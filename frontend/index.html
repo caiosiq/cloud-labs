@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optical Digital Twin | Lab Interface</title>
+    <!-- Google Fonts for Modern Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+
+    <style>
+        :root {
+            /* Color Palette - Modern Scientific Dark Mode */
+            --bg-dark: #0f1115;
+            --bg-panel: #181b21;
+            --bg-panel-hover: #22262e;
+            --border-color: #2a2e36;
+            
+            --primary-accent: #3b82f6; /* Scientific Blue */
+            --primary-glow: rgba(59, 130, 246, 0.3);
+            
+            --laser-red: #ff3b3b;
+            --laser-glow: rgba(255, 59, 59, 0.4);
+            
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+
+            --status-success: #10b981;
+            --status-warning: #f59e0b;
+            --status-error: #ef4444;
+            
+            --grid-color: #2a2e36;
+            --grid-major: #3f4451;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            font-size: 14px;
+        }
+
+        /* --- Sidebar (Left) --- */
+        #sidebar {
+            width: 280px;
+            background-color: var(--bg-panel);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+            box-shadow: 4px 0 24px rgba(0,0,0,0.2);
+            position: relative; /* Ensure it stays in flow */
+        }
+
+        /* --- Sidebar (Right) --- */
+        #sidebar-right {
+            width: 320px;
+            background-color: var(--bg-panel);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+            box-shadow: -4px 0 24px rgba(0,0,0,0.2);
+        }
+
+        .logo-area {
+            padding: 24px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            font-size: 24px;
+            color: var(--primary-accent);
+        }
+
+        .logo-text {
+            font-weight: 600;
+            font-size: 16px;
+            letter-spacing: -0.5px;
+        }
+
+        .section-header {
+            padding: 20px 24px 10px;
+            text-transform: uppercase;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+
+        #inventory-list {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 0 16px;
+        }
+
+        .component-card {
+            background-color: rgba(255,255,255,0.03);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            transition: all 0.2s ease;
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .component-card:hover {
+            background-color: var(--bg-panel-hover);
+            border-color: var(--primary-accent);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .comp-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 6px;
+            background-color: rgba(255,255,255,0.05);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: var(--text-secondary);
+        }
+
+        .comp-info { flex-grow: 1; }
+        .comp-name { font-weight: 500; display: block; margin-bottom: 2px; }
+        .comp-meta { font-size: 11px; color: var(--text-muted); display: block; }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--text-muted);
+        }
+        .status-dot.placed { background-color: var(--status-success); box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
+        .status-dot.inventory { background-color: var(--primary-accent); }
+
+        .controls-area {
+            padding: 20px;
+            border-top: 1px solid var(--border-color);
+            background-color: rgba(0,0,0,0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 10px;
+            border-radius: 6px;
+            border: none;
+            font-family: inherit;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-accent);
+            color: white;
+            box-shadow: 0 4px 12px var(--primary-glow);
+        }
+        .btn-primary:hover { background-color: #2563eb; }
+        
+        .btn-secondary {
+            background-color: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            margin-top: 8px;
+        }
+        .btn-secondary:hover { border-color: var(--text-secondary); color: var(--text-primary); }
+
+        /* --- Main Content (Center) --- */
+        #main-content {
+            flex-grow: 1;
+            position: relative;
+            background-image: 
+                radial-gradient(circle at 50% 50%, #1a1d24 0%, var(--bg-dark) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        #canvas-wrapper {
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            position: relative;
+            background-color: #13151a; 
+        }
+
+        /* --- Context Panel (Left) --- */
+        #context-panel {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 16px;
+            border-top: 1px solid var(--border-color);
+            display: none; /* Hidden by default until selection */
+        }
+
+        .panel-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .system-status {
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            background-color: rgba(255,255,255,0.05);
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .system-status.active { color: var(--status-success); background-color: rgba(16, 185, 129, 0.1); }
+
+        .log-container {
+            padding: 12px 16px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 11px;
+            color: var(--text-secondary);
+            height: 150px;
+            overflow-y: auto;
+            line-height: 1.6;
+        }
+        
+        .log-entry { margin-bottom: 4px; border-left: 2px solid transparent; padding-left: 8px; }
+        .log-entry.info { border-color: var(--primary-accent); }
+        .log-entry.warn { border-color: var(--status-warning); color: var(--status-warning); }
+        .log-entry.error { border-color: var(--status-error); color: var(--status-error); }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <div class="logo-area">
+            <span class="material-icons-round logo-icon">science</span>
+            <div class="logo-text">AI Optics Twin</div>
+            <a href="/debug" target="_blank" title="Open Debugger" style="color: var(--text-muted); margin-left: auto;">
+                <span class="material-icons-round" style="font-size: 16px;">bug_report</span>
+            </a>
+        </div>
+
+        <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Optical Components</span>
+            <span id="add-component-btn" class="material-icons-round" style="cursor: pointer; font-size: 16px; color: var(--primary-accent);" title="Open Inventory">add_circle</span>
+        </div>
+        <div id="component-list" style="flex-grow: 0; height: 35%; overflow-y: auto;">
+            <!-- Placed components will appear here -->
+            <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px;">
+                No components placed.
+            </div>
+        </div>
+
+        <!-- Inventory Library Popup (Hidden by default) -->
+        <div id="library-popup" style="display: none; position: absolute; top: 80px; left: 290px; width: 260px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 2000; padding: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+                <span style="font-weight: 600; font-size: 12px; color: var(--text-primary);">Component Library</span>
+                <span id="library-close" class="material-icons-round" style="font-size: 16px; cursor: pointer; color: var(--text-muted);">close</span>
+            </div>
+            <div id="library-list" style="max-height: 300px; overflow-y: auto;">
+                <!-- Inventory items injected here -->
+            </div>
+        </div>
+
+        <div class="controls-area">
+            <button id="refresh-btn" class="btn btn-secondary">
+                <span class="material-icons-round">sync</span> Refresh State
+            </button>
+        </div>
+        
+        <!-- Contextual Controls (Shows when component selected) -->
+        <div id="context-panel">
+            <div class="section-header" style="padding: 0 0 12px 0; border-bottom: 1px solid var(--border-color);">
+                <span id="selected-comp-name" style="color: var(--primary-accent);">Component</span> Controls
+            </div>
+            
+            <div style="margin-top: 12px;">
+                <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">POSITION (mm)</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                    <input type="number" id="ctx-x" placeholder="X" class="coord-input">
+                    <input type="number" id="ctx-y" placeholder="Y" class="coord-input">
+                </div>
+                <div style="margin-bottom: 12px;">
+                     <input type="number" id="ctx-rot" placeholder="Rotation (°)" class="coord-input" style="width: 100%;">
+                </div>
+                <button id="ctx-move-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px;">Move to Coordinates</button>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 8px;">OPTIMIZATION STRATEGIES</label>
+                <div id="ctx-strategies"></div>
+            </div>
+        </div>
+
+        <style>
+            .coord-input {
+                background: #0f1115;
+                border: 1px solid var(--border-color);
+                color: white;
+                padding: 6px;
+                border-radius: 4px;
+                font-size: 11px;
+                width: 100%;
+            }
+        </style>
+    </div>
+
+    <!-- MAIN CANVAS AREA -->
+    <div id="main-content">
+        <div id="canvas-wrapper">
+            <canvas id="optical-table" width="1000" height="700"></canvas>
+        </div>
+    </div>
+
+    <!-- RIGHT SIDEBAR (Recipes & Monitor) -->
+    <div id="sidebar-right">
+        <!-- Live Feed Section -->
+        <div style="height: 200px; background: black; position: relative; border-bottom: 1px solid var(--border-color);">
+             <img id="live-video-img" src="/api/video-feed/stream" style="width: 100%; height: 100%; object-fit: cover; display: none;" onerror="this.style.display='none'; document.getElementById('video-placeholder').style.display='flex';">
+             <div id="video-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #64748b;">
+                <span class="material-icons-round" style="font-size: 32px; margin-bottom: 8px;">videocam_off</span>
+                <span style="font-size: 12px;">No Camera Connection</span>
+                <span id="video-status" style="font-size: 10px; margin-top: 4px; color: #ef4444;">● OFFLINE</span>
+            </div>
+            <div style="position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 4px; font-size: 10px; color: white;">LIVE FEED</div>
+        </div>
+
+        <!-- System Monitor -->
+        <div style="height: 150px; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>System Monitor</span>
+                <div id="system-status-badge" class="system-status active"><span class="status-dot placed"></span> IDLE</div>
+            </div>
+            <div id="log-output" class="log-container" style="flex-grow: 1; height: auto; border: none;">
+                <div class="log-entry info">System initialized.</div>
+            </div>
+        </div>
+
+        <!-- Recipe Editor -->
+        <div style="flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;">
+             <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Recipe Editor</span>
+                <div id="rec-indicator" style="display: none; color: #ef4444; font-weight: bold; font-size: 10px; align-items: center; gap: 4px;">
+                    <span class="material-icons-round" style="font-size: 10px; animation: pulse 1s infinite;">fiber_manual_record</span> REC
+                </div>
+            </div>
+            
+            <div style="padding: 0 16px 8px;">
+                 <input type="text" id="recipe-editor-name" placeholder="Recipe Name..." style="width: 100%; padding: 8px; background: #0f1115; border: 1px solid #2a2e36; border-radius: 6px; color: white; font-size: 12px; margin-bottom: 8px;">
+                 
+                 <div style="display: flex; gap: 8px;">
+                     <button id="record-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px;">
+                        <span class="material-icons-round" style="font-size: 14px;">fiber_manual_record</span> Record
+                    </button>
+                    <button id="recipe-editor-save" class="btn btn-primary" style="font-size: 11px; padding: 6px;">
+                        <span class="material-icons-round" style="font-size: 14px;">save</span> Save
+                    </button>
+                 </div>
+            </div>
+
+            <div id="recipe-steps-container" style="flex-grow: 1; overflow-y: auto; background: rgba(0,0,0,0.2); margin: 0 16px 16px; border: 1px solid #2a2e36; border-radius: 6px;">
+                <div style="padding: 20px; text-align: center; color: #64748b; font-size: 12px;">No steps recorded.</div>
+            </div>
+            
+            <div class="section-header" style="border-top: 1px solid var(--border-color); padding-top: 12px;">Saved Recipes</div>
+            <div id="recipe-list" style="height: 120px; overflow-y: auto; padding: 0 16px 16px;">
+                <!-- List -->
+            </div>
+        </div>
+    </div>
+
+    <style>
+        /* Unified Panel Styles */
+        #unified-panel {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            width: 340px;
+            background-color: rgba(24, 27, 33, 0.95);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            transition: height 0.3s ease;
+            overflow: hidden;
+            z-index: 50;
+        }
+
+        #unified-panel.minimized {
+            height: 46px; /* Header only */
+        }
+
+        .tab-group {
+            display: flex;
+            gap: 16px;
+        }
+
+        .tab-item {
+            font-size: 12px;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding-bottom: 2px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab-item:hover { color: var(--text-primary); }
+
+        .tab-item.active {
+            color: var(--primary-accent);
+            border-bottom-color: var(--primary-accent);
+            font-weight: 600;
+        }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        
+        .recipe-step-item {
+            display: flex;
+            align-items: center;
+            padding: 6px 8px;
+            border-bottom: 1px solid #2a2e36;
+            font-size: 11px;
+            color: #e2e8f0;
+        }
+        .recipe-step-item:last-child { border-bottom: none; }
+        .recipe-step-item:hover { background: #181b21; }
+        
+        .step-num { width: 24px; color: #64748b; font-weight: 600; }
+        .step-action { width: 70px; font-weight: 600; color: #3b82f6; }
+        .step-desc { flex-grow: 1; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .step-del { color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; font-size: 14px; }
+        .step-del:hover { background: rgba(239, 68, 68, 0.1); }
+    </style>
+    <script src="/static/app.js"></script>
+</body>
+</html>

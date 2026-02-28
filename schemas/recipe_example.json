@@ -1,0 +1,25 @@
+[
+  { 
+    "step": 1, 
+    "action": "PLACE", 
+    "component": "CAM1", 
+    "parameters": { "x": 800.0, "y": 200.0, "rotation": 180.0 } 
+  },
+  { 
+    "step": 2, 
+    "action": "PLACE", 
+    "component": "Mirror_1", 
+    "parameters": { "x": 105.0, "y": 200.0, "rotation": 45.0 } 
+  },
+  { 
+    "step": 3, 
+    "action": "OPTIMIZE", 
+    "target": "Mirror_1", 
+    "parameters": { "strategy": "NEWTON", "camera_number": 1 }
+  },
+  { 
+    "step": 4, 
+    "action": "REMOVE", 
+    "component": "CAM1" 
+  }
+]

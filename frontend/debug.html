@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optical Digital Twin | Data Debugger</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0f1115;
+            --bg-panel: #181b21;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --border: #2a2e36;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #sidebar {
+            width: 250px;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .nav-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: left;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+        }
+        .nav-btn:hover, .nav-btn.active {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+        #content {
+            flex-grow: 1;
+            padding: 20px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        #json-viewer {
+            flex-grow: 1;
+            background: #13151a;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            overflow: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            color: #a5b3ce;
+        }
+        .key { color: #e06c75; }
+        .string { color: #98c379; }
+        .number { color: #d19a66; }
+        .boolean { color: #56b6c2; }
+        h2 { margin-top: 0; font-size: 16px; color: var(--text-primary); }
+        .timestamp { font-size: 11px; color: var(--text-secondary); margin-bottom: 10px; display: block; }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <h3 style="margin-top:0; font-size:14px;">Data Stores</h3>
+        <button class="nav-btn active" onclick="loadData('lab-state')">Lab State (Tier 1)</button>
+        <button class="nav-btn" onclick="loadData('ghost-state')">Ghost State (Tier 2)</button>
+        <button class="nav-btn" onclick="loadData('recipes')">Recipes (Tier 3)</button>
+        <button class="nav-btn" onclick="loadData('golden')">Golden States (Tier 4)</button>
+        <div style="flex-grow:1"></div>
+        <a href="/" style="text-decoration:none;">
+            <button class="nav-btn" style="width:100%; text-align:center;">← Back to Twin</button>
+        </a>
+    </div>
+    <div id="content">
+        <h2 id="view-title">Lab State</h2>
+        <span id="last-updated" class="timestamp">Last fetched: Never</span>
+        <div id="json-viewer">Loading...</div>
+    </div>
+
+    <script>
+        let currentView = 'lab-state';
+        let showingReport = false;
+
+        async function loadData(view) {
+            showingReport = false;
+            currentView = view;
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            document.getElementById('view-title').textContent = view.toUpperCase().replace('-', ' ');
+            document.getElementById('json-viewer').innerHTML = '<span style="color:#64748b">Fetching...</span>';
+
+            try {
+                let url = '';
+                if (view === 'lab-state') url = '/api/lab-state';
+                else if (view === 'ghost-state') url = '/api/debug/ghost-state';
+                else if (view === 'recipes') url = '/api/recipes';
+                else if (view === 'golden') {
+                    // Custom Logic for Golden State View
+                    url = '/api/debug/golden-states';
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    
+                    let html = '';
+                    if (Object.keys(data).length === 0) {
+                        html = '<div style="color:#64748b">No golden states found. Run a recipe first.</div>';
+                    } else {
+                        html = '<div style="display:flex; flex-direction:column; gap:10px; margin-bottom:20px;">';
+                        Object.entries(data).forEach(([id, state]) => {
+                            html += `
+                                <div style="background:#1a1d21; padding:12px; border-radius:6px; border:1px solid #2a2e36;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                                        <span style="font-weight:600; color:#e2e8f0;">${id}</span>
+                                        <button onclick="runComparison('${id}')" style="background:#3b82f6; border:none; color:white; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600;">Compare w/ Lab</button>
+                                    </div>
+                                    <div style="font-size:10px; color:#64748b; margin-top:4px;">${state.timestamp}</div>
+                                </div>
+                            `;
+                        });
+                        html += '</div>';
+                        html += '<h3 style="margin-top:20px; color:#e2e8f0;">Raw JSON</h3>';
+                        html += '<div id="json-raw" style="background:#13151a; padding:10px; border-radius:4px;">' + syntaxHighlight(data) + '</div>';
+                    }
+                    document.getElementById('last-updated').textContent = `Last fetched: ${new Date().toLocaleTimeString()}`;
+                    document.getElementById('json-viewer').innerHTML = html;
+                    return; 
+                }
+
+                const res = await fetch(url);
+                const data = await res.json();
+                
+                document.getElementById('last-updated').textContent = `Last fetched: ${new Date().toLocaleTimeString()}`;
+                document.getElementById('json-viewer').innerHTML = syntaxHighlight(data);
+            } catch (e) {
+                document.getElementById('json-viewer').textContent = 'Error fetching data: ' + e.message;
+            }
+        }
+
+        async function runComparison(id) {
+             showingReport = true;
+             document.getElementById('json-viewer').innerHTML = '<span style="color:#64748b">Running Comparison...</span>';
+             try {
+                 const res = await fetch(`/api/recipes/${id}/compare`);
+                 const report = await res.json();
+                 
+                 let html = `<div style="padding:10px; border:1px solid #2a2e36; border-radius:8px; background:#1a1d21; margin-bottom:20px;">`;
+                 html += `<h3 style="margin:0 0 10px 0; color:${report.status === 'MATCH' ? '#10b981' : '#ef4444'}">Status: ${report.status}</h3>`;
+                 html += `<div style="font-size:12px; color:#94a3b8; margin-bottom:12px;">Total Drift: <span style="color:#e2e8f0;">${report.total_drift_mm} mm</span></div>`;
+                 
+                 html += '<table style="width:100%; border-collapse:collapse; font-size:12px;">';
+                 html += '<tr style="text-align:left; color:#64748b; border-bottom:1px solid #2a2e36;"><th style="padding:8px;">Component</th><th style="padding:8px;">Status</th><th style="padding:8px;">Drift (mm)</th></tr>';
+                 
+                 report.details.forEach(d => {
+                     let color = d.status === 'OK' ? '#10b981' : '#ef4444';
+                     html += `
+                        <tr style="border-bottom:1px solid #2a2e36;">
+                            <td style="padding:8px; color:#e2e8f0;">${d.component_id}</td>
+                            <td style="padding:8px; color:${color}; font-weight:600;">${d.status}</td>
+                            <td style="padding:8px; color:#e2e8f0;">${d.drift_mm}</td>
+                        </tr>
+                     `;
+                 });
+                 html += '</table></div>';
+                 
+                 html += '<button onclick="loadData(\'golden\')" style="background:transparent; border:1px solid #3b82f6; color:#3b82f6; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:11px; margin-bottom:20px;">← Back to Golden States</button>';
+                 
+                 html += '<h3 style="margin-top:10px; color:#e2e8f0;">Raw Report</h3>';
+                 html += '<div id="json-raw" style="background:#13151a; padding:10px; border-radius:4px; font-family:monospace; white-space:pre-wrap;">' + syntaxHighlight(report) + '</div>';
+                 
+                 document.getElementById('json-viewer').innerHTML = html;
+             } catch (e) {
+                 alert("Comparison failed: " + e.message);
+                 loadData('golden');
+             }
+        }
+
+        function syntaxHighlight(json) {
+            if (typeof json != 'string') {
+                json = JSON.stringify(json, undefined, 2);
+            }
+            json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+                var cls = 'number';
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) {
+                        cls = 'key';
+                    } else {
+                        cls = 'string';
+                    }
+                } else if (/true|false/.test(match)) {
+                    cls = 'boolean';
+                } else if (/null/.test(match)) {
+                    cls = 'null';
+                }
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+        }
+
+        // Auto refresh every 2s
+        setInterval(() => {
+            if(showingReport) return;
+            const activeBtn = document.querySelector('.nav-btn.active');
+            if(activeBtn) activeBtn.click();
+        }, 2000);
+
+        loadData('lab-state');
+    </script>
+</body>
+</html>
