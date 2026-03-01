@@ -23,6 +23,7 @@ const recipeList = document.getElementById('recipe-list');
 // Context Panel Elements (Left Sidebar)
 const contextPanel = document.getElementById('context-panel');
 const selectedCompName = document.getElementById('selected-comp-name');
+const selectedCompProperties = document.getElementById('selected-comp-properties');
 const ctxX = document.getElementById('ctx-x');
 const ctxY = document.getElementById('ctx-y');
 const ctxRot = document.getElementById('ctx-rot');
@@ -78,6 +79,9 @@ async function fetchCatalogMap() {
             catalog.forEach(item => {
                 catalogMap[item.tag_id] = item;
             });
+            console.log("Catalog Loaded:", catalogMap);
+            // Re-render UI once catalog is loaded to update names
+            updateUI();
         }
     } catch (e) { console.error("Catalog fetch failed", e); }
 }
@@ -326,7 +330,29 @@ function updateContextPanel(name) {
     const comp = labState.components[name];
     const pose = ghostState[name];
     
-    selectedCompName.textContent = name;
+    let displayName = name;
+    let properties = {};
+
+    if (catalogMap[name]) {
+        displayName = catalogMap[name].name;
+        if (catalogMap[name].properties) {
+            properties = catalogMap[name].properties;
+        }
+    }
+    
+    selectedCompName.textContent = displayName;
+
+    // Render Properties
+    selectedCompProperties.innerHTML = '';
+    if (Object.keys(properties).length > 0) {
+        const propsHtml = Object.entries(properties).map(([key, val]) => {
+            // Format Key: radius_of_curvature -> Radius of curvature
+            const cleanKey = key.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+            return `<div style="margin-bottom: 2px;">${cleanKey}: <span style="color: #e2e8f0;">${val}</span></div>`;
+        }).join('');
+        selectedCompProperties.innerHTML = propsHtml;
+    }
+
     contextPanel.style.display = 'block';
     
     ctxX.value = pose.x.toFixed(1);
@@ -736,31 +762,137 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI * 2); ctx.stroke();
     }
 
-    ctx.fillStyle = '#C0C0C0'; 
-    ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.fill();
-    ctx.shadowColor = 'transparent';
+    // Draw Specific Icons based on Catalog ID or Type
+    const catalogItem = catalogMap[name];
+    const catalogId = catalogItem ? catalogItem.id : null;
 
-    if (type === 'OPTICAL_MIRROR') {
-        ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(0, 18); ctx.stroke();
-        ctx.fillStyle = '#444'; ctx.fillRect(-4, -18, 4, 36);
-    } else if (type === 'OPTICAL_LENS') {
-        ctx.fillStyle = 'rgba(100, 200, 255, 0.3)';
-        ctx.strokeStyle = 'rgba(150, 220, 255, 0.8)'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.ellipse(0, 0, 4, 18, 0, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
-    } else if (type === 'OPTICAL_BEAMSPLITTER') {
-        ctx.fillStyle = 'rgba(200, 200, 200, 0.1)';
-        ctx.strokeStyle = '#888'; ctx.lineWidth = 1;
-        ctx.fillRect(-12, -12, 24, 24); ctx.strokeRect(-12, -12, 24, 24);
-        ctx.strokeStyle = 'rgba(100, 200, 255, 0.5)';
-        ctx.beginPath(); ctx.moveTo(-12, -12); ctx.lineTo(12, 12); ctx.stroke();
-    } else if (type === 'OPTICAL_CAMERA') {
+    if (catalogId === 'nd_filter') {
+        // ND Filter: Dark Neutral (Black/Grey)
+        ctx.fillStyle = '#111';
+        ctx.fillRect(-12, -12, 24, 24);
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-12, -12, 24, 24);
+        // Dark Glass look
+        ctx.fillStyle = 'rgba(20, 20, 20, 0.9)';
+        ctx.fillRect(-10, -10, 20, 20);
+
+    } else if (catalogId === 'filter_generic') {
+        // Generic Filter: Colored (e.g. Red/Pink)
+        ctx.fillStyle = '#333';
+        ctx.fillRect(-12, -12, 24, 24);
+        ctx.strokeStyle = '#f87171'; // Reddish border
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-12, -12, 24, 24);
+        // Tinted Glass look
+        ctx.fillStyle = 'rgba(248, 113, 113, 0.3)';
+        ctx.fillRect(-10, -10, 20, 20);
+
+    } else if (catalogId === 'cam_gripper_1' || catalogId === 'cam_gripper_2' || type === 'OPTICAL_CAMERA') {
+        // Camera
         ctx.fillStyle = '#1e293b';
         ctx.fillRect(-15, -15, 30, 30);
+        // Lens ring
         ctx.fillStyle = '#000';
-        ctx.beginPath(); ctx.arc(0, 15, 10, 0, Math.PI, false); ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill();
+        // Sensor reflection
+        ctx.fillStyle = '#3b82f6'; // Blueish reflection
+        ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI * 2); ctx.fill();
+        // Direction indicator
         ctx.fillStyle = '#ef4444';
-        ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(-4, -24); ctx.lineTo(4, -24); ctx.fill();
+
+    } else if (catalogId === 'mirror_curved') {
+        // Curved Mirror (Semi-Circle Concave)
+        const radius = 15;
+        
+        // Mirror Surface (Semi-circle)
+        ctx.strokeStyle = '#3b82f6'; 
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        // Arc from -PI/2 (top) to PI/2 (bottom) counter-clockwise (Left Side)
+        ctx.arc(0, 0, radius, -Math.PI/2-Math.PI/4, Math.PI/2-Math.PI/4, true);
+        ctx.stroke();
+        
+        // Mount backing (curved)
+        ctx.fillStyle = '#444';
+        ctx.beginPath();
+        // Outer arc (backing)
+        ctx.arc(0, 0, radius + 4, -Math.PI/2-Math.PI/4, Math.PI/2-Math.PI/4, true);
+        // Connect bottom
+        ctx.lineTo(0, radius);
+        // Inner arc (match mirror)
+        ctx.arc(0, 0, radius, Math.PI/2-Math.PI/4, -Math.PI/2-Math.PI/4, false);
+        ctx.closePath();
+        ctx.fill();
+
+        // Reflective side hint (Gloss)
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)'; 
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius - 2, -Math.PI/2-Math.PI/4, Math.PI/2-Math.PI/4, true);
+        ctx.stroke();
+
+    } else if (catalogId === 'mirror_planar' || type === 'OPTICAL_MIRROR') {
+        // Planar Mirror
+        ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(0, 18); ctx.stroke();
+        // Mount backing
+        ctx.fillStyle = '#444'; ctx.fillRect(-6, -18, 6, 36);
+        // Reflective side hint
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(2, -15); ctx.lineTo(2, 15); ctx.stroke();
+
+    } else if (catalogId === 'beam_block') {
+        // Beam Block: Solid dark block with cross
+        ctx.fillStyle = '#111';
+        ctx.fillRect(-12, -12, 24, 24);
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); 
+        ctx.moveTo(-12, -12); ctx.lineTo(12, 12);
+        ctx.moveTo(12, -12); ctx.lineTo(-12, 12);
+        ctx.stroke();
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-12, -12, 24, 24);
+
+    } else if (catalogId === 'beam_splitter' || type === 'OPTICAL_BEAMSPLITTER') {
+        // Beam Splitter: Cube
+        ctx.fillStyle = 'rgba(200, 200, 200, 0.1)';
+        ctx.strokeStyle = '#888'; ctx.lineWidth = 2;
+        ctx.strokeRect(-14, -14, 28, 28);
+        // Diagonal coating
+        ctx.strokeStyle = 'rgba(100, 200, 255, 0.8)';
+        ctx.beginPath(); ctx.moveTo(-14, -14); ctx.lineTo(14, 14); ctx.stroke();
+
+    } else if (catalogId === 'lens_main' || type === 'OPTICAL_LENS') {
+        // Lens: Ellipse
+        ctx.fillStyle = 'rgba(100, 200, 255, 0.3)';
+        ctx.strokeStyle = 'rgba(150, 220, 255, 0.9)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.ellipse(0, 0, 6, 20, 0, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+        
+    } else if (catalogId === 'crystal_main' || type === 'OPTICAL_CRYSTAL') {
+        // Crystal: Hexagon or Rectangle
+        ctx.fillStyle = 'rgba(236, 72, 153, 0.3)'; // Pinkish
+        ctx.strokeStyle = '#ec4899';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-10, -20); ctx.lineTo(10, -20);
+        ctx.lineTo(15, 0);
+        ctx.lineTo(10, 20); ctx.lineTo(-10, 20);
+        ctx.lineTo(-15, 0);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+
+    } else {
+        // Default / Unknown
+        ctx.fillStyle = '#C0C0C0'; 
+        ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText("?", 0, 4);
     }
 
     ctx.restore();
@@ -770,7 +902,14 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     ctx.fillStyle = (mode === 'GHOST') ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.9)';
     ctx.font = '500 11px Inter, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(name, 0, -25);
+    
+    // Resolve Display Name from Catalog
+    let displayName = name;
+    if (catalogMap[name]) {
+        displayName = catalogMap[name].name;
+    }
+    
+    ctx.fillText(displayName, 0, -25);
     
     if (mode === 'PENDING') {
         ctx.fillStyle = '#f59e0b';

@@ -161,14 +161,32 @@ This roadmap outlines the development stages for the Optical Digital Twin, a sys
 
 ---
 
-## Phase 5: Real World Integration
-**Goal:** Transition from the simulated backend to the physical laboratory hardware.
+## Phase 5: Real World Integration (The "Real" Twin)
+**Goal:** Transition from the simulated backend to the physical laboratory hardware, ensuring the Digital Twin reflects the *actual* physical reality.
+
+### Key Strategy: The "Scan-First" Initialization
+To ensure the Digital Twin matches reality, we will not hardcode the initial state. Instead, we will use the `scan_components` capability of the `OpticalExperiment` manager to discover what is actually on the table.
+
+- [x] **Define the Physical Inventory (Catalog)**
+    - Update `component_catalog.json` to match the *actual* ArUco tags used in the lab (e.g., ND Filter=Tag 9, CAM1=Tag 22).
+    - This ensures that when the user requests "ND Filter", the system knows exactly which physical object to look for.
+
+- [x] **Implement `RealLabCommunicator`**
+    - Create the adapter class that wraps `OpticalExperiment`.
+    - **Initialization:** On startup, iterate through the known inventory list and run `experiment.scan_components()`.
+    - **State Population:** Populate the `lab_state.json` with the *actual* poses found during the scan. This becomes the "Ground Truth".
+
+- [x] **Live Command Execution**
+    - Map `MOVE` commands to `experiment.place_component_wo_home_specific_xy`.
+    - Map `OPTIMIZE` commands to `experiment.optimize_component` with the correct strategy class (Newton/Cobyla).
 
 - [ ] **Live Video Integration**
-    - Integrate MJPEG or WebRTC streams from physical lab cameras into the UI.
+    - Integrate MJPEG streams from the physical lab cameras into the UI.
 
 - [ ] **Real-time Telemetry**
-    - Display real-time data from the robot, including joint angles and force sensor readings.
+    - Display real-time data from the robot (status, joints) in the UI.
 
-- [ ] **Calibration Tools**
-    - specific interactive tools to correlate video feed pixels with robot coordinates.
+- [ ] **Fix Cobyla Alignment**
+    - The `COBYLA` strategy requires specific hardware mappings (`motor_ids`, `camera_number`) which are currently not supported by the frontend UI.
+    - Implement a mechanism to dynamically fetch or configure these parameters before enabling the strategy on the Real Lab.
+    - Currently, `RealLabCommunicator` raises a `NotImplementedError` to prevent unsafe operations.

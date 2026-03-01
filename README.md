@@ -34,7 +34,14 @@ The system is built on a modular **4-Tier Data Architecture** to handle the comp
 *   **Frontend:** Vanilla JS + HTML5 Canvas (No heavy frameworks).
 *   **Backend:** FastAPI (Python).
 *   **Communication:** REST API + Polling (for simplicity and robustness).
-*   **Simulation:** `MockLabCommunicator` simulates robot delays, noise, and optimization processes.
+*   **Hardware Interface:** Adapter Pattern (`LabCommunicator` -> `Mock` | `Real`).
+
+### Synchronization Protocol (CQS)
+The system follows a **Command-Query Separation** pattern:
+1.  **Queries (Reading State)**: The Client *polls* `GET /lab-state` every 500ms to visualize reality.
+2.  **Commands (Writing Intent)**: The Client *pushes* `POST /command` (e.g., `MOVE`, `OPTIMIZE`) to the Server.
+    *   Response: `202 Accepted` (Queued), `409 Conflict` (Busy).
+    *   The UI marks components as "Pending" and waits for the next Poll to confirm the physical move.
 
 ---
 
@@ -44,7 +51,10 @@ The system is built on a modular **4-Tier Data Architecture** to handle the comp
 optics-digital-twin/
 ├── backend/                # FastAPI Application
 │   ├── main.py             # Entry point & API Routes
-│   ├── lab_communicator.py # Hardware Abstraction Layer (Mock/Real)
+│   ├── lab_communicator/   # Hardware Abstraction Layer
+│   │   ├── base.py         # Abstract Base Class
+│   │   ├── mock.py         # Simulated Lab (Delays, Noise)
+│   │   └── real.py         # Adapter for 'lab_automation' Library
 │   └── ...
 ├── frontend/               # Static Web Assets
 │   ├── index.html          # Main Interface
@@ -52,41 +62,64 @@ optics-digital-twin/
 │   ├── app.js              # Core UI Logic
 │   └── ...
 ├── schemas/                # JSON Data Stores
+│   ├── component_catalog.json # Physical Inventory Definition
 │   ├── lab_state.json      # Current Physical State
 │   └── recipes/            # Saved Recipes & Golden States
 ├── README.md               # This file
-└── ROADMAP.md              # Development Plan
+├── ROADMAP.md              # Development Plan
+└── online-update.md        # Remote Access Strategy
 ```
 
 ---
 
-## 🚀 Quick Start (Simulation Mode)
+## 🚀 Usage Guide
 
-The system currently runs in **Mock Mode**, simulating a physical lab with delays and sensor noise.
+### 1. Simulation Mode (Default)
+The system runs in **Mock Mode** by default, simulating a physical lab with delays and sensor noise.
 
-### 1. Start the Backend
 ```bash
 cd backend
-# Install dependencies (fastapi, uvicorn)
+# Install dependencies
 pip install fastapi uvicorn
 # Run the server
 uvicorn main:app --reload
 ```
-*Server will start at `http://localhost:8000`*
-
-### 2. Access the Interface
-Open your browser to:
 *   **Main UI:** [http://localhost:8000/](http://localhost:8000/)
 *   **Debugger:** [http://localhost:8000/debug](http://localhost:8000/debug)
 
-### 3. Usage Flow
-1.  **Drag & Drop:** Move components from the inventory to the table.
-2.  **Interact:** Click a component to open the context popup. Move it precisely or run an **Optimization Strategy** (e.g., Newton).
-3.  **Record Recipe:** Open the "Recipe Editor" (Sidebar), click "Record", perform actions, and "Save".
-4.  **Run Recipe:** Click the "Play" button on a saved recipe to re-execute the sequence.
-5.  **Check Drift:** Go to the **Debugger**, view "Golden States", and compare with the current Lab State.
+### 2. Real Lab Mode
+To connect to the physical robotic setup, the system uses a **RealLabCommunicator** adapter that wraps the `lab_automation` Python package.
+
+**Prerequisites:**
+*   **Hardware**: xArm6 Robot, RealSense Camera, ArUco-tagged mounts.
+*   **Software**: The `lab_automation` package (drivers & managers) must be available.
+
+**Configuration:**
+Set environment variables to point to your automation library:
+
+**PowerShell Example:**
+```powershell
+$env:LAB_MODE="REAL"
+$env:LAB_AUTOMATION_PATH="C:\path\to\your\lab_automation"
+uvicorn main:app --reload
+```
+
+**What Happens in Real Mode?**
+*   **Scan-First Initialization**: On startup, the system calls `experiment.scan_components()` to discover what is actually on the table.
+*   **Live Video**: The UI streams live MJPEG video from the lab cameras.
+*   **Real Execution**: `MOVE` commands map to `experiment.place_component(...)`. `OPTIMIZE` commands trigger feedback loops (Newton/Cobyla).
+
+### 3. Experiment Workflow
+1.  **Drag & Drop**: Move components from the inventory to the table.
+2.  **Interact**: Click a component to open the context popup. Move it precisely or run an **Optimization Strategy** (e.g., Newton).
+3.  **Record Recipe**: Open the "Recipe Editor" (Sidebar), click "Record", perform actions, and "Save".
+4.  **Run Recipe**: Click the "Play" button on a saved recipe to re-execute the sequence.
+5.  **Check Drift**: Go to the **Debugger**, view "Golden States", and compare with the current Lab State.
 
 ---
 
-## 🛠 Development
-To switch to a real robot, implement a `RealLabCommunicator` class in `backend/lab_communicator.py` inheriting from `LabCommunicator`, and update `main.py` to use it.
+## 🛠 Adding New Components
+To add new physical components to the system:
+1.  **Tag It**: Attach an ArUco tag to the physical object.
+2.  **Catalog It**: Add an entry to `schemas/component_catalog.json` with the corresponding `tag_id` (e.g., `tag_22`) and physical properties.
+3.  **Restart**: Restart the backend. The system will now recognize and scan for this component.

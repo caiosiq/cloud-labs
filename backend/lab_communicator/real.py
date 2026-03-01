@@ -1,0 +1,278 @@
+import json
+import os
+import sys
+import asyncio
+from datetime import datetime
+from typing import Dict, Any, List
+
+from .base import LabCommunicator
+
+# Configuration for External Lab Automation Library
+LAB_AUTOMATION_PATH = os.getenv("LAB_AUTOMATION_PATH")
+if LAB_AUTOMATION_PATH and os.path.exists(LAB_AUTOMATION_PATH):
+    sys.path.append(LAB_AUTOMATION_PATH)
+    print(f"[REAL LAB] Added {LAB_AUTOMATION_PATH} to sys.path")
+else:
+    print("[REAL LAB] Warning: LAB_AUTOMATION_PATH not set or invalid.")
+
+# Import Real Lab Automation
+try:
+    from lab_automation.managers.experiment_manager import OpticalExperiment
+    from lab_automation.objects.base import OpticalComponent, Pose
+    from lab_automation.objects.strategies import NewtonPlacementStrategy, CobylaAlignmentStrategy
+    LAB_LIB_AVAILABLE = True
+except ImportError as e:
+    print(f"[REAL LAB] Critical Error: Failed to import lab_automation: {e}")
+    LAB_LIB_AVAILABLE = False
+
+class RealLabCommunicator(LabCommunicator):
+    def __init__(self):
+        if not LAB_LIB_AVAILABLE:
+            raise RuntimeError("lab_automation library not available. Cannot start RealLabCommunicator.")
+
+        print("[REAL LAB] Initializing OpticalExperiment...")
+        # Initialize the experiment manager
+        self.experiment = OpticalExperiment(mock=False)
+        self.experiment.initialize_robot()
+        
+        # Cache of OpticalComponent objects: { "tag_22": OpticalComponent(...) }
+        self.component_map: Dict[str, OpticalComponent] = {}
+        
+        # Initialize State
+        self.current_state = {
+            "system_status": "IDLE",
+            "last_updated": datetime.now().isoformat(),
+            "components": {}
+        }
+        
+        self._initialize_state()
+
+    def _initialize_state(self):
+        """Scans the table based on the catalog and populates the component map."""
+        print("[REAL LAB] Scanning components...")
+        
+        # 1. Load Catalog to know what to look for
+        # Assuming we are in backend/lab_communicator/real.py
+        catalog_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "schemas", "component_catalog.json"))
+        if not os.path.exists(catalog_path):
+             print("[REAL LAB] Error: Catalog not found. Cannot scan.")
+             return
+
+        with open(catalog_path, "r") as f:
+            catalog = json.load(f)
+
+        # 2. Create OpticalComponent objects for everything in catalog
+        components_to_scan = []
+        for item in catalog:
+            tag_id_str = item.get("tag_id") # e.g. "tag_22"
+            if not tag_id_str: continue
+            
+            # Extract numeric ID from "tag_22" -> 22
+            try:
+                numeric_id = int(tag_id_str.replace("tag_", ""))
+            except ValueError:
+                print(f"[REAL LAB] Warning: Invalid tag format {tag_id_str}")
+                continue
+
+            comp = OpticalComponent(name=item.get("name", tag_id_str), tag_id=numeric_id)
+            components_to_scan.append(comp)
+            self.component_map[tag_id_str] = comp
+
+        # 3. Perform Physical Scan
+        self.experiment.scan_components(components_to_scan, force_rescan=True)
+        
+        # 4. Populate Lab State
+        self.current_state["components"] = {}
+        
+        for item in catalog:
+            tag_id = item.get("tag_id")
+            comp = self.component_map.get(tag_id)
+            
+            if comp and comp.inventory_location:
+                # Found on table
+                pose = {
+                    "x": comp.inventory_location.x,
+                    "y": comp.inventory_location.y,
+                    "rotation": comp.inventory_location.yaw or 0
+                }
+                state = "PLACED"
+            else:
+                # Not found -> In Inventory (virtual)
+                pose = {"x": 0, "y": 0, "rotation": 0}
+                state = "INVENTORY"
+
+            self.current_state["components"][tag_id] = {
+                "id": tag_id,
+                "type": item.get("type", "OPTICAL_MIRROR"),
+                "state": state,
+                "pose": pose,
+                "intent": { 
+                    "nominal_pose": pose if state == "PLACED" else None, 
+                    "is_optimized": False,
+                    "placement_strategy": "MANUAL"
+                },
+                "metadata": {}
+            }
+        
+        self.current_state["last_updated"] = datetime.now().isoformat()
+        print(f"[REAL LAB] Scan complete. Found {len([c for c in self.current_state['components'].values() if c['state'] == 'PLACED'])} components.")
+
+    def get_lab_state(self) -> Dict[str, Any]:
+        return self.current_state
+
+    async def move_component(self, target_id: str, params: Dict[str, Any]):
+        print(f"[REAL LAB] Moving {target_id}...")
+        
+        # 1. Update Status
+        self.current_state["system_status"] = "BUSY"
+        
+        # 2. Get Component
+        if target_id not in self.component_map:
+            print(f"[REAL LAB] Error: Component {target_id} not found in map.")
+            self.current_state["system_status"] = "IDLE"
+            return
+
+        comp = self.component_map[target_id]
+        
+        # 3. Extract Coordinates
+        tx = params.get("target_x")
+        ty = params.get("target_y")
+        rot = params.get("rotation", 0)
+        
+        # 4. Execute Move
+        try:
+            print(f"[REAL LAB] Dispatching robot to X={tx}, Y={ty}, Rot={rot}")
+            
+            if not comp.inventory_location:
+                print(f"[REAL LAB] Warning: {target_id} inventory location unknown. Assuming it's at previous location or 0,0")
+            
+            self.experiment.place_component_wo_home_specific_xy(
+                component=comp,
+                target_x=tx,
+                target_y=ty,
+                angle=[180, 0, rot] 
+            )
+            
+            # 5. Update State
+            if target_id in self.current_state["components"]:
+                self.current_state["components"][target_id]["pose"] = {
+                    "x": tx,
+                    "y": ty,
+                    "rotation": rot
+                }
+                self.current_state["components"][target_id]["state"] = "PLACED"
+                
+                # Update intent to match reality
+                self.current_state["components"][target_id]["intent"]["nominal_pose"] = {
+                    "x": tx, "y": ty, "rotation": rot
+                }
+            
+        except Exception as e:
+            print(f"[REAL LAB] Move Failed: {e}")
+            
+        finally:
+            self.current_state["system_status"] = "IDLE"
+            self.current_state["last_updated"] = datetime.now().isoformat()
+
+    async def optimize_component(self, target_id: str, strategy_name: str, params: Dict[str, Any]):
+        print(f"[REAL LAB] Optimizing {target_id} with {strategy_name}...")
+        self.current_state["system_status"] = "OPTIMIZING"
+        
+        if target_id not in self.component_map:
+             self.current_state["system_status"] = "IDLE"
+             return
+
+        comp = self.component_map[target_id]
+
+        try:
+            # 1. Select Strategy
+            strategy = None
+            if strategy_name == "NEWTON":
+                # STRICT PARAMETER HANDLING: No defaults allowed.
+                # If params are missing, this will raise a KeyError, which is desired behavior.
+                strategy = NewtonPlacementStrategy(
+                    camera_port=params["camera_number"],
+                    target_x_pixel=params["target_x_pixel"],
+                    tolerance_ratio=params["tolerance_ratio"]
+                )
+            elif strategy_name == "COBYLA":
+                # TODO: Implement motor_id mapping logic
+                raise NotImplementedError("COBYLA strategy not yet implemented for Real Lab - requires motor_id mapping")
+            
+            if strategy:
+                # 2. Execute
+                self.experiment.optimize_component(comp, strategy)
+                
+                # 3. Update State 
+                if target_id in self.current_state["components"]:
+                    self.current_state["components"][target_id]["intent"]["is_optimized"] = True
+                    self.current_state["components"][target_id]["intent"]["placement_strategy"] = strategy_name
+                
+        except Exception as e:
+            print(f"[REAL LAB] Optimization Failed: {e}")
+            
+        finally:
+            self.current_state["system_status"] = "IDLE"
+            self.current_state["last_updated"] = datetime.now().isoformat()
+            
+    async def remove_component(self, target_id: str):
+         print(f"[REAL LAB] Remove requested for {target_id} (Not implemented)")
+         pass
+
+    def get_video_feed_status(self):
+        # TODO: Check actual camera connection
+        return {"connected": True, "source": "/api/video-feed/stream"} 
+
+    def get_video_stream(self):
+        """
+        Yields MJPEG frames from the camera.
+        Uses CameraDriver if available, or a fallback generator.
+        """
+        print("[REAL LAB] Starting Video Stream Generator...")
+        
+        # We need to import cv2 here inside the method or at module level if not already
+        import cv2
+        import numpy as np
+
+        camera = None
+        # Try to get the ceiling camera (Port 0)
+        if self.experiment and hasattr(self.experiment, 'ceiling_cam1'):
+            camera = self.experiment.ceiling_cam1
+            
+        while True:
+            frame = None
+            if camera:
+                try:
+                    # Attempt to read frame directly from OpenCV capture object
+                    if hasattr(camera, 'cap') and camera.cap is not None:
+                         ret, frame = camera.cap.read()
+                         if not ret:
+                             frame = None
+                    else:
+                        # Fallback if no direct cap access
+                        frame = None 
+                except Exception:
+                    frame = None
+            
+            if frame is None:
+                # Generate a dummy frame
+                frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(frame, "NO SIGNAL", (200, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+            ret, buffer = cv2.imencode('.jpg', frame)
+            if ret:
+                frame_bytes = buffer.tobytes()
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            
+            # Use time.sleep instead of asyncio.sleep in a synchronous generator
+            # But StreamingResponse takes an iterator. If it's async, we use async generator.
+            # FastAPI StreamingResponse supports both. Let's stick to synchronous for simplicity if cv2 blocks,
+            # but ideally we should be async. However, cv2.read() is blocking.
+            # To be safe with FastAPI's event loop, we should probably run this in a thread or accept blocking.
+            # For now, let's use time.sleep(0.05) to yield control.
+            import time
+            time.sleep(0.05)
+
+    async def add_component_to_state(self, component_data: Dict[str, Any]):
+        print(f"[REAL LAB] User requested to add {component_data.get('tag_id')}. Please place it on the table and Rescan.")

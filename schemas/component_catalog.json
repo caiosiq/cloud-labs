@@ -1,58 +1,116 @@
 [
   {
-    "id": "mirror_generic_1",
-    "type": "OPTICAL_MIRROR",
-    "name": "Generic Mirror",
+    "id": "nd_filter",
+    "type": "OPTICAL_FILTER",
+    "name": "ND Filter",
+    "tag_id": "tag_9",
+    "size": { "width": 90, "height": 90 },
+    "properties": {
+      "optical_density": 1.0,
+      "transmission": 0.1
+    }
+  },
+  {
+    "id": "cam_gripper_1",
+    "type": "OPTICAL_CAMERA",
+    "name": "Gripper Camera 1",
     "tag_id": "tag_22",
-    "size": { "width": 90, "height": 90 }
+    "size": { "width": 90, "height": 90 },
+    "properties": {
+      "resolution": "1920x1080",
+      "fov": 60
+    }
   },
   {
-    "id": "lens_generic_1",
-    "type": "OPTICAL_LENS",
-    "name": "Generic Lens",
-    "tag_id": "tag_11",
-    "size": { "width": 90, "height": 90 }
-  },
-  {
-    "id": "bs_generic_1",
-    "type": "OPTICAL_BEAMSPLITTER",
-    "name": "Generic Beam Splitter",
-    "tag_id": "tag_33",
-    "size": { "width": 90, "height": 90 }
-  },
-  {
-    "id": "cam_generic_1",
+    "id": "cam_gripper_2",
     "type": "OPTICAL_CAMERA",
-    "name": "Generic Camera",
-    "tag_id": "tag_22_cam",
-    "size": { "width": 90, "height": 90 }
+    "name": "Gripper Camera 2",
+    "tag_id": "tag_21",
+    "size": { "width": 90, "height": 90 },
+    "properties": {
+      "resolution": "1920x1080",
+      "fov": 60
+    }
   },
   {
-    "id": "mirror_thorlabs_1",
+    "id": "mirror_curved",
     "type": "OPTICAL_MIRROR",
-    "name": "Thorlabs Mirror 1",
-    "tag_id": "tag_101",
-    "size": { "width": 90, "height": 90 }
+    "name": "Curved Mirror",
+    "tag_id": "tag_18",
+    "size": { "width": 90, "height": 90 },
+    "properties": {
+      "radius_of_curvature": "100mm",
+      "reflectivity": 0.98,
+      "coating": "HR 1064nm"
+    }
   },
   {
-    "id": "lens_thorlabs_50mm",
-    "type": "OPTICAL_LENS",
-    "name": "50mm Lens",
-    "tag_id": "tag_102",
-    "size": { "width": 90, "height": 90 }
-  },
-  {
-    "id": "bs_thorlabs_cube",
+    "id": "beam_block",
     "type": "OPTICAL_BEAMSPLITTER",
-    "name": "Beam Splitter Cube",
-    "tag_id": "tag_103",
-    "size": { "width": 90, "height": 90 }
+    "name": "Beam Block",
+    "tag_id": "tag_2",
+    "size": { "width": 90, "height": 90 },
+    "properties": {
+      "material": "Anodized Aluminum",
+      "damage_threshold": "10J/cm^2"
+    }
   },
   {
-    "id": "cam_basler_1",
-    "type": "OPTICAL_CAMERA",
-    "name": "Basler Camera",
-    "tag_id": "tag_104",
-    "size": { "width": 90, "height": 90 }
+    "id": "beam_splitter",
+    "type": "OPTICAL_BEAMSPLITTER",
+    "name": "Beam Splitter (BS)",
+    "tag_id": "tag_10",
+    "size": { "width": 90, "height": 90 },
+    "properties": {
+      "split_ratio": "50:50",
+      "polarization": "Non-polarizing"
+    }
+  },
+  {
+    "id": "lens_main",
+    "type": "OPTICAL_LENS",
+    "name": "Main Lens",
+    "tag_id": "tag_11",
+    "size": { "width": 90, "height": 90 },
+    "properties": {
+      "focal_length": "50mm",
+      "material": "BK7",
+      "coating": "AR 400-700nm"
+    }
+  },
+  {
+    "id": "mirror_planar",
+    "type": "OPTICAL_MIRROR",
+    "name": "Planar Mirror",
+    "tag_id": "tag_20",
+    "size": { "width": 90, "height": 90 },
+    "properties": {
+      "radius_of_curvature": "Infinity",
+      "reflectivity": 0.99,
+      "surface_flatness": "lambda/10"
+    }
+  },
+  {
+    "id": "filter_generic",
+    "type": "OPTICAL_FILTER",
+    "name": "Filter",
+    "tag_id": "tag_3",
+    "size": { "width": 90, "height": 90 },
+    "properties": {
+      "type": "Longpass",
+      "cut_on": "600nm"
+    }
+  },
+  {
+    "id": "crystal_main",
+    "type": "OPTICAL_CRYSTAL",
+    "name": "Crystal",
+    "tag_id": "tag_19",
+    "size": { "width": 90, "height": 90 },
+    "properties": {
+      "material": "KTP",
+      "cut_angle": "theta=90, phi=23.5",
+      "refractive_index": 1.74
+    }
   }
 ]

@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 import io
 
 # Import the new communicator
-from lab_communicator import MockLabCommunicator
+# from lab_communicator import MockLabCommunicator
 
 app = FastAPI()
 
@@ -19,12 +19,31 @@ SCHEMAS_DIR = os.path.join(os.path.dirname(__file__), "..", "schemas")
 RECIPES_DIR = os.path.join(os.path.dirname(__file__), "..", "recipes")
 
 # Initialize Communicator
-# In the future, switch this based on an env var like 'LAB_MODE=REAL'
-try:
-    lab = MockLabCommunicator()
-except Exception as e:
-    print(f"CRITICAL ERROR: Failed to initialize Lab Communicator: {e}")
-    lab = None
+LAB_MODE = os.getenv("LAB_MODE", "MOCK").upper()
+
+if LAB_MODE == "REAL":
+    try:
+        from lab_communicator.real import RealLabCommunicator
+        print(">>> STARTING IN REAL LAB MODE <<<")
+        lab = RealLabCommunicator()
+    except ImportError as e:
+        print(f"CRITICAL ERROR: Failed to import RealLabCommunicator: {e}")
+        print("Falling back to Mock Mode...")
+        from lab_communicator.mock import MockLabCommunicator
+        lab = MockLabCommunicator()
+    except Exception as e:
+        print(f"CRITICAL ERROR: Failed to initialize Real Lab: {e}")
+        print("Falling back to Mock Mode...")
+        from lab_communicator.mock import MockLabCommunicator
+        lab = MockLabCommunicator()
+else:
+    print(">>> STARTING IN MOCK MODE <<<")
+    try:
+        from lab_communicator.mock import MockLabCommunicator
+        lab = MockLabCommunicator()
+    except Exception as e:
+        print(f"CRITICAL ERROR: Failed to initialize Mock Lab Communicator: {e}")
+        lab = None
 
 # Ensure recipes directory exists
 if not os.path.exists(RECIPES_DIR):
@@ -170,8 +189,15 @@ async def get_video_stream():
     Returns a mock image or real stream
     """
     # print(f"[{datetime.now().strftime('%H:%M:%S')}] Request: GET /api/video-feed/stream") # Optional: uncomment to log video requests
-    # Serve the SVG directly instead of redirecting
-    return FileResponse(os.path.join(frontend_path, "mock_feed.svg"))
+    
+    if LAB_MODE == "REAL":
+        return StreamingResponse(
+            lab.get_video_stream(), 
+            media_type="multipart/x-mixed-replace; boundary=frame"
+        )
+    else:
+        # Serve the SVG directly instead of redirecting
+        return FileResponse(os.path.join(frontend_path, "mock_feed.svg"))
 
 
 # --- Recipe Endpoints ---

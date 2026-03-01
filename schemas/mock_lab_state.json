@@ -1,0 +1,210 @@
+{
+  "system_status": "IDLE",
+  "last_updated": "2026-02-28T18:40:29.538146",
+  "components": {
+    "tag_9": {
+      "id": "tag_9",
+      "type": "OPTICAL_FILTER",
+      "state": "PLACED",
+      "pose": {
+        "x": 150,
+        "y": 200,
+        "rotation": 0
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 150,
+          "y": 200,
+          "rotation": 0
+        },
+        "placement_strategy": "MANUAL",
+        "is_optimized": false
+      },
+      "metadata": {}
+    },
+    "tag_22": {
+      "id": "tag_22",
+      "type": "OPTICAL_CAMERA",
+      "state": "PLACED",
+      "pose": {
+        "x": 249.90768515291833,
+        "y": 200.35998030773624,
+        "rotation": 0
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 250,
+          "y": 200,
+          "rotation": 0
+        },
+        "placement_strategy": "MANUAL",
+        "last_optimized_pose": null,
+        "is_optimized": false
+      },
+      "metadata": {}
+    },
+    "tag_21": {
+      "id": "tag_21",
+      "type": "OPTICAL_CAMERA",
+      "state": "PLACED",
+      "pose": {
+        "x": 350,
+        "y": 200,
+        "rotation": 0
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 350,
+          "y": 200,
+          "rotation": 0
+        },
+        "placement_strategy": "MANUAL",
+        "is_optimized": false
+      },
+      "metadata": {}
+    },
+    "tag_18": {
+      "id": "tag_18",
+      "type": "OPTICAL_MIRROR",
+      "state": "PLACED",
+      "pose": {
+        "x": 444.045105674558,
+        "y": 199.80227701007126,
+        "rotation": 45
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 444,
+          "y": 200,
+          "rotation": 45
+        },
+        "placement_strategy": "MANUAL",
+        "last_optimized_pose": null,
+        "is_optimized": false
+      },
+      "metadata": {}
+    },
+    "tag_2": {
+      "id": "tag_2",
+      "type": "OPTICAL_BEAMSPLITTER",
+      "state": "PLACED",
+      "pose": {
+        "x": 550,
+        "y": 200,
+        "rotation": 0
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 550,
+          "y": 200,
+          "rotation": 0
+        },
+        "placement_strategy": "MANUAL",
+        "is_optimized": false
+      },
+      "metadata": {}
+    },
+    "tag_10": {
+      "id": "tag_10",
+      "type": "OPTICAL_BEAMSPLITTER",
+      "state": "PLACED",
+      "pose": {
+        "x": 650,
+        "y": 200,
+        "rotation": 0
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 650,
+          "y": 200,
+          "rotation": 0
+        },
+        "placement_strategy": "MANUAL",
+        "is_optimized": false
+      },
+      "metadata": {}
+    },
+    "tag_11": {
+      "id": "tag_11",
+      "type": "OPTICAL_LENS",
+      "state": "PLACED",
+      "pose": {
+        "x": 750,
+        "y": 200,
+        "rotation": 0
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 750,
+          "y": 200,
+          "rotation": 0
+        },
+        "placement_strategy": "MANUAL",
+        "is_optimized": false
+      },
+      "metadata": {}
+    },
+    "tag_20": {
+      "id": "tag_20",
+      "type": "OPTICAL_MIRROR",
+      "state": "PLACED",
+      "pose": {
+        "x": 835.1626506753031,
+        "y": 199.98637547968232,
+        "rotation": 0
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 835,
+          "y": 200,
+          "rotation": 0
+        },
+        "placement_strategy": "MANUAL",
+        "last_optimized_pose": null,
+        "is_optimized": false
+      },
+      "metadata": {}
+    },
+    "tag_3": {
+      "id": "tag_3",
+      "type": "OPTICAL_FILTER",
+      "state": "PLACED",
+      "pose": {
+        "x": 150,
+        "y": 300,
+        "rotation": 0
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 150,
+          "y": 300,
+          "rotation": 0
+        },
+        "placement_strategy": "MANUAL",
+        "is_optimized": false
+      },
+      "metadata": {}
+    },
+    "tag_19": {
+      "id": "tag_19",
+      "type": "OPTICAL_CRYSTAL",
+      "state": "PLACED",
+      "pose": {
+        "x": 405.76380659886064,
+        "y": 483.5853463012448,
+        "rotation": 0
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 406,
+          "y": 484,
+          "rotation": 0
+        },
+        "placement_strategy": "MANUAL",
+        "last_optimized_pose": null,
+        "is_optimized": false
+      },
+      "metadata": {}
+    }
+  }
+}

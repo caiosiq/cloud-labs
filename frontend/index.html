@@ -305,7 +305,8 @@
         <!-- Contextual Controls (Shows when component selected) -->
         <div id="context-panel">
             <div class="section-header" style="padding: 0 0 12px 0; border-bottom: 1px solid var(--border-color);">
-                <span id="selected-comp-name" style="color: var(--primary-accent);">Component</span> Controls
+                <div><span id="selected-comp-name" style="color: var(--primary-accent);">Component</span> Controls</div>
+                <div id="selected-comp-properties" style="margin-top: 6px; font-size: 11px; font-style: italic; color: var(--text-muted); font-weight: 400; text-transform: none; line-height: 1.4;"></div>
             </div>
             
             <div style="margin-top: 12px;">
@@ -471,6 +472,6 @@
         .step-del { color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; font-size: 14px; }
         .step-del:hover { background: rgba(239, 68, 68, 0.1); }
     </style>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=2"></script>
 </body>
 </html>
