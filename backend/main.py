@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse, Response
 from pydantic import BaseModel
 import json
 import os
@@ -8,6 +8,24 @@ import asyncio
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import io
+
+# Load .env from project root (parent of backend/) so LAB_MODE and LAB_AUTOMATION_PATH are set
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_env_path = os.path.join(_project_root, ".env")
+if os.path.exists(_env_path):
+    from dotenv import load_dotenv
+    load_dotenv(_env_path)
+    print(f"[CONFIG] Loaded .env from {_env_path}")
+else:
+    print(f"[CONFIG] No .env at {_env_path}")
+
+# Resolve LAB_AUTOMATION_PATH relative to project root so it works from backend/ cwd
+_lab_path = os.getenv("LAB_AUTOMATION_PATH")
+if _lab_path:
+    _lab_path_abs = os.path.abspath(os.path.join(_project_root, _lab_path))
+    os.environ["LAB_AUTOMATION_PATH"] = _lab_path_abs
+    if not os.path.exists(_lab_path_abs):
+        print(f"[CONFIG] Warning: LAB_AUTOMATION_PATH resolved to {_lab_path_abs} (path does not exist)")
 
 # Import the new communicator
 # from lab_communicator import MockLabCommunicator
@@ -19,7 +37,8 @@ SCHEMAS_DIR = os.path.join(os.path.dirname(__file__), "..", "schemas")
 RECIPES_DIR = os.path.join(os.path.dirname(__file__), "..", "recipes")
 
 # Initialize Communicator
-LAB_MODE = os.getenv("LAB_MODE", "MOCK").upper()
+LAB_MODE = (os.getenv("LAB_MODE") or "MOCK").upper()
+print(f"LAB_MODE: {LAB_MODE}")
 
 if LAB_MODE == "REAL":
     try:
@@ -146,6 +165,23 @@ async def get_lab_state():
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Response: 500 Failed to read state: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to read Lab State: {str(e)}")
 
+@app.get("/api/laser-line")
+async def get_laser_line():
+    """Laser path in lab coords: x = a*y + b (mm). Mock: fixed params; Real: from laser_line_fit.npy."""
+    if LAB_MODE != "REAL" or lab is None:
+        return {"a": 0.0, "b": 0.0, "source": "mock"}
+    path = os.path.join(_project_root, "laser_line_fit.npy")
+    if not os.path.exists(path):
+        return {"a": 0.0, "b": 0.0, "source": "real", "loaded": False}
+    try:
+        import numpy as np
+        data = np.load(path)
+        a, b = float(data[0]), float(data[1])
+        return {"a": a, "b": b, "source": "real", "loaded": True}
+    except Exception as e:
+        print(f"[CONFIG] Failed to load laser_line_fit.npy: {e}")
+        return {"a": 0.0, "b": 0.0, "source": "real", "loaded": False}
+
 @app.post("/api/command")
 async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundTasks):
     print(f"Received Command: {payload}")
@@ -177,6 +213,20 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
         raise HTTPException(status_code=400, detail="Unknown action")
 
 # --- Video Feed Endpoints ---
+
+@app.get("/api/table-cam/capture")
+async def table_cam_capture(cam_id: int = 1):
+    """Capture one image from table recorder camera (1 or 2). Real lab only; on-demand (no stream)."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if not hasattr(lab, "capture_table_cam"):
+        raise HTTPException(status_code=503, detail="Table cam capture not available (real lab only)")
+    if cam_id not in (1, 2):
+        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
+    data = lab.capture_table_cam(cam_id)
+    if data is None:
+        raise HTTPException(status_code=503, detail="Capture failed or table cams not available")
+    return Response(content=data, media_type="image/png")
 
 @app.get("/api/video-feed/status")
 async def get_video_status():

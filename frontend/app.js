@@ -3,7 +3,31 @@ console.log("App.js loading...");
 
 const CANVAS_WIDTH = 1000;
 const CANVAS_HEIGHT = 700;
-const MM_TO_PX = 1.0; 
+// Real lab table: X and Y in mm, origin at center. UI maps this range to canvas.
+const LAB_X_MIN = -500;
+const LAB_X_MAX = 500;
+const LAB_Y_MIN = -500;
+const LAB_Y_MAX = 500;
+const LAB_WIDTH_MM = LAB_X_MAX - LAB_X_MIN;
+const LAB_HEIGHT_MM = LAB_Y_MAX - LAB_Y_MIN;
+// Scale so full lab range fits in canvas; preserve aspect (square mm -> square px)
+const LAB_SCALE = Math.min(CANVAS_WIDTH / LAB_WIDTH_MM, CANVAS_HEIGHT / LAB_HEIGHT_MM);
+const LAB_CENTER_PX = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
+
+/** Lab mm -> canvas pixels (origin at center, +Y lab = up on screen) */
+function mmToPx(labX, labY) {
+    return {
+        x: LAB_CENTER_PX.x + labX * LAB_SCALE,
+        y: LAB_CENTER_PX.y - labY * LAB_SCALE
+    };
+}
+/** Canvas pixels -> lab mm */
+function pxToMm(px, py) {
+    return {
+        x: (px - LAB_CENTER_PX.x) / LAB_SCALE,
+        y: (LAB_CENTER_PX.y - py) / LAB_SCALE
+    };
+} 
 
 // DOM Elements
 const canvas = document.getElementById('optical-table');
@@ -54,6 +78,8 @@ let pendingCommands = new Set();
 let selectedComponent = null; 
 let availableStrategies = null; 
 let availableRecipes = [];
+/** Laser line in mm: x = a*y + b. Fetched from /api/laser-line (mock: fixed; real: from laser_line_fit.npy). */
+let laserLineCoeffs = null;
 
 // Optimization State
 let isOptimizing = false;
@@ -88,6 +114,7 @@ async function fetchCatalogMap() {
 
 // Call this early
 fetchCatalogMap();
+fetchLaserLine();
 
 async function fetchStrategies() {
     availableStrategies = {
@@ -108,6 +135,18 @@ async function fetchStrategies() {
         }
       }
     };
+}
+
+async function fetchLaserLine() {
+    try {
+        const response = await fetch('/api/laser-line');
+        if (response.ok) {
+            laserLineCoeffs = await response.json();
+            console.log("Laser line:", laserLineCoeffs.source, laserLineCoeffs.loaded !== false ? "a=" + laserLineCoeffs.a + " b=" + laserLineCoeffs.b : "(defaults)");
+        }
+    } catch (e) {
+        console.error("Laser line fetch failed", e);
+    }
 }
 
 async function fetchRecipes() {
@@ -287,10 +326,11 @@ async function sendCommand(command) {
 
 // --- 2. Interaction Logic ---
 
-function getComponentAtPosition(x, y) {
+function getComponentAtPosition(canvasX, canvasY) {
     for (const [name, pose] of Object.entries(ghostState)) {
-        const dx = x - pose.x * MM_TO_PX;
-        const dy = y - pose.y * MM_TO_PX;
+        const p = mmToPx(pose.x, pose.y);
+        const dx = canvasX - p.x;
+        const dy = canvasY - p.y;
         if (Math.sqrt(dx*dx + dy*dy) < 20) return { name, type: 'GHOST' };
     }
     return null;
@@ -314,10 +354,8 @@ canvas.addEventListener('mousedown', (e) => {
         } else {
             isDragging = true;
             draggingComponent = hit.name;
-            dragOffset = {
-                x: mouseX - ghostState[hit.name].x * MM_TO_PX,
-                y: mouseY - ghostState[hit.name].y * MM_TO_PX
-            };
+            const p = mmToPx(ghostState[hit.name].x, ghostState[hit.name].y);
+            dragOffset = { x: mouseX - p.x, y: mouseY - p.y };
         }
     } else {
         selectedComponent = null;
@@ -411,13 +449,9 @@ canvas.addEventListener('mousemove', (e) => {
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    let newX = (mouseX - dragOffset.x) / MM_TO_PX;
-    let newY = (mouseY - dragOffset.y) / MM_TO_PX;
-
-    if (Math.abs(newY - 200) < 15) newY = 200;
-
-    ghostState[draggingComponent].x = newX;
-    ghostState[draggingComponent].y = newY;
+    const lab = pxToMm(mouseX - dragOffset.x, mouseY - dragOffset.y);
+    ghostState[draggingComponent].x = lab.x;
+    ghostState[draggingComponent].y = lab.y;
     
     render();
 });
@@ -459,11 +493,11 @@ canvas.addEventListener('drop', (e) => {
             const mouseY = e.clientY - rect.top;
             
             const type = e.dataTransfer.getData("application/type") || "OPTICAL_MIRROR";
-    
+            const lab = pxToMm(mouseX, mouseY);
             // Initialize ghost state for new component immediately
             ghostState[componentName] = {
-                x: mouseX / MM_TO_PX,
-                y: mouseY / MM_TO_PX,
+                x: lab.x,
+                y: lab.y,
                 rotation: 0
             };
     
@@ -522,17 +556,12 @@ canvas.addEventListener('mousedown', (e) => {
         } else {
             isDragging = true;
             draggingComponent = hit.name;
-            dragOffset = {
-                x: mouseX - ghostState[hit.name].x * MM_TO_PX,
-                y: mouseY - ghostState[hit.name].y * MM_TO_PX
-            };
-            // Hide popup while dragging to avoid clutter
-            // hideContextPopup(); // Removed
+            const p = mmToPx(ghostState[hit.name].x, ghostState[hit.name].y);
+            dragOffset = { x: mouseX - p.x, y: mouseY - p.y };
         }
     } else {
         selectedComponent = null;
         contextPanel.style.display = 'none';
-        // hideContextPopup(); // Removed
         render();
     }
 });
@@ -554,7 +583,7 @@ canvas.addEventListener('mouseup', async (e) => {
         
         // Re-open popup at new location (REMOVED - Context Panel is static)
         // const pose = ghostState[draggingComponent];
-        // showContextPopup(draggingComponent, pose.x * MM_TO_PX, pose.y * MM_TO_PX, false);
+        // showContextPopup(draggingComponent, mmToPx(pose.x, pose.y).x, mmToPx(pose.x, pose.y).y, false);
         
         updateContextPanel(draggingComponent);
         draggingComponent = null;
@@ -702,7 +731,7 @@ function clearCanvas() {
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     
     ctx.fillStyle = '#2a2e36';
-    const spacing = 25 * MM_TO_PX;
+    const spacing = 25;
     for (let x = spacing; x < CANVAS_WIDTH; x += spacing) {
         for (let y = spacing; y < CANVAS_HEIGHT; y += spacing) {
             ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
@@ -710,23 +739,52 @@ function clearCanvas() {
     }
 }
 
+/** Clip segment of line x = a*y + b to lab bounds; returns [p1, p2] in mm or null. */
+function clipLaserLineToBounds(a, b) {
+    const pts = [];
+    if (Math.abs(a) < 1e-10) {
+        const x = b;
+        if (x < LAB_X_MIN || x > LAB_X_MAX) return null;
+        pts.push({ x, y: LAB_Y_MIN }, { x, y: LAB_Y_MAX });
+    } else {
+        const yAtLeft = (LAB_X_MIN - b) / a;
+        const yAtRight = (LAB_X_MAX - b) / a;
+        if (yAtLeft >= LAB_Y_MIN && yAtLeft <= LAB_Y_MAX) pts.push({ x: LAB_X_MIN, y: yAtLeft });
+        if (yAtRight >= LAB_Y_MIN && yAtRight <= LAB_Y_MAX) pts.push({ x: LAB_X_MAX, y: yAtRight });
+        const xAtBottom = a * LAB_Y_MIN + b;
+        const xAtTop = a * LAB_Y_MAX + b;
+        if (xAtBottom >= LAB_X_MIN && xAtBottom <= LAB_X_MAX) pts.push({ x: xAtBottom, y: LAB_Y_MIN });
+        if (xAtTop >= LAB_X_MIN && xAtTop <= LAB_X_MAX) pts.push({ x: xAtTop, y: LAB_Y_MAX });
+    }
+    if (pts.length < 2) return null;
+    pts.sort((a_, b_) => a_.y - b_.y);
+    return [pts[0], pts[pts.length - 1]];
+}
+
 function drawLaserPath() {
     ctx.shadowBlur = 10;
     ctx.shadowColor = '#ff3b3b';
-    ctx.strokeStyle = '#ff3b3b'; 
+    ctx.strokeStyle = '#ff3b3b';
     ctx.lineWidth = 2;
-    ctx.setLineDash([10, 10]); 
-    ctx.beginPath();
-    ctx.moveTo(0, 200 * MM_TO_PX);
-    ctx.lineTo(CANVAS_WIDTH, 200 * MM_TO_PX);
-    ctx.stroke();
-    ctx.setLineDash([]); 
-    ctx.shadowBlur = 0; 
+    ctx.setLineDash([10, 10]);
+    const coef = laserLineCoeffs || { a: 0, b: 0 };
+    const seg = clipLaserLineToBounds(coef.a, coef.b);
+    if (seg) {
+        const p1 = mmToPx(seg[0].x, seg[0].y);
+        const p2 = mmToPx(seg[1].x, seg[1].y);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.shadowBlur = 0;
 }
 
 function drawComponent(name, pose, type, mode = 'SOLID') {
-    const x = pose.x * MM_TO_PX;
-    const y = pose.y * MM_TO_PX;
+    const p = mmToPx(pose.x, pose.y);
+    const x = p.x;
+    const y = p.y;
     const rotation = pose.rotation * (Math.PI / 180); 
 
     ctx.save();
@@ -985,11 +1043,13 @@ function render() {
         // Draw Drift Line (Nominal vs Physical)
         const physical = labState.components[name];
         if (physical && physical.state === 'PLACED') {
+            const from = mmToPx(physical.pose.x, physical.pose.y);
+            const to = mmToPx(pose.x, pose.y);
             ctx.strokeStyle = isPending ? '#f59e0b' : 'rgba(255, 255, 255, 0.2)';
             ctx.setLineDash([5, 5]);
             ctx.beginPath();
-            ctx.moveTo(physical.pose.x * MM_TO_PX, physical.pose.y * MM_TO_PX);
-            ctx.lineTo(pose.x * MM_TO_PX, pose.y * MM_TO_PX);
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
             ctx.stroke();
             ctx.setLineDash([]);
         }
@@ -1570,6 +1630,66 @@ function initVideoFeed() {
     // Check status periodically
     setInterval(checkVideoStatus, 5000);
     checkVideoStatus();
+}
+
+// --- Table cam capture (on-demand, real lab only) ---
+let selectedTableCam = 1;
+let tableCamLastBlobUrl = null;
+const tableCamBtn1 = document.getElementById('table-cam-btn-1');
+const tableCamBtn2 = document.getElementById('table-cam-btn-2');
+const tableCamCaptureBtn = document.getElementById('table-cam-capture-btn');
+const tableCamImg = document.getElementById('table-cam-img');
+const tableCamPlaceholder = document.getElementById('table-cam-placeholder');
+const tableCamError = document.getElementById('table-cam-error');
+
+function setTableCamSelection(camId) {
+    selectedTableCam = camId;
+    if (tableCamBtn1) {
+        tableCamBtn1.classList.toggle('btn-primary', camId === 1);
+        tableCamBtn1.classList.toggle('btn-secondary', camId !== 1);
+    }
+    if (tableCamBtn2) {
+        tableCamBtn2.classList.toggle('btn-primary', camId === 2);
+        tableCamBtn2.classList.toggle('btn-secondary', camId !== 2);
+    }
+}
+
+if (tableCamBtn1) tableCamBtn1.addEventListener('click', () => setTableCamSelection(1));
+if (tableCamBtn2) tableCamBtn2.addEventListener('click', () => setTableCamSelection(2));
+setTableCamSelection(1);
+
+if (tableCamCaptureBtn) {
+    tableCamCaptureBtn.addEventListener('click', async () => {
+        if (!tableCamImg || !tableCamPlaceholder || !tableCamError) return;
+        tableCamPlaceholder.textContent = 'Capturing...';
+        tableCamPlaceholder.style.display = 'block';
+        tableCamImg.style.display = 'none';
+        tableCamImg.src = '';
+        tableCamError.style.display = 'none';
+        try {
+            const res = await fetch(`/api/table-cam/capture?cam_id=${selectedTableCam}`);
+            if (res.ok) {
+                const blob = await res.blob();
+                if (tableCamLastBlobUrl) URL.revokeObjectURL(tableCamLastBlobUrl);
+                tableCamLastBlobUrl = URL.createObjectURL(blob);
+                tableCamImg.src = tableCamLastBlobUrl;
+                tableCamImg.style.display = 'block';
+                tableCamPlaceholder.style.display = 'none';
+                tableCamPlaceholder.textContent = 'Click Capture to get image';
+            } else {
+                const err = (await res.json().catch(() => ({}))).detail || 'Capture failed (real lab only)';
+                tableCamError.textContent = err;
+                tableCamError.style.display = 'block';
+                tableCamPlaceholder.style.display = 'none';
+                tableCamPlaceholder.textContent = 'Click Capture to get image';
+            }
+        } catch (e) {
+            tableCamError.textContent = e.message || 'Request failed';
+            tableCamError.style.display = 'block';
+            tableCamPlaceholder.style.display = 'none';
+            tableCamPlaceholder.textContent = 'Click Capture to get image';
+        }
+    });
 }
 
 async function checkVideoStatus() {

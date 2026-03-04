@@ -8,10 +8,14 @@ from typing import Dict, Any, List
 from .base import LabCommunicator
 
 # Configuration for External Lab Automation Library
+# LAB_AUTOMATION_PATH = path to the lab_automation package folder (repo root).
+# For "from lab_automation.managers..." we must add its parent to sys.path so the package name resolves.
 LAB_AUTOMATION_PATH = os.getenv("LAB_AUTOMATION_PATH")
 if LAB_AUTOMATION_PATH and os.path.exists(LAB_AUTOMATION_PATH):
-    sys.path.append(LAB_AUTOMATION_PATH)
-    print(f"[REAL LAB] Added {LAB_AUTOMATION_PATH} to sys.path")
+    _lab_parent = os.path.dirname(LAB_AUTOMATION_PATH)
+    if _lab_parent not in sys.path:
+        sys.path.insert(0, _lab_parent)
+    print(f"[REAL LAB] Added parent {_lab_parent} to sys.path (package lab_automation at {LAB_AUTOMATION_PATH})")
 else:
     print("[REAL LAB] Warning: LAB_AUTOMATION_PATH not set or invalid.")
 
@@ -24,6 +28,13 @@ try:
 except ImportError as e:
     print(f"[REAL LAB] Critical Error: Failed to import lab_automation: {e}")
     LAB_LIB_AVAILABLE = False
+
+try:
+    from lab_automation.managers.recorder_capture_helpers import activate_cam_and_capture
+    RECORDER_CAPTURE_AVAILABLE = True
+except ImportError:
+    activate_cam_and_capture = None
+    RECORDER_CAPTURE_AVAILABLE = False
 
 class RealLabCommunicator(LabCommunicator):
     def __init__(self):
@@ -146,14 +157,15 @@ class RealLabCommunicator(LabCommunicator):
             if not comp.inventory_location:
                 print(f"[REAL LAB] Warning: {target_id} inventory location unknown. Assuming it's at previous location or 0,0")
             
-            self.experiment.place_component_wo_home_specific_xy(
+            self.experiment.place_component_wo_home_specific_xy_from_current(
                 component=comp,
                 target_x=tx,
                 target_y=ty,
-                angle=[180, 0, rot] 
+                angle=[127.28, 127.28, rot]
             )
             
             # 5. Update State
+            #UPDATE TO GET REFORCE-SCAM
             if target_id in self.current_state["components"]:
                 self.current_state["components"][target_id]["pose"] = {
                     "x": tx,
@@ -273,6 +285,37 @@ class RealLabCommunicator(LabCommunicator):
             # For now, let's use time.sleep(0.05) to yield control.
             import time
             time.sleep(0.05)
+
+    def capture_table_cam(self, cam_id: int):
+        """Capture one image from table recorder camera (1 or 2). Returns PNG bytes or None."""
+        if not RECORDER_CAPTURE_AVAILABLE or activate_cam_and_capture is None:
+            return None
+        if cam_id not in (1, 2):
+            return None
+        import cv2
+        import tempfile
+        import os as _os
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            tmp_path = f.name
+        try:
+            img = activate_cam_and_capture(
+                cam_id=cam_id,
+                video_exposure=0.05,
+                capture_exposure=0.05,
+                filename=tmp_path,
+                settle_s=0.5,
+                output_dir=None,
+            )
+            if img is None:
+                return None
+            _, buf = cv2.imencode(".png", img)
+            return buf.tobytes()
+        finally:
+            if _os.path.exists(tmp_path):
+                try:
+                    _os.remove(tmp_path)
+                except Exception:
+                    pass
 
     async def add_component_to_state(self, component_data: Dict[str, Any]):
         print(f"[REAL LAB] User requested to add {component_data.get('tag_id')}. Please place it on the table and Rescan.")

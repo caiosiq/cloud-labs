@@ -26,3 +26,7 @@ class LabCommunicator:
     def get_video_stream(self):
         """Returns a generator yielding MJPEG frames."""
         raise NotImplementedError
+
+    def capture_table_cam(self, cam_id: int):
+        """Capture one image from table recorder camera (cam_id 1 or 2). Returns PNG bytes or None if not supported."""
+        return None

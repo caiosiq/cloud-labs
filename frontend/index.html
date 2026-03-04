@@ -371,6 +371,24 @@
             </div>
         </div>
 
+        <!-- Table cam capture (real lab: on-demand capture from recorder cams) -->
+        <div id="table-cam-section" style="border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
+            <div class="section-header">Table cam capture</div>
+            <div style="padding: 0 12px 8px; display: flex; gap: 8px; align-items: center;">
+                <span style="font-size: 11px; color: var(--text-secondary);">Camera:</span>
+                <button id="table-cam-btn-1" type="button" class="btn btn-secondary table-cam-sel" style="font-size: 11px; padding: 4px 10px;">CAM 1</button>
+                <button id="table-cam-btn-2" type="button" class="btn btn-secondary table-cam-sel" style="font-size: 11px; padding: 4px 10px;">CAM 2</button>
+                <button id="table-cam-capture-btn" type="button" class="btn btn-primary" style="font-size: 11px; padding: 4px 10px;">
+                    <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">camera</span> Capture
+                </button>
+            </div>
+            <div id="table-cam-preview" style="height: 160px; background: #0f1115; margin: 0 12px 12px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                <img id="table-cam-img" src="" alt="Table cam" style="max-width: 100%; max-height: 100%; object-fit: contain; display: none;">
+                <div id="table-cam-placeholder" style="color: var(--text-muted); font-size: 12px; text-align: center;">Click Capture to get image</div>
+                <div id="table-cam-error" style="color: var(--status-error); font-size: 11px; display: none;"></div>
+            </div>
+        </div>
+
         <!-- Recipe Editor -->
         <div style="flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;">
              <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
