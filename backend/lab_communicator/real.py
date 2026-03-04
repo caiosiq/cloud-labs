@@ -1,6 +1,9 @@
+import atexit
 import json
 import os
+import subprocess
 import sys
+import time
 import asyncio
 from datetime import datetime
 from typing import Dict, Any, List
@@ -57,6 +60,72 @@ class RealLabCommunicator(LabCommunicator):
         }
         
         self._initialize_state()
+        self._recorder_procs: List[subprocess.Popen] = []
+        self._start_recorder_processes()
+
+    def _send_recorder_cmd(self, port: int, cmd: str) -> None:
+        """Send a command to a recorder process on the given port (9999 or 10000)."""
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect(("localhost", port))
+            s.sendall((cmd.strip() + "\n").encode())
+            s.close()
+        except Exception as e:
+            print(f"[REAL LAB] Recorder cmd (port {port}): {e}")
+
+    def _start_recorder_processes(self) -> None:
+        """Start the two recorder subprocesses (cam1=9999, cam2=10000) to warm up table cameras."""
+        lab_path = os.getenv("LAB_AUTOMATION_PATH")
+        if not lab_path or not os.path.isdir(lab_path):
+            print("[REAL LAB] LAB_AUTOMATION_PATH not set or invalid; skipping recorder warm-up.")
+            return
+        recorder_script = os.path.join(lab_path, "recorder_cam_laser_align_simplified.py")
+        if not os.path.isfile(recorder_script):
+            recorder_script = os.path.join(lab_path, "scripts", "recorder_cam_laser_align_simplified.py")
+        if not os.path.isfile(recorder_script):
+            print("[REAL LAB] Recorder script not found; table cam capture may fail (ports 9999/10000).")
+            return
+        use_real_camera = os.getenv("TABLE_CAM_USE_MOCK", "").strip().lower() not in ("1", "true", "yes")
+        extra = ["--real-camera"] if use_real_camera else []
+        try:
+            p1 = subprocess.Popen(
+                [sys.executable, recorder_script, "--cam", "0", "--port", "9999", "--prefix", "cam1"] + extra,
+                cwd=lab_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            p2 = subprocess.Popen(
+                [sys.executable, recorder_script, "--cam", "1", "--port", "10000", "--prefix", "cam2"] + extra,
+                cwd=lab_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            self._recorder_procs = [p1, p2]
+            time.sleep(1.2)
+            print("[REAL LAB] Recorder processes started (cam1=9999, cam2=10000). Table cam capture ready.")
+            atexit.register(self._shutdown_recorders)
+        except Exception as e:
+            print(f"[REAL LAB] Failed to start recorders: {e}")
+            self._recorder_procs = []
+
+    def _shutdown_recorders(self) -> None:
+        """Send EXIT to recorder ports and wait for processes. Called on backend exit."""
+        if not self._recorder_procs:
+            return
+        for port in (9999, 10000):
+            self._send_recorder_cmd(port, "REC_OFF")
+            self._send_recorder_cmd(port, "EXIT")
+        for p in self._recorder_procs:
+            try:
+                p.wait(timeout=2.0)
+            except Exception:
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
+        self._recorder_procs = []
 
     def _initialize_state(self):
         """Scans the table based on the catalog and populates the component map."""
