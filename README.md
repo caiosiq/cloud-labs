@@ -91,8 +91,9 @@ uvicorn main:app --reload
 To connect to the physical robotic setup, the system uses a **RealLabCommunicator** adapter that wraps the `lab_automation` Python package.
 
 **Prerequisites:**
-*   **Hardware**: xArm6 Robot, RealSense Camera, ArUco-tagged mounts.
+*   **Hardware**: xArm6 Robot, RealSense Camera (Ceiling), ArUco-tagged mounts, and 2 Table Cameras.
 *   **Software**: The `lab_automation` package (drivers & managers) must be available.
+*   **Scripts**: The system expects `recorder_cam_laser_align_simplified.py` in the `LAB_AUTOMATION_PATH` to handle camera drivers.
 
 **Configuration:**
 Set environment variables to point to your automation library:
@@ -105,16 +106,20 @@ uvicorn main:app --reload
 ```
 
 **What Happens in Real Mode?**
-*   **Scan-First Initialization**: On startup, the system calls `experiment.scan_components()` to discover what is actually on the table.
-*   **Live Video**: The UI streams live MJPEG video from the lab cameras.
-*   **Real Execution**: `MOVE` commands map to `experiment.place_component(...)`. `OPTIMIZE` commands trigger feedback loops (Newton/Cobyla).
+1.  **Process Management**: On startup, the backend launches two subprocesses (ports 9999 & 10000) to manage the table cameras via the `lab_automation` library.
+2.  **Scan-First Initialization**: The system calls `experiment.scan_components()` to discover what is actually on the table using the ceiling camera.
+3.  **Live Video**: 
+    *   **Ceiling**: Streams MJPEG video via `/api/video-feed/stream`.
+    *   **Table**: Provides on-demand high-res captures via `/api/table-cam/capture`.
+4.  **Real Execution**: `MOVE` commands map to `experiment.place_component(...)`. `OPTIMIZE` commands trigger feedback loops (Newton).
 
 ### 3. Experiment Workflow
 1.  **Drag & Drop**: Move components from the inventory to the table.
 2.  **Interact**: Click a component to open the context popup. Move it precisely or run an **Optimization Strategy** (e.g., Newton).
-3.  **Record Recipe**: Open the "Recipe Editor" (Sidebar), click "Record", perform actions, and "Save".
-4.  **Run Recipe**: Click the "Play" button on a saved recipe to re-execute the sequence.
-5.  **Check Drift**: Go to the **Debugger**, view "Golden States", and compare with the current Lab State.
+3.  **Visualize**: The UI overlays the **Laser Path** (loaded from `laser_line_fit.npy` in Real Mode) to show the predicted beam trajectory.
+4.  **Record Recipe**: Open the "Recipe Editor" (Sidebar), click "Record", perform actions, and "Save".
+5.  **Run Recipe**: Click the "Play" button on a saved recipe to re-execute the sequence.
+6.  **Check Drift**: Go to the **Debugger**, view "Golden States", and compare with the current Lab State.
 
 ---
 

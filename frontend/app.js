@@ -195,6 +195,11 @@ async function fetchLabState() {
                         } else {
                             ghostState[name] = { ...comp.pose };
                         }
+                        
+                        // Ensure rotation is initialized from labState (physical yaw) if missing
+                        if (typeof ghostState[name].rotation !== 'number') {
+                            ghostState[name].rotation = comp.pose.rotation || 0;
+                        }
                     }
                 }
             });
@@ -326,6 +331,51 @@ async function sendCommand(command) {
 
 // --- 2. Interaction Logic ---
 
+function getComponentSize(name) {
+    let size = { width: 90, height: 90 }; // Default 90x90mm as requested
+
+    // Case 1: Existing component in Lab State
+    if (labState && labState.components && labState.components[name]) {
+        const tagId = labState.components[name].id;
+        if (catalogMap[tagId] && catalogMap[tagId].size) {
+            size = catalogMap[tagId].size;
+        }
+    } 
+    // Case 2: Direct Tag ID (e.g. during Drag-and-Drop creation)
+    else if (catalogMap[name] && catalogMap[name].size) {
+        size = catalogMap[name].size;
+    }
+    return size;
+}
+
+function getComponentRadius(name) {
+    const size = getComponentSize(name);
+    // Circumscribed radius = sqrt(w^2 + h^2) / 2
+    return Math.sqrt(size.width * size.width + size.height * size.height) / 2;
+}
+
+function checkCollision(targetId, x, y) {
+    const PADDING_MM = 5; // Minimal padding distance between circumscribed circles
+    const r1 = getComponentRadius(targetId);
+
+    for (const [id, pose] of Object.entries(ghostState)) {
+        if (id === targetId) continue; // Don't check against self
+        
+        const r2 = getComponentRadius(id);
+        const minDist = r1 + r2 + PADDING_MM;
+
+        // Calculate distance in mm
+        const dx = x - pose.x;
+        const dy = y - pose.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        if (dist < minDist) {
+            return { detected: true, other: id };
+        }
+    }
+    return { detected: false };
+}
+
 function getComponentAtPosition(canvasX, canvasY) {
     for (const [name, pose] of Object.entries(ghostState)) {
         const p = mmToPx(pose.x, pose.y);
@@ -420,6 +470,20 @@ ctxMoveBtn.addEventListener('click', async () => {
     const ty = parseFloat(ctxY.value);
     const trot = parseFloat(ctxRot.value);
 
+    // Collision Check
+    const collision = checkCollision(selectedComponent, tx, ty);
+    if (collision.detected) {
+        log(`Move cancelled: Collision with ${collision.other}`, "error");
+        // Revert UI values to current ghost state (which hasn't updated yet)
+        if (ghostState[selectedComponent]) {
+            const old = ghostState[selectedComponent];
+            ctxX.value = old.x.toFixed(1);
+            ctxY.value = old.y.toFixed(1);
+        }
+        return;
+    }
+
+    // Update Ghost State immediately for visual feedback
     ghostState[selectedComponent].x = tx;
     ghostState[selectedComponent].y = ty;
     ghostState[selectedComponent].rotation = trot;
@@ -450,16 +514,83 @@ canvas.addEventListener('mousemove', (e) => {
     const mouseY = e.clientY - rect.top;
 
     const lab = pxToMm(mouseX - dragOffset.x, mouseY - dragOffset.y);
-    ghostState[draggingComponent].x = lab.x;
-    ghostState[draggingComponent].y = lab.y;
+    
+    // Snapping Logic (Snap to Laser Line)
+    let finalX = lab.x;
+    let finalY = lab.y;
+
+    if (laserLineCoeffs && typeof laserLineCoeffs.a === 'number') {
+        const a = laserLineCoeffs.a;
+        const b = laserLineCoeffs.b;
+        const SNAP_THRESHOLD_MM = 10; // Snap if within 10mm
+
+        // Line eq: x - ay - b = 0  => A=1, B=-a, C=-b
+        // Distance d = |Ax + By + C| / sqrt(A^2 + B^2)
+        const val = finalX - a * finalY - b;
+        const dist = Math.abs(val) / Math.sqrt(1 + a * a);
+
+        if (dist < SNAP_THRESHOLD_MM) {
+            // Project point onto line
+            // (x, y) - k * (A, B) where k = val / (A^2 + B^2)
+            const k = val / (1 + a * a);
+            finalX = finalX - k;
+            finalY = finalY + a * k; // y - (-a)*k
+            
+            // Optional: Snap Rotation? 
+            // For now, we just snap position as requested.
+        }
+    }
+
+    ghostState[draggingComponent].x = finalX;
+    ghostState[draggingComponent].y = finalY;
     
     render();
 });
+
+// --- ADDED: Mouse Wheel Rotation ---
+canvas.addEventListener('wheel', (e) => {
+    if (isDragging && draggingComponent && ghostState[draggingComponent]) {
+        e.preventDefault();
+        
+        // Scroll direction: positive deltaY (down) -> +5 deg, negative (up) -> -5 deg
+        const direction = Math.sign(e.deltaY);
+        const step = 5;
+        
+        if (typeof ghostState[draggingComponent].rotation !== 'number') {
+            ghostState[draggingComponent].rotation = 0;
+        }
+        
+        ghostState[draggingComponent].rotation += (direction * step);
+        
+        // Update UI immediately
+        render();
+        updateContextPanel(draggingComponent);
+    }
+}, { passive: false });
 
 canvas.addEventListener('mouseup', async (e) => {
     if (isDragging && draggingComponent) {
         isDragging = false;
         
+        // Collision Check
+        const current = ghostState[draggingComponent];
+        const collision = checkCollision(draggingComponent, current.x, current.y);
+        
+        if (collision.detected) {
+             log(`Move cancelled: Collision with ${collision.other}`, "error");
+             
+             // Snap back to original position from labState if possible
+             if (labState.components[draggingComponent] && labState.components[draggingComponent].state === 'PLACED') {
+                 const original = labState.components[draggingComponent].pose;
+                 ghostState[draggingComponent].x = original.x;
+                 ghostState[draggingComponent].y = original.y;
+                 ghostState[draggingComponent].rotation = original.rotation;
+             }
+             render();
+             draggingComponent = null;
+             return;
+        }
+
         await sendCommand({
             action: "MOVE_COMPONENT",
             target_id: draggingComponent,
@@ -500,6 +631,15 @@ canvas.addEventListener('drop', (e) => {
                 y: lab.y,
                 rotation: 0
             };
+
+            // Collision Check
+            const collision = checkCollision(componentName, lab.x, lab.y);
+            if (collision.detected) {
+                log(`Placement cancelled: Collision with ${collision.other}`, "error");
+                delete ghostState[componentName];
+                render();
+                return;
+            }
     
             // Trigger move command which will create it in backend
             sendCommand({
@@ -730,11 +870,21 @@ function clearCanvas() {
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     
+    // Draw Breadboard Grid (25mm spacing)
     ctx.fillStyle = '#2a2e36';
-    const spacing = 25;
-    for (let x = spacing; x < CANVAS_WIDTH; x += spacing) {
-        for (let y = spacing; y < CANVAS_HEIGHT; y += spacing) {
-            ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+    const gridSpacingMm = 25;
+    
+    // Calculate start/end based on lab coordinates
+    // We iterate in mm and convert to px to ensure accuracy
+    for (let xMm = LAB_X_MIN; xMm <= LAB_X_MAX; xMm += gridSpacingMm) {
+        for (let yMm = LAB_Y_MIN; yMm <= LAB_Y_MAX; yMm += gridSpacingMm) {
+            const p = mmToPx(xMm, yMm);
+            // Only draw if within canvas bounds (though mmToPx should handle mapping)
+            if (p.x >= 0 && p.x <= CANVAS_WIDTH && p.y >= 0 && p.y <= CANVAS_HEIGHT) {
+                ctx.beginPath(); 
+                ctx.arc(p.x, p.y, 2, 0, Math.PI * 2); 
+                ctx.fill();
+            }
         }
     }
 }
@@ -787,6 +937,13 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     const y = p.y;
     const rotation = pose.rotation * (Math.PI / 180); 
 
+    // Determine Size in Pixels (since LAB_SCALE is px/mm, width_px = width_mm * LAB_SCALE)
+    const size = getComponentSize(name);
+    const w = size.width * LAB_SCALE;
+    const h = size.height * LAB_SCALE;
+    const halfW = w / 2;
+    const halfH = h / 2;
+
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rotation);
@@ -801,14 +958,19 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     if (name === selectedComponent) {
         ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); 
+        // Use circumscribed circle for halo to ensure it covers the shape
+        const r = Math.sqrt(halfW*halfW + halfH*halfH) + 5;
+        ctx.arc(0, 0, r, 0, Math.PI * 2); 
+        ctx.stroke();
     }
 
     if (mode === 'PENDING') {
         ctx.strokeStyle = '#f59e0b'; // Amber
         ctx.lineWidth = 2;
         ctx.setLineDash([4, 2]);
-        ctx.beginPath(); ctx.arc(0, 0, 18, 0, Math.PI * 2); ctx.stroke();
+        const r = Math.sqrt(halfW*halfW + halfH*halfH);
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
         ctx.setLineDash([]);
     }
 
@@ -817,7 +979,8 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.shadowBlur = 20;
         ctx.strokeStyle = '#10b981';
         ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI * 2); ctx.stroke();
+        const r = Math.sqrt(halfW*halfW + halfH*halfH);
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
     }
 
     // Draw Specific Icons based on Catalog ID or Type
@@ -827,42 +990,45 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     if (catalogId === 'nd_filter') {
         // ND Filter: Dark Neutral (Black/Grey)
         ctx.fillStyle = '#111';
-        ctx.fillRect(-12, -12, 24, 24);
+        ctx.fillRect(-halfW, -halfH, w, h);
         ctx.strokeStyle = '#666';
         ctx.lineWidth = 2;
-        ctx.strokeRect(-12, -12, 24, 24);
+        ctx.strokeRect(-halfW, -halfH, w, h);
         // Dark Glass look
         ctx.fillStyle = 'rgba(20, 20, 20, 0.9)';
-        ctx.fillRect(-10, -10, 20, 20);
+        ctx.fillRect(-halfW + 2, -halfH + 2, w - 4, h - 4);
 
     } else if (catalogId === 'filter_generic') {
         // Generic Filter: Colored (e.g. Red/Pink)
         ctx.fillStyle = '#333';
-        ctx.fillRect(-12, -12, 24, 24);
+        ctx.fillRect(-halfW, -halfH, w, h);
         ctx.strokeStyle = '#f87171'; // Reddish border
         ctx.lineWidth = 2;
-        ctx.strokeRect(-12, -12, 24, 24);
+        ctx.strokeRect(-halfW, -halfH, w, h);
         // Tinted Glass look
         ctx.fillStyle = 'rgba(248, 113, 113, 0.3)';
-        ctx.fillRect(-10, -10, 20, 20);
+        ctx.fillRect(-halfW + 2, -halfH + 2, w - 4, h - 4);
 
     } else if (catalogId === 'cam_gripper_1' || catalogId === 'cam_gripper_2' || type === 'OPTICAL_CAMERA') {
         // Camera
         ctx.fillStyle = '#1e293b';
-        ctx.fillRect(-15, -15, 30, 30);
+        ctx.fillRect(-halfW, -halfH, w, h);
         // Lens ring
         ctx.fillStyle = '#000';
-        ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, Math.min(w,h)/3, 0, Math.PI * 2); ctx.fill();
         // Sensor reflection
         ctx.fillStyle = '#3b82f6'; // Blueish reflection
-        ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, Math.min(w,h)/8, 0, Math.PI * 2); ctx.fill();
         // Direction indicator
         ctx.fillStyle = '#ef4444';
-        ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(-4, -24); ctx.lineTo(4, -24); ctx.fill();
+        const triH = h/4;
+        ctx.beginPath(); ctx.moveTo(0, -halfH - 2); ctx.lineTo(-triH/2, -halfH - triH - 2); ctx.lineTo(triH/2, -halfH - triH - 2); ctx.fill();
 
     } else if (catalogId === 'mirror_curved') {
         // Curved Mirror (Semi-Circle Concave)
-        const radius = 15;
+        // Assume width is the diameter, height is the depth? Or vice versa.
+        // Catalog size: 90x90. Let's draw it fitting in the box.
+        const radius = Math.min(w, h) / 2;
         
         // Mirror Surface (Semi-circle)
         ctx.strokeStyle = '#3b82f6'; 
@@ -893,60 +1059,67 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
 
     } else if (catalogId === 'mirror_planar' || type === 'OPTICAL_MIRROR') {
         // Planar Mirror
+        // Draw fitting in w x h box.
+        // Usually thin in one dimension, wide in other.
+        // But footprint is 90x90.
+        // We'll draw the mirror face along Y axis, centered.
+        
         ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(0, 18); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, -halfH); ctx.lineTo(0, halfH); ctx.stroke();
         // Mount backing
-        ctx.fillStyle = '#444'; ctx.fillRect(-6, -18, 6, 36);
+        ctx.fillStyle = '#444'; ctx.fillRect(-halfW/2, -halfH, halfW/2, h); 
         // Reflective side hint
         ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(2, -15); ctx.lineTo(2, 15); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(2, -halfH + 5); ctx.lineTo(2, halfH - 5); ctx.stroke();
 
     } else if (catalogId === 'beam_block') {
         // Beam Block: Solid dark block with cross
         ctx.fillStyle = '#111';
-        ctx.fillRect(-12, -12, 24, 24);
+        ctx.fillRect(-halfW, -halfH, w, h);
         ctx.strokeStyle = '#ef4444';
         ctx.lineWidth = 2;
         ctx.beginPath(); 
-        ctx.moveTo(-12, -12); ctx.lineTo(12, 12);
-        ctx.moveTo(12, -12); ctx.lineTo(-12, 12);
+        ctx.moveTo(-halfW, -halfH); ctx.lineTo(halfW, halfH);
+        ctx.moveTo(halfW, -halfH); ctx.lineTo(-halfW, halfH);
         ctx.stroke();
         ctx.strokeStyle = '#555';
         ctx.lineWidth = 2;
-        ctx.strokeRect(-12, -12, 24, 24);
+        ctx.strokeRect(-halfW, -halfH, w, h);
 
     } else if (catalogId === 'beam_splitter' || type === 'OPTICAL_BEAMSPLITTER') {
         // Beam Splitter: Cube
         ctx.fillStyle = 'rgba(200, 200, 200, 0.1)';
         ctx.strokeStyle = '#888'; ctx.lineWidth = 2;
-        ctx.strokeRect(-14, -14, 28, 28);
+        ctx.strokeRect(-halfW, -halfH, w, h);
         // Diagonal coating
         ctx.strokeStyle = 'rgba(100, 200, 255, 0.8)';
-        ctx.beginPath(); ctx.moveTo(-14, -14); ctx.lineTo(14, 14); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-halfW, -halfH); ctx.lineTo(halfW, halfH); ctx.stroke();
 
     } else if (catalogId === 'lens_main' || type === 'OPTICAL_LENS') {
-        // Lens: Ellipse
+        // Lens: Ellipse fitting the box
         ctx.fillStyle = 'rgba(100, 200, 255, 0.3)';
         ctx.strokeStyle = 'rgba(150, 220, 255, 0.9)'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.ellipse(0, 0, 6, 20, 0, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.ellipse(0, 0, halfW/3, halfH, 0, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
         
     } else if (catalogId === 'crystal_main' || type === 'OPTICAL_CRYSTAL') {
-        // Crystal: Hexagon or Rectangle
+        // Crystal: Hexagon or Rectangle fitting box
         ctx.fillStyle = 'rgba(236, 72, 153, 0.3)'; // Pinkish
         ctx.strokeStyle = '#ec4899';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(-10, -20); ctx.lineTo(10, -20);
-        ctx.lineTo(15, 0);
-        ctx.lineTo(10, 20); ctx.lineTo(-10, 20);
-        ctx.lineTo(-15, 0);
+        // Draw Hexagon fitting in w/h
+        ctx.moveTo(-halfW/2, -halfH); ctx.lineTo(halfW/2, -halfH);
+        ctx.lineTo(halfW, 0);
+        ctx.lineTo(halfW/2, halfH); ctx.lineTo(-halfW/2, halfH);
+        ctx.lineTo(-halfW, 0);
         ctx.closePath();
         ctx.fill(); ctx.stroke();
 
     } else {
         // Default / Unknown
         ctx.fillStyle = '#C0C0C0'; 
-        ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.fill();
+        const r = Math.min(halfW, halfH);
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#000';
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
@@ -967,17 +1140,17 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         displayName = catalogMap[name].name;
     }
     
-    ctx.fillText(displayName, 0, -25);
+    ctx.fillText(displayName, 0, -halfH - 10);
     
     if (mode === 'PENDING') {
         ctx.fillStyle = '#f59e0b';
         ctx.font = 'bold 10px Inter, sans-serif';
-        ctx.fillText("MOVING...", 0, 25);
+        ctx.fillText("MOVING...", 0, halfH + 15);
     }
     if (isOptimizing && pendingCommands.has(name)) {
         ctx.fillStyle = '#10b981';
         ctx.font = 'bold 10px Inter, sans-serif';
-        ctx.fillText("OPTIMIZING...", 0, 25);
+        ctx.fillText("OPTIMIZING...", 0, halfH + 15);
     }
 
     ctx.restore();

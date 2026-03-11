@@ -1,23 +1,24 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-02-28T18:40:29.538146",
+  "last_updated": "2026-03-10T23:00:45.124887",
   "components": {
     "tag_9": {
       "id": "tag_9",
       "type": "OPTICAL_FILTER",
       "state": "PLACED",
       "pose": {
-        "x": 150,
-        "y": 200,
+        "x": 0.002920437046654345,
+        "y": 36.83813666203569,
         "rotation": 0
       },
       "intent": {
         "nominal_pose": {
-          "x": 150,
-          "y": 200,
+          "x": 0,
+          "y": 37.142857142857146,
           "rotation": 0
         },
         "placement_strategy": "MANUAL",
+        "last_optimized_pose": null,
         "is_optimized": false
       },
       "metadata": {}
@@ -27,15 +28,15 @@
       "type": "OPTICAL_CAMERA",
       "state": "PLACED",
       "pose": {
-        "x": 249.90768515291833,
-        "y": 200.35998030773624,
-        "rotation": 0
+        "x": -333.79852019231066,
+        "y": -28.699165738564666,
+        "rotation": 450
       },
       "intent": {
         "nominal_pose": {
-          "x": 250,
-          "y": 200,
-          "rotation": 0
+          "x": -334.28571428571433,
+          "y": -28.571428571428573,
+          "rotation": 450
         },
         "placement_strategy": "MANUAL",
         "last_optimized_pose": null,
@@ -48,17 +49,18 @@
       "type": "OPTICAL_CAMERA",
       "state": "PLACED",
       "pose": {
-        "x": 350,
-        "y": 200,
+        "x": 411.8453867888497,
+        "y": -265.0657066905643,
         "rotation": 0
       },
       "intent": {
         "nominal_pose": {
-          "x": 350,
-          "y": 200,
+          "x": 411.42857142857144,
+          "y": -264.85714285714283,
           "rotation": 0
         },
         "placement_strategy": "MANUAL",
+        "last_optimized_pose": null,
         "is_optimized": false
       },
       "metadata": {}
@@ -68,14 +70,14 @@
       "type": "OPTICAL_MIRROR",
       "state": "PLACED",
       "pose": {
-        "x": 444.045105674558,
-        "y": 199.80227701007126,
+        "x": -0.19097893901359297,
+        "y": -185.4056140764002,
         "rotation": 45
       },
       "intent": {
         "nominal_pose": {
-          "x": 444,
-          "y": 200,
+          "x": 0,
+          "y": -185.71428571428572,
           "rotation": 45
         },
         "placement_strategy": "MANUAL",
@@ -89,17 +91,18 @@
       "type": "OPTICAL_BEAMSPLITTER",
       "state": "PLACED",
       "pose": {
-        "x": 550,
-        "y": 200,
-        "rotation": 0
+        "x": -377.5408887743121,
+        "y": -267.5773033939975,
+        "rotation": 40
       },
       "intent": {
         "nominal_pose": {
-          "x": 550,
-          "y": 200,
-          "rotation": 0
+          "x": -377.14285714285717,
+          "y": -267.14285714285717,
+          "rotation": 40
         },
         "placement_strategy": "MANUAL",
+        "last_optimized_pose": null,
         "is_optimized": false
       },
       "metadata": {}
@@ -170,17 +173,18 @@
       "type": "OPTICAL_FILTER",
       "state": "PLACED",
       "pose": {
-        "x": 150,
-        "y": 300,
-        "rotation": 0
+        "x": -341.32923496640166,
+        "y": 282.9942611232206,
+        "rotation": 70
       },
       "intent": {
         "nominal_pose": {
-          "x": 150,
-          "y": 300,
-          "rotation": 0
+          "x": -341.42857142857144,
+          "y": 282.8571428571429,
+          "rotation": 70
         },
         "placement_strategy": "MANUAL",
+        "last_optimized_pose": null,
         "is_optimized": false
       },
       "metadata": {}
@@ -190,14 +194,14 @@
       "type": "OPTICAL_CRYSTAL",
       "state": "PLACED",
       "pose": {
-        "x": 405.76380659886064,
-        "y": 483.5853463012448,
+        "x": 241.66312509088675,
+        "y": 322.3437042702692,
         "rotation": 0
       },
       "intent": {
         "nominal_pose": {
-          "x": 406,
-          "y": 484,
+          "x": 241.7142857142858,
+          "y": 322.57142857142856,
           "rotation": 0
         },
         "placement_strategy": "MANUAL",

@@ -200,6 +200,15 @@ class RealLabCommunicator(LabCommunicator):
     def get_lab_state(self) -> Dict[str, Any]:
         return self.current_state
 
+    def find_angle(self, rotation_degrees: float) -> List[float]:
+        """
+        Converts a simple Z-rotation (degrees) into the robot's specific 3D orientation format (rx, ry, rz).
+        TODO: Determine the exact kinematic conversion. 
+        For now, we use the placeholder logic: [127.28, 127.28, rotation_degrees].
+        """
+        # Placeholder logic
+        return [127.28, 127.28, rotation_degrees]
+
     async def move_component(self, target_id: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Moving {target_id}...")
         
@@ -230,7 +239,7 @@ class RealLabCommunicator(LabCommunicator):
                 component=comp,
                 target_x=tx,
                 target_y=ty,
-                angle=[127.28, 127.28, rot]
+                angle=self.find_angle(rot)
             )
             
             # 5. Update State
