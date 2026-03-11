@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-03-10T23:56:21.822979",
+  "last_updated": "2026-03-11T14:29:24.096277",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -28,15 +28,15 @@
       "type": "OPTICAL_CAMERA",
       "state": "PLACED",
       "pose": {
-        "x": -333.79852019231066,
-        "y": -28.699165738564666,
-        "rotation": 450
+        "x": -197.14892795639852,
+        "y": 91.56494177742952,
+        "rotation": 680
       },
       "intent": {
         "nominal_pose": {
-          "x": -334.28571428571433,
-          "y": -28.571428571428573,
-          "rotation": 450
+          "x": -197.14285714285717,
+          "y": 91.42857142857143,
+          "rotation": 680
         },
         "placement_strategy": "MANUAL",
         "last_optimized_pose": null,
@@ -70,15 +70,15 @@
       "type": "OPTICAL_MIRROR",
       "state": "PLACED",
       "pose": {
-        "x": -0.19097893901359297,
-        "y": -185.4056140764002,
-        "rotation": 45
+        "x": 0.031739100178045265,
+        "y": -321.7752861376805,
+        "rotation": 360
       },
       "intent": {
         "nominal_pose": {
           "x": 0,
-          "y": -185.71428571428572,
-          "rotation": 45
+          "y": -321.42857142857144,
+          "rotation": 360
         },
         "placement_strategy": "MANUAL",
         "last_optimized_pose": null,

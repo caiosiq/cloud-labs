@@ -1,16 +1,5 @@
 [
   {
-    "id": "nd_filter",
-    "type": "OPTICAL_FILTER",
-    "name": "ND Filter",
-    "tag_id": "tag_9",
-    "size": { "width": 62, "height": 62 },
-    "properties": {
-      "optical_density": 1.0,
-      "transmission": 0.1
-    }
-  },
-  {
     "id": "lens_main",
     "type": "OPTICAL_LENS",
     "name": "Main Lens",
@@ -23,17 +12,5 @@
     },
     "motor_ids": [1, 3],
     "motor_controller": "wifi_stepper1"
-  },
-  {
-    "id": "input_coupler",
-    "type": "OPTICAL_MIRROR",
-    "name": "Input Coupler (IC)",
-    "tag_id": "tag_24",
-    "size": { "width": 62, "height": 62 },
-    "properties": {
-      "reflectivity": "98%"
-    },
-    "motor_ids": [1, 3],
-    "motor_controller": "wifi_stepper2"
   }
 ]

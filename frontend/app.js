@@ -122,9 +122,10 @@ async function fetchStrategies() {
         "name": "Newton Strategy",
         "description": "Aligns a component by minimizing beam deviation.",
         "parameters": {
-          "camera_number": { "type": "integer", "default": 1, "description": "Target Camera ID" },
+          "camera_number": { "type": "integer", "default": 2, "description": "Target Camera ID" },
+          "target_x_pixel": { "type": "integer", "default": 2744, "description": "Target X (pixel)" },
           "axis": { "type": "string", "enum": ["x", "y"], "default": "x", "description": "Axis" },
-          "tolerance_ratio": { "type": "float", "default": 0.05, "description": "Tolerance" }
+          "tolerance_ratio": { "type": "float", "default": 0.1, "description": "Tolerance" }
         }
       },
       "COBYLA": {

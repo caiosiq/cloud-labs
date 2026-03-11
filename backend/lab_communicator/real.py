@@ -306,10 +306,11 @@ class RealLabCommunicator(LabCommunicator):
                 # STRICT PARAMETER HANDLING: No defaults allowed.
                 # If params are missing, this will raise a KeyError, which is desired behavior.
                 strategy = NewtonPlacementStrategy(
-                    camera_port=params["camera_number"],
+                    camera_number=params["camera_number"],
                     target_x_pixel=params["target_x_pixel"],
                     tolerance_ratio=params["tolerance_ratio"]
                 )
+                print("DOING NEWTON STRATEGY")
             elif strategy_name == "COBYLA":
                 motor_ids = params.get("motor_ids")
                 if not motor_ids:
