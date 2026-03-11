@@ -141,6 +141,9 @@ class RealLabCommunicator(LabCommunicator):
         with open(catalog_path, "r") as f:
             catalog = json.load(f)
 
+        # Store catalog map for metadata lookup (e.g. motor_controller)
+        self.catalog_map = {item.get("tag_id"): item for item in catalog if item.get("tag_id")}
+
         # 2. Create OpticalComponent objects for everything in catalog
         components_to_scan = []
         for item in catalog:
@@ -264,6 +267,28 @@ class RealLabCommunicator(LabCommunicator):
             self.current_state["system_status"] = "IDLE"
             self.current_state["last_updated"] = datetime.now().isoformat()
 
+    async def move_motor(self, target_id: str, motor_id: int, distance: float):
+        print(f"[REAL LAB] Moving motor {motor_id} of {target_id} by {distance} (RELATIVE)...")
+        
+        # Determine controller from catalog metadata
+        meta = self.catalog_map[target_id]
+        if "motor_controller" in meta:
+            controller_name = meta["motor_controller"]
+        
+        controller = getattr(self.experiment, controller_name, None)
+        
+        if not controller:
+            print(f"[REAL LAB] Error: Controller '{controller_name}' not found on experiment.")
+            return
+
+        try:
+            # We assume the underlying library treats move_motor as relative if that's what COBYLA strategy implies.
+            # User confirmed: "move motor is already assuming relative motions"
+            controller.move_motor(motor_id, distance, wait_completion=True)
+            print(f"[REAL LAB] Motor moved.")
+        except Exception as e:
+            print(f"[REAL LAB] Motor move failed: {e}")
+
     async def optimize_component(self, target_id: str, strategy_name: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Optimizing {target_id} with {strategy_name}...")
         self.current_state["system_status"] = "OPTIMIZING"
@@ -286,8 +311,26 @@ class RealLabCommunicator(LabCommunicator):
                     tolerance_ratio=params["tolerance_ratio"]
                 )
             elif strategy_name == "COBYLA":
-                # TODO: Implement motor_id mapping logic
-                raise NotImplementedError("COBYLA strategy not yet implemented for Real Lab - requires motor_id mapping")
+                motor_ids = params.get("motor_ids")
+                if not motor_ids:
+                    # Fallback: check catalog/state if we have it
+                    # But params should ideally come from UI
+                    # Let's see if we can check our loaded catalog info?
+                    # We didn't persist the full catalog in component_map, but we have self.current_state
+                    if target_id in self.current_state["components"]:
+                        # We didn't save motor_ids in current_state["components"] entry in _initialize_state yet.
+                        # We should probably update _initialize_state to save it if we want to rely on it.
+                        # For now, expect it in params.
+                        pass
+                
+                if not motor_ids:
+                     raise ValueError("COBYLA strategy requires 'motor_ids' parameter.")
+
+                strategy = CobylaAlignmentStrategy(
+                    camera_number=params.get("camera_number", 1),
+                    motor_ids=motor_ids,
+                    objective_threshold=params.get("objective_threshold", 100.0)
+                )
             
             if strategy:
                 # 2. Execute

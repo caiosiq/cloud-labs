@@ -11,6 +11,9 @@ class LabCommunicator:
     async def move_component(self, target_id: str, target_pose: Dict[str, float]):
         raise NotImplementedError
 
+    async def move_motor(self, target_id: str, motor_id: int, distance: float):
+        raise NotImplementedError
+
     async def optimize_component(self, target_id: str, strategy: str, params: Dict[str, Any]):
         raise NotImplementedError
 

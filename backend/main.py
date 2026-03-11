@@ -200,6 +200,14 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
         # params already has it if sent by frontend
         background_tasks.add_task(lab.move_component, target_id, params)
         return {"status": "accepted", "message": f"Robot dispatched to move {target_id}"}
+
+    elif action == "MOVE_MOTOR":
+        motor_id = params.get("motor_id")
+        distance = params.get("distance")
+        if motor_id is None or distance is None:
+             raise HTTPException(status_code=400, detail="MOVE_MOTOR requires 'motor_id' and 'distance'")
+        background_tasks.add_task(lab.move_motor, target_id, motor_id, distance)
+        return {"status": "accepted", "message": f"Motor {motor_id} on {target_id} moving by {distance}"}
     
     elif action == "OPTIMIZE":
         strategy = params.get("strategy", "NEWTON")

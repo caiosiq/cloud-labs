@@ -124,6 +124,22 @@ class MockLabCommunicator(LabCommunicator):
         self._write_state(state)
         print(f"[MOCK LAB] Moved {target_id} to ({comp['pose']['x']:.2f}, {comp['pose']['y']:.2f})")
 
+    async def move_motor(self, target_id: str, motor_id: int, distance: float):
+        print(f"[MOCK LAB] Moving motor {motor_id} of {target_id} by {distance}...")
+        
+        # Lock
+        state = self._read_state()
+        state["system_status"] = "BUSY"
+        self._write_state(state)
+        
+        await asyncio.sleep(1)
+        
+        # Unlock
+        state = self._read_state()
+        state["system_status"] = "IDLE"
+        self._write_state(state)
+        print(f"[MOCK LAB] Motor move complete.")
+
     async def optimize_component(self, target_id: str, strategy: str, params: Dict[str, Any]):
         print(f"[MOCK LAB] Optimizing {target_id} with {strategy}...")
         

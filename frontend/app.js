@@ -461,6 +461,83 @@ function updateContextPanel(name) {
         btn.onclick = () => showParameterModal(stratKey, strat);
         ctxStrategies.appendChild(btn);
     });
+
+    // --- Motor Controls ---
+    const existingMotor = document.getElementById('ctx-motor-controls');
+    if (existingMotor) existingMotor.remove();
+
+    if (catalogMap[name] && catalogMap[name].motor_ids && catalogMap[name].motor_ids.length > 0) {
+        const motorSection = document.createElement('div');
+        motorSection.id = 'ctx-motor-controls';
+        motorSection.style.marginTop = '12px';
+        motorSection.style.paddingTop = '12px';
+        motorSection.style.borderTop = '1px solid #2a2e36';
+        
+        motorSection.innerHTML = '<div style="font-size:11px; color:#94a3b8; margin-bottom:8px; font-weight:600;">MOTOR CONTROL (Relative)</div>';
+        
+        catalogMap[name].motor_ids.forEach(mid => {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.gap = '10px';
+            row.style.marginBottom = '8px';
+            
+            const label = document.createElement('span');
+            label.textContent = `M${mid}`;
+            label.style.fontSize = '12px';
+            label.style.color = '#cbd5e1';
+            label.style.width = '25px';
+            
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.value = '100'; 
+            input.style.width = '60px';
+            input.style.fontSize = '12px';
+            input.style.padding = '6px 8px';
+            input.style.background = '#0f1115';
+            input.style.border = '1px solid #2a2e36';
+            input.style.color = '#fff';
+            input.style.borderRadius = '4px';
+            input.title = "Step Size";
+            
+            const btnRev = document.createElement('button');
+            btnRev.className = 'btn btn-secondary';
+            btnRev.style.padding = '6px 12px';
+            btnRev.style.fontSize = '12px';
+            btnRev.style.width = 'auto';
+            btnRev.innerHTML = '<span class="material-icons-round" style="font-size:14px">remove</span>';
+            btnRev.title = "Jog Backward";
+            btnRev.onclick = () => moveMotor(name, mid, -parseFloat(input.value));
+
+            const btnFwd = document.createElement('button');
+            btnFwd.className = 'btn btn-secondary';
+            btnFwd.style.padding = '6px 12px';
+            btnFwd.style.fontSize = '12px';
+            btnFwd.style.width = 'auto';
+            btnFwd.innerHTML = '<span class="material-icons-round" style="font-size:14px">add</span>';
+            btnFwd.title = "Jog Forward";
+            btnFwd.onclick = () => moveMotor(name, mid, parseFloat(input.value));
+            
+            row.appendChild(label);
+            row.appendChild(btnRev);
+            row.appendChild(input);
+            row.appendChild(btnFwd);
+            motorSection.appendChild(row);
+        });
+        
+        ctxStrategies.parentNode.appendChild(motorSection);
+    }
+}
+
+async function moveMotor(targetId, motorId, dist) {
+    await sendCommand({
+        action: "MOVE_MOTOR",
+        target_id: targetId,
+        parameters: {
+            motor_id: motorId,
+            distance: dist
+        }
+    });
 }
 
 ctxMoveBtn.addEventListener('click', async () => {
@@ -844,6 +921,14 @@ function showParameterModal(strategyKey, strategyDef) {
         });
         
         params.strategy = strategyKey;
+
+        // Auto-inject motor_ids for COBYLA if available
+        if (strategyKey === 'COBYLA' && selectedComponent) {
+             if (catalogMap[selectedComponent] && catalogMap[selectedComponent].motor_ids) {
+                 params.motor_ids = catalogMap[selectedComponent].motor_ids;
+                 log(`Using motor_ids: [${params.motor_ids.join(', ')}]`, "info");
+             }
+        }
 
         sendCommand({
             action: "OPTIMIZE",
@@ -1318,11 +1403,17 @@ function updateUI() {
              // statusDot = `<div class="status-dot" style="background-color: #f59e0b;" title="Drifted/Manual"></div>`;
         }
 
+        // Motor Badge
+        let motorBadge = '';
+        if (catalogMap[comp.id] && catalogMap[comp.id].motor_ids && catalogMap[comp.id].motor_ids.length > 0) {
+            motorBadge = `<span class="material-icons-round" style="font-size: 12px; color: #f59e0b; margin-right: 4px;" title="Motorized">settings_input_component</span>`;
+        }
+
         card.innerHTML = `
             <div class="comp-icon material-icons-round">${icon}</div>
             <div class="comp-info">
                 <span class="comp-name" style="${unknownTag ? 'color: #f59e0b;' : ''}">${displayName}</span>
-                <span class="comp-meta">${displayType.replace('OPTICAL_', '')} • ${comp.id}</span>
+                <span class="comp-meta">${motorBadge}${displayType.replace('OPTICAL_', '')} • ${comp.id}</span>
             </div>
             ${statusDot}
         `;
