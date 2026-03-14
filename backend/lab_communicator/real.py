@@ -7,6 +7,8 @@ import time
 import asyncio
 from datetime import datetime
 from typing import Dict, Any, List
+import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 from .base import LabCommunicator
 
@@ -173,10 +175,26 @@ class RealLabCommunicator(LabCommunicator):
             
             if comp and comp.inventory_location:
                 # Found on table
+                
+                # Try to get angle vector from inventory_location
+                angle_vector = None
+                if hasattr(comp.inventory_location, 'angle') and comp.inventory_location.angle:
+                    angle_vector = comp.inventory_location.angle
+                elif hasattr(comp.inventory_location, 'rx'):
+                     angle_vector = [comp.inventory_location.rx, comp.inventory_location.ry, comp.inventory_location.rz]
+                
+                if angle_vector:
+                     calc_rotation = self.get_rotation_from_angle(angle_vector)
+                     print(f"[REAL LAB] {tag_id} found. Angle vec: {angle_vector} -> Z-Rot: {calc_rotation:.2f}")
+                else:
+                     # Fallback to yaw if no angle vector
+                     calc_rotation = comp.inventory_location.yaw or 0
+                     print(f"[REAL LAB] {tag_id} found. Using fallback yaw: {calc_rotation:.2f}")
+
                 pose = {
                     "x": comp.inventory_location.x,
                     "y": comp.inventory_location.y,
-                    "rotation": comp.inventory_location.yaw or 0
+                    "rotation": calc_rotation
                 }
                 state = "PLACED"
             else:
@@ -206,11 +224,63 @@ class RealLabCommunicator(LabCommunicator):
     def find_angle(self, rotation_degrees: float) -> List[float]:
         """
         Converts a simple Z-rotation (degrees) into the robot's specific 3D orientation format (rx, ry, rz).
-        TODO: Determine the exact kinematic conversion. 
-        For now, we use the placeholder logic: [127.28, 127.28, rotation_degrees].
+        Using logic provided:
+        1. Create Euler angles [180, 0, rotation] (assuming gripper down)
+        2. Convert to rotation vector
+        3. Convert to degree-like magnitude
+        4. Invert X and Y, set Z to 0 (specific to this robot configuration)
         """
-        # Placeholder logic
-        return [127.28, 127.28, rotation_degrees]
+        try:
+            # 1. Create Euler angles [180, 0, rotation]
+            # Standard convention: Gripper down is Rx=180.
+            euler_angles = [180, 0, rotation_degrees]
+            
+            # 2. Convert to Rotation object
+            r_inverse = R.from_euler('xyz', euler_angles, degrees=True)
+            
+            # 3. Get Rotation Vector (radians)
+            inverted_rad = r_inverse.as_rotvec()
+            
+            # 4. Convert to degrees (inverted)
+            inverted_place = -inverted_rad * 180 / np.pi
+            
+            # 5. Construct target angle
+            # User snippet: target_angle = [-inverted_place[0], -inverted_place[1], 0.0]
+            target_angle = [-inverted_place[0], -inverted_place[1], 0.0]
+            
+            print(f"[REAL LAB] find_angle({rotation_degrees}) -> {target_angle}")
+            return [float(x) for x in target_angle]
+            
+        except Exception as e:
+            print(f"[REAL LAB] Error in find_angle: {e}. Fallback to default.")
+            return [180.0, 0.0, 0.0]
+
+    def get_rotation_from_angle(self, robot_angle: List[float]) -> float:
+        """
+        Reverses the logic of find_angle to recover the Z-rotation (theta)
+        from the robot's orientation vector (rx, ry, rz).
+        Assumes robot_angle is a Rotation Vector in degrees.
+        """
+        try:
+            # 1. Convert degrees to radians
+            # Based on forward logic: target = rotvec_rad * 180/pi
+            # So rotvec_rad = target * pi/180
+            v_rad = np.array(robot_angle) * np.pi / 180.0
+            
+            # 2. Create Rotation object
+            r = R.from_rotvec(v_rad)
+            
+            # 3. Get Euler angles [Rx, Ry, Rz]
+            # We expect [180, 0, theta] roughly
+            euler = r.as_euler('xyz', degrees=True)
+            
+            # 4. Extract Z rotation
+            # euler[2] is the rotation around Z
+            return float(euler[2])
+            
+        except Exception as e:
+            print(f"[REAL LAB] Error in get_rotation_from_angle: {e}")
+            return 0.0
 
     async def move_component(self, target_id: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Moving {target_id}...")

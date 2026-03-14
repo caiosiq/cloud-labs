@@ -80,6 +80,8 @@ let availableStrategies = null;
 let availableRecipes = [];
 /** Laser line in mm: x = a*y + b. Fetched from /api/laser-line (mock: fixed; real: from laser_line_fit.npy). */
 let laserLineCoeffs = null;
+let previousSystemStatus = 'IDLE';
+let forceGhostSync = false;
 
 // Optimization State
 let isOptimizing = false;
@@ -186,25 +188,62 @@ async function fetchLabState() {
 
         // Initial Sync: Use INTENT if available, else Physical Pose
         if (labState.components) {
+            // Determine if we should sync ghost state from backend
+            // 1. Force Sync (Refresh button)
+            // 2. System status transitioned from BUSY/OPTIMIZING to IDLE (Command finished)
+            // 3. Initial Load (handled by !ghostState check)
+            
+            const justFinishedCommand = (previousSystemStatus !== 'IDLE' && labState.system_status === 'IDLE');
+            const shouldSync = forceGhostSync || justFinishedCommand;
+
+            if (shouldSync) {
+                 log("Syncing ghost state with lab state...", "info");
+            }
+
             Object.entries(labState.components).forEach(([name, comp]) => {
                 if (comp.state === 'PLACED') {
-                    // Only update ghostState if it doesn't exist for this component
-                    // or if we haven't touched it (no pending drag)
-                    if (!ghostState[name] && !isDragging) {
+                    // Always initialize if missing (first load)
+                    if (!ghostState[name]) {
+                        if (comp.intent && comp.intent.nominal_pose) {
+                            ghostState[name] = { ...comp.intent.nominal_pose };
+                        } else {
+                            ghostState[name] = { ...comp.pose };
+                        }
+                        // Ensure rotation
+                        if (typeof ghostState[name].rotation !== 'number') {
+                            ghostState[name].rotation = comp.pose.rotation || 0;
+                        }
+                    }
+                    // Otherwise only sync if allowed (command finished or forced refresh)
+                    else if (shouldSync && !isDragging) {
                         if (comp.intent && comp.intent.nominal_pose) {
                             ghostState[name] = { ...comp.intent.nominal_pose };
                         } else {
                             ghostState[name] = { ...comp.pose };
                         }
                         
-                        // Ensure rotation is initialized from labState (physical yaw) if missing
+                        // Ensure rotation
                         if (typeof ghostState[name].rotation !== 'number') {
                             ghostState[name].rotation = comp.pose.rotation || 0;
+                        }
+
+                        // If selected, update UI inputs immediately
+                        if (selectedComponent === name) {
+                            if (document.getElementById('ctx-x')) {
+                                ctxX.value = ghostState[name].x.toFixed(1);
+                                ctxY.value = ghostState[name].y.toFixed(1);
+                                ctxRot.value = ghostState[name].rotation.toFixed(1);
+                            }
                         }
                     }
                 }
             });
+
+            // Reset flags
+            if (shouldSync) forceGhostSync = false;
         }
+        
+        previousSystemStatus = labState.system_status;
         
         // --- ADDED: Auto-refresh available components list for sidebar ---
         if (!labState.components || Object.keys(labState.components).length === 0) {
@@ -1877,6 +1916,7 @@ function init() {
     setInterval(fetchLabState, POLLING_INTERVAL);
     refreshBtn.addEventListener('click', () => {
         log("Forcing state sync...", "warn");
+        forceGhostSync = true;
         fetchLabState();
         checkVideoStatus();
     });

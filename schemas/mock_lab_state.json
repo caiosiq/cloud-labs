@@ -1,20 +1,20 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-03-11T14:29:24.096277",
+  "last_updated": "2026-03-11T18:39:23.008048",
   "components": {
     "tag_9": {
       "id": "tag_9",
       "type": "OPTICAL_FILTER",
       "state": "PLACED",
       "pose": {
-        "x": 0.002920437046654345,
-        "y": 36.83813666203569,
+        "x": -294.9207283028984,
+        "y": -34.42100813734988,
         "rotation": 0
       },
       "intent": {
         "nominal_pose": {
-          "x": 0,
-          "y": 37.142857142857146,
+          "x": -295.2428571428572,
+          "y": -34.34285714285718,
           "rotation": 0
         },
         "placement_strategy": "MANUAL",
@@ -133,14 +133,14 @@
       "type": "OPTICAL_LENS",
       "state": "PLACED",
       "pose": {
-        "x": 350.3648383189333,
-        "y": 200.16882410128915,
+        "x": 304.8486302510242,
+        "y": -27.03587684277327,
         "rotation": 0
       },
       "intent": {
         "nominal_pose": {
-          "x": 350,
-          "y": 200,
+          "x": 305,
+          "y": -27.1,
           "rotation": 0
         },
         "placement_strategy": "MANUAL",
