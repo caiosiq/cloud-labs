@@ -164,7 +164,7 @@ class RealLabCommunicator(LabCommunicator):
             self.component_map[tag_id_str] = comp
 
         # 3. Perform Physical Scan
-        self.experiment.scan_components(components_to_scan, force_rescan=True)
+        self.experiment.scan_components_cloudlab(components_to_scan, force_rescan=True)
         
         # 4. Populate Lab State
         self.current_state["components"] = {}
@@ -172,88 +172,65 @@ class RealLabCommunicator(LabCommunicator):
         for item in catalog:
             tag_id = item.get("tag_id")
             comp = self.component_map.get(tag_id)
-            
+            inv = getattr(comp, "inventory_location", None) if comp else None
+
+            # --- Debug: what we have for this component ---
+            print(f"[REAL LAB] --- {tag_id} ---")
+            print(f"  comp exists: {comp is not None}, inventory_location exists: {inv is not None}")
+            if inv is not None:
+                attrs = {}
+                for a in ("x", "y", "z", "roll", "pitch", "yaw", "angle", "rx", "ry", "rz"):
+                    if hasattr(inv, a):
+                        attrs[a] = getattr(inv, a)
+                print(f"  inventory_location attrs: {attrs}")
+            else:
+                print(f"  (no inventory_location)")
+
             if comp and comp.inventory_location:
                 # Found on table
-                
-                # Try to get angle vector from inventory_location
-                angle_vector = None
-                if hasattr(comp.inventory_location, 'angle') and comp.inventory_location.angle:
-                    angle_vector = comp.inventory_location.angle
-                elif hasattr(comp.inventory_location, 'rx'):
-                     angle_vector = [comp.inventory_location.rx, comp.inventory_location.ry, comp.inventory_location.rz]
-                
-                if angle_vector:
-                     calc_rotation = self.get_rotation_from_angle(angle_vector)
-                     print(f"[REAL LAB] {tag_id} found. Angle vec: {angle_vector} -> Z-Rot: {calc_rotation:.2f}")
-                else:
-                     # Fallback to yaw if no angle vector
-                     calc_rotation = comp.inventory_location.yaw or 0
-                     print(f"[REAL LAB] {tag_id} found. Using fallback yaw: {calc_rotation:.2f}")
+                inv = comp.inventory_location
+                calc_rotation = getattr(inv, "yaw", None) or 0
+                print(f"  fallback yaw (deg): {getattr(inv, 'yaw', None)} -> rotation: {calc_rotation:.2f}")
 
                 pose = {
-                    "x": comp.inventory_location.x,
-                    "y": comp.inventory_location.y,
+                    "x": inv.x,
+                    "y": inv.y,
                     "rotation": calc_rotation
                 }
+                # Include roll, pitch, yaw so UI can derive display rz (e.g. from yaw for top-down view)
+                for key in ("roll", "pitch", "yaw"):
+                    val = getattr(inv, key, None)
+                    if val is not None:
+                        pose[key] = val
                 state = "PLACED"
+                print(f"  pose written: {pose}")
             else:
-                # Not found -> In Inventory (virtual)
                 pose = {"x": 0, "y": 0, "rotation": 0}
                 state = "INVENTORY"
+                print(f"  state: INVENTORY (pose {pose})")
 
-            self.current_state["components"][tag_id] = {
+            entry = {
                 "id": tag_id,
                 "type": item.get("type", "OPTICAL_MIRROR"),
                 "state": state,
                 "pose": pose,
-                "intent": { 
-                    "nominal_pose": pose if state == "PLACED" else None, 
+                "intent": {
+                    "nominal_pose": pose if state == "PLACED" else None,
                     "is_optimized": False,
                     "placement_strategy": "MANUAL"
                 },
                 "metadata": {}
             }
-        
+            self.current_state["components"][tag_id] = entry
+            print(f"  entry keys: {list(entry.keys())}, intent.nominal_pose: {entry['intent'].get('nominal_pose')}")
+
         self.current_state["last_updated"] = datetime.now().isoformat()
-        print(f"[REAL LAB] Scan complete. Found {len([c for c in self.current_state['components'].values() if c['state'] == 'PLACED'])} components.")
+        n_placed = len([c for c in self.current_state["components"].values() if c["state"] == "PLACED"])
+        print(f"[REAL LAB] Scan complete. {n_placed} components PLACED.")
 
     def get_lab_state(self) -> Dict[str, Any]:
         return self.current_state
 
-    def find_angle(self, rotation_degrees: float) -> List[float]:
-        """
-        Converts a simple Z-rotation (degrees) into the robot's specific 3D orientation format (rx, ry, rz).
-        Using logic provided:
-        1. Create Euler angles [180, 0, rotation] (assuming gripper down)
-        2. Convert to rotation vector
-        3. Convert to degree-like magnitude
-        4. Invert X and Y, set Z to 0 (specific to this robot configuration)
-        """
-        try:
-            # 1. Create Euler angles [180, 0, rotation]
-            # Standard convention: Gripper down is Rx=180.
-            euler_angles = [180, 0, rotation_degrees]
-            
-            # 2. Convert to Rotation object
-            r_inverse = R.from_euler('xyz', euler_angles, degrees=True)
-            
-            # 3. Get Rotation Vector (radians)
-            inverted_rad = r_inverse.as_rotvec()
-            
-            # 4. Convert to degrees (inverted)
-            inverted_place = -inverted_rad * 180 / np.pi
-            
-            # 5. Construct target angle
-            # User snippet: target_angle = [-inverted_place[0], -inverted_place[1], 0.0]
-            target_angle = [-inverted_place[0], -inverted_place[1], 0.0]
-            
-            print(f"[REAL LAB] find_angle({rotation_degrees}) -> {target_angle}")
-            return [float(x) for x in target_angle]
-            
-        except Exception as e:
-            print(f"[REAL LAB] Error in find_angle: {e}. Fallback to default.")
-            return [180.0, 0.0, 0.0]
 
     def get_rotation_from_angle(self, robot_angle: List[float]) -> float:
         """
@@ -299,7 +276,7 @@ class RealLabCommunicator(LabCommunicator):
         # 3. Extract Coordinates
         tx = params.get("target_x")
         ty = params.get("target_y")
-        rot = params.get("rotation", 0)
+        rot = params.get("rotation")
         
         # 4. Execute Move
         try:
@@ -308,11 +285,11 @@ class RealLabCommunicator(LabCommunicator):
             if not comp.inventory_location:
                 print(f"[REAL LAB] Warning: {target_id} inventory location unknown. Assuming it's at previous location or 0,0")
             
-            self.experiment.place_component_wo_home_specific_xy_from_current(
+            self.experiment.place_component_wo_home_specific_xy_cloudlab(
                 component=comp,
                 target_x=tx,
                 target_y=ty,
-                angle=self.find_angle(rot)
+                angle=[-180,0,rot]
             )
             
             # 5. Update State
@@ -329,7 +306,7 @@ class RealLabCommunicator(LabCommunicator):
                 self.current_state["components"][target_id]["intent"]["nominal_pose"] = {
                     "x": tx, "y": ty, "rotation": rot
                 }
-            
+                print(comp)
         except Exception as e:
             print(f"[REAL LAB] Move Failed: {e}")
             

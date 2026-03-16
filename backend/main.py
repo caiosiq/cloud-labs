@@ -1,10 +1,13 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse, Response
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 import json
 import os
+import re
 import asyncio
+import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import io
@@ -127,11 +130,43 @@ frontend_path = os.path.join(BASE_DIR, "..", "frontend")
 if not os.path.exists(frontend_path):
     os.makedirs(frontend_path)
 
+# Cache-bust version: new value on every server start so browser loads latest JS/CSS
+_STATIC_VERSION = str(int(time.time()))
+
+
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    """Set no-cache headers for HTML and static assets so updates are always visible."""
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        path = request.scope.get("path", "")
+        if path == "/" or path == "/debug" or path.startswith("/static"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+
+app.add_middleware(NoCacheMiddleware)
 app.mount("/static", StaticFiles(directory=frontend_path), name="static")
+
+
+def _read_index_html(path: str) -> str:
+    """Read HTML file and inject cache-bust version for script assets."""
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    html = re.sub(r"app\.js\?v=\d+", f"app.js?v={_STATIC_VERSION}", html)
+    return html
+
 
 @app.get("/")
 async def read_index():
-    return FileResponse(os.path.join(frontend_path, "index.html"))
+    path = os.path.join(frontend_path, "index.html")
+    html = _read_index_html(path)
+    return Response(content=html, media_type="text/html", headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
 
 @app.get("/api/catalog")
 async def get_component_catalog():
@@ -417,7 +452,14 @@ async def list_golden_states():
 
 @app.get("/debug")
 async def read_debug():
-    return FileResponse(os.path.join(frontend_path, "debug.html"))
+    path = os.path.join(frontend_path, "debug.html")
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    return Response(content=html, media_type="text/html", headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
 
 if __name__ == "__main__":
     import uvicorn
