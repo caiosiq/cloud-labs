@@ -404,12 +404,12 @@ class RealLabCommunicator(LabCommunicator):
         # TODO: Check actual camera connection
         return {"connected": True, "source": "/api/video-feed/stream"} 
 
-    def get_video_stream(self):
+    def get_video_stream(self, fps: int = 10):
         """
         Yields MJPEG frames from the camera.
         Uses CameraDriver if available, or a fallback generator.
         """
-        print("[REAL LAB] Starting Video Stream Generator...")
+        print(f"[REAL LAB] Starting Video Stream Generator at {fps} FPS...")
         
         # We need to import cv2 here inside the method or at module level if not already
         import cv2
@@ -419,6 +419,8 @@ class RealLabCommunicator(LabCommunicator):
         # Try to get the ceiling camera (Port 0)
         if self.experiment and hasattr(self.experiment, 'ceiling_cam1'):
             camera = self.experiment.ceiling_cam1
+            
+        sleep_duration = 1.0 / max(1, min(fps, 60)) # Clamp between 1 and 60 FPS
             
         while True:
             frame = None
@@ -447,13 +449,8 @@ class RealLabCommunicator(LabCommunicator):
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             
             # Use time.sleep instead of asyncio.sleep in a synchronous generator
-            # But StreamingResponse takes an iterator. If it's async, we use async generator.
-            # FastAPI StreamingResponse supports both. Let's stick to synchronous for simplicity if cv2 blocks,
-            # but ideally we should be async. However, cv2.read() is blocking.
-            # To be safe with FastAPI's event loop, we should probably run this in a thread or accept blocking.
-            # For now, let's use time.sleep(0.05) to yield control.
             import time
-            time.sleep(0.05)
+            time.sleep(sleep_duration)
 
     def capture_table_cam(self, cam_id: int):
         """Capture one image from table recorder camera (1 or 2). Returns PNG bytes or None."""

@@ -413,6 +413,13 @@ function checkCollision(targetId, x, y) {
             return { detected: true, other: id };
         }
     }
+
+    // Check Danger Zone (R=126/2mm)
+    const distOrigin = Math.sqrt(x*x + y*y);
+    if (distOrigin < 63 + r1) {
+        return { detected: true, other: "DANGER ZONE (Robot Base)" };
+    }
+
     return { detected: false };
 }
 
@@ -995,6 +1002,50 @@ function clearCanvas() {
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     
+    // Draw Danger Zone (R=10cm around origin)
+    ctx.beginPath();
+    ctx.arc(LAB_CENTER_PX.x, LAB_CENTER_PX.y, 63 * LAB_SCALE, 0, Math.PI * 2); // 63mm = 10cm
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.1)'; // Reddish transparent
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    // Draw Danger Zone Label
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.5)';
+    ctx.font = '10px Inter';
+    ctx.fillText("DANGER ZONE", LAB_CENTER_PX.x - 30, LAB_CENTER_PX.y - 10);
+
+    // Draw Axes
+    // X Axis (Red)
+    ctx.beginPath();
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2;
+    ctx.moveTo(LAB_CENTER_PX.x, LAB_CENTER_PX.y);
+    ctx.lineTo(LAB_CENTER_PX.x + 50, LAB_CENTER_PX.y); // 50px length
+    ctx.stroke();
+    ctx.fillStyle = '#ef4444';
+    ctx.fillText("X", LAB_CENTER_PX.x + 55, LAB_CENTER_PX.y + 4);
+
+    // Y Axis (Green) - Note: Canvas Y is inverted relative to Lab Y usually, but here we mapped +Y up in mmToPx
+    // mmToPx: y: LAB_CENTER_PX.y - labY * LAB_SCALE. So +LabY is -CanvasY (Up).
+    ctx.beginPath();
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = 2;
+    ctx.moveTo(LAB_CENTER_PX.x, LAB_CENTER_PX.y);
+    ctx.lineTo(LAB_CENTER_PX.x, LAB_CENTER_PX.y - 50); // Up
+    ctx.stroke();
+    ctx.fillStyle = '#10b981';
+    ctx.fillText("Y", LAB_CENTER_PX.x - 4, LAB_CENTER_PX.y - 55);
+
+    // Origin Dot
+    ctx.beginPath();
+    ctx.arc(LAB_CENTER_PX.x, LAB_CENTER_PX.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+
     // Draw Breadboard Grid (25mm spacing)
     ctx.fillStyle = '#2a2e36';
     const gridSpacingMm = 25;
@@ -1932,6 +1983,21 @@ function initUnifiedPanel() {
 
 // --- Video Feed Logic ---
 function initVideoFeed() {
+    const fpsInput = document.getElementById('fps-input');
+    if (fpsInput) {
+        fpsInput.addEventListener('change', () => {
+             const fps = Math.max(1, Math.min(60, parseInt(fpsInput.value) || 10));
+             fpsInput.value = fps;
+             // Reload video
+             if (videoImg) {
+                 // Base source is /api/video-feed/stream
+                 const baseSrc = '/api/video-feed/stream';
+                 videoImg.src = `${baseSrc}?fps=${fps}&t=${Date.now()}`;
+                 log(`Video stream FPS set to ${fps}`, "info");
+             }
+        });
+    }
+
     // Check status periodically
     setInterval(checkVideoStatus, 5000);
     checkVideoStatus();
@@ -2011,7 +2077,9 @@ async function checkVideoStatus() {
                 videoStatus.style.color = '#10b981';
                 // Refresh src to retry connection if it was broken
                 if (videoImg.src.indexOf(data.source) === -1) {
-                    videoImg.src = data.source;
+                    const fpsInput = document.getElementById('fps-input');
+                    const fps = fpsInput ? fpsInput.value : 10;
+                    videoImg.src = `${data.source}?fps=${fps}`;
                 }
             } else {
                 console.warn(`[${new Date().toLocaleTimeString()}] Video Status: Disconnected`);

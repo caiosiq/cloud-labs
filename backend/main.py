@@ -277,7 +277,7 @@ async def get_video_status():
     return lab.get_video_feed_status()
 
 @app.get("/api/video-feed/stream")
-async def get_video_stream():
+async def get_video_stream(fps: int = 10):
     """
     Returns a mock image or real stream
     """
@@ -285,7 +285,7 @@ async def get_video_stream():
     
     if LAB_MODE == "REAL":
         return StreamingResponse(
-            lab.get_video_stream(), 
+            lab.get_video_stream(fps=fps), 
             media_type="multipart/x-mixed-replace; boundary=frame"
         )
     else:

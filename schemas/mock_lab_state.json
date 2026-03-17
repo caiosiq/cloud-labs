@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-03-11T18:39:23.008048",
+  "last_updated": "2026-03-16T23:59:08.699368",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -112,14 +112,14 @@
       "type": "OPTICAL_BEAMSPLITTER",
       "state": "PLACED",
       "pose": {
-        "x": 10.20427748139178,
-        "y": 151.547387930836,
+        "x": 259.0845975997807,
+        "y": 173.50186376700566,
         "rotation": 0
       },
       "intent": {
         "nominal_pose": {
-          "x": 10,
-          "y": 151.42857142857144,
+          "x": 259.5278522037456,
+          "y": 173.15900670711792,
           "rotation": 0
         },
         "placement_strategy": "MANUAL",
@@ -133,15 +133,15 @@
       "type": "OPTICAL_LENS",
       "state": "PLACED",
       "pose": {
-        "x": 304.8486302510242,
-        "y": -27.03587684277327,
-        "rotation": 0
+        "x": 213.7986302534366,
+        "y": -136.19354548666132,
+        "rotation": 85
       },
       "intent": {
         "nominal_pose": {
-          "x": 305,
-          "y": -27.1,
-          "rotation": 0
+          "x": 213.6,
+          "y": -135.7,
+          "rotation": 85
         },
         "placement_strategy": "MANUAL",
         "last_optimized_pose": null,
