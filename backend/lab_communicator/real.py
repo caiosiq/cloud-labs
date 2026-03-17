@@ -28,7 +28,7 @@ else:
 try:
     from lab_automation.managers.experiment_manager import OpticalExperiment
     from lab_automation.objects.base import OpticalComponent, Pose
-    from lab_automation.objects.strategies import NewtonPlacementStrategy, CobylaAlignmentStrategy
+    from lab_automation.objects.strategies import NewtonPlacementStrategy_cloudlab, CobylaAlignmentStrategy
     LAB_LIB_AVAILABLE = True
 except ImportError as e:
     print(f"[REAL LAB] Critical Error: Failed to import lab_automation: {e}")
@@ -289,7 +289,7 @@ class RealLabCommunicator(LabCommunicator):
                 component=comp,
                 target_x=tx,
                 target_y=ty,
-                angle=[-180,0,rot]
+                angle=[-180,0,-rot]
             )
             
             # 5. Update State
@@ -350,12 +350,21 @@ class RealLabCommunicator(LabCommunicator):
             # 1. Select Strategy
             strategy = None
             if strategy_name == "NEWTON":
+                # Use the component's current table Y as the original_position for Newton placement
+                original_pos = 0.0
+                cur_loc = getattr(comp, "current_location", None)
+                original_pos = cur_loc.y
+
                 # STRICT PARAMETER HANDLING: No defaults allowed.
                 # If params are missing, this will raise a KeyError, which is desired behavior.
-                strategy = NewtonPlacementStrategy(
+                strategy = NewtonPlacementStrategy_cloudlab(
                     camera_number=params["camera_number"],
                     target_x_pixel=params["target_x_pixel"],
-                    tolerance_ratio=params["tolerance_ratio"]
+                    tolerance_ratio=params["tolerance_ratio"],
+                    axis=params["axis"],
+                    original_position=original_pos,
+                    initial_move=-0.5,
+                    do_repositioning=False
                 )
                 print("DOING NEWTON STRATEGY")
             elif strategy_name == "COBYLA":

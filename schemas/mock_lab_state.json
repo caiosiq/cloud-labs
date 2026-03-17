@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-03-16T23:59:08.699368",
+  "last_updated": "2026-03-17T15:03:07.742559",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -70,15 +70,15 @@
       "type": "OPTICAL_MIRROR",
       "state": "PLACED",
       "pose": {
-        "x": 0.031739100178045265,
-        "y": -321.7752861376805,
-        "rotation": 360
+        "x": -151.0346802971465,
+        "y": -334.61156818799,
+        "rotation": 290
       },
       "intent": {
         "nominal_pose": {
-          "x": 0,
-          "y": -321.42857142857144,
-          "rotation": 360
+          "x": -151.42857142857144,
+          "y": -334.28571428571433,
+          "rotation": 290
         },
         "placement_strategy": "MANUAL",
         "last_optimized_pose": null,

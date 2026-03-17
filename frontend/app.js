@@ -416,7 +416,7 @@ function checkCollision(targetId, x, y) {
 
     // Check Danger Zone (R=126/2mm)
     const distOrigin = Math.sqrt(x*x + y*y);
-    if (distOrigin < 63 + r1) {
+    if (distOrigin < 90 + r1) {
         return { detected: true, other: "DANGER ZONE (Robot Base)" };
     }
 
@@ -1004,7 +1004,7 @@ function clearCanvas() {
     
     // Draw Danger Zone (R=10cm around origin)
     ctx.beginPath();
-    ctx.arc(LAB_CENTER_PX.x, LAB_CENTER_PX.y, 63 * LAB_SCALE, 0, Math.PI * 2); // 63mm = 10cm
+    ctx.arc(LAB_CENTER_PX.x, LAB_CENTER_PX.y, 90 * LAB_SCALE, 0, Math.PI * 2); // 90mm
     ctx.fillStyle = 'rgba(239, 68, 68, 0.1)'; // Reddish transparent
     ctx.fill();
     ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
