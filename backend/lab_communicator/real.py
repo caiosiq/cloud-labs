@@ -435,15 +435,10 @@ class RealLabCommunicator(LabCommunicator):
             frame = None
             if camera:
                 try:
-                    # Attempt to read frame directly from OpenCV capture object
-                    if hasattr(camera, 'cap') and camera.cap is not None:
-                         ret, frame = camera.cap.read()
-                         if not ret:
-                             frame = None
-                    else:
-                        # Fallback if no direct cap access
-                        frame = None 
-                except Exception:
+                    # Use the CameraDriver's get_frame method instead of accessing cap directly
+                    frame = camera.get_frame()
+                except Exception as e:
+                    print(f"[REAL LAB] Camera stream error: {e}")
                     frame = None
             
             if frame is None:

@@ -324,7 +324,101 @@ function showErrorModal(title, message) {
     document.body.appendChild(overlay);
 }
 
+function showConfirmationModal(message, onConfirm, onCancel) {
+    if (document.getElementById('confirm-modal')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'confirm-modal';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0'; overlay.style.left = '0';
+    overlay.style.width = '100vw'; overlay.style.height = '100vh';
+    overlay.style.backgroundColor = 'rgba(0,0,0,0.85)';
+    overlay.style.zIndex = '3000';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.backdropFilter = 'blur(5px)';
+
+    const card = document.createElement('div');
+    card.style.backgroundColor = '#181b21';
+    card.style.border = '1px solid #3b82f6';
+    card.style.borderRadius = '8px';
+    card.style.padding = '24px';
+    card.style.width = '400px';
+    card.style.textAlign = 'center';
+    card.style.boxShadow = '0 20px 50px rgba(0,0,0,0.7)';
+
+    card.innerHTML = `
+        <span class="material-icons-round" style="font-size: 40px; color: #3b82f6; margin-bottom: 12px;">help_outline</span>
+        <h3 style="margin: 0 0 12px 0; color: #e2e8f0;">Confirm Action</h3>
+        <p style="margin: 0 0 24px 0; color: #94a3b8; font-size: 14px; line-height: 1.5;">${message}</p>
+        <div style="display: flex; justify-content: center; gap: 12px;">
+            <button id="confirm-no" class="btn btn-secondary" style="width: auto; padding: 8px 20px;">Cancel</button>
+            <button id="confirm-yes" class="btn btn-primary" style="width: auto; padding: 8px 20px;">Confirm</button>
+        </div>
+    `;
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    document.getElementById('confirm-no').onclick = () => {
+        overlay.remove();
+        if (onCancel) onCancel();
+    };
+
+    document.getElementById('confirm-yes').onclick = () => {
+        overlay.remove();
+        if (onConfirm) onConfirm();
+    };
+}
+
 async function sendCommand(command) {
+    // Intercept MOVE_COMPONENT commands for confirmation
+    if (command.action === 'MOVE_COMPONENT' && !isRecording) {
+        // Create a descriptive message
+        let msg = `Move <strong>${command.target_id}</strong>?`;
+        if (command.parameters) {
+            msg += `<br>X: ${command.parameters.target_x.toFixed(1)} mm<br>Y: ${command.parameters.target_y.toFixed(1)} mm<br>Rot: ${command.parameters.rotation.toFixed(1)}°`;
+        }
+        
+        return new Promise((resolve) => {
+            showConfirmationModal(
+                msg, 
+                async () => {
+                    // Confirmed: Proceed with actual send
+                    await executeSendCommand(command);
+                    resolve();
+                },
+                () => {
+                    // Cancelled: Revert ghost state if possible
+                    log("Move cancelled by user.", "info");
+                    
+                    if (command.target_id && labState && labState.components && labState.components[command.target_id] && labState.components[command.target_id].state === 'PLACED') {
+                        const original = labState.components[command.target_id].pose;
+                        // Only revert if we have the ghost state object
+                        if (ghostState[command.target_id]) {
+                            ghostState[command.target_id].x = original.x;
+                            ghostState[command.target_id].y = original.y;
+                            ghostState[command.target_id].rotation = original.rotation;
+                        
+                            // Update Context Panel if selected
+                            if (selectedComponent === command.target_id) {
+                                updateContextPanel(command.target_id);
+                            }
+                            render();
+                        }
+                    }
+                    resolve();
+                }
+            );
+        });
+    }
+
+    // Direct execution for other commands or if recording
+    return await executeSendCommand(command);
+}
+
+async function executeSendCommand(command) {
     try {
         log(`Sending command: ${command.action}`, "info");
         
