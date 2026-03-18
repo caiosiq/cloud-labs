@@ -1,0 +1,27 @@
+{
+  "system_status": "IDLE",
+  "last_updated": "2026-03-18T16:24:46.154556",
+  "components": {
+    "tag_11": {
+      "id": "tag_11",
+      "type": "OPTICAL_LENS",
+      "state": "PLACED",
+      "pose": {
+        "x": 386.1,
+        "y": 2.8,
+        "rotation": 270
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 386.1,
+          "y": 2.8,
+          "rotation": 270
+        },
+        "is_optimized": false,
+        "placement_strategy": "MANUAL"
+      },
+      "metadata": {}
+    }
+  },
+  "optimization_step": 0
+}

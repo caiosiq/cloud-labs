@@ -6,7 +6,7 @@ import sys
 import time
 import asyncio
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
@@ -71,43 +71,102 @@ class RealLabCommunicator(LabCommunicator):
         self._opt_monitor_thread = threading.Thread(target=self._monitor_optimization_dir, daemon=True)
         self._opt_monitor_thread.start()
 
+    def _get_optimization_watch_dirs(self) -> List[str]:
+        """
+        Optimization images may be written from different working directories
+        (cloud-labs process vs lab_automation process). Watch both to avoid stale frames.
+        """
+        candidates = {os.path.abspath("Camera_Images")}
+        lab_path = os.getenv("LAB_AUTOMATION_PATH")
+        if lab_path:
+            candidates.add(os.path.join(os.path.abspath(lab_path), "Camera_Images"))
+        # Keep deterministic ordering
+        return sorted(candidates)
+
+    def _get_latest_optimization_png(self) -> Tuple[Optional[str], int]:
+        """
+        Returns (latest_image_path, latest_mtime_ns). latest_mtime_ns is 0 when none found.
+        """
+        import glob
+
+        latest_file: Optional[str] = None
+        latest_ns: int = 0
+
+        for d in self._get_optimization_watch_dirs():
+            if not os.path.exists(d):
+                continue
+            try:
+                # Newton/vision paths have been used with both png/jpg historically.
+                files = []
+                files.extend(glob.glob(os.path.join(d, "*.png")))
+                files.extend(glob.glob(os.path.join(d, "*.jpg")))
+                files.extend(glob.glob(os.path.join(d, "*.jpeg")))
+
+                for f in files:
+                    try:
+                        ns = os.stat(f).st_mtime_ns
+                    except Exception:
+                        continue
+                    if ns > latest_ns:
+                        latest_ns = ns
+                        latest_file = f
+            except Exception:
+                continue
+
+        return latest_file, latest_ns
+
     def _monitor_optimization_dir(self):
-        """Background task to watch Camera_Images and increment optimization_step when files change."""
-        import os, glob, time
-        watch_dir = os.path.abspath("Camera_Images")
-        last_mtime = 0
-        
-        # Initialize last_mtime to current latest so we don't count old files
+        """Background task to watch optimization PNGs and increment optimization_step when files change."""
+        import time
+
+        latest_file, last_mtime_ns = self._get_latest_optimization_png()
+        last_size = -1
+        last_path = latest_file
         try:
-            if os.path.exists(watch_dir):
-                png_files = glob.glob(os.path.join(watch_dir, "*.png"))
-                if png_files:
-                    last_mtime = os.path.getmtime(max(png_files, key=os.path.getmtime))
+            if latest_file:
+                last_size = os.path.getsize(latest_file)
         except Exception:
-            pass
+            last_size = -1
 
         while True:
             time.sleep(0.5)
             if self.current_state.get("system_status") == "OPTIMIZING":
                 try:
-                    if os.path.exists(watch_dir):
-                        png_files = glob.glob(os.path.join(watch_dir, "*.png"))
-                        if png_files:
-                            latest_file = max(png_files, key=os.path.getmtime)
-                            current_mtime = os.path.getmtime(latest_file)
-                            if current_mtime > last_mtime:
-                                last_mtime = current_mtime
-                                current_step = self.current_state.get("optimization_step", 0)
-                                self.current_state["optimization_step"] = current_step + 1
+                    current_file, current_ns = self._get_latest_optimization_png()
+                    if not current_file:
+                        continue
+
+                    try:
+                        current_size = os.path.getsize(current_file)
+                    except Exception:
+                        current_size = -1
+
+                    # Increment on any meaningful change: mtime_ns, size, or file identity.
+                    if current_ns > last_mtime_ns or current_size != last_size or current_file != last_path:
+                        last_mtime_ns = current_ns
+                        last_size = current_size
+                        last_path = current_file
+                        current_step = self.current_state.get("optimization_step", 0)
+                        self.current_state["optimization_step"] = current_step + 1
+                        print(
+                            f"[REAL LAB] optimization_step={current_step + 1} "
+                            f"(file={os.path.basename(current_file)} ns={current_ns} size={current_size})"
+                        )
                 except Exception:
                     pass
             else:
                 # Keep last_mtime updated even when not optimizing to avoid a jump when it starts
                 try:
-                    if os.path.exists(watch_dir):
-                        png_files = glob.glob(os.path.join(watch_dir, "*.png"))
-                        if png_files:
-                            last_mtime = os.path.getmtime(max(png_files, key=os.path.getmtime))
+                    current_file, current_ns = self._get_latest_optimization_png()
+                    if current_file:
+                        try:
+                            current_size = os.path.getsize(current_file)
+                        except Exception:
+                            current_size = -1
+                        if current_ns > last_mtime_ns or current_size != last_size or current_file != last_path:
+                            last_mtime_ns = current_ns
+                            last_size = current_size
+                            last_path = current_file
                 except Exception:
                     pass
 
@@ -274,6 +333,58 @@ class RealLabCommunicator(LabCommunicator):
         n_placed = len([c for c in self.current_state["components"].values() if c["state"] == "PLACED"])
         print(f"[REAL LAB] Scan complete. {n_placed} components PLACED.")
 
+    def refresh_state(self):
+        """
+        Re-initialize lab state using the same logic as at startup.
+        This is used by the UI "Refresh State" button.
+        """
+        self.current_state["system_status"] = "BUSY"
+        try:
+            self._initialize_state()
+        finally:
+            self.current_state["system_status"] = "IDLE"
+            self.current_state["optimization_step"] = 0
+            self.current_state["last_updated"] = datetime.now().isoformat()
+
+    def set_lab_state(self, state: Dict[str, Any]):
+        """
+        Load a previously saved lab state snapshot and apply it to both:
+        1) `self.current_state` (what the UI reads)
+        2) `self.component_map` (what the robot uses)
+        """
+        if not isinstance(state, dict):
+            raise ValueError("Loaded state must be a JSON object/dict")
+
+        # Update the current_state that the UI reads.
+        self.current_state = state
+        self.current_state["system_status"] = "IDLE"
+        self.current_state["optimization_step"] = int(self.current_state.get("optimization_step", 0) or 0)
+        self.current_state["last_updated"] = datetime.now().isoformat()
+
+        # Apply to component_map so pick/place uses correct coordinates.
+        components = self.current_state.get("components", {}) or {}
+        for tag_id, entry in components.items():
+            pose = (entry or {}).get("pose", {}) or {}
+            x = float(pose.get("x", 0.0))
+            y = float(pose.get("y", 0.0))
+            z = float(pose.get("z", 500.0))  # z isn't stored in current UI payload; default matches scan
+
+            roll = float(pose.get("roll", 0.0))
+            pitch = float(pose.get("pitch", 0.0))
+            yaw = float(pose.get("yaw", 0.0))
+
+            comp = self.component_map.get(tag_id)
+            if not comp:
+                # If missing from map, skip (UI will still render, but robot may not know it).
+                continue
+
+            p = Pose(x=x, y=y, z=z, roll=roll, pitch=pitch, yaw=yaw)
+            comp.inventory_location = p
+            comp.current_location = p
+
+            # Best-effort: keep flags consistent
+            comp.is_placed = (entry or {}).get("state") == "PLACED"
+
     def get_lab_state(self) -> Dict[str, Any]:
         return self.current_state
 
@@ -401,7 +512,6 @@ class RealLabCommunicator(LabCommunicator):
                 # Use the component's current table Y as the original_position for Newton placement
                 original_pos = 0.0
                 cur_loc = getattr(comp, "current_location", None)
-                original_pos = cur_loc.y
 
                 # STRICT PARAMETER HANDLING: No defaults allowed.
                 # If params are missing, this will raise a KeyError, which is desired behavior.
@@ -410,9 +520,8 @@ class RealLabCommunicator(LabCommunicator):
                     target_x_pixel=params["target_x_pixel"],
                     tolerance_ratio=params["tolerance_ratio"],
                     axis=params["axis"],
-                    original_position=original_pos,
-                    initial_move=-0.5,
-                    do_repositioning=False
+                    initial_move=-0.2,
+                    do_repositioning=False,
                 )
                 print("DOING NEWTON STRATEGY")
             elif strategy_name == "COBYLA":
@@ -509,38 +618,53 @@ class RealLabCommunicator(LabCommunicator):
         """Yields MJPEG frames by watching the Camera_Images directory."""
         import cv2
         import time
-        import os
-        import glob
-        
-        # Determine the target directory (e.g. Camera_Images in CWD)
-        watch_dir = os.path.abspath("Camera_Images")
-        if not os.path.exists(watch_dir):
-            try:
-                os.makedirs(watch_dir, exist_ok=True)
-            except Exception:
-                pass
-            
-        print(f"[REAL LAB] Starting Optimization Feed watching: {watch_dir}")
+
+        # Ensure the most likely directory exists so strategies that rely on CWD won't fail silently.
+        try:
+            os.makedirs(os.path.abspath("Camera_Images"), exist_ok=True)
+        except Exception:
+            pass
+
+        watch_dirs = self._get_optimization_watch_dirs()
+        print(f"[REAL LAB] Starting Optimization Feed watching: {watch_dirs}")
         
         sleep_duration = 1.0 / max(1, min(fps, 30))
-        last_mtime = 0
+        last_mtime_ns = 0
+        last_size = -1
         last_frame_bytes = None
         
         while True:
-            # Find the most recently modified PNG file
             try:
-                png_files = glob.glob(os.path.join(watch_dir, "*.png"))
-                if png_files:
-                    latest_file = max(png_files, key=os.path.getmtime)
-                    current_mtime = os.path.getmtime(latest_file)
-                    
-                    if current_mtime > last_mtime:
-                        img = cv2.imread(latest_file)
+                latest_file, current_ns = self._get_latest_optimization_png()
+                if latest_file:
+                    try:
+                        current_size = os.path.getsize(latest_file)
+                    except Exception:
+                        current_size = -1
+
+                    # Try to refresh if file version changed (mtime/size/file identity)
+                    if current_ns > last_mtime_ns or current_size != last_size:
+                        # Retry decode a few times to avoid libpng "Read Error" from partially-written files.
+                        img = None
+                        for attempt in range(6):
+                            try:
+                                time.sleep(0.05)
+                                img = cv2.imread(latest_file)
+                            except Exception:
+                                img = None
+                            if img is not None:
+                                break
+
                         if img is not None:
                             ret, buffer = cv2.imencode('.jpg', img)
                             if ret:
                                 last_frame_bytes = buffer.tobytes()
-                                last_mtime = current_mtime
+                                last_mtime_ns = current_ns
+                                last_size = current_size
+                                print(
+                                    f"[REAL LAB] optimization-stream updated "
+                                    f"(file={os.path.basename(latest_file)} ns={current_ns} size={current_size})"
+                                )
             except Exception as e:
                 print(f"[REAL LAB] Error in optimization stream: {e}")
             

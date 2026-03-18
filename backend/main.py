@@ -38,6 +38,7 @@ app = FastAPI()
 # Constants
 SCHEMAS_DIR = os.path.join(os.path.dirname(__file__), "..", "schemas")
 RECIPES_DIR = os.path.join(os.path.dirname(__file__), "..", "recipes")
+STATES_DIR = os.path.join(os.path.dirname(__file__), "..", "states")
 
 # Initialize Communicator
 LAB_MODE = (os.getenv("LAB_MODE") or "MOCK").upper()
@@ -71,6 +72,10 @@ else:
 if not os.path.exists(RECIPES_DIR):
     os.makedirs(RECIPES_DIR)
 
+# Ensure states directory exists
+if not os.path.exists(STATES_DIR):
+    os.makedirs(STATES_DIR)
+
 # --- Models ---
 class RecipeStep(BaseModel):
     step: int
@@ -84,6 +89,9 @@ class Recipe(BaseModel):
     name: str
     description: Optional[str] = ""
     steps: List[RecipeStep]
+
+class StateName(BaseModel):
+    name: str
 
 # --- Recipe Executor (Uses Communicator) ---
 
@@ -199,6 +207,82 @@ async def get_lab_state():
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Response: 500 Failed to read state: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to read Lab State: {str(e)}")
+
+@app.post("/api/lab-state/refresh")
+async def refresh_lab_state(background_tasks: BackgroundTasks):
+    """
+    Re-initialize the lab state from sensors/top cameras (REAL) or reload the mock state file.
+    """
+    if lab is None:
+        raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
+
+    # If the communicator provides a refresh method, run it.
+    if hasattr(lab, "refresh_state"):
+        # Run in background so the server stays responsive.
+        background_tasks.add_task(lab.refresh_state)
+        return {"status": "accepted", "message": "Lab state refresh started"}
+
+    # Fallback: no refresh capability, just return current state.
+    return {"status": "ok", "message": "Lab state refresh not supported; returning current state"}
+
+@app.get("/api/states")
+async def list_saved_states():
+    if not os.path.exists(STATES_DIR):
+        return []
+    files = [f for f in os.listdir(STATES_DIR) if f.endswith(".json")]
+    # Return names without extension
+    return sorted([os.path.splitext(f)[0] for f in files])
+
+@app.post("/api/states/save")
+async def save_lab_state(payload: StateName):
+    if lab is None:
+        raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
+
+    if hasattr(lab, "get_lab_state"):
+        st = lab.get_lab_state() or {}
+        if st.get("system_status") in ("BUSY", "OPTIMIZING"):
+            raise HTTPException(status_code=409, detail=f"System is {st.get('system_status')}. Please wait.")
+
+    import re
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="State name is required")
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", name)
+    if not safe:
+        raise HTTPException(status_code=400, detail="Invalid state name")
+
+    file_path = os.path.join(STATES_DIR, f"{safe}.json")
+    state = lab.get_lab_state()
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+    return {"status": "success", "name": safe, "path": file_path}
+
+@app.post("/api/states/load")
+async def load_lab_state(payload: StateName):
+    if lab is None:
+        raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
+
+    if hasattr(lab, "get_lab_state"):
+        st = lab.get_lab_state() or {}
+        if st.get("system_status") in ("BUSY", "OPTIMIZING"):
+            raise HTTPException(status_code=409, detail=f"System is {st.get('system_status')}. Please wait.")
+
+    import re
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="State name is required")
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", name)
+    file_path = os.path.join(STATES_DIR, f"{safe}.json")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"State not found: {safe}")
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        state = json.load(f)
+
+    if hasattr(lab, "set_lab_state"):
+        lab.set_lab_state(state)
+
+    return {"status": "success", "name": safe, "state": state}
 
 @app.get("/api/laser-line")
 async def get_laser_line():

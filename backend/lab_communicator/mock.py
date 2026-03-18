@@ -73,6 +73,19 @@ class MockLabCommunicator(LabCommunicator):
     def get_lab_state(self) -> Dict[str, Any]:
         return self._read_state()
 
+    def refresh_state(self):
+        """
+        Mock mode has no sensors to re-scan; keep the in-file state as-is.
+        """
+        # No-op: the state is already persisted in `self.state_file`.
+        return
+
+    def set_lab_state(self, state: Dict[str, Any]):
+        """
+        Load a previously saved lab state snapshot into the mock persistence file.
+        """
+        self._write_state(state)
+
     async def move_component(self, target_id: str, target_pose: Dict[str, float]):
         print(f"[MOCK LAB] Moving {target_id}...")
         

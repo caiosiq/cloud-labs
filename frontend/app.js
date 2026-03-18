@@ -40,6 +40,8 @@ const libraryList = document.getElementById('library-list');
 const addComponentBtn = document.getElementById('add-component-btn');
 const libraryClose = document.getElementById('library-close');
 const refreshBtn = document.getElementById('refresh-btn');
+const saveStateBtn = document.getElementById('save-state-btn');
+const loadStateBtn = document.getElementById('load-state-btn');
 const sidebar = document.getElementById('sidebar');
 const recipeList = document.getElementById('recipe-list');
 // const runExpBtn = document.getElementById('run-exp-btn'); // Removed
@@ -263,6 +265,14 @@ async function fetchLabState() {
                 const optOverlay = document.getElementById('optimization-overlay');
                 if (optOverlay) optOverlay.style.display = 'none';
                 isOptimizingFeedActive = false;
+
+                // Revert table-cam highlight
+                const tableCamPreview = document.getElementById('table-cam-preview');
+                if (tableCamPreview) {
+                    tableCamPreview.style.border = '1px solid var(--border-color)';
+                    tableCamPreview.style.backgroundColor = '#0f1115';
+                    tableCamPreview.style.boxShadow = '';
+                }
                 
                 // Stop optimization stream to save bandwidth
                 const tableCamImg = document.getElementById('table-cam-img');
@@ -287,6 +297,15 @@ async function fetchLabState() {
                 optStepText.innerText = `OPTIMIZING (Step ${labState.optimization_step || 0})`;
             }
 
+            // Highlight the table cam preview while optimizing
+            const tableCamPreview = document.getElementById('table-cam-preview');
+            if (tableCamPreview) {
+                console.log(`[UI] OPTIMIZING -> highlighting table-cam-preview (step=${labState.optimization_step || 0})`);
+                tableCamPreview.style.border = '2px solid #22c55e';
+                tableCamPreview.style.backgroundColor = '#0b2a19';
+                tableCamPreview.style.boxShadow = '0 0 0 3px rgba(34,197,94,0.25)';
+            }
+
             if (!isOptimizingFeedActive) {
                 isOptimizingFeedActive = true;
                 const tableCamImg = document.getElementById('table-cam-img');
@@ -294,6 +313,15 @@ async function fetchLabState() {
                 const tableCamError = document.getElementById('table-cam-error');
                 
                 if (tableCamImg) {
+                    // Remove the old captured image immediately when optimization starts
+                    tableCamImg.src = "";
+                    tableCamImg.style.display = 'none';
+                    console.log(`[UI] switching table-cam to optimization-feed stream...`);
+                    if (tableCamPlaceholder) {
+                        tableCamPlaceholder.style.display = 'flex';
+                        tableCamPlaceholder.innerHTML = `<span class="material-icons-round" style="font-size: 18px; margin-bottom: 2px;">auto_awesome</span><div>Optimizing... (Step ${labState.optimization_step || 0})</div>`;
+                    }
+
                     tableCamImg.src = `/api/optimization-feed/stream?t=${Date.now()}`;
                     tableCamImg.style.display = 'block';
                     if (tableCamPlaceholder) tableCamPlaceholder.style.display = 'none';
@@ -2100,12 +2128,83 @@ function init() {
     fetchRecipes();
     fetchLabState();
     setInterval(fetchLabState, POLLING_INTERVAL);
-    refreshBtn.addEventListener('click', () => {
-        log("Forcing state sync...", "warn");
-        forceGhostSync = true;
-        fetchLabState();
-        checkVideoStatus();
+    refreshBtn.addEventListener('click', async () => {
+        try {
+            log("Refreshing lab state (re-scan)...", "warn");
+            // Kick off backend refresh (REAL: re-scan, MOCK: no-op)
+            const res = await fetch('/api/lab-state/refresh', { method: 'POST' });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'Refresh failed');
+            }
+
+            // Wait until the backend reports IDLE before syncing ghost/UI state.
+            const start = Date.now();
+            while (Date.now() - start < 30000) {
+                const stateRes = await fetch('/api/lab-state');
+                const state = await stateRes.json();
+                if (state && state.system_status === 'IDLE') break;
+                await new Promise(r => setTimeout(r, 500));
+            }
+
+            forceGhostSync = true;
+            await fetchLabState();
+            checkVideoStatus();
+        } catch (e) {
+            console.error("Refresh state failed:", e);
+            log(`Refresh failed: ${e.message || e}`, "error");
+            showErrorModal("Refresh Failed", e.message || String(e));
+        }
     });
+
+    if (saveStateBtn) {
+        saveStateBtn.addEventListener('click', async () => {
+            try {
+                const defaultName = `state_${new Date().toISOString().replace(/[:.]/g, '-')}`;
+                const name = prompt("Save current lab state as:", defaultName);
+                if (!name) return;
+
+                const res = await fetch('/api/states/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.detail || 'Save failed');
+
+                log(`Saved lab state: ${data.name || name}`, "info");
+            } catch (e) {
+                console.error("Save state failed:", e);
+                showErrorModal("Save Failed", e.message || String(e));
+            }
+        });
+    }
+
+    if (loadStateBtn) {
+        loadStateBtn.addEventListener('click', async () => {
+            try {
+                const defaultName = `state_last`;
+                const name = prompt("Load lab state (saved name):", defaultName);
+                if (!name) return;
+
+                const res = await fetch('/api/states/load', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.detail || 'Load failed');
+
+                // Force UI+ghost to match loaded state immediately.
+                forceGhostSync = true;
+                await fetchLabState();
+                log(`Loaded lab state: ${data.name || name}`, "info");
+            } catch (e) {
+                console.error("Load state failed:", e);
+                showErrorModal("Load Failed", e.message || String(e));
+            }
+        });
+    }
     
     initVideoFeed();
     initUnifiedPanel();
@@ -2210,11 +2309,17 @@ async function checkVideoStatus() {
                 videoPlaceholder.style.display = 'none';
                 videoStatus.innerHTML = '● LIVE';
                 videoStatus.style.color = '#10b981';
-                // Refresh src to retry connection if it was broken
-                if (videoImg.src.indexOf(data.source) === -1) {
+                // Force refresh with cache-busting so we don't get stuck showing an older mock SVG response.
+                // Reload only if the placeholder was visible (i.e. previous state was OFFLINE).
+                if (videoPlaceholder.style.display !== 'none') {
                     const fpsInput = document.getElementById('fps-input');
                     const fps = fpsInput ? fpsInput.value : 10;
-                    videoImg.src = `${data.source}?fps=${fps}`;
+                    videoImg.src = `${data.source}?fps=${fps}&t=${Date.now()}`;
+                } else if (videoImg.src.indexOf('t=') === -1) {
+                    // Also refresh once on connect if the src has no timestamp yet.
+                    const fpsInput = document.getElementById('fps-input');
+                    const fps = fpsInput ? fpsInput.value : 10;
+                    videoImg.src = `${data.source}?fps=${fps}&t=${Date.now()}`;
                 }
             } else {
                 console.warn(`[${new Date().toLocaleTimeString()}] Video Status: Disconnected`);
