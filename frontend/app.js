@@ -85,6 +85,7 @@ let forceGhostSync = false;
 
 // Optimization State
 let isOptimizing = false;
+let isOptimizingFeedActive = false;
 let optimizationData = []; 
 
 // Recipe State
@@ -257,9 +258,49 @@ async function fetchLabState() {
             if (isOptimizing) {
                 isOptimizing = false; 
                 log("Optimization sequence complete.", "info");
+                
+                // Hide optimization feed overlay
+                const optOverlay = document.getElementById('optimization-overlay');
+                if (optOverlay) optOverlay.style.display = 'none';
+                isOptimizingFeedActive = false;
+                
+                // Stop optimization stream to save bandwidth
+                const tableCamImg = document.getElementById('table-cam-img');
+                const tableCamPlaceholder = document.getElementById('table-cam-placeholder');
+                if (tableCamImg) {
+                    tableCamImg.src = ""; 
+                    tableCamImg.style.display = 'none';
+                }
+                if (tableCamPlaceholder) {
+                    tableCamPlaceholder.style.display = 'flex';
+                    tableCamPlaceholder.innerHTML = '<span class="material-icons-round" style="font-size: 24px; margin-bottom: 8px;">camera_alt</span><span style="font-size: 11px;">Table Cam Capture</span>';
+                }
             }
         } else if (labState.system_status === 'OPTIMIZING') {
             isOptimizing = true;
+            
+            // Show optimization feed overlay
+            const optOverlay = document.getElementById('optimization-overlay');
+            const optStepText = document.getElementById('optimization-step-text');
+            if (optOverlay && optStepText) {
+                optOverlay.style.display = 'flex';
+                optStepText.innerText = `OPTIMIZING (Step ${labState.optimization_step || 0})`;
+            }
+
+            if (!isOptimizingFeedActive) {
+                isOptimizingFeedActive = true;
+                const tableCamImg = document.getElementById('table-cam-img');
+                const tableCamPlaceholder = document.getElementById('table-cam-placeholder');
+                const tableCamError = document.getElementById('table-cam-error');
+                
+                if (tableCamImg) {
+                    tableCamImg.src = `/api/optimization-feed/stream?t=${Date.now()}`;
+                    tableCamImg.style.display = 'block';
+                    if (tableCamPlaceholder) tableCamPlaceholder.style.display = 'none';
+                    if (tableCamError) tableCamError.style.display = 'none';
+                }
+            }
+
             if (Math.random() > 0.5) {
                 optimizationData.push({
                     step: optimizationData.length, 

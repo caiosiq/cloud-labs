@@ -293,6 +293,21 @@ async def get_video_stream(fps: int = 10):
         return FileResponse(os.path.join(frontend_path, "mock_feed.svg"))
 
 
+@app.get("/api/optimization-feed/stream")
+async def get_optimization_feed_stream(fps: int = 5):
+    """
+    Returns an MJPEG stream of the optimization images.
+    """
+    if LAB_MODE == "REAL" and hasattr(lab, "get_optimization_stream"):
+        return StreamingResponse(
+            lab.get_optimization_stream(fps=fps), 
+            media_type="multipart/x-mixed-replace; boundary=frame"
+        )
+    else:
+        # Serve the SVG directly instead of redirecting
+        return FileResponse(os.path.join(frontend_path, "mock_feed.svg"))
+
+
 # --- Recipe Endpoints ---
 
 @app.get("/api/recipes")

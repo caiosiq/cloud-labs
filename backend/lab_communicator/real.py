@@ -58,12 +58,58 @@ class RealLabCommunicator(LabCommunicator):
         self.current_state = {
             "system_status": "IDLE",
             "last_updated": datetime.now().isoformat(),
-            "components": {}
+            "components": {},
+            "optimization_step": 0
         }
         
         self._initialize_state()
         self._recorder_procs: List[subprocess.Popen] = []
         self._start_recorder_processes()
+        
+        # Start a background thread to monitor optimization steps reliably
+        import threading
+        self._opt_monitor_thread = threading.Thread(target=self._monitor_optimization_dir, daemon=True)
+        self._opt_monitor_thread.start()
+
+    def _monitor_optimization_dir(self):
+        """Background task to watch Camera_Images and increment optimization_step when files change."""
+        import os, glob, time
+        watch_dir = os.path.abspath("Camera_Images")
+        last_mtime = 0
+        
+        # Initialize last_mtime to current latest so we don't count old files
+        try:
+            if os.path.exists(watch_dir):
+                png_files = glob.glob(os.path.join(watch_dir, "*.png"))
+                if png_files:
+                    last_mtime = os.path.getmtime(max(png_files, key=os.path.getmtime))
+        except Exception:
+            pass
+
+        while True:
+            time.sleep(0.5)
+            if self.current_state.get("system_status") == "OPTIMIZING":
+                try:
+                    if os.path.exists(watch_dir):
+                        png_files = glob.glob(os.path.join(watch_dir, "*.png"))
+                        if png_files:
+                            latest_file = max(png_files, key=os.path.getmtime)
+                            current_mtime = os.path.getmtime(latest_file)
+                            if current_mtime > last_mtime:
+                                last_mtime = current_mtime
+                                current_step = self.current_state.get("optimization_step", 0)
+                                self.current_state["optimization_step"] = current_step + 1
+                except Exception:
+                    pass
+            else:
+                # Keep last_mtime updated even when not optimizing to avoid a jump when it starts
+                try:
+                    if os.path.exists(watch_dir):
+                        png_files = glob.glob(os.path.join(watch_dir, "*.png"))
+                        if png_files:
+                            last_mtime = os.path.getmtime(max(png_files, key=os.path.getmtime))
+                except Exception:
+                    pass
 
     def _send_recorder_cmd(self, port: int, cmd: str) -> None:
         """Send a command to a recorder process on the given port (9999 or 10000)."""
@@ -312,6 +358,7 @@ class RealLabCommunicator(LabCommunicator):
             
         finally:
             self.current_state["system_status"] = "IDLE"
+            self.current_state["optimization_step"] = 0
             self.current_state["last_updated"] = datetime.now().isoformat()
 
     async def move_motor(self, target_id: str, motor_id: int, distance: float):
@@ -339,6 +386,7 @@ class RealLabCommunicator(LabCommunicator):
     async def optimize_component(self, target_id: str, strategy_name: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Optimizing {target_id} with {strategy_name}...")
         self.current_state["system_status"] = "OPTIMIZING"
+        self.current_state["optimization_step"] = 0
         
         if target_id not in self.component_map:
              self.current_state["system_status"] = "IDLE"
@@ -403,6 +451,7 @@ class RealLabCommunicator(LabCommunicator):
             
         finally:
             self.current_state["system_status"] = "IDLE"
+            self.current_state["optimization_step"] = 0
             self.current_state["last_updated"] = datetime.now().isoformat()
             
     async def remove_component(self, target_id: str):
@@ -454,6 +503,61 @@ class RealLabCommunicator(LabCommunicator):
             
             # Use time.sleep instead of asyncio.sleep in a synchronous generator
             import time
+            time.sleep(sleep_duration)
+
+    def get_optimization_stream(self, fps: int = 5):
+        """Yields MJPEG frames by watching the Camera_Images directory."""
+        import cv2
+        import time
+        import os
+        import glob
+        
+        # Determine the target directory (e.g. Camera_Images in CWD)
+        watch_dir = os.path.abspath("Camera_Images")
+        if not os.path.exists(watch_dir):
+            try:
+                os.makedirs(watch_dir, exist_ok=True)
+            except Exception:
+                pass
+            
+        print(f"[REAL LAB] Starting Optimization Feed watching: {watch_dir}")
+        
+        sleep_duration = 1.0 / max(1, min(fps, 30))
+        last_mtime = 0
+        last_frame_bytes = None
+        
+        while True:
+            # Find the most recently modified PNG file
+            try:
+                png_files = glob.glob(os.path.join(watch_dir, "*.png"))
+                if png_files:
+                    latest_file = max(png_files, key=os.path.getmtime)
+                    current_mtime = os.path.getmtime(latest_file)
+                    
+                    if current_mtime > last_mtime:
+                        img = cv2.imread(latest_file)
+                        if img is not None:
+                            ret, buffer = cv2.imencode('.jpg', img)
+                            if ret:
+                                last_frame_bytes = buffer.tobytes()
+                                last_mtime = current_mtime
+            except Exception as e:
+                print(f"[REAL LAB] Error in optimization stream: {e}")
+            
+            # Yield the last known frame
+            if last_frame_bytes:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + last_frame_bytes + b'\r\n')
+            else:
+                # Dummy frame
+                import numpy as np
+                frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(frame, "WAITING FOR OPTIMIZATION", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                ret, buffer = cv2.imencode('.jpg', frame)
+                if ret:
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                       
             time.sleep(sleep_duration)
 
     def capture_table_cam(self, cam_id: int):
