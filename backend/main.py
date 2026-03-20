@@ -11,6 +11,9 @@ import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import io
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Load .env from project root (parent of backend/) so LAB_MODE and LAB_AUTOMATION_PATH are set
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -196,16 +199,17 @@ async def add_component(payload: Dict[str, Any], background_tasks: BackgroundTas
 
 @app.get("/api/lab-state")
 async def get_lab_state():
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Request: GET /api/lab-state")
+    # Polled every ~500ms from the UI — use debug to avoid flooding the console (see LOG_LEVEL).
+    logger.debug("GET /api/lab-state")
     if lab is None:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Response: 500 Lab Communicator Not Initialized")
+        logger.error("GET /api/lab-state: lab communicator not initialized")
         raise HTTPException(status_code=500, detail="Lab Communicator failed to initialize. Check server logs.")
     try:
         state = lab.get_lab_state()
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Response: 200 OK (State sent)") 
+        logger.debug("GET /api/lab-state: ok")
         return JSONResponse(content=state)
     except Exception as e:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Response: 500 Failed to read state: {e}")
+        logger.exception("GET /api/lab-state failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read Lab State: {str(e)}")
 
 @app.post("/api/lab-state/refresh")
@@ -562,4 +566,19 @@ async def read_debug():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    # Optional: LOG_LEVEL=DEBUG shows per-poll lab-state logs above.
+    _lvl = getattr(logging, (os.getenv("LOG_LEVEL") or "INFO").upper(), logging.INFO)
+    logging.basicConfig(level=_lvl, format="%(levelname)s %(name)s: %(message)s")
+
+    # Access log prints every HTTP line (e.g. GET /api/lab-state twice per second). Off unless:
+    #   UVICORN_ACCESS_LOG=1
+    # Or run: uvicorn main:app --reload --no-access-log
+    _access = (os.getenv("UVICORN_ACCESS_LOG") or "").strip().lower() in ("1", "true", "yes")
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        access_log=_access,
+        log_level=(os.getenv("UVICORN_LOG_LEVEL") or "info").lower(),
+    )

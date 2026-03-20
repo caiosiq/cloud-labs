@@ -442,11 +442,14 @@ class RealLabCommunicator(LabCommunicator):
             if not comp.inventory_location:
                 print(f"[REAL LAB] Warning: {target_id} inventory location unknown. Assuming it's at previous location or 0,0")
             
-            self.experiment.place_component_wo_home_specific_xy_cloudlab(
-                component=comp,
-                target_x=tx,
-                target_y=ty,
-                angle=[-180,0,-rot]
+            # Worker thread: place blocks for a long time; must not block the event loop or lab-state polls stall.
+            await asyncio.to_thread(
+                lambda: self.experiment.place_component_wo_home_specific_xy_cloudlab(
+                    component=comp,
+                    target_x=tx,
+                    target_y=ty,
+                    angle=[-180, 0, -rot],
+                )
             )
             
             # 5. Update State
@@ -476,10 +479,15 @@ class RealLabCommunicator(LabCommunicator):
         print(f"[REAL LAB] Moving motor {motor_id} of {target_id} by {distance} (RELATIVE)...")
         
         # Determine controller from catalog metadata
-        meta = self.catalog_map[target_id]
-        if "motor_controller" in meta:
-            controller_name = meta["motor_controller"]
-        
+        meta = self.catalog_map.get(target_id)
+        if not meta:
+            print(f"[REAL LAB] Error: {target_id} not in component_catalog.")
+            return
+        controller_name = meta.get("motor_controller")
+        if not controller_name:
+            print(f"[REAL LAB] Error: catalog entry for {target_id} has no 'motor_controller'.")
+            return
+
         controller = getattr(self.experiment, controller_name, None)
         
         if not controller:
@@ -487,9 +495,13 @@ class RealLabCommunicator(LabCommunicator):
             return
 
         try:
-            # We assume the underlying library treats move_motor as relative if that's what COBYLA strategy implies.
-            # User confirmed: "move motor is already assuming relative motions"
-            controller.move_motor(motor_id, distance, wait_completion=True)
+            # Worker thread: same event-loop issue as optimize / place.
+            await asyncio.to_thread(
+                controller.move_motor,
+                motor_id,
+                distance,
+                wait_completion=True,
+            )
             print(f"[REAL LAB] Motor moved.")
         except Exception as e:
             print(f"[REAL LAB] Motor move failed: {e}")
@@ -547,9 +559,11 @@ class RealLabCommunicator(LabCommunicator):
                 )
             
             if strategy:
-                # 2. Execute
-                self.experiment.optimize_component(comp, strategy)
-                
+                # 2. Execute off the event loop. optimize_component() in lab_automation is synchronous and
+                # can run for minutes; if we block here, GET /api/lab-state never runs and the UI never
+                # sees system_status=OPTIMIZING or optimization_step updates (mock works because it awaits sleep).
+                await asyncio.to_thread(self.experiment.optimize_component, comp, strategy)
+
                 # 3. Update State 
                 if target_id in self.current_state["components"]:
                     self.current_state["components"][target_id]["intent"]["is_optimized"] = True

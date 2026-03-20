@@ -1,41 +1,47 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-03-17T15:03:07.742559",
+  "last_updated": "2026-03-20T00:18:57.771619",
   "components": {
     "tag_9": {
       "id": "tag_9",
       "type": "OPTICAL_FILTER",
       "state": "PLACED",
       "pose": {
-        "x": -294.9207283028984,
-        "y": -34.42100813734988,
-        "rotation": 0
+        "x": -389.653506751356,
+        "y": 61.60730977767172,
+        "rotation": 1.2909717869127262
       },
       "intent": {
         "nominal_pose": {
-          "x": -295.2428571428572,
-          "y": -34.34285714285718,
+          "x": -389.52857142857147,
+          "y": 61.371428571428545,
           "rotation": 0
         },
-        "placement_strategy": "MANUAL",
-        "last_optimized_pose": null,
-        "is_optimized": false
+        "placement_strategy": "NEWTON",
+        "last_optimized_pose": {
+          "x": -389.653506751356,
+          "y": 61.60730977767172,
+          "rotation": 1.2909717869127262
+        },
+        "is_optimized": true
       },
-      "metadata": {}
+      "metadata": {
+        "last_optimization_score": 0.99
+      }
     },
     "tag_22": {
       "id": "tag_22",
       "type": "OPTICAL_CAMERA",
       "state": "PLACED",
       "pose": {
-        "x": -197.14892795639852,
-        "y": 91.56494177742952,
+        "x": -211.48290838489055,
+        "y": -81.78206082425027,
         "rotation": 680
       },
       "intent": {
         "nominal_pose": {
-          "x": -197.14285714285717,
-          "y": 91.42857142857143,
+          "x": -211.42857142857144,
+          "y": -81.42857142857143,
           "rotation": 680
         },
         "placement_strategy": "MANUAL",
@@ -175,14 +181,14 @@
       "type": "OPTICAL_FILTER",
       "state": "PLACED",
       "pose": {
-        "x": -341.32923496640166,
-        "y": 282.9942611232206,
+        "x": -86.9827529445462,
+        "y": 374.4173871065666,
         "rotation": 70
       },
       "intent": {
         "nominal_pose": {
-          "x": -341.42857142857144,
-          "y": 282.8571428571429,
+          "x": -87.14285714285715,
+          "y": 374.28571428571433,
           "rotation": 70
         },
         "placement_strategy": "MANUAL",
