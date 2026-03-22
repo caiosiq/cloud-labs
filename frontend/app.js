@@ -217,6 +217,19 @@ async function fetchLabState() {
                             ghostState[name].rotation = comp.pose.rotation || 0;
                         }
                     }
+                    // During real Newton-style optimization the backend updates intent.nominal_pose before each
+                    // sub-move (ghost) and pose after the place completes (solid). Sync ghost every poll while OPTIMIZING.
+                    else if (labState.system_status === 'OPTIMIZING' && !isDragging && comp.intent && comp.intent.nominal_pose) {
+                        ghostState[name] = { ...comp.intent.nominal_pose };
+                        if (typeof ghostState[name].rotation !== 'number') {
+                            ghostState[name].rotation = comp.pose.rotation || 0;
+                        }
+                        if (selectedComponent === name && document.getElementById('ctx-x')) {
+                            ctxX.value = ghostState[name].x.toFixed(1);
+                            ctxY.value = ghostState[name].y.toFixed(1);
+                            ctxRot.value = ghostState[name].rotation.toFixed(1);
+                        }
+                    }
                     // Otherwise only sync if allowed (command finished or forced refresh)
                     else if (shouldSync && !isDragging) {
                         if (comp.intent && comp.intent.nominal_pose) {
@@ -329,7 +342,8 @@ async function fetchLabState() {
                 }
             }
 
-            if (Math.random() > 0.5) {
+            // Fake beam-intensity plot is mock-only; real lab has no such metric in state.
+            if (labState.lab_mode === 'MOCK' && Math.random() > 0.5) {
                 optimizationData.push({
                     step: optimizationData.length, 
                     value: Math.min(1.0, 0.2 + optimizationData.length * 0.05 + Math.random() * 0.1)
@@ -1497,6 +1511,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
 
 function drawOptimizationGraph() {
     if (!isOptimizing || optimizationData.length === 0) return;
+    if (!labState || labState.lab_mode !== 'MOCK') return;
 
     const w = 300;
     const h = 150;
@@ -2296,6 +2311,80 @@ if (tableCamCaptureBtn) {
         }
     });
 }
+
+// --- Cobyla reference image (server-side BGR ndarray for CobylaAlignmentStrategy.reference_image) ---
+const tableCamCobylaRefBtn = document.getElementById('table-cam-cobyla-ref-btn');
+const tableCamCobylaClearBtn = document.getElementById('table-cam-cobyla-clear-btn');
+const cobylaRefStatusEl = document.getElementById('cobyla-ref-status');
+
+async function refreshCobylaRefStatus() {
+    if (!cobylaRefStatusEl) return;
+    try {
+        const r = await fetch('/api/cobyla-reference-image/status');
+        if (!r.ok) {
+            cobylaRefStatusEl.textContent = 'Cobyla ref: status unavailable';
+            return;
+        }
+        const d = await r.json();
+        if (d.set && d.width && d.height) {
+            cobylaRefStatusEl.textContent = `Cobyla ref: set (${d.width}×${d.height})`;
+        } else {
+            cobylaRefStatusEl.textContent = 'Cobyla ref: not set';
+        }
+    } catch (e) {
+        cobylaRefStatusEl.textContent = 'Cobyla ref: status error';
+    }
+}
+
+if (tableCamCobylaRefBtn) {
+    tableCamCobylaRefBtn.addEventListener('click', async () => {
+        if (!cobylaRefStatusEl) return;
+        cobylaRefStatusEl.textContent = 'Cobyla ref: uploading…';
+        try {
+            const cap = await fetch(`/api/table-cam/capture?cam_id=${selectedTableCam}`);
+            if (!cap.ok) {
+                const err = (await cap.json().catch(() => ({}))).detail || `Capture failed (${cap.status})`;
+                cobylaRefStatusEl.textContent = `Cobyla ref: ${err}`;
+                log(err, 'warn');
+                return;
+            }
+            const blob = await cap.blob();
+            const res = await fetch('/api/cobyla-reference-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'image/png' },
+                body: blob,
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const err = data.detail || res.statusText || 'Upload failed';
+                cobylaRefStatusEl.textContent = `Cobyla ref: ${err}`;
+                log(err, 'warn');
+                return;
+            }
+            log(data.message || 'Cobyla reference stored', 'info');
+            await refreshCobylaRefStatus();
+        } catch (e) {
+            cobylaRefStatusEl.textContent = `Cobyla ref: ${e.message || 'failed'}`;
+            log(e.message || 'Cobyla reference upload failed', 'error');
+        }
+    });
+}
+
+if (tableCamCobylaClearBtn) {
+    tableCamCobylaClearBtn.addEventListener('click', async () => {
+        try {
+            const res = await fetch('/api/cobyla-reference-image', { method: 'DELETE' });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) log(data.message || 'Cobyla reference cleared', 'info');
+            await refreshCobylaRefStatus();
+        } catch (e) {
+            log(e.message || 'Clear failed', 'error');
+        }
+    });
+}
+
+refreshCobylaRefStatus();
+setInterval(refreshCobylaRefStatus, 8000);
 
 async function checkVideoStatus() {
     try {

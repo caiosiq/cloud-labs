@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -207,6 +207,8 @@ async def get_lab_state():
     try:
         state = lab.get_lab_state()
         logger.debug("GET /api/lab-state: ok")
+        if isinstance(state, dict):
+            state = {**state, "lab_mode": LAB_MODE}
         return JSONResponse(content=state)
     except Exception as e:
         logger.exception("GET /api/lab-state failed: %s", e)
@@ -358,6 +360,44 @@ async def table_cam_capture(cam_id: int = 1):
     if data is None:
         raise HTTPException(status_code=503, detail="Capture failed or table cams not available")
     return Response(content=data, media_type="image/png")
+
+
+@app.post("/api/cobyla-reference-image")
+async def cobyla_reference_image_upload(request: Request):
+    """
+    Store a PNG as CobylaAlignmentStrategy.reference_image (BGR ndarray, same class of image as table-cam capture).
+    Body: raw PNG bytes, Content-Type image/png recommended.
+    """
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if not hasattr(lab, "set_cobyla_reference_from_png_bytes"):
+        raise HTTPException(status_code=503, detail="Cobyla reference storage not available")
+    body = await request.body()
+    ok, msg = lab.set_cobyla_reference_from_png_bytes(body)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"status": "success", "message": msg}
+
+
+@app.get("/api/cobyla-reference-image/status")
+async def cobyla_reference_image_status():
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if not hasattr(lab, "get_cobyla_reference_status"):
+        raise HTTPException(status_code=503, detail="Cobyla reference status not available")
+    out = dict(lab.get_cobyla_reference_status())
+    out["lab_mode"] = LAB_MODE
+    return out
+
+
+@app.delete("/api/cobyla-reference-image")
+async def cobyla_reference_image_clear():
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if hasattr(lab, "clear_cobyla_reference"):
+        lab.clear_cobyla_reference()
+    return {"status": "success", "message": "Cobyla reference cleared"}
+
 
 @app.get("/api/video-feed/status")
 async def get_video_status():

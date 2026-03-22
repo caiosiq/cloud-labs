@@ -3,7 +3,7 @@ import json
 import asyncio
 import random
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Dict, Tuple
 
 from .base import LabCommunicator
 
@@ -24,6 +24,7 @@ class MockLabCommunicator(LabCommunicator):
         print(f"[MOCK LAB] Using state file: {self.state_file}")
         self._ensure_state()
         self._load_catalog()
+        self._cobyla_reference_bgr = None  # optional BGR ndarray for UI / parity with real
 
     def _ensure_state(self):
         if not os.path.exists(self.state_file):
@@ -255,6 +256,47 @@ class MockLabCommunicator(LabCommunicator):
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
         print(f"[MOCK LAB] Placed {tag_id} at ({x:.1f}, {y:.1f})")
+
+    def set_cobyla_reference_from_png_bytes(self, data: bytes) -> Tuple[bool, str]:
+        """Same API as real lab; mock optimize does not use it, but UI can test the flow."""
+        if not data or len(data) < 8:
+            return False, "empty body"
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            return False, "cv2/numpy required"
+        arr = np.frombuffer(data, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            return False, "could not decode PNG"
+        if img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        elif img.ndim == 3 and img.shape[2] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        if img.ndim != 3 or img.shape[2] != 3:
+            return False, "decoded image must be BGR with 3 channels"
+        self._cobyla_reference_bgr = img.copy()
+        h, w = img.shape[:2]
+        print(f"[MOCK LAB] Cobyla reference image set ({w}x{h} BGR)")
+        return True, f"stored {w}x{h} BGR reference (mock)"
+
+    def clear_cobyla_reference(self) -> None:
+        self._cobyla_reference_bgr = None
+        print("[MOCK LAB] Cobyla reference image cleared")
+
+    def get_cobyla_reference_status(self) -> Dict[str, Any]:
+        ref = self._cobyla_reference_bgr
+        if ref is None:
+            return {"available": True, "set": False}
+        h, w = ref.shape[:2]
+        return {
+            "available": True,
+            "set": True,
+            "width": int(w),
+            "height": int(h),
+            "channels": int(ref.shape[2]),
+        }
 
     def get_video_feed_status(self) -> Dict[str, Any]:
         return {"connected": True, "source": "/api/video-feed/stream"}

@@ -1,12 +1,15 @@
 import atexit
+import inspect
 import json
 import os
+import re
 import subprocess
 import sys
+import threading
 import time
 import asyncio
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
@@ -61,13 +64,20 @@ class RealLabCommunicator(LabCommunicator):
             "components": {},
             "optimization_step": 0
         }
-        
+        self._state_lock = threading.RLock()
+        self._place_cloudlab_orig: Any = None
+
+        # CobylaAlignmentStrategy.reference_image (BGR ndarray, same family as table-cam / capture_image)
+        self._cobyla_ref_lock = threading.Lock()
+        self._cobyla_reference_bgr: Optional[Any] = None  # np.ndarray when set
+
         self._initialize_state()
         self._recorder_procs: List[subprocess.Popen] = []
         self._start_recorder_processes()
-        
+        # Fallback when image names have no stepNN: count once per new basename (avoids double bumps on mtime+size).
+        self._last_optimization_image_basename: Optional[str] = None
+
         # Start a background thread to monitor optimization steps reliably
-        import threading
         self._opt_monitor_thread = threading.Thread(target=self._monitor_optimization_dir, daemon=True)
         self._opt_monitor_thread.start()
 
@@ -115,6 +125,14 @@ class RealLabCommunicator(LabCommunicator):
 
         return latest_file, latest_ns
 
+    @staticmethod
+    def _optimization_step_from_image_path(path: str) -> Optional[int]:
+        """If basename contains step<digits> (e.g. test_step00.png), return that index; else None."""
+        m = re.search(r"(?i)step(\d+)", os.path.basename(path))
+        if not m:
+            return None
+        return int(m.group(1), 10)
+
     def _monitor_optimization_dir(self):
         """Background task to watch optimization PNGs and increment optimization_step when files change."""
         import time
@@ -141,17 +159,38 @@ class RealLabCommunicator(LabCommunicator):
                     except Exception:
                         current_size = -1
 
-                    # Increment on any meaningful change: mtime_ns, size, or file identity.
-                    if current_ns > last_mtime_ns or current_size != last_size or current_file != last_path:
-                        last_mtime_ns = current_ns
-                        last_size = current_size
-                        last_path = current_file
-                        current_step = self.current_state.get("optimization_step", 0)
-                        self.current_state["optimization_step"] = current_step + 1
-                        print(
-                            f"[REAL LAB] optimization_step={current_step + 1} "
-                            f"(file={os.path.basename(current_file)} ns={current_ns} size={current_size})"
-                        )
+                    # Prefer step index from filename (e.g. test_step02.png -> 2). Writers often touch the same
+                    # file twice (mtime + size), which previously doubled increments (0->2->4...).
+                    parsed = self._optimization_step_from_image_path(current_file)
+                    if parsed is not None:
+                        with self._state_lock:
+                            if self.current_state.get("system_status") != "OPTIMIZING":
+                                pass
+                            else:
+                                prev = self.current_state.get("optimization_step")
+                                if parsed != prev:
+                                    self.current_state["optimization_step"] = parsed
+                                    print(
+                                        f"[REAL LAB] optimization_step={parsed} "
+                                        f"(from file={os.path.basename(current_file)})"
+                                    )
+                    else:
+                        basename = os.path.basename(current_file)
+                        with self._state_lock:
+                            if self.current_state.get("system_status") != "OPTIMIZING":
+                                pass
+                            elif basename != self._last_optimization_image_basename:
+                                self._last_optimization_image_basename = basename
+                                current_step = self.current_state.get("optimization_step", 0)
+                                self.current_state["optimization_step"] = current_step + 1
+                                print(
+                                    f"[REAL LAB] optimization_step={current_step + 1} "
+                                    f"(new image basename={basename} ns={current_ns} size={current_size})"
+                                )
+
+                    last_mtime_ns = current_ns
+                    last_size = current_size
+                    last_path = current_file
                 except Exception:
                     pass
             else:
@@ -271,9 +310,9 @@ class RealLabCommunicator(LabCommunicator):
         # 3. Perform Physical Scan
         self.experiment.scan_components_cloudlab(components_to_scan, force_rescan=True)
         
-        # 4. Populate Lab State
-        self.current_state["components"] = {}
-        
+        # 4. Populate Lab State (build off lock, then swap)
+        new_components: Dict[str, Any] = {}
+
         for item in catalog:
             tag_id = item.get("tag_id")
             comp = self.component_map.get(tag_id)
@@ -293,6 +332,7 @@ class RealLabCommunicator(LabCommunicator):
 
             if comp and comp.inventory_location:
                 # Found on table
+                comp.current_location = comp.inventory_location
                 inv = comp.inventory_location
                 calc_rotation = getattr(inv, "yaw", None) or 0
                 print(f"  fallback yaw (deg): {getattr(inv, 'yaw', None)} -> rotation: {calc_rotation:.2f}")
@@ -326,11 +366,13 @@ class RealLabCommunicator(LabCommunicator):
                 },
                 "metadata": {}
             }
-            self.current_state["components"][tag_id] = entry
+            new_components[tag_id] = entry
             print(f"  entry keys: {list(entry.keys())}, intent.nominal_pose: {entry['intent'].get('nominal_pose')}")
 
-        self.current_state["last_updated"] = datetime.now().isoformat()
-        n_placed = len([c for c in self.current_state["components"].values() if c["state"] == "PLACED"])
+        with self._state_lock:
+            self.current_state["components"] = new_components
+            self.current_state["last_updated"] = datetime.now().isoformat()
+        n_placed = len([c for c in new_components.values() if c["state"] == "PLACED"])
         print(f"[REAL LAB] Scan complete. {n_placed} components PLACED.")
 
     def refresh_state(self):
@@ -338,13 +380,15 @@ class RealLabCommunicator(LabCommunicator):
         Re-initialize lab state using the same logic as at startup.
         This is used by the UI "Refresh State" button.
         """
-        self.current_state["system_status"] = "BUSY"
+        with self._state_lock:
+            self.current_state["system_status"] = "BUSY"
         try:
             self._initialize_state()
         finally:
-            self.current_state["system_status"] = "IDLE"
-            self.current_state["optimization_step"] = 0
-            self.current_state["last_updated"] = datetime.now().isoformat()
+            with self._state_lock:
+                self.current_state["system_status"] = "IDLE"
+                self.current_state["optimization_step"] = 0
+                self.current_state["last_updated"] = datetime.now().isoformat()
 
     def set_lab_state(self, state: Dict[str, Any]):
         """
@@ -355,23 +399,24 @@ class RealLabCommunicator(LabCommunicator):
         if not isinstance(state, dict):
             raise ValueError("Loaded state must be a JSON object/dict")
 
-        # Update the current_state that the UI reads.
-        self.current_state = state
-        self.current_state["system_status"] = "IDLE"
-        self.current_state["optimization_step"] = int(self.current_state.get("optimization_step", 0) or 0)
-        self.current_state["last_updated"] = datetime.now().isoformat()
+        with self._state_lock:
+            # Update the current_state that the UI reads.
+            self.current_state = state
+            self.current_state["system_status"] = "IDLE"
+            self.current_state["optimization_step"] = int(self.current_state.get("optimization_step", 0) or 0)
+            self.current_state["last_updated"] = datetime.now().isoformat()
+            components = dict(self.current_state.get("components", {}) or {})
 
         # Apply to component_map so pick/place uses correct coordinates.
-        components = self.current_state.get("components", {}) or {}
         for tag_id, entry in components.items():
             pose = (entry or {}).get("pose", {}) or {}
             x = float(pose.get("x", 0.0))
             y = float(pose.get("y", 0.0))
             z = float(pose.get("z", 500.0))  # z isn't stored in current UI payload; default matches scan
 
-            roll = float(pose.get("roll", 0.0))
-            pitch = float(pose.get("pitch", 0.0))
-            yaw = float(pose.get("yaw", 0.0))
+            roll = 180
+            pitch = 0
+            yaw = float(pose.get("rotation"))
 
             comp = self.component_map.get(tag_id)
             if not comp:
@@ -386,8 +431,167 @@ class RealLabCommunicator(LabCommunicator):
             comp.is_placed = (entry or {}).get("state") == "PLACED"
 
     def get_lab_state(self) -> Dict[str, Any]:
-        return self.current_state
+        with self._state_lock:
+            return json.loads(json.dumps(self.current_state))
 
+    def set_cobyla_reference_from_png_bytes(self, data: bytes) -> Tuple[bool, str]:
+        """Decode PNG bytes to BGR (OpenCV) and store for the next COBYLA optimize run."""
+        if not data or len(data) < 8:
+            return False, "empty body"
+        try:
+            import cv2
+        except ImportError:
+            return False, "cv2 not installed"
+        arr = np.frombuffer(data, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            return False, "could not decode PNG"
+        if img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        elif img.ndim == 3 and img.shape[2] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        if img.ndim != 3 or img.shape[2] != 3:
+            return False, "decoded image must be BGR with 3 channels"
+        with self._cobyla_ref_lock:
+            self._cobyla_reference_bgr = img.copy()
+        h, w = img.shape[:2]
+        print(f"[REAL LAB] Cobyla reference image set ({w}x{h} BGR)")
+        return True, f"stored {w}x{h} BGR reference"
+
+    def clear_cobyla_reference(self) -> None:
+        with self._cobyla_ref_lock:
+            self._cobyla_reference_bgr = None
+        print("[REAL LAB] Cobyla reference image cleared")
+
+    def get_cobyla_reference_status(self) -> Dict[str, Any]:
+        with self._cobyla_ref_lock:
+            ref = self._cobyla_reference_bgr
+        if ref is None:
+            return {"available": True, "set": False}
+        h, w = ref.shape[:2]
+        return {
+            "available": True,
+            "set": True,
+            "width": int(w),
+            "height": int(h),
+            "channels": int(ref.shape[2]),
+        }
+
+    def _tag_id_for_component(self, comp: Any) -> Optional[str]:
+        for tid, c in self.component_map.items():
+            if c is comp:
+                return tid
+        return None
+
+    def _ui_pose_for_placement_tick(
+        self, tag_id: str, target_x: Optional[float], target_y: Optional[float]
+    ) -> Dict[str, float]:
+        """
+        Newton sub-moves: take table X/Y from the place call, keep canvas rotation from current lab state.
+        Robot `angle` / rotvec is not the same as the UI's top-down `rotation` (e.g. 270 vs ~29); parsing it
+        misaligns ghost and solid.
+        """
+        with self._state_lock:
+            comp_entry = (self.current_state.get("components") or {}).get(tag_id)
+            pose = dict((comp_entry or {}).get("pose") or {})
+        nx = float(target_x) if target_x is not None else float(pose.get("x", 0.0))
+        ny = float(target_y) if target_y is not None else float(pose.get("y", 0.0))
+        rot = float(pose.get("rotation", 0.0) or 0.0)
+        out: Dict[str, float] = {"x": nx, "y": ny, "rotation": rot}
+        for key in ("roll", "pitch", "yaw"):
+            if key in pose and pose[key] is not None:
+                try:
+                    out[key] = float(pose[key])
+                except (TypeError, ValueError):
+                    pass
+        return out
+
+    def _apply_placement_ui_phase(self, tag_id: str, phase: str, pose: Dict[str, float]) -> None:
+        """
+        phase='ghost' -> update intent.nominal_pose only (planned target before/at start of move).
+        phase='physical' -> update solid pose + intent to match (after successful place).
+        """
+        if phase not in ("ghost", "physical"):
+            return
+        with self._state_lock:
+            comp_entry = (self.current_state.get("components") or {}).get(tag_id)
+            if not comp_entry:
+                return
+            intent = comp_entry.setdefault("intent", {})
+            if phase == "ghost":
+                intent["nominal_pose"] = dict(pose)
+            else:
+                comp_entry["pose"] = dict(pose)
+                comp_entry["state"] = "PLACED"
+                intent["nominal_pose"] = dict(pose)
+            self.current_state["last_updated"] = datetime.now().isoformat()
+
+    def _cloudlab_progress_callback(self, target_tag_id: str):
+        """
+        Optional callback for NewtonPlacementStrategy_cloudlab(progress_callback=...).
+        Signature: (phase, component, target_x, target_y, angle=None, step=None)
+        phase in ('ghost', 'physical').
+        """
+
+        def _cb(phase: str, component: Any, target_x: float, target_y: float, angle: Any = None, step: Any = None):
+            tid = self._tag_id_for_component(component)
+            if tid != target_tag_id:
+                return
+            pose = self._ui_pose_for_placement_tick(tid, target_x, target_y)
+            self._apply_placement_ui_phase(tid, phase, pose)
+
+        return _cb
+
+    def _install_cloudlab_place_ui_hook(self, target_tag_id: str) -> None:
+        """Wrap place_component_wo_home_specific_xy_cloudlab so UI gets ghost then physical updates."""
+        exp = self.experiment
+        if not hasattr(exp, "place_component_wo_home_specific_xy_cloudlab"):
+            print("[REAL LAB] No place_component_wo_home_specific_xy_cloudlab on experiment; UI hook skipped.")
+            return
+        if self._place_cloudlab_orig is not None:
+            return
+        orig = exp.place_component_wo_home_specific_xy_cloudlab
+        self._place_cloudlab_orig = orig
+        comm = self
+
+        try:
+            sig = inspect.signature(orig)
+        except (TypeError, ValueError):
+            sig = None
+
+        def wrapped(*args, **kwargs):
+            component = target_x = target_y = None
+            if sig is not None:
+                try:
+                    ba = sig.bind_partial(*args, **kwargs)
+                    ba.apply_defaults()
+                    component = ba.arguments.get("component")
+                    target_x = ba.arguments.get("target_x")
+                    target_y = ba.arguments.get("target_y")
+                except TypeError:
+                    pass
+            tid = comm._tag_id_for_component(component) if component is not None else None
+            pose = None
+            if tid == target_tag_id and target_x is not None and target_y is not None:
+                pose = comm._ui_pose_for_placement_tick(tid, target_x, target_y)
+                comm._apply_placement_ui_phase(tid, "ghost", pose)
+            try:
+                return orig(*args, **kwargs)
+            except Exception:
+                raise
+            else:
+                if pose is not None and tid == target_tag_id:
+                    comm._apply_placement_ui_phase(tid, "physical", pose)
+
+        exp.place_component_wo_home_specific_xy_cloudlab = wrapped  # type: ignore[method-assign]
+        print("[REAL LAB] Installed place_component_wo_home_specific_xy_cloudlab UI hook for Newton.")
+
+    def _remove_cloudlab_place_ui_hook(self) -> None:
+        if self._place_cloudlab_orig is None:
+            return
+        if hasattr(self.experiment, "place_component_wo_home_specific_xy_cloudlab"):
+            self.experiment.place_component_wo_home_specific_xy_cloudlab = self._place_cloudlab_orig
+        self._place_cloudlab_orig = None
 
     def get_rotation_from_angle(self, robot_angle: List[float]) -> float:
         """
@@ -418,14 +622,16 @@ class RealLabCommunicator(LabCommunicator):
 
     async def move_component(self, target_id: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Moving {target_id}...")
-        
+
         # 1. Update Status
-        self.current_state["system_status"] = "BUSY"
-        
+        with self._state_lock:
+            self.current_state["system_status"] = "BUSY"
+
         # 2. Get Component
         if target_id not in self.component_map:
             print(f"[REAL LAB] Error: Component {target_id} not found in map.")
-            self.current_state["system_status"] = "IDLE"
+            with self._state_lock:
+                self.current_state["system_status"] = "IDLE"
             return
 
         comp = self.component_map[target_id]
@@ -454,26 +660,29 @@ class RealLabCommunicator(LabCommunicator):
             
             # 5. Update State
             #UPDATE TO GET REFORCE-SCAM
-            if target_id in self.current_state["components"]:
-                self.current_state["components"][target_id]["pose"] = {
-                    "x": tx,
-                    "y": ty,
-                    "rotation": rot
-                }
-                self.current_state["components"][target_id]["state"] = "PLACED"
-                
-                # Update intent to match reality
-                self.current_state["components"][target_id]["intent"]["nominal_pose"] = {
-                    "x": tx, "y": ty, "rotation": rot
-                }
-                print(comp)
+            with self._state_lock:
+                if target_id in self.current_state["components"]:
+                    self.current_state["components"][target_id]["pose"] = {
+                        "x": tx,
+                        "y": ty,
+                        "rotation": rot
+                    }
+                    self.current_state["components"][target_id]["state"] = "PLACED"
+
+                    # Update intent to match reality
+                    self.current_state["components"][target_id]["intent"]["nominal_pose"] = {
+                        "x": tx, "y": ty, "rotation": rot
+                    }
+                    self.current_state["last_updated"] = datetime.now().isoformat()
+            print(comp)
         except Exception as e:
             print(f"[REAL LAB] Move Failed: {e}")
-            
+
         finally:
-            self.current_state["system_status"] = "IDLE"
-            self.current_state["optimization_step"] = 0
-            self.current_state["last_updated"] = datetime.now().isoformat()
+            with self._state_lock:
+                self.current_state["system_status"] = "IDLE"
+                self.current_state["optimization_step"] = 0
+                self.current_state["last_updated"] = datetime.now().isoformat()
 
     async def move_motor(self, target_id: str, motor_id: int, distance: float):
         print(f"[REAL LAB] Moving motor {motor_id} of {target_id} by {distance} (RELATIVE)...")
@@ -508,26 +717,28 @@ class RealLabCommunicator(LabCommunicator):
 
     async def optimize_component(self, target_id: str, strategy_name: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Optimizing {target_id} with {strategy_name}...")
-        self.current_state["system_status"] = "OPTIMIZING"
-        self.current_state["optimization_step"] = 0
-        
+        with self._state_lock:
+            self.current_state["system_status"] = "OPTIMIZING"
+            self.current_state["optimization_step"] = 0
+        self._last_optimization_image_basename = None
+
         if target_id not in self.component_map:
-             self.current_state["system_status"] = "IDLE"
-             return
+            with self._state_lock:
+                self.current_state["system_status"] = "IDLE"
+            return
 
         comp = self.component_map[target_id]
+        newton_place_hook_installed = False
 
         try:
             # 1. Select Strategy
             strategy = None
             if strategy_name == "NEWTON":
-                # Use the component's current table Y as the original_position for Newton placement
-                original_pos = 0.0
-                cur_loc = getattr(comp, "current_location", None)
+                # Live UI: ghost follows planned targets; solid follows completed places (see _cloudlab hooks).
+                self._install_cloudlab_place_ui_hook(target_id)
+                newton_place_hook_installed = True
 
-                # STRICT PARAMETER HANDLING: No defaults allowed.
-                # If params are missing, this will raise a KeyError, which is desired behavior.
-                strategy = NewtonPlacementStrategy_cloudlab(
+                newton_kw: Dict[str, Any] = dict(
                     camera_number=params["camera_number"],
                     target_x_pixel=params["target_x_pixel"],
                     tolerance_ratio=params["tolerance_ratio"],
@@ -535,6 +746,14 @@ class RealLabCommunicator(LabCommunicator):
                     initial_move=-0.2,
                     do_repositioning=False,
                 )
+                try:
+                    init_sig = inspect.signature(NewtonPlacementStrategy_cloudlab.__init__)
+                    if "progress_callback" in init_sig.parameters:
+                        newton_kw["progress_callback"] = self._cloudlab_progress_callback(target_id)
+                except (TypeError, ValueError):
+                    pass
+
+                strategy = NewtonPlacementStrategy_cloudlab(**newton_kw)
                 print("DOING NEWTON STRATEGY")
             elif strategy_name == "COBYLA":
                 motor_ids = params.get("motor_ids")
@@ -552,11 +771,24 @@ class RealLabCommunicator(LabCommunicator):
                 if not motor_ids:
                      raise ValueError("COBYLA strategy requires 'motor_ids' parameter.")
 
-                strategy = CobylaAlignmentStrategy(
-                    camera_number=params.get("camera_number", 1),
-                    motor_ids=motor_ids,
-                    objective_threshold=params.get("objective_threshold", 100.0)
-                )
+                cobyla_kw: Dict[str, Any] = {
+                    "camera_number": params.get("camera_number", 1),
+                    "motor_ids": motor_ids,
+                    "objective_threshold": params.get("objective_threshold", 100.0),
+                }
+                with self._cobyla_ref_lock:
+                    ref_copy = None if self._cobyla_reference_bgr is None else self._cobyla_reference_bgr.copy()
+                if ref_copy is not None:
+                    try:
+                        sig = inspect.signature(CobylaAlignmentStrategy.__init__)
+                        if "reference_image" in sig.parameters:
+                            cobyla_kw["reference_image"] = ref_copy
+                    except (TypeError, ValueError):
+                        cobyla_kw["reference_image"] = ref_copy
+                else:
+                    print("[REAL LAB] COBYLA: no reference image set via UI; strategy will use its own fallback if any.")
+
+                strategy = CobylaAlignmentStrategy(**cobyla_kw)
             
             if strategy:
                 # 2. Execute off the event loop. optimize_component() in lab_automation is synchronous and
@@ -564,18 +796,23 @@ class RealLabCommunicator(LabCommunicator):
                 # sees system_status=OPTIMIZING or optimization_step updates (mock works because it awaits sleep).
                 await asyncio.to_thread(self.experiment.optimize_component, comp, strategy)
 
-                # 3. Update State 
-                if target_id in self.current_state["components"]:
-                    self.current_state["components"][target_id]["intent"]["is_optimized"] = True
-                    self.current_state["components"][target_id]["intent"]["placement_strategy"] = strategy_name
-                
+                # 3. Update State
+                with self._state_lock:
+                    if target_id in self.current_state["components"]:
+                        self.current_state["components"][target_id]["intent"]["is_optimized"] = True
+                        self.current_state["components"][target_id]["intent"]["placement_strategy"] = strategy_name
+                        self.current_state["last_updated"] = datetime.now().isoformat()
+
         except Exception as e:
             print(f"[REAL LAB] Optimization Failed: {e}")
-            
+
         finally:
-            self.current_state["system_status"] = "IDLE"
-            self.current_state["optimization_step"] = 0
-            self.current_state["last_updated"] = datetime.now().isoformat()
+            if newton_place_hook_installed:
+                self._remove_cloudlab_place_ui_hook()
+            with self._state_lock:
+                self.current_state["system_status"] = "IDLE"
+                self.current_state["optimization_step"] = 0
+                self.current_state["last_updated"] = datetime.now().isoformat()
             
     async def remove_component(self, target_id: str):
          print(f"[REAL LAB] Remove requested for {target_id} (Not implemented)")

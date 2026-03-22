@@ -11,7 +11,7 @@
   },
   "COBYLA": {
     "name": "Cobyla Alignment",
-    "description": "Constrained Optimization by Linear Approximation. Good for multi-variable alignment.",
+    "description": "Constrained Optimization by Linear Approximation. Good for multi-variable alignment. In real mode, set a single-beam reference image from the Table cam panel (stored server-side) before running; it is passed as reference_image to CobylaAlignmentStrategy (same kind of BGR image as table-cam capture).",
     "parameters": {
       "camera_number": { "type": "integer", "default": 1, "description": "Target Camera ID" },
       "motor_ids": { "type": "array", "default": [1, 3], "description": "List of Motor IDs to adjust" },
