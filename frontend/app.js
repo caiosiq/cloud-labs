@@ -14,6 +14,11 @@ const LAB_HEIGHT_MM = LAB_Y_MAX - LAB_Y_MIN;
 const LAB_SCALE = Math.min(CANVAS_WIDTH / LAB_WIDTH_MM, CANVAS_HEIGHT / LAB_HEIGHT_MM);
 const LAB_CENTER_PX = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
 
+/** Breadboard hole pattern vs lab origin: ¼" base shift + arm fine-tune to match holes with laser at b = 391.6 mm (see laser_line_fit.npy). Only the grid dots use this; component poses stay in raw lab mm. */
+const QUARTER_INCH_MM = 25.4 / 4;
+const BREADBOARD_GRID_FINE_TUNE_X_MM = -2.05; // with previous b = 393.65 → measured line 391.6 mm
+const BREADBOARD_GRID_OFFSET_X_MM = -QUARTER_INCH_MM + BREADBOARD_GRID_FINE_TUNE_X_MM; // −8.4 mm
+
 /** Lab mm -> canvas pixels (origin at center, +Y lab = up on screen) */
 function mmToPx(labX, labY) {
     return {
@@ -1223,7 +1228,7 @@ function clearCanvas() {
     ctx.fillStyle = '#fff';
     ctx.fill();
 
-    // Draw Breadboard Grid (25mm spacing)
+    // Draw Breadboard Grid (25mm spacing), shifted in X to match physical hole columns (see BREADBOARD_GRID_OFFSET_X_MM).
     ctx.fillStyle = '#2a2e36';
     const gridSpacingMm = 25;
     
@@ -1231,7 +1236,7 @@ function clearCanvas() {
     // We iterate in mm and convert to px to ensure accuracy
     for (let xMm = LAB_X_MIN; xMm <= LAB_X_MAX; xMm += gridSpacingMm) {
         for (let yMm = LAB_Y_MIN; yMm <= LAB_Y_MAX; yMm += gridSpacingMm) {
-            const p = mmToPx(xMm, yMm);
+            const p = mmToPx(xMm + BREADBOARD_GRID_OFFSET_X_MM, yMm);
             // Only draw if within canvas bounds (though mmToPx should handle mapping)
             if (p.x >= 0 && p.x <= CANVAS_WIDTH && p.y >= 0 && p.y <= CANVAS_HEIGHT) {
                 ctx.beginPath(); 
@@ -2163,6 +2168,7 @@ function init() {
             }
 
             forceGhostSync = true;
+            await fetchLaserLine();
             await fetchLabState();
             checkVideoStatus();
         } catch (e) {

@@ -1,0 +1,79 @@
+{
+  "system_status": "IDLE",
+  "last_updated": "2026-03-24T15:42:21.646880",
+  "components": {
+    "tag_20": {
+      "id": "tag_20",
+      "type": "OPTICAL_MIRROR",
+      "state": "PLACED",
+      "pose": {
+        "x": 243.6470023481506,
+        "y": 151.03525473565696,
+        "rotation": -2.4088915527080275,
+        "roll": -180,
+        "pitch": 0,
+        "yaw": -2.4088915527080275
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 243.6470023481506,
+          "y": 151.03525473565696,
+          "rotation": -2.4088915527080275,
+          "roll": -180,
+          "pitch": 0,
+          "yaw": -2.4088915527080275
+        },
+        "is_optimized": false,
+        "placement_strategy": "MANUAL"
+      },
+      "metadata": {}
+    },
+    "tag_18": {
+      "id": "tag_18",
+      "type": "OPTICAL_MIRROR",
+      "state": "PLACED",
+      "pose": {
+        "x": 239.72070093346457,
+        "y": -235.53054047192865,
+        "rotation": 243.0204341774873,
+        "roll": -180,
+        "pitch": 0,
+        "yaw": 243.0204341774873
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 239.72070093346457,
+          "y": -235.53054047192865,
+          "rotation": 243.0204341774873,
+          "roll": -180,
+          "pitch": 0,
+          "yaw": 243.0204341774873
+        },
+        "is_optimized": false,
+        "placement_strategy": "MANUAL"
+      },
+      "metadata": {}
+    },
+    "tag_11": {
+      "id": "tag_11",
+      "type": "OPTICAL_LENS",
+      "state": "PLACED",
+      "pose": {
+        "x": 390.3,
+        "y": -0.5,
+        "rotation": 270
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 391.35062153084317,
+          "y": -0.5,
+          "rotation": 270.0
+        },
+        "is_optimized": true,
+        "placement_strategy": "NEWTON"
+      },
+      "metadata": {}
+    }
+  },
+  "optimization_step": 0
+}

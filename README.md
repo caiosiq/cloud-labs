@@ -134,9 +134,13 @@ cloud-labs/                   # repository root (historically also called optics
 ├── states/                   # User-saved lab state snapshots (API)
 ├── requirements.txt          # Python dependencies (install from repo root)
 ├── ROADMAP.md
-├── laser_line_fit.npy        # Optional: real-mode laser line (x = a*y + b)
+├── laser_line_fit.npy        # Real-mode laser overlay: coefficients x = a*y + b (mm); see below
+├── scripts/
+│   └── generate_laser_line_fit.py  # Regenerate laser_line_fit.npy after retuning the physical laser
 └── Camera_Images/            # Optimization frames may be read/watched here (real workflows)
 ```
+
+**Laser line (`laser_line_fit.npy`):** In **`LAB_MODE=REAL`**, `GET /api/laser-line` loads **`[a, b]`** from this file so the UI draws the red dashed path and snap-to-line behavior. Coordinates are **lab mm** with **origin at table center**; the breadboard grid in the UI is **25 mm** between holes. The **grid dots** use **`BREADBOARD_GRID_OFFSET_X_MM`** in **`frontend/app.js`**: a **−¼ inch** base plus an extra fine-tune (e.g. **−8.4 mm** total when the arm-measured vertical beam is at **`b ≈ 391.6`**) so dots track the real hole columns—**component poses** are unchanged. Set **`b`** to the arm-measured **x** of the beam for a vertical line (**`a = 0`**). After editing **`laser_line_fit.npy`**, use **Refresh state** (or reload) to refetch coefficients.
 
 The `backend-simple/` folder holds small lab-related Python snippets with **relative imports** meant for use inside a larger **`lab_automation`** tree; it is **not** the FastAPI entrypoint.
 

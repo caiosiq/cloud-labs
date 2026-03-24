@@ -745,6 +745,7 @@ class RealLabCommunicator(LabCommunicator):
                     axis=params["axis"],
                     initial_move=-0.2,
                     do_repositioning=False,
+                    video_exposure = 1.0
                 )
                 try:
                     init_sig = inspect.signature(NewtonPlacementStrategy_cloudlab.__init__)
