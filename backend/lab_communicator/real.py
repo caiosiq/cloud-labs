@@ -1,6 +1,7 @@
 import atexit
 import inspect
 import json
+import math
 import os
 import re
 import subprocess
@@ -43,6 +44,29 @@ try:
 except ImportError:
     activate_cam_and_capture = None
     RECORDER_CAPTURE_AVAILABLE = False
+
+# --- Lab vs robot table XY (see coordinate_rotation.md in repo root) ---
+# UI and overhead-camera geometry use "lab" axes. The robot table frame is rotated by a small angle.
+# Calibrated: motion that is a straight line in the lab (e.g. +100 mm along lab Y) decomposes in robot
+# coordinates as approximately Δx_robot = +2.5 mm and Δy_robot = +100 mm (same sign convention as your
+# robot axes). That implies sin(θ) ≈ −2.5/100 for the lab→robot rotation below → θ = atan2(-2.5, 100).
+# Refine by changing this constant after re-measurement.
+LAB_ROBOT_TABLE_ROTATION_RAD: float = math.atan2(-2.5, 100.0)
+
+
+def lab_table_xy_to_robot_xy(x_lab: float, y_lab: float) -> Tuple[float, float]:
+    """Map UI / lab table mm to robot controller table mm before place/move calls."""
+    t = LAB_ROBOT_TABLE_ROTATION_RAD
+    c, s = math.cos(t), math.sin(t)
+    return (c * x_lab - s * y_lab, s * x_lab + c * y_lab)
+
+
+def robot_table_xy_to_lab_xy(x_robot: float, y_robot: float) -> Tuple[float, float]:
+    """Map robot-reported table mm to lab / UI mm (inverse of lab_table_xy_to_robot_xy)."""
+    t = LAB_ROBOT_TABLE_ROTATION_RAD
+    c, s = math.cos(t), math.sin(t)
+    return (c * x_robot + s * y_robot, -s * x_robot + c * y_robot)
+
 
 class RealLabCommunicator(LabCommunicator):
     def __init__(self):
@@ -408,10 +432,12 @@ class RealLabCommunicator(LabCommunicator):
             components = dict(self.current_state.get("components", {}) or {})
 
         # Apply to component_map so pick/place uses correct coordinates.
+        # Snapshot poses are lab / UI mm; automation expects robot table mm.
         for tag_id, entry in components.items():
             pose = (entry or {}).get("pose", {}) or {}
-            x = float(pose.get("x", 0.0))
-            y = float(pose.get("y", 0.0))
+            x_lab = float(pose.get("x", 0.0))
+            y_lab = float(pose.get("y", 0.0))
+            x, y = lab_table_xy_to_robot_xy(x_lab, y_lab)
             z = float(pose.get("z", 500.0))  # z isn't stored in current UI payload; default matches scan
 
             roll = 180
@@ -490,12 +516,16 @@ class RealLabCommunicator(LabCommunicator):
         Newton sub-moves: take table X/Y from the place call, keep canvas rotation from current lab state.
         Robot `angle` / rotvec is not the same as the UI's top-down `rotation` (e.g. 270 vs ~29); parsing it
         misaligns ghost and solid.
+        When target_x/target_y are set, they are robot-frame mm from the strategy; convert to lab for UI state.
         """
         with self._state_lock:
             comp_entry = (self.current_state.get("components") or {}).get(tag_id)
             pose = dict((comp_entry or {}).get("pose") or {})
-        nx = float(target_x) if target_x is not None else float(pose.get("x", 0.0))
-        ny = float(target_y) if target_y is not None else float(pose.get("y", 0.0))
+        if target_x is not None and target_y is not None:
+            nx, ny = robot_table_xy_to_lab_xy(float(target_x), float(target_y))
+        else:
+            nx = float(pose.get("x", 0.0))
+            ny = float(pose.get("y", 0.0))
         rot = float(pose.get("rotation", 0.0) or 0.0)
         out: Dict[str, float] = {"x": nx, "y": ny, "rotation": rot}
         for key in ("roll", "pitch", "yaw"):
@@ -636,14 +666,20 @@ class RealLabCommunicator(LabCommunicator):
 
         comp = self.component_map[target_id]
         
-        # 3. Extract Coordinates
+        # 3. Extract Coordinates (UI / API uses lab mm)
         tx = params.get("target_x")
         ty = params.get("target_y")
         rot = params.get("rotation")
+        tx_lab = float(tx)
+        ty_lab = float(ty)
+        tx_robot, ty_robot = lab_table_xy_to_robot_xy(tx_lab, ty_lab)
         
         # 4. Execute Move
         try:
-            print(f"[REAL LAB] Dispatching robot to X={tx}, Y={ty}, Rot={rot}")
+            print(
+                f"[REAL LAB] Dispatching robot to X={tx_robot}, Y={ty_robot}, Rot={rot} "
+                f"(lab X={tx_lab}, Y={ty_lab})"
+            )
             
             if not comp.inventory_location:
                 print(f"[REAL LAB] Warning: {target_id} inventory location unknown. Assuming it's at previous location or 0,0")
@@ -652,8 +688,8 @@ class RealLabCommunicator(LabCommunicator):
             await asyncio.to_thread(
                 lambda: self.experiment.place_component_wo_home_specific_xy_cloudlab(
                     component=comp,
-                    target_x=tx,
-                    target_y=ty,
+                    target_x=tx_robot,
+                    target_y=ty_robot,
                     angle=[-180, 0, -rot],
                 )
             )
@@ -663,15 +699,15 @@ class RealLabCommunicator(LabCommunicator):
             with self._state_lock:
                 if target_id in self.current_state["components"]:
                     self.current_state["components"][target_id]["pose"] = {
-                        "x": tx,
-                        "y": ty,
+                        "x": tx_lab,
+                        "y": ty_lab,
                         "rotation": rot
                     }
                     self.current_state["components"][target_id]["state"] = "PLACED"
 
                     # Update intent to match reality
                     self.current_state["components"][target_id]["intent"]["nominal_pose"] = {
-                        "x": tx, "y": ty, "rotation": rot
+                        "x": tx_lab, "y": ty_lab, "rotation": rot
                     }
                     self.current_state["last_updated"] = datetime.now().isoformat()
             print(comp)
