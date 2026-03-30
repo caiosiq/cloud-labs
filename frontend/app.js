@@ -473,9 +473,8 @@ async function sendCommand(command) {
             showConfirmationModal(
                 msg, 
                 async () => {
-                    // Confirmed: Proceed with actual send
-                    await executeSendCommand(command);
-                    resolve();
+                    const r = await executeSendCommand(command);
+                    resolve(r);
                 },
                 () => {
                     // Cancelled: Revert ghost state if possible
@@ -496,7 +495,7 @@ async function sendCommand(command) {
                             render();
                         }
                     }
-                    resolve();
+                    resolve({ ok: false, error: 'cancelled' });
                 }
             );
         });
@@ -534,10 +533,18 @@ async function executeSendCommand(command) {
         if (response.status === 409) {
              log("System BUSY. Command rejected.", "warn");
              pendingCommands.delete(command.target_id);
-             return;
+             return { ok: false, error: 'System is BUSY or OPTIMIZING (409).' };
         }
 
-        const result = await response.json();
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            const detail = result.detail || `HTTP ${response.status}`;
+            log(`Command rejected: ${detail}`, "error");
+            if (command.target_id) pendingCommands.delete(command.target_id);
+            return { ok: false, error: detail };
+        }
+
         log(`Server: ${result.message}`, "info");
         
         if (command.action === 'OPTIMIZE') {
@@ -545,9 +552,12 @@ async function executeSendCommand(command) {
             optimizationData = []; 
         }
 
+        return { ok: true, message: result.message || 'Accepted' };
+
     } catch (error) {
         log(`Command failed: ${error.message}`, "error");
         if (command.target_id) pendingCommands.delete(command.target_id);
+        return { ok: false, error: error.message || String(error) };
     }
 }
 
@@ -2142,6 +2152,42 @@ function log(message, type = 'info') {
     if (logOutput.children.length > 50) logOutput.removeChild(logOutput.lastChild);
 }
 
+/** Initialize ghostState[tagId] from lab state for Command Console moves. */
+function ensureGhostForConsole(tagId) {
+    if (ghostState[tagId]) return true;
+    const comp = labState && labState.components && labState.components[tagId];
+    if (!comp || comp.state !== 'PLACED' || !comp.pose) return false;
+    ghostState[tagId] = {
+        x: comp.pose.x,
+        y: comp.pose.y,
+        rotation: typeof comp.pose.rotation === 'number' ? comp.pose.rotation : 0
+    };
+    return true;
+}
+
+/** Same behavior as the Refresh State button (shared with Command Console). */
+async function runLabStateRefresh() {
+    log("Refreshing lab state (re-scan)...", "warn");
+    const res = await fetch('/api/lab-state/refresh', { method: 'POST' });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Refresh failed');
+    }
+
+    const start = Date.now();
+    while (Date.now() - start < 30000) {
+        const stateRes = await fetch('/api/lab-state');
+        const state = await stateRes.json();
+        if (state && state.system_status === 'IDLE') break;
+        await new Promise(r => setTimeout(r, 500));
+    }
+
+    forceGhostSync = true;
+    await fetchLaserLine();
+    await fetchLabState();
+    checkVideoStatus();
+}
+
 function init() {
     log("Interface loaded.");
     fetchStrategies();
@@ -2150,27 +2196,7 @@ function init() {
     setInterval(fetchLabState, POLLING_INTERVAL);
     refreshBtn.addEventListener('click', async () => {
         try {
-            log("Refreshing lab state (re-scan)...", "warn");
-            // Kick off backend refresh (REAL: re-scan, MOCK: no-op)
-            const res = await fetch('/api/lab-state/refresh', { method: 'POST' });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.detail || 'Refresh failed');
-            }
-
-            // Wait until the backend reports IDLE before syncing ghost/UI state.
-            const start = Date.now();
-            while (Date.now() - start < 30000) {
-                const stateRes = await fetch('/api/lab-state');
-                const state = await stateRes.json();
-                if (state && state.system_status === 'IDLE') break;
-                await new Promise(r => setTimeout(r, 500));
-            }
-
-            forceGhostSync = true;
-            await fetchLaserLine();
-            await fetchLabState();
-            checkVideoStatus();
+            await runLabStateRefresh();
         } catch (e) {
             console.error("Refresh state failed:", e);
             log(`Refresh failed: ${e.message || e}`, "error");
@@ -2432,5 +2458,21 @@ async function checkVideoStatus() {
         videoStatus.style.color = '#ef4444';
     }
 }
+
+// --- Command Console (ES module `js/command-console.js`): dependency injection ---
+window.__commandConsoleDeps = {
+    executeSendCommand,
+    sendCommand,
+    checkCollision,
+    log,
+    runLabStateRefresh,
+    ensureGhostForConsole,
+    get ghostState() {
+        return ghostState;
+    },
+    render,
+    getCatalogEntry: (tagId) => catalogMap[tagId] || null,
+    getLabState: () => labState
+};
 
 init();

@@ -133,7 +133,7 @@ If needed for debugging, a **prefix** such as `json ` followed by a single-line 
 4. Wire **`command-api.js`** to **`executeSendCommand`** and **`POST /api/lab-state/refresh`** for `refresh`.
 5. **`help`** driven by a single **command registry** (verb → args → example).
 6. Output log + **409** / collision / parse errors surfaced clearly.
-7. Optional: `json …` one-liner for developers only.
+7. Optional: `json …` one-liner for developers only — **done** (`command-parse.js`).
 
 ---
 
@@ -166,41 +166,41 @@ If needed for debugging, a **prefix** such as `json ` followed by a single-line 
 
 ### Phase 1 — Hooks & module wiring
 
-- [ ] Expose `executeSendCommand`, `sendCommand` (if needed), `checkCollision`, and `log` for ES module consumption (export or `initCommandConsole(deps)` pattern).
-- [ ] Add `<script type="module">` entry in `index.html` that loads the console bootstrap after core app setup.
+- [x] Expose `executeSendCommand`, `sendCommand` (if needed), `checkCollision`, and `log` for ES module consumption (export or `initCommandConsole(deps)` pattern).
+- [x] Add `<script type="module">` entry in `index.html` that loads the console bootstrap after core app setup.
 
 ### Phase 2 — Command Console shell
 
-- [ ] Collapsible **Command Console** region (default collapsed) with label **Command Console**.
-- [ ] Scoped styles under `.command-console` to avoid bleeding into the rest of the UI.
-- [ ] Single-line input and a scrollable output / log strip.
+- [x] Collapsible **Command Console** region (default collapsed) with label **Command Console**.
+- [x] Scoped styles under `.command-console` to avoid bleeding into the rest of the UI.
+- [x] Single-line input and a scrollable output / log strip.
 
 ### Phase 3 — Shorthand parser (`command-parse.js`)
 
-- [ ] `move <tag_id> <x> <y> <rotation>` → `MOVE_COMPONENT` payload (lab mm / deg).
-- [ ] `motor <tag_id> <motor_id> <distance>` → `MOVE_MOTOR`.
-- [ ] `optimize <tag_id> <strategy> …` → `OPTIMIZE` with required strategy parameters (document minimal v1 subset).
-- [ ] `refresh` → `POST /api/lab-state/refresh` (no raw `SCAN` unless unified with backend).
-- [ ] `help` / `?` → print usage from a single command registry object.
-- [ ] Parse errors: clear, single-line messages (unknown verb, wrong arity, bad numbers).
+- [x] `move <tag_id> <x> <y> <rotation>` → `MOVE_COMPONENT` payload (lab mm / deg).
+- [x] `motor <tag_id> <motor_id> <distance>` → `MOVE_MOTOR`.
+- [x] `optimize <tag_id> <strategy> …` → `OPTIMIZE` with required strategy parameters (document minimal v1 subset).
+- [x] `refresh` → `POST /api/lab-state/refresh` (no raw `SCAN` unless unified with backend).
+- [x] `help` / `?` → print usage from a single command registry object.
+- [x] Parse errors: clear, single-line messages (unknown verb, wrong arity, bad numbers).
 
 ### Phase 4 — Dispatch (`command-api.js`)
 
-- [ ] Route parsed commands through `executeSendCommand` (not a duplicate `fetch` to `/api/command` except where unavoidable).
-- [ ] `refresh` wired to the same refresh flow as the Refresh button.
-- [ ] **Collision:** run the same `checkCollision` as the context panel before `MOVE_COMPONENT`; reject with error string on clash.
-- [ ] Surface **409** (BUSY / OPTIMIZING) and HTTP error bodies in the output log.
+- [x] Route parsed commands through `executeSendCommand` (not a duplicate `fetch` to `/api/command` except where unavoidable).
+- [x] `refresh` wired to the same refresh flow as the Refresh button.
+- [x] **Collision:** run the same `checkCollision` as the context panel before `MOVE_COMPONENT`; reject with error string on clash.
+- [x] Surface **409** (BUSY / OPTIMIZING) and HTTP error bodies in the output log.
 
 ### Phase 5 — Parity & polish
 
-- [ ] Confirm recipe recording: with recording on, console commands append steps via `executeSendCommand` (QA pass).
-- [ ] Keyboard history (e.g. up/down) for the input line.
-- [ ] Optional: `json …` single-line escape for developer copy-paste from DevTools.
+- [x] Confirm recipe recording: with recording on, console commands append steps via `executeSendCommand` (QA pass).
+- [x] Keyboard history (e.g. up/down) for the input line.
+- [x] Optional: `json …` single-line escape for developer copy-paste from DevTools.
 
 ### Phase 6 — Quality of life (later)
 
-- [ ] Session history in `sessionStorage` (optional).
-- [ ] Tab completion for `tag_*` from latest lab state snapshot (read-only).
+- [x] Session history in `sessionStorage` (optional).
+- [x] Tab completion for `tag_*` from latest lab state snapshot (read-only).
 
 ### Phase 7 — Optional refactor (only if needed)
 
