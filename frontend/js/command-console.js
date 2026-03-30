@@ -262,5 +262,5 @@ const deps = typeof window !== 'undefined' ? window.__commandConsoleDeps : null;
 if (deps) {
     initCommandConsole(deps);
 } else {
-    console.warn('[Command Console] window.__commandConsoleDeps missing — ensure app.js runs before this module.');
+    console.warn('[Command Console] window.__commandConsoleDeps missing — ensure js/main.js (app bundle) runs before this module.');
 }

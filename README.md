@@ -23,7 +23,7 @@ So the two layers live in **different domains**:
 | **Experiment manager** (`lab_automation`) | How to talk to the xArm6, how to interpret image arrays, how to sequence low-level motor and placement calls | **Hardware-accurate** experimental scripts: the full power—and full fragility—of the real system |
 | **Lab communicator + HTTP API** (this repo) | What a human or an automation client **wants** to happen next, in a **stable, safe payload** | **Intent**: the same mental model whether the backend is mock or real |
 
-If tomorrow you replace the xArm6 with a UR10, **reimplement or reconfigure the experiment manager and the robot drivers**—the commands at that level **will** change. But the **UI**, the **Command Console** (planned), and the **JSON** shape of **`/api/command`** can stay the same: they are not tied to a particular vendor pose format. The apparent redundancy between “experiment manager functions” and “communicator functions” is an **abstraction boundary**. You pay a thin translation layer so that everything above it—canvas, recipes, future LLM-driven plans—does not get rewritten when the bench changes.
+If tomorrow you replace the xArm6 with a UR10, **reimplement or reconfigure the experiment manager and the robot drivers**—the commands at that level **will** change. But the **UI**, the **Command Console** (see **`coding_on_the_ui.md`** and **`frontend/js/command-console.js`**), and the **JSON** shape of **`/api/command`** can stay the same: they are not tied to a particular vendor pose format. The apparent redundancy between “experiment manager functions” and “communicator functions” is an **abstraction boundary**. You pay a thin translation layer so that everything above it—canvas, recipes, future LLM-driven plans—does not get rewritten when the bench changes.
 
 Historically, this repository began as **“cloud-labs”** in the sense of **a remote-facing UI** for the lab. The direction now is broader: treat the stack as a **durable language for running experiments**—commands, sequences, and eventually richer scripting—while keeping the **robot and vision specifics** fenced behind the communicator. That separation is what lets you iterate on **how people and tools ask for work** without constantly revisiting **how the arm moves**.
 
@@ -39,7 +39,37 @@ For the distinction between **lab coordinates** (what you see) and **robot coord
 - **Interaction**: select a part, edit X/Y/rotation, **move** (with collision checks and confirm for non-recording moves), drag on canvas with optional **snap toward the laser line**, wheel to rotate while dragging, and **optimization** strategies (e.g. Newton / Cobyla) from the context panel. **Motor jog** controls appear for catalog entries that declare `motor_ids`.
 - **Recipes**: record MOVE/OPTIMIZE steps, save under `recipes/`, play back via the API; successful runs can emit a `{recipe_id}_golden.json` reference.
 - **Saved layouts**: **Save / Load lab state** writes JSON under `states/` (mock-friendly; useful for repeatable demos).
+- **Command Console** (bottom of the main page): typed shorthand for moves, optimize, and related actions; backed by ES modules under **`frontend/js/`** and wired through **`window.__commandConsoleDeps`** (see **Frontend code layout** below).
 - **Debug page** at `/debug` for deeper inspection (ghost derivation, golden listing, etc.).
+
+---
+
+## Frontend code layout
+
+There is **no bundler or SPA framework**: the browser loads **native ES modules** from `/static` (the `frontend/` tree). Styling remains mostly **inline in `index.html`**; behavior is split between a **main app bundle** and the **Command Console** stack.
+
+### Load order
+
+`index.html` registers two module scripts **in this order**:
+
+1. **`/static/js/main.js`** — runs the lab UI and defines **`window.__commandConsoleDeps`** before the console needs it.
+2. **`/static/js/command-console.js`** — shell, history, tab completion; reads **`__commandConsoleDeps`** for `sendCommand`, `log`, `render`, lab state, ghost state, and collision checks.
+
+The root route rewrites **`js/main.js?v=…`** in the served HTML with a startup timestamp so refreshes pick up changes while **`NoCacheMiddleware`** still applies **`no-store`** on `/static` in development.
+
+### Module map
+
+| File | Role |
+|------|------|
+| **`js/main.js`** | Entry: imports **`bootstrap.js`**. |
+| **`js/bootstrap.js`** | Side-effect import of **`app-main.js`** (starts the app). |
+| **`js/app-main.js`** | Main UI: DOM hooks, **`fetch`** polling, canvas draw/interaction, sidebars (components, context, recipes, library), modals, video / table-cam / Cobyla UI, **`init()`**, and assignment of **`window.__commandConsoleDeps`**. |
+| **`js/config.js`** | Canvas size, lab bounds (mm), derived scale, breadboard grid offset, **`POLLING_INTERVAL`**. |
+| **`js/state/store.js`** | Single mutable **`store`** object: `labState`, `ghostState`, `catalogMap`, selection, optimization flags, recipe recording buffers, table-cam selection, etc. |
+| **`js/canvas/coordinates.js`** | **`mmToPx`** / **`pxToMm`** for the lab frame (origin at table center, +Y up on screen). |
+| **`js/command-console.js`** | Console UI loop; depends on **`command-parse.js`**, **`command-api.js`**, **`command-complete.js`**. |
+
+Larger slices of logic (dedicated API client, separate render module) can be peeled out of **`app-main.js`** over time; **`frontend_refactor.md`** tracks that optional breakdown.
 
 ---
 
@@ -63,8 +93,8 @@ For the distinction between **lab coordinates** (what you see) and **robot coord
 
 | Layer | Technology |
 |--------|------------|
-| **Frontend** | Static HTML/CSS/JS (no SPA framework); canvas rendering, `fetch` polling |
-| **Backend** | FastAPI (`backend/main.py`), serves `/` and `/debug` with no-cache headers and version-busted `app.js` |
+| **Frontend** | Static HTML/CSS; **ES modules** (`js/main.js` → `app-main.js`); canvas; `fetch` polling; Command Console modules |
+| **Backend** | FastAPI (`backend/main.py`), serves `/` and `/debug` with no-cache headers and version-busted `js/main.js` |
 | **Static assets** | Mounted at `/static` → `frontend/` |
 | **Hardware** | **LabCommunicator** abstraction: `MockLabCommunicator` \| `RealLabCommunicator` |
 
@@ -148,7 +178,21 @@ cloud-labs/                   # repository root (historically also called optics
 │       ├── mock.py           # Simulated lab (delays, noise, local JSON state)
 │       ├── real.py           # Adapter for external lab_automation package
 │       └── newton_cloudlab_progress_example.py  # Paste guide for optional Newton UI callback in lab_automation
-├── frontend/                 # index.html, app.js, styles, mock video SVG, debug.html
+├── frontend/
+│   ├── index.html            # layout + inline styles; script: js/main.js then command-console.js
+│   ├── debug.html
+│   ├── mock_feed.svg         # mock video placeholder when no live stream
+│   └── js/
+│       ├── main.js           # entry (imports bootstrap)
+│       ├── bootstrap.js      # loads app-main
+│       ├── app-main.js       # lab UI, canvas, init, __commandConsoleDeps
+│       ├── config.js         # geometry + POLLING_INTERVAL
+│       ├── state/store.js    # client-side mutable store
+│       ├── canvas/coordinates.js
+│       ├── command-console.js
+│       ├── command-parse.js
+│       ├── command-api.js
+│       └── command-complete.js
 ├── schemas/                  # JSON contracts & reference data
 │   ├── component_catalog.json
 │   ├── mock_lab_state.json   # Seed / reference for mock
@@ -163,7 +207,7 @@ cloud-labs/                   # repository root (historically also called optics
 └── Camera_Images/            # Optimization frames may be read/watched here (real workflows)
 ```
 
-**Laser line (`laser_line_fit.npy`):** In **`LAB_MODE=REAL`**, `GET /api/laser-line` loads **`[a, b]`** from this file so the UI draws the red dashed path and snap-to-line behavior. Coordinates are **lab mm** with **origin at table center**; the breadboard grid in the UI is **25 mm** between holes. The **grid dots** use **`BREADBOARD_GRID_OFFSET_X_MM`** in **`frontend/app.js`**: a **−¼ inch** base plus an extra fine-tune (e.g. **−8.4 mm** total when the arm-measured vertical beam is at **`b ≈ 391.6`**) so dots track the real hole columns—**component poses** are unchanged. Set **`b`** to the arm-measured **x** of the beam for a vertical line (**`a = 0`**). After editing **`laser_line_fit.npy`**, use **Refresh state** (or reload) to refetch coefficients.
+**Laser line (`laser_line_fit.npy`):** In **`LAB_MODE=REAL`**, `GET /api/laser-line` loads **`[a, b]`** from this file so the UI draws the red dashed path and snap-to-line behavior. Coordinates are **lab mm** with **origin at table center**; the breadboard grid in the UI is **25 mm** between holes. The **grid dots** use **`BREADBOARD_GRID_OFFSET_X_MM`** in **`frontend/js/config.js`**: a **−¼ inch** base plus an extra fine-tune (e.g. **−8.4 mm** total when the arm-measured vertical beam is at **`b ≈ 391.6`**) so dots track the real hole columns—**component poses** are unchanged. Set **`b`** to the arm-measured **x** of the beam for a vertical line (**`a = 0`**). After editing **`laser_line_fit.npy`**, use **Refresh state** (or reload) to refetch coefficients.
 
 The `backend-simple/` folder holds small lab-related Python snippets with **relative imports** meant for use inside a larger **`lab_automation`** tree; it is **not** the FastAPI entrypoint.
 

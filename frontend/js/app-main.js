@@ -1,38 +1,20 @@
-// Optical Digital Twin - Phase 4.5 (Golden Datastructures)
-console.log("App.js loading...");
+// Optical Digital Twin — ES module bundle (see js/bootstrap.js)
+import {
+    CANVAS_WIDTH,
+    CANVAS_HEIGHT,
+    LAB_X_MIN,
+    LAB_X_MAX,
+    LAB_Y_MIN,
+    LAB_Y_MAX,
+    LAB_SCALE,
+    LAB_CENTER_PX,
+    BREADBOARD_GRID_OFFSET_X_MM,
+    POLLING_INTERVAL,
+} from './config.js';
+import { mmToPx, pxToMm } from './canvas/coordinates.js';
+import { store } from './state/store.js';
 
-const CANVAS_WIDTH = 1000;
-const CANVAS_HEIGHT = 700;
-// Real lab table: X and Y in mm, origin at center. UI maps this range to canvas.
-const LAB_X_MIN = -500;
-const LAB_X_MAX = 500;
-const LAB_Y_MIN = -500;
-const LAB_Y_MAX = 500;
-const LAB_WIDTH_MM = LAB_X_MAX - LAB_X_MIN;
-const LAB_HEIGHT_MM = LAB_Y_MAX - LAB_Y_MIN;
-// Scale so full lab range fits in canvas; preserve aspect (square mm -> square px)
-const LAB_SCALE = Math.min(CANVAS_WIDTH / LAB_WIDTH_MM, CANVAS_HEIGHT / LAB_HEIGHT_MM);
-const LAB_CENTER_PX = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
-
-/** Breadboard hole pattern vs lab origin: ¼" base shift + arm fine-tune to match holes with laser at b = 391.6 mm (see laser_line_fit.npy). Only the grid dots use this; component poses stay in raw lab mm. */
-const QUARTER_INCH_MM = 25.4 / 4;
-const BREADBOARD_GRID_FINE_TUNE_X_MM = -2.05; // with previous b = 393.65 → measured line 391.6 mm
-const BREADBOARD_GRID_OFFSET_X_MM = -QUARTER_INCH_MM + BREADBOARD_GRID_FINE_TUNE_X_MM; // −8.4 mm
-
-/** Lab mm -> canvas pixels (origin at center, +Y lab = up on screen) */
-function mmToPx(labX, labY) {
-    return {
-        x: LAB_CENTER_PX.x + labX * LAB_SCALE,
-        y: LAB_CENTER_PX.y - labY * LAB_SCALE
-    };
-}
-/** Canvas pixels -> lab mm */
-function pxToMm(px, py) {
-    return {
-        x: (px - LAB_CENTER_PX.x) / LAB_SCALE,
-        y: (LAB_CENTER_PX.y - py) / LAB_SCALE
-    };
-} 
+console.log('App main module loading...');
 
 // DOM Elements
 const canvas = document.getElementById('optical-table');
@@ -75,37 +57,10 @@ const videoImg = document.getElementById('live-video-img');
 const videoPlaceholder = document.getElementById('video-placeholder');
 const videoStatus = document.getElementById('video-status');
 
-// State
-let labState = null;        
-let ghostState = {};        
-let draggingComponent = null; 
-let isDragging = false;
-let dragOffset = { x: 0, y: 0 };
-let pendingCommands = new Set();
-let selectedComponent = null; 
-let availableStrategies = null; 
-let availableRecipes = [];
-/** Laser line in mm: x = a*y + b. Fetched from /api/laser-line (mock: fixed; real: from laser_line_fit.npy). */
-let laserLineCoeffs = null;
-let previousSystemStatus = 'IDLE';
-let forceGhostSync = false;
-
-// Optimization State
-let isOptimizing = false;
-let isOptimizingFeedActive = false;
-let optimizationData = []; 
-
-// Recipe State
-let isRecording = false;
-let currentRecipeSteps = [];
-
-// Configuration
-const POLLING_INTERVAL = 500; 
 
 // --- 1. Networking ---
 
-// We need the catalog to map IDs to Names
-let catalogMap = {}; 
+// We need the catalog to map IDs to Names (store.catalogMap)
 
 async function fetchCatalogMap() {
     try {
@@ -113,9 +68,9 @@ async function fetchCatalogMap() {
         if (response.ok) {
             const catalog = await response.json();
             catalog.forEach(item => {
-                catalogMap[item.tag_id] = item;
+                store.catalogMap[item.tag_id] = item;
             });
-            console.log("Catalog Loaded:", catalogMap);
+            console.log("Catalog Loaded:", store.catalogMap);
             // Re-render UI once catalog is loaded to update names
             updateUI();
         }
@@ -127,7 +82,7 @@ fetchCatalogMap();
 fetchLaserLine();
 
 async function fetchStrategies() {
-    availableStrategies = {
+    store.availableStrategies = {
       "NEWTON": {
         "name": "Newton Strategy",
         "description": "Aligns a component by minimizing beam deviation.",
@@ -152,8 +107,8 @@ async function fetchLaserLine() {
     try {
         const response = await fetch('/api/laser-line');
         if (response.ok) {
-            laserLineCoeffs = await response.json();
-            console.log("Laser line:", laserLineCoeffs.source, laserLineCoeffs.loaded !== false ? "a=" + laserLineCoeffs.a + " b=" + laserLineCoeffs.b : "(defaults)");
+            store.laserLineCoeffs = await response.json();
+            console.log("Laser line:", store.laserLineCoeffs.source, store.laserLineCoeffs.loaded !== false ? "a=" + store.laserLineCoeffs.a + " b=" + store.laserLineCoeffs.b : "(defaults)");
         }
     } catch (e) {
         console.error("Laser line fetch failed", e);
@@ -164,7 +119,7 @@ async function fetchRecipes() {
     try {
         const response = await fetch('/api/recipes');
         if (response.ok) {
-            availableRecipes = await response.json();
+            store.availableRecipes = await response.json();
             renderRecipes();
         }
     } catch (e) {
@@ -187,7 +142,7 @@ async function fetchLabState() {
             throw new Error(errorMsg);
         }
         
-        labState = await response.json();
+        store.labState = await response.json();
         console.log(`[${new Date().toLocaleTimeString()}] Received Lab State successfully.`);
         
         // Clear error modal if it was open (recovery)
@@ -195,65 +150,65 @@ async function fetchLabState() {
         if (existingError) existingError.remove();
 
         // Initial Sync: Use INTENT if available, else Physical Pose
-        if (labState.components) {
+        if (store.labState.components) {
             // Determine if we should sync ghost state from backend
             // 1. Force Sync (Refresh button)
             // 2. System status transitioned from BUSY/OPTIMIZING to IDLE (Command finished)
-            // 3. Initial Load (handled by !ghostState check)
+            // 3. Initial Load (handled by !store.ghostState check)
             
-            const justFinishedCommand = (previousSystemStatus !== 'IDLE' && labState.system_status === 'IDLE');
-            const shouldSync = forceGhostSync || justFinishedCommand;
+            const justFinishedCommand = (store.previousSystemStatus !== 'IDLE' && store.labState.system_status === 'IDLE');
+            const shouldSync = store.forceGhostSync || justFinishedCommand;
 
             if (shouldSync) {
                  log("Syncing ghost state with lab state...", "info");
             }
 
-            Object.entries(labState.components).forEach(([name, comp]) => {
+            Object.entries(store.labState.components).forEach(([name, comp]) => {
                 if (comp.state === 'PLACED') {
                     // Always initialize if missing (first load)
-                    if (!ghostState[name]) {
+                    if (!store.ghostState[name]) {
                         if (comp.intent && comp.intent.nominal_pose) {
-                            ghostState[name] = { ...comp.intent.nominal_pose };
+                            store.ghostState[name] = { ...comp.intent.nominal_pose };
                         } else {
-                            ghostState[name] = { ...comp.pose };
+                            store.ghostState[name] = { ...comp.pose };
                         }
                         // Ensure rotation
-                        if (typeof ghostState[name].rotation !== 'number') {
-                            ghostState[name].rotation = comp.pose.rotation || 0;
+                        if (typeof store.ghostState[name].rotation !== 'number') {
+                            store.ghostState[name].rotation = comp.pose.rotation || 0;
                         }
                     }
                     // During real Newton-style optimization the backend updates intent.nominal_pose before each
                     // sub-move (ghost) and pose after the place completes (solid). Sync ghost every poll while OPTIMIZING.
-                    else if (labState.system_status === 'OPTIMIZING' && !isDragging && comp.intent && comp.intent.nominal_pose) {
-                        ghostState[name] = { ...comp.intent.nominal_pose };
-                        if (typeof ghostState[name].rotation !== 'number') {
-                            ghostState[name].rotation = comp.pose.rotation || 0;
+                    else if (store.labState.system_status === 'OPTIMIZING' && !store.isDragging && comp.intent && comp.intent.nominal_pose) {
+                        store.ghostState[name] = { ...comp.intent.nominal_pose };
+                        if (typeof store.ghostState[name].rotation !== 'number') {
+                            store.ghostState[name].rotation = comp.pose.rotation || 0;
                         }
-                        if (selectedComponent === name && document.getElementById('ctx-x')) {
-                            ctxX.value = ghostState[name].x.toFixed(1);
-                            ctxY.value = ghostState[name].y.toFixed(1);
-                            ctxRot.value = ghostState[name].rotation.toFixed(1);
+                        if (store.selectedComponent === name && document.getElementById('ctx-x')) {
+                            ctxX.value = store.ghostState[name].x.toFixed(1);
+                            ctxY.value = store.ghostState[name].y.toFixed(1);
+                            ctxRot.value = store.ghostState[name].rotation.toFixed(1);
                         }
                     }
                     // Otherwise only sync if allowed (command finished or forced refresh)
-                    else if (shouldSync && !isDragging) {
+                    else if (shouldSync && !store.isDragging) {
                         if (comp.intent && comp.intent.nominal_pose) {
-                            ghostState[name] = { ...comp.intent.nominal_pose };
+                            store.ghostState[name] = { ...comp.intent.nominal_pose };
                         } else {
-                            ghostState[name] = { ...comp.pose };
+                            store.ghostState[name] = { ...comp.pose };
                         }
                         
                         // Ensure rotation
-                        if (typeof ghostState[name].rotation !== 'number') {
-                            ghostState[name].rotation = comp.pose.rotation || 0;
+                        if (typeof store.ghostState[name].rotation !== 'number') {
+                            store.ghostState[name].rotation = comp.pose.rotation || 0;
                         }
 
                         // If selected, update UI inputs immediately
-                        if (selectedComponent === name) {
+                        if (store.selectedComponent === name) {
                             if (document.getElementById('ctx-x')) {
-                                ctxX.value = ghostState[name].x.toFixed(1);
-                                ctxY.value = ghostState[name].y.toFixed(1);
-                                ctxRot.value = ghostState[name].rotation.toFixed(1);
+                                ctxX.value = store.ghostState[name].x.toFixed(1);
+                                ctxY.value = store.ghostState[name].y.toFixed(1);
+                                ctxRot.value = store.ghostState[name].rotation.toFixed(1);
                             }
                         }
                     }
@@ -261,28 +216,28 @@ async function fetchLabState() {
             });
 
             // Reset flags
-            if (shouldSync) forceGhostSync = false;
+            if (shouldSync) store.forceGhostSync = false;
         }
         
-        previousSystemStatus = labState.system_status;
+        store.previousSystemStatus = store.labState.system_status;
         
         // --- ADDED: Auto-refresh available components list for sidebar ---
-        if (!labState.components || Object.keys(labState.components).length === 0) {
+        if (!store.labState.components || Object.keys(store.labState.components).length === 0) {
              // If lab state is empty, we should still show something if it's just initialized
-             // but 'components' in labState might be empty if the file is empty.
+             // but 'components' in store.labState might be empty if the file is empty.
              // We rely on 'updateUI' to handle rendering.
         }
         
-        if (labState.system_status === 'IDLE') {
-            pendingCommands.clear(); 
-            if (isOptimizing) {
-                isOptimizing = false; 
+        if (store.labState.system_status === 'IDLE') {
+            store.pendingCommands.clear(); 
+            if (store.isOptimizing) {
+                store.isOptimizing = false; 
                 log("Optimization sequence complete.", "info");
                 
                 // Hide optimization feed overlay
                 const optOverlay = document.getElementById('optimization-overlay');
                 if (optOverlay) optOverlay.style.display = 'none';
-                isOptimizingFeedActive = false;
+                store.isOptimizingFeedActive = false;
 
                 // Revert table-cam highlight
                 const tableCamPreview = document.getElementById('table-cam-preview');
@@ -304,28 +259,28 @@ async function fetchLabState() {
                     tableCamPlaceholder.innerHTML = '<span class="material-icons-round" style="font-size: 24px; margin-bottom: 8px;">camera_alt</span><span style="font-size: 11px;">Table Cam Capture</span>';
                 }
             }
-        } else if (labState.system_status === 'OPTIMIZING') {
-            isOptimizing = true;
+        } else if (store.labState.system_status === 'OPTIMIZING') {
+            store.isOptimizing = true;
             
             // Show optimization feed overlay
             const optOverlay = document.getElementById('optimization-overlay');
             const optStepText = document.getElementById('optimization-step-text');
             if (optOverlay && optStepText) {
                 optOverlay.style.display = 'flex';
-                optStepText.innerText = `OPTIMIZING (Step ${labState.optimization_step || 0})`;
+                optStepText.innerText = `OPTIMIZING (Step ${store.labState.optimization_step || 0})`;
             }
 
             // Highlight the table cam preview while optimizing
             const tableCamPreview = document.getElementById('table-cam-preview');
             if (tableCamPreview) {
-                console.log(`[UI] OPTIMIZING -> highlighting table-cam-preview (step=${labState.optimization_step || 0})`);
+                console.log(`[UI] OPTIMIZING -> highlighting table-cam-preview (step=${store.labState.optimization_step || 0})`);
                 tableCamPreview.style.border = '2px solid #22c55e';
                 tableCamPreview.style.backgroundColor = '#0b2a19';
                 tableCamPreview.style.boxShadow = '0 0 0 3px rgba(34,197,94,0.25)';
             }
 
-            if (!isOptimizingFeedActive) {
-                isOptimizingFeedActive = true;
+            if (!store.isOptimizingFeedActive) {
+                store.isOptimizingFeedActive = true;
                 const tableCamImg = document.getElementById('table-cam-img');
                 const tableCamPlaceholder = document.getElementById('table-cam-placeholder');
                 const tableCamError = document.getElementById('table-cam-error');
@@ -337,7 +292,7 @@ async function fetchLabState() {
                     console.log(`[UI] switching table-cam to optimization-feed stream...`);
                     if (tableCamPlaceholder) {
                         tableCamPlaceholder.style.display = 'flex';
-                        tableCamPlaceholder.innerHTML = `<span class="material-icons-round" style="font-size: 18px; margin-bottom: 2px;">auto_awesome</span><div>Optimizing... (Step ${labState.optimization_step || 0})</div>`;
+                        tableCamPlaceholder.innerHTML = `<span class="material-icons-round" style="font-size: 18px; margin-bottom: 2px;">auto_awesome</span><div>Optimizing... (Step ${store.labState.optimization_step || 0})</div>`;
                     }
 
                     tableCamImg.src = `/api/optimization-feed/stream?t=${Date.now()}`;
@@ -348,10 +303,10 @@ async function fetchLabState() {
             }
 
             // Fake beam-intensity plot is mock-only; real lab has no such metric in state.
-            if (labState.lab_mode === 'MOCK' && Math.random() > 0.5) {
-                optimizationData.push({
-                    step: optimizationData.length, 
-                    value: Math.min(1.0, 0.2 + optimizationData.length * 0.05 + Math.random() * 0.1)
+            if (store.labState.lab_mode === 'MOCK' && Math.random() > 0.5) {
+                store.optimizationData.push({
+                    step: store.optimizationData.length, 
+                    value: Math.min(1.0, 0.2 + store.optimizationData.length * 0.05 + Math.random() * 0.1)
                 });
             }
         }
@@ -462,7 +417,7 @@ function showConfirmationModal(message, onConfirm, onCancel) {
 
 async function sendCommand(command) {
     // Intercept MOVE_COMPONENT commands for confirmation
-    if (command.action === 'MOVE_COMPONENT' && !isRecording) {
+    if (command.action === 'MOVE_COMPONENT' && !store.isRecording) {
         // Create a descriptive message
         let msg = `Move <strong>${command.target_id}</strong>?`;
         if (command.parameters) {
@@ -480,16 +435,16 @@ async function sendCommand(command) {
                     // Cancelled: Revert ghost state if possible
                     log("Move cancelled by user.", "info");
                     
-                    if (command.target_id && labState && labState.components && labState.components[command.target_id] && labState.components[command.target_id].state === 'PLACED') {
-                        const original = labState.components[command.target_id].pose;
+                    if (command.target_id && store.labState && store.labState.components && store.labState.components[command.target_id] && store.labState.components[command.target_id].state === 'PLACED') {
+                        const original = store.labState.components[command.target_id].pose;
                         // Only revert if we have the ghost state object
-                        if (ghostState[command.target_id]) {
-                            ghostState[command.target_id].x = original.x;
-                            ghostState[command.target_id].y = original.y;
-                            ghostState[command.target_id].rotation = original.rotation;
+                        if (store.ghostState[command.target_id]) {
+                            store.ghostState[command.target_id].x = original.x;
+                            store.ghostState[command.target_id].y = original.y;
+                            store.ghostState[command.target_id].rotation = original.rotation;
                         
                             // Update Context Panel if selected
-                            if (selectedComponent === command.target_id) {
+                            if (store.selectedComponent === command.target_id) {
                                 updateContextPanel(command.target_id);
                             }
                             render();
@@ -510,19 +465,19 @@ async function executeSendCommand(command) {
         log(`Sending command: ${command.action}`, "info");
         
         // RECIPE LOGIC: Capture command if recording
-        if (isRecording) {
+        if (store.isRecording) {
             const step = {
-                step: currentRecipeSteps.length + 1,
+                step: store.currentRecipeSteps.length + 1,
                 action: command.action,
                 component: command.target_id,
                 parameters: command.parameters || {}
             };
-            currentRecipeSteps.push(step);
+            store.currentRecipeSteps.push(step);
             updateRecipeEditorList();
             // We still execute it live so the user sees the result!
         }
 
-        if (command.target_id) pendingCommands.add(command.target_id);
+        if (command.target_id) store.pendingCommands.add(command.target_id);
         
         const response = await fetch('/api/command', {
             method: 'POST',
@@ -532,7 +487,7 @@ async function executeSendCommand(command) {
         
         if (response.status === 409) {
              log("System BUSY. Command rejected.", "warn");
-             pendingCommands.delete(command.target_id);
+             store.pendingCommands.delete(command.target_id);
              return { ok: false, error: 'System is BUSY or OPTIMIZING (409).' };
         }
 
@@ -541,22 +496,22 @@ async function executeSendCommand(command) {
         if (!response.ok) {
             const detail = result.detail || `HTTP ${response.status}`;
             log(`Command rejected: ${detail}`, "error");
-            if (command.target_id) pendingCommands.delete(command.target_id);
+            if (command.target_id) store.pendingCommands.delete(command.target_id);
             return { ok: false, error: detail };
         }
 
         log(`Server: ${result.message}`, "info");
         
         if (command.action === 'OPTIMIZE') {
-            isOptimizing = true;
-            optimizationData = []; 
+            store.isOptimizing = true;
+            store.optimizationData = []; 
         }
 
         return { ok: true, message: result.message || 'Accepted' };
 
     } catch (error) {
         log(`Command failed: ${error.message}`, "error");
-        if (command.target_id) pendingCommands.delete(command.target_id);
+        if (command.target_id) store.pendingCommands.delete(command.target_id);
         return { ok: false, error: error.message || String(error) };
     }
 }
@@ -567,15 +522,15 @@ function getComponentSize(name) {
     let size = { width: 90, height: 90 }; // Default 90x90mm as requested
 
     // Case 1: Existing component in Lab State
-    if (labState && labState.components && labState.components[name]) {
-        const tagId = labState.components[name].id;
-        if (catalogMap[tagId] && catalogMap[tagId].size) {
-            size = catalogMap[tagId].size;
+    if (store.labState && store.labState.components && store.labState.components[name]) {
+        const tagId = store.labState.components[name].id;
+        if (store.catalogMap[tagId] && store.catalogMap[tagId].size) {
+            size = store.catalogMap[tagId].size;
         }
     } 
     // Case 2: Direct Tag ID (e.g. during Drag-and-Drop creation)
-    else if (catalogMap[name] && catalogMap[name].size) {
-        size = catalogMap[name].size;
+    else if (store.catalogMap[name] && store.catalogMap[name].size) {
+        size = store.catalogMap[name].size;
     }
     return size;
 }
@@ -590,7 +545,7 @@ function checkCollision(targetId, x, y) {
     const PADDING_MM = 5; // Minimal padding distance between circumscribed circles
     const r1 = getComponentRadius(targetId);
 
-    for (const [id, pose] of Object.entries(ghostState)) {
+    for (const [id, pose] of Object.entries(store.ghostState)) {
         if (id === targetId) continue; // Don't check against self
         
         const r2 = getComponentRadius(id);
@@ -616,7 +571,7 @@ function checkCollision(targetId, x, y) {
 }
 
 function getComponentAtPosition(canvasX, canvasY) {
-    for (const [name, pose] of Object.entries(ghostState)) {
+    for (const [name, pose] of Object.entries(store.ghostState)) {
         const p = mmToPx(pose.x, pose.y);
         const dx = canvasX - p.x;
         const dy = canvasY - p.y;
@@ -626,7 +581,7 @@ function getComponentAtPosition(canvasX, canvasY) {
 }
 
 canvas.addEventListener('mousedown', (e) => {
-    if (labState && labState.system_status !== 'IDLE') return;
+    if (store.labState && store.labState.system_status !== 'IDLE') return;
 
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -635,35 +590,35 @@ canvas.addEventListener('mousedown', (e) => {
     const hit = getComponentAtPosition(mouseX, mouseY);
     
     if (hit) {
-        if (selectedComponent !== hit.name) {
-            selectedComponent = hit.name;
+        if (store.selectedComponent !== hit.name) {
+            store.selectedComponent = hit.name;
             updateContextPanel(hit.name);
             render(); 
             log(`Selected ${hit.name}`, "info");
         } else {
-            isDragging = true;
-            draggingComponent = hit.name;
-            const p = mmToPx(ghostState[hit.name].x, ghostState[hit.name].y);
-            dragOffset = { x: mouseX - p.x, y: mouseY - p.y };
+            store.isDragging = true;
+            store.draggingComponent = hit.name;
+            const p = mmToPx(store.ghostState[hit.name].x, store.ghostState[hit.name].y);
+            store.dragOffset = { x: mouseX - p.x, y: mouseY - p.y };
         }
     } else {
-        selectedComponent = null;
+        store.selectedComponent = null;
         contextPanel.style.display = 'none';
         render();
     }
 });
 
 function updateContextPanel(name) {
-    const comp = labState.components[name];
-    const pose = ghostState[name];
+    const comp = store.labState.components[name];
+    const pose = store.ghostState[name];
     
     let displayName = name;
     let properties = {};
 
-    if (catalogMap[name]) {
-        displayName = catalogMap[name].name;
-        if (catalogMap[name].properties) {
-            properties = catalogMap[name].properties;
+    if (store.catalogMap[name]) {
+        displayName = store.catalogMap[name].name;
+        if (store.catalogMap[name].properties) {
+            properties = store.catalogMap[name].properties;
         }
     }
     
@@ -688,7 +643,7 @@ function updateContextPanel(name) {
     
     // Generate Strategies Buttons
     ctxStrategies.innerHTML = '';
-    Object.entries(availableStrategies).forEach(([stratKey, strat]) => {
+    Object.entries(store.availableStrategies).forEach(([stratKey, strat]) => {
         const btn = document.createElement('button');
         btn.className = 'btn btn-secondary';
         btn.style.width = '100%';
@@ -705,7 +660,7 @@ function updateContextPanel(name) {
     const existingMotor = document.getElementById('ctx-motor-controls');
     if (existingMotor) existingMotor.remove();
 
-    if (catalogMap[name] && catalogMap[name].motor_ids && catalogMap[name].motor_ids.length > 0) {
+    if (store.catalogMap[name] && store.catalogMap[name].motor_ids && store.catalogMap[name].motor_ids.length > 0) {
         const motorSection = document.createElement('div');
         motorSection.id = 'ctx-motor-controls';
         motorSection.style.marginTop = '12px';
@@ -714,7 +669,7 @@ function updateContextPanel(name) {
         
         motorSection.innerHTML = '<div style="font-size:11px; color:#94a3b8; margin-bottom:8px; font-weight:600;">MOTOR CONTROL (Relative)</div>';
         
-        catalogMap[name].motor_ids.forEach(mid => {
+        store.catalogMap[name].motor_ids.forEach(mid => {
             const row = document.createElement('div');
             row.style.display = 'flex';
             row.style.alignItems = 'center';
@@ -780,19 +735,19 @@ async function moveMotor(targetId, motorId, dist) {
 }
 
 ctxMoveBtn.addEventListener('click', async () => {
-    if (!selectedComponent) return;
+    if (!store.selectedComponent) return;
     
     const tx = parseFloat(ctxX.value);
     const ty = parseFloat(ctxY.value);
     const trot = parseFloat(ctxRot.value);
 
     // Collision Check
-    const collision = checkCollision(selectedComponent, tx, ty);
+    const collision = checkCollision(store.selectedComponent, tx, ty);
     if (collision.detected) {
         log(`Move cancelled: Collision with ${collision.other}`, "error");
         // Revert UI values to current ghost state (which hasn't updated yet)
-        if (ghostState[selectedComponent]) {
-            const old = ghostState[selectedComponent];
+        if (store.ghostState[store.selectedComponent]) {
+            const old = store.ghostState[store.selectedComponent];
             ctxX.value = old.x.toFixed(1);
             ctxY.value = old.y.toFixed(1);
         }
@@ -800,13 +755,13 @@ ctxMoveBtn.addEventListener('click', async () => {
     }
 
     // Update Ghost State immediately for visual feedback
-    ghostState[selectedComponent].x = tx;
-    ghostState[selectedComponent].y = ty;
-    ghostState[selectedComponent].rotation = trot;
+    store.ghostState[store.selectedComponent].x = tx;
+    store.ghostState[store.selectedComponent].y = ty;
+    store.ghostState[store.selectedComponent].rotation = trot;
     
     await sendCommand({
         action: "MOVE_COMPONENT",
-        target_id: selectedComponent,
+        target_id: store.selectedComponent,
         parameters: {
             target_x: tx,
             target_y: ty,
@@ -823,21 +778,21 @@ ctxMoveBtn.addEventListener('click', async () => {
 
 
 canvas.addEventListener('mousemove', (e) => {
-    if (!isDragging || !draggingComponent) return;
+    if (!store.isDragging || !store.draggingComponent) return;
 
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    const lab = pxToMm(mouseX - dragOffset.x, mouseY - dragOffset.y);
+    const lab = pxToMm(mouseX - store.dragOffset.x, mouseY - store.dragOffset.y);
     
     // Snapping Logic (Snap to Laser Line)
     let finalX = lab.x;
     let finalY = lab.y;
 
-    if (laserLineCoeffs && typeof laserLineCoeffs.a === 'number') {
-        const a = laserLineCoeffs.a;
-        const b = laserLineCoeffs.b;
+    if (store.laserLineCoeffs && typeof store.laserLineCoeffs.a === 'number') {
+        const a = store.laserLineCoeffs.a;
+        const b = store.laserLineCoeffs.b;
         const SNAP_THRESHOLD_MM = 10; // Snap if within 10mm
 
         // Line eq: x - ay - b = 0  => A=1, B=-a, C=-b
@@ -857,67 +812,67 @@ canvas.addEventListener('mousemove', (e) => {
         }
     }
 
-    ghostState[draggingComponent].x = finalX;
-    ghostState[draggingComponent].y = finalY;
+    store.ghostState[store.draggingComponent].x = finalX;
+    store.ghostState[store.draggingComponent].y = finalY;
     
     render();
 });
 
 // --- ADDED: Mouse Wheel Rotation ---
 canvas.addEventListener('wheel', (e) => {
-    if (isDragging && draggingComponent && ghostState[draggingComponent]) {
+    if (store.isDragging && store.draggingComponent && store.ghostState[store.draggingComponent]) {
         e.preventDefault();
         
         // Scroll direction: positive deltaY (down) -> +5 deg, negative (up) -> -5 deg
         const direction = Math.sign(e.deltaY);
         const step = 5;
         
-        if (typeof ghostState[draggingComponent].rotation !== 'number') {
-            ghostState[draggingComponent].rotation = 0;
+        if (typeof store.ghostState[store.draggingComponent].rotation !== 'number') {
+            store.ghostState[store.draggingComponent].rotation = 0;
         }
         
-        ghostState[draggingComponent].rotation += (direction * step);
+        store.ghostState[store.draggingComponent].rotation += (direction * step);
         
         // Update UI immediately
         render();
-        updateContextPanel(draggingComponent);
+        updateContextPanel(store.draggingComponent);
     }
 }, { passive: false });
 
 canvas.addEventListener('mouseup', async (e) => {
-    if (isDragging && draggingComponent) {
-        isDragging = false;
+    if (store.isDragging && store.draggingComponent) {
+        store.isDragging = false;
         
         // Collision Check
-        const current = ghostState[draggingComponent];
-        const collision = checkCollision(draggingComponent, current.x, current.y);
+        const current = store.ghostState[store.draggingComponent];
+        const collision = checkCollision(store.draggingComponent, current.x, current.y);
         
         if (collision.detected) {
              log(`Move cancelled: Collision with ${collision.other}`, "error");
              
-             // Snap back to original position from labState if possible
-             if (labState.components[draggingComponent] && labState.components[draggingComponent].state === 'PLACED') {
-                 const original = labState.components[draggingComponent].pose;
-                 ghostState[draggingComponent].x = original.x;
-                 ghostState[draggingComponent].y = original.y;
-                 ghostState[draggingComponent].rotation = original.rotation;
+             // Snap back to original position from store.labState if possible
+             if (store.labState.components[store.draggingComponent] && store.labState.components[store.draggingComponent].state === 'PLACED') {
+                 const original = store.labState.components[store.draggingComponent].pose;
+                 store.ghostState[store.draggingComponent].x = original.x;
+                 store.ghostState[store.draggingComponent].y = original.y;
+                 store.ghostState[store.draggingComponent].rotation = original.rotation;
              }
              render();
-             draggingComponent = null;
+             store.draggingComponent = null;
              return;
         }
 
         await sendCommand({
             action: "MOVE_COMPONENT",
-            target_id: draggingComponent,
+            target_id: store.draggingComponent,
             parameters: {
-                target_x: ghostState[draggingComponent].x,
-                target_y: ghostState[draggingComponent].y,
-                rotation: ghostState[draggingComponent].rotation
+                target_x: store.ghostState[store.draggingComponent].x,
+                target_y: store.ghostState[store.draggingComponent].y,
+                rotation: store.ghostState[store.draggingComponent].rotation
             }
         });
         
-        draggingComponent = null;
+        store.draggingComponent = null;
     }
 });
 
@@ -929,11 +884,11 @@ canvas.addEventListener('dragover', (e) => e.preventDefault());
 
 canvas.addEventListener('drop', (e) => {
         e.preventDefault();
-        if (labState && labState.system_status !== 'IDLE') return;
+        if (store.labState && store.labState.system_status !== 'IDLE') return;
     
         const componentName = e.dataTransfer.getData("text/plain");
         
-        // --- MODIFIED: Allow dropping ANY component ID, even if not in labState yet ---
+        // --- MODIFIED: Allow dropping ANY component ID, even if not in store.labState yet ---
         if (componentName) {
             const rect = canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
@@ -942,7 +897,7 @@ canvas.addEventListener('drop', (e) => {
             const type = e.dataTransfer.getData("application/type") || "OPTICAL_MIRROR";
             const lab = pxToMm(mouseX, mouseY);
             // Initialize ghost state for new component immediately
-            ghostState[componentName] = {
+            store.ghostState[componentName] = {
                 x: lab.x,
                 y: lab.y,
                 rotation: 0
@@ -952,7 +907,7 @@ canvas.addEventListener('drop', (e) => {
             const collision = checkCollision(componentName, lab.x, lab.y);
             if (collision.detected) {
                 log(`Placement cancelled: Collision with ${collision.other}`, "error");
-                delete ghostState[componentName];
+                delete store.ghostState[componentName];
                 render();
                 return;
             }
@@ -962,8 +917,8 @@ canvas.addEventListener('drop', (e) => {
                 action: "MOVE_COMPONENT",
                 target_id: componentName,
                 parameters: {
-                    target_x: ghostState[componentName].x,
-                    target_y: ghostState[componentName].y,
+                    target_x: store.ghostState[componentName].x,
+                    target_y: store.ghostState[componentName].y,
                     rotation: 0,
                     type: type // Pass type to backend
                 }
@@ -992,60 +947,6 @@ const popupStrategies = document.getElementById('popup-strategies');
 // Removed showContextPopup and hideContextPopup functions as they are replaced by updateContextPanel
 
 // ... (Parameter Modal Logic remains)
-
-// Update MouseDown Logic to Trigger Popup
-canvas.addEventListener('mousedown', (e) => {
-    if (labState && labState.system_status !== 'IDLE') return;
-
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    const hit = getComponentAtPosition(mouseX, mouseY);
-    
-    if (hit) {
-        if (selectedComponent !== hit.name) {
-            selectedComponent = hit.name;
-            updateContextPanel(hit.name);
-            render(); 
-            log(`Selected ${hit.name}`, "info");
-        } else {
-            isDragging = true;
-            draggingComponent = hit.name;
-            const p = mmToPx(ghostState[hit.name].x, ghostState[hit.name].y);
-            dragOffset = { x: mouseX - p.x, y: mouseY - p.y };
-        }
-    } else {
-        selectedComponent = null;
-        contextPanel.style.display = 'none';
-        render();
-    }
-});
-
-// Re-show popup after drag ends
-canvas.addEventListener('mouseup', async (e) => {
-    if (isDragging && draggingComponent) {
-        isDragging = false;
-        
-        await sendCommand({
-            action: "MOVE_COMPONENT",
-            target_id: draggingComponent,
-            parameters: {
-                target_x: ghostState[draggingComponent].x,
-                target_y: ghostState[draggingComponent].y,
-                rotation: ghostState[draggingComponent].rotation
-            }
-        });
-        
-        // Re-open popup at new location (REMOVED - Context Panel is static)
-        // const pose = ghostState[draggingComponent];
-        // showContextPopup(draggingComponent, mmToPx(pose.x, pose.y).x, mmToPx(pose.x, pose.y).y, false);
-        
-        updateContextPanel(draggingComponent);
-        draggingComponent = null;
-    }
-});
-
 
 // --- Parameter Modal Logic ---
 
@@ -1162,16 +1063,16 @@ function showParameterModal(strategyKey, strategyDef) {
         params.strategy = strategyKey;
 
         // Auto-inject motor_ids for COBYLA if available
-        if (strategyKey === 'COBYLA' && selectedComponent) {
-             if (catalogMap[selectedComponent] && catalogMap[selectedComponent].motor_ids) {
-                 params.motor_ids = catalogMap[selectedComponent].motor_ids;
+        if (strategyKey === 'COBYLA' && store.selectedComponent) {
+             if (store.catalogMap[store.selectedComponent] && store.catalogMap[store.selectedComponent].motor_ids) {
+                 params.motor_ids = store.catalogMap[store.selectedComponent].motor_ids;
                  log(`Using motor_ids: [${params.motor_ids.join(', ')}]`, "info");
              }
         }
 
         sendCommand({
             action: "OPTIMIZE",
-            target_id: selectedComponent, 
+            target_id: store.selectedComponent, 
             parameters: params
         });
         overlay.remove();
@@ -1285,7 +1186,7 @@ function drawLaserPath() {
     ctx.strokeStyle = '#ff3b3b';
     ctx.lineWidth = 2;
     ctx.setLineDash([10, 10]);
-    const coef = laserLineCoeffs || { a: 0, b: 0 };
+    const coef = store.laserLineCoeffs || { a: 0, b: 0 };
     const seg = clipLaserLineToBounds(coef.a, coef.b);
     if (seg) {
         const p1 = mmToPx(seg[0].x, seg[0].y);
@@ -1323,7 +1224,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     ctx.shadowBlur = (mode === 'GHOST') ? 0 : 10;
     
     // Selection Halo
-    if (name === selectedComponent) {
+    if (name === store.selectedComponent) {
         ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 2;
         ctx.beginPath(); 
@@ -1342,7 +1243,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.setLineDash([]);
     }
 
-    if (isOptimizing && pendingCommands.has(name)) {
+    if (store.isOptimizing && store.pendingCommands.has(name)) {
         ctx.shadowColor = '#10b981'; // Green glow
         ctx.shadowBlur = 20;
         ctx.strokeStyle = '#10b981';
@@ -1352,7 +1253,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     }
 
     // Draw Specific Icons based on Catalog ID or Type
-    const catalogItem = catalogMap[name];
+    const catalogItem = store.catalogMap[name];
     const catalogId = catalogItem ? catalogItem.id : null;
 
     if (catalogId === 'nd_filter') {
@@ -1504,8 +1405,8 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     
     // Resolve Display Name from Catalog
     let displayName = name;
-    if (catalogMap[name]) {
-        displayName = catalogMap[name].name;
+    if (store.catalogMap[name]) {
+        displayName = store.catalogMap[name].name;
     }
     
     ctx.fillText(displayName, 0, -halfH - 10);
@@ -1515,7 +1416,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.font = 'bold 10px Inter, sans-serif';
         ctx.fillText("MOVING...", 0, halfH + 15);
     }
-    if (isOptimizing && pendingCommands.has(name)) {
+    if (store.isOptimizing && store.pendingCommands.has(name)) {
         ctx.fillStyle = '#10b981';
         ctx.font = 'bold 10px Inter, sans-serif';
         ctx.fillText("OPTIMIZING...", 0, halfH + 15);
@@ -1525,8 +1426,8 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
 }
 
 function drawOptimizationGraph() {
-    if (!isOptimizing || optimizationData.length === 0) return;
-    if (!labState || labState.lab_mode !== 'MOCK') return;
+    if (!store.isOptimizing || store.optimizationData.length === 0) return;
+    if (!store.labState || store.labState.lab_mode !== 'MOCK') return;
 
     const w = 300;
     const h = 150;
@@ -1553,7 +1454,7 @@ function drawOptimizationGraph() {
     const xScale = (w - 20) / maxSteps;
     const yScale = (h - 40); // 0-1 normalized
 
-    optimizationData.forEach((point, i) => {
+    store.optimizationData.forEach((point, i) => {
         const px = x + 10 + point.step * xScale;
         const py = y + h - 10 - point.value * yScale;
         if (i === 0) ctx.moveTo(px, py);
@@ -1566,24 +1467,24 @@ function render() {
     clearCanvas();
     drawLaserPath();
 
-    if (!labState) return;
+    if (!store.labState) return;
 
     // 1. Draw Physical Components (Solid)
-    Object.entries(labState.components).forEach(([name, comp]) => {
+    Object.entries(store.labState.components).forEach(([name, comp]) => {
         if (comp.state === 'PLACED') {
             drawComponent(name, comp.pose, comp.type, 'SOLID');
         }
     });
 
     // 2. Draw Ghost Components (Intent)
-    // We now use ghostState which is initialized from comp.intent.nominal_pose
-    Object.entries(ghostState).forEach(([name, pose]) => {
-        const type = labState.components[name]?.type || 'UNKNOWN';
-        const isPending = pendingCommands.has(name);
+    // We now use store.ghostState which is initialized from comp.intent.nominal_pose
+    Object.entries(store.ghostState).forEach(([name, pose]) => {
+        const type = store.labState.components[name]?.type || 'UNKNOWN';
+        const isPending = store.pendingCommands.has(name);
         drawComponent(name, pose, type, isPending ? 'PENDING' : 'GHOST');
         
         // Draw Drift Line (Nominal vs Physical)
-        const physical = labState.components[name];
+        const physical = store.labState.components[name];
         if (physical && physical.state === 'PLACED') {
             const from = mmToPx(physical.pose.x, physical.pose.y);
             const to = mmToPx(pose.x, pose.y);
@@ -1613,9 +1514,9 @@ function getComponentIcon(type) {
 }
 
 function updateUI() {
-    if (!labState) return;
+    if (!store.labState) return;
 
-    const status = labState.system_status;
+    const status = store.labState.system_status;
     let badgeClass = 'active';
     let badgeColor = 'placed'; // green
     let badgeStyle = '';
@@ -1634,14 +1535,14 @@ function updateUI() {
     statusBadge.innerHTML = `<span class="status-dot ${badgeColor}" style="${badgeStyle}"></span> ${status}`;
 
     // Update Sidebar Selection if active
-    if (selectedComponent) {
+    if (store.selectedComponent) {
         // updateSidebarSelection(); // function removed previously
     }
 
     componentList.innerHTML = '';
     // libraryList.innerHTML = ''; // DO NOT TOUCH LIBRARY LIST IN UPDATE LOOP
     
-    const components = labState.components || {};
+    const components = store.labState.components || {};
     
     // Check if there are any placed items
     // (We treat everything in components as 'placed' or at least 'in lab' for the sidebar list)
@@ -1657,7 +1558,7 @@ function updateUI() {
     Object.entries(components).forEach(([name, comp]) => {
         const card = document.createElement('div');
         card.className = 'component-card';
-        if (name === selectedComponent) card.style.borderColor = '#3b82f6'; 
+        if (name === store.selectedComponent) card.style.borderColor = '#3b82f6'; 
         // card.draggable = true; // Dragging from sidebar to move? Maybe, but mostly we select and use context panel.
         
         // card.addEventListener('dragstart', (e) => handleInventoryDragStart(e, name));
@@ -1668,9 +1569,9 @@ function updateUI() {
         let displayType = comp.type;
         let unknownTag = false;
 
-        if (catalogMap[comp.id]) {
-            displayName = catalogMap[comp.id].name;
-            // displayType = catalogMap[comp.id].type; // Ensure type matches catalog
+        if (store.catalogMap[comp.id]) {
+            displayName = store.catalogMap[comp.id].name;
+            // displayType = store.catalogMap[comp.id].type; // Ensure type matches catalog
         } else {
             // Unknown Tag Logic
             displayName = `Unknown (${comp.id})`;
@@ -1689,7 +1590,7 @@ function updateUI() {
 
         // Motor Badge
         let motorBadge = '';
-        if (catalogMap[comp.id] && catalogMap[comp.id].motor_ids && catalogMap[comp.id].motor_ids.length > 0) {
+        if (store.catalogMap[comp.id] && store.catalogMap[comp.id].motor_ids && store.catalogMap[comp.id].motor_ids.length > 0) {
             motorBadge = `<span class="material-icons-round" style="font-size: 12px; color: #f59e0b; margin-right: 4px;" title="Motorized">settings_input_component</span>`;
         }
 
@@ -1704,7 +1605,7 @@ function updateUI() {
         
         // Click listener for selection
         card.addEventListener('click', () => {
-            selectedComponent = name;
+            store.selectedComponent = name;
             updateContextPanel(name);
             render();
         });
@@ -1716,14 +1617,13 @@ function updateUI() {
 }
 
 // --- Library Controls ---
-let catalogCache = null;
 
 addComponentBtn.addEventListener('click', async () => {
     libraryPopup.style.display = 'block'; // Show immediately
     
     // Use cached catalog if available to avoid refetching
-    // if (catalogCache) {
-    //    renderCatalog(catalogCache);
+    // if (store.catalogCache) {
+    //    renderCatalog(store.catalogCache);
     //    return;
     // }
 
@@ -1732,8 +1632,8 @@ addComponentBtn.addEventListener('click', async () => {
     try {
         const response = await fetch('/api/catalog');
         if (!response.ok) throw new Error("Failed to load catalog");
-        catalogCache = await response.json();
-        renderCatalog(catalogCache);
+        store.catalogCache = await response.json();
+        renderCatalog(store.catalogCache);
     } catch (e) {
         libraryList.innerHTML = `<div style="padding:10px; text-align:center; color:#ef4444">Error: ${e.message}</div>`;
     }
@@ -1747,7 +1647,7 @@ function renderCatalog(catalog) {
     }
 
     // Get current lab components to check what is already placed
-    const labComponents = labState ? labState.components : {};
+    const labComponents = store.labState ? store.labState.components : {};
     const placedTagIds = new Set(Object.values(labComponents).map(c => c.id));
 
     catalog.forEach(item => {
@@ -1809,12 +1709,12 @@ libraryClose.addEventListener('click', () => {
 
 function renderRecipes() {
     recipeList.innerHTML = '';
-    if (availableRecipes.length === 0) {
+    if (store.availableRecipes.length === 0) {
         recipeList.innerHTML = '<div style="color: #64748b; font-size: 11px; padding: 10px; text-align: center;">No recipes saved.</div>';
         return;
     }
 
-    availableRecipes.forEach(recipe => {
+    store.availableRecipes.forEach(recipe => {
         const item = document.createElement('div');
         item.style.backgroundColor = 'rgba(255,255,255,0.03)';
         item.style.border = '1px solid #2a2e36';
@@ -1850,12 +1750,12 @@ function renderRecipes() {
 
 function updateRecipeEditorList() {
     recipeStepsContainer.innerHTML = '';
-    if (currentRecipeSteps.length === 0) {
+    if (store.currentRecipeSteps.length === 0) {
         recipeStepsContainer.innerHTML = '<div style="padding: 20px; text-align: center; color: #64748b; font-size: 12px;">No steps recorded yet.</div>';
         return;
     }
 
-    currentRecipeSteps.forEach((step, index) => {
+    store.currentRecipeSteps.forEach((step, index) => {
         const item = document.createElement('div');
         item.className = 'recipe-step-item';
         
@@ -1879,16 +1779,16 @@ function updateRecipeEditorList() {
 }
 
 function deleteStep(index) {
-    currentRecipeSteps.splice(index, 1);
+    store.currentRecipeSteps.splice(index, 1);
     // Re-assign step numbers if needed, though mostly visual
     updateRecipeEditorList();
 }
 
 recordBtn.addEventListener('click', () => {
-    isRecording = !isRecording; // Toggle recording
+    store.isRecording = !store.isRecording; // Toggle recording
     
-    if (isRecording) {
-        currentRecipeSteps = [];
+    if (store.isRecording) {
+        store.currentRecipeSteps = [];
         recipeEditorName.value = `Recipe ${new Date().toLocaleTimeString()}`;
         updateRecipeEditorList();
         recIndicator.style.display = 'flex';
@@ -1904,7 +1804,7 @@ recordBtn.addEventListener('click', () => {
 });
 
 recipeEditorSave.addEventListener('click', async () => {
-    if (currentRecipeSteps.length === 0) {
+    if (store.currentRecipeSteps.length === 0) {
         alert("No actions recorded!");
         return;
     }
@@ -1913,7 +1813,7 @@ recipeEditorSave.addEventListener('click', async () => {
     const id = name.toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Math.floor(Math.random() * 1000);
 
     // Re-number steps just in case
-    const steps = currentRecipeSteps.map((s, i) => ({ ...s, step: i + 1 }));
+    const steps = store.currentRecipeSteps.map((s, i) => ({ ...s, step: i + 1 }));
 
     const recipe = {
         id: id,
@@ -1930,7 +1830,7 @@ recipeEditorSave.addEventListener('click', async () => {
         
         if (res.ok) {
             log(`Recipe "${name}" saved!`, "info");
-            isRecording = false;
+            store.isRecording = false;
             recIndicator.style.display = 'none';
             recordBtn.classList.remove('btn-primary');
             recordBtn.classList.add('btn-secondary');
@@ -1947,7 +1847,7 @@ recipeEditorSave.addEventListener('click', async () => {
 
 async function playRecipe(id) {
     // 1. Find the recipe object
-    const recipe = availableRecipes.find(r => r.id === id);
+    const recipe = store.availableRecipes.find(r => r.id === id);
     if (!recipe) {
         log("Recipe not found locally.", "error");
         return;
@@ -1976,7 +1876,7 @@ async function playRecipe(id) {
 }
 
 function checkRecipeRequirements(recipe) {
-    if (!labState || !labState.components) return { valid: false, error: "Lab state not loaded" };
+    if (!store.labState || !store.labState.components) return { valid: false, error: "Lab state not loaded" };
     
     const missingRequestable = [];
     const missingUnknown = [];
@@ -1991,10 +1891,10 @@ function checkRecipeRequirements(recipe) {
     
     requiredComponents.forEach(id => {
         // Check if it exists in the current lab state
-        if (!labState.components[id]) {
+        if (!store.labState.components[id]) {
             // Check if in catalog
-            if (catalogMap[id]) {
-                missingRequestable.push(catalogMap[id]);
+            if (store.catalogMap[id]) {
+                missingRequestable.push(store.catalogMap[id]);
             } else {
                 missingUnknown.push(id);
             }
@@ -2152,12 +2052,12 @@ function log(message, type = 'info') {
     if (logOutput.children.length > 50) logOutput.removeChild(logOutput.lastChild);
 }
 
-/** Initialize ghostState[tagId] from lab state for Command Console moves. */
+/** Initialize store.ghostState[tagId] from lab state for Command Console moves. */
 function ensureGhostForConsole(tagId) {
-    if (ghostState[tagId]) return true;
-    const comp = labState && labState.components && labState.components[tagId];
+    if (store.ghostState[tagId]) return true;
+    const comp = store.labState && store.labState.components && store.labState.components[tagId];
     if (!comp || comp.state !== 'PLACED' || !comp.pose) return false;
-    ghostState[tagId] = {
+    store.ghostState[tagId] = {
         x: comp.pose.x,
         y: comp.pose.y,
         rotation: typeof comp.pose.rotation === 'number' ? comp.pose.rotation : 0
@@ -2182,7 +2082,7 @@ async function runLabStateRefresh() {
         await new Promise(r => setTimeout(r, 500));
     }
 
-    forceGhostSync = true;
+    store.forceGhostSync = true;
     await fetchLaserLine();
     await fetchLabState();
     checkVideoStatus();
@@ -2243,7 +2143,7 @@ function init() {
                 if (!res.ok) throw new Error(data.detail || 'Load failed');
 
                 // Force UI+ghost to match loaded state immediately.
-                forceGhostSync = true;
+                store.forceGhostSync = true;
                 await fetchLabState();
                 log(`Loaded lab state: ${data.name || name}`, "info");
             } catch (e) {
@@ -2285,8 +2185,6 @@ function initVideoFeed() {
 }
 
 // --- Table cam capture (on-demand, real lab only) ---
-let selectedTableCam = 1;
-let tableCamLastBlobUrl = null;
 const tableCamBtn1 = document.getElementById('table-cam-btn-1');
 const tableCamBtn2 = document.getElementById('table-cam-btn-2');
 const tableCamCaptureBtn = document.getElementById('table-cam-capture-btn');
@@ -2295,7 +2193,7 @@ const tableCamPlaceholder = document.getElementById('table-cam-placeholder');
 const tableCamError = document.getElementById('table-cam-error');
 
 function setTableCamSelection(camId) {
-    selectedTableCam = camId;
+    store.selectedTableCam = camId;
     if (tableCamBtn1) {
         tableCamBtn1.classList.toggle('btn-primary', camId === 1);
         tableCamBtn1.classList.toggle('btn-secondary', camId !== 1);
@@ -2319,12 +2217,12 @@ if (tableCamCaptureBtn) {
         tableCamImg.src = '';
         tableCamError.style.display = 'none';
         try {
-            const res = await fetch(`/api/table-cam/capture?cam_id=${selectedTableCam}`);
+            const res = await fetch(`/api/table-cam/capture?cam_id=${store.selectedTableCam}`);
             if (res.ok) {
                 const blob = await res.blob();
-                if (tableCamLastBlobUrl) URL.revokeObjectURL(tableCamLastBlobUrl);
-                tableCamLastBlobUrl = URL.createObjectURL(blob);
-                tableCamImg.src = tableCamLastBlobUrl;
+                if (store.tableCamLastBlobUrl) URL.revokeObjectURL(store.tableCamLastBlobUrl);
+                store.tableCamLastBlobUrl = URL.createObjectURL(blob);
+                tableCamImg.src = store.tableCamLastBlobUrl;
                 tableCamImg.style.display = 'block';
                 tableCamPlaceholder.style.display = 'none';
                 tableCamPlaceholder.textContent = 'Click Capture to get image';
@@ -2373,7 +2271,7 @@ if (tableCamCobylaRefBtn) {
         if (!cobylaRefStatusEl) return;
         cobylaRefStatusEl.textContent = 'Cobyla ref: uploading…';
         try {
-            const cap = await fetch(`/api/table-cam/capture?cam_id=${selectedTableCam}`);
+            const cap = await fetch(`/api/table-cam/capture?cam_id=${store.selectedTableCam}`);
             if (!cap.ok) {
                 const err = (await cap.json().catch(() => ({}))).detail || `Capture failed (${cap.status})`;
                 cobylaRefStatusEl.textContent = `Cobyla ref: ${err}`;
@@ -2468,11 +2366,11 @@ window.__commandConsoleDeps = {
     runLabStateRefresh,
     ensureGhostForConsole,
     get ghostState() {
-        return ghostState;
+        return store.ghostState;
     },
     render,
-    getCatalogEntry: (tagId) => catalogMap[tagId] || null,
-    getLabState: () => labState
+    getCatalogEntry: (tagId) => store.catalogMap[tagId] || null,
+    getLabState: () => store.labState
 };
 
 init();

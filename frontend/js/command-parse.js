@@ -1,6 +1,6 @@
 /**
  * Shorthand parser for the Command Console.
- * Defaults for NEWTON/COBYLA must stay aligned with `fetchStrategies()` in app.js.
+ * Defaults for NEWTON/COBYLA must stay aligned with `fetchStrategies()` in js/app-main.js.
  * @see coding_on_the_ui.md
  */
 

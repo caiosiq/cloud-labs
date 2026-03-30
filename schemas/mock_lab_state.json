@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-03-30T16:12:48.056355",
+  "last_updated": "2026-03-30T16:35:41.795405",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -30,14 +30,14 @@
       "type": "OPTICAL_CAMERA",
       "state": "PLACED",
       "pose": {
-        "x": -207.05224701425269,
-        "y": 166.9166373794072,
+        "x": -423.0298640608087,
+        "y": 289.97865949867116,
         "rotation": 680
       },
       "intent": {
         "nominal_pose": {
-          "x": -207.14285714285717,
-          "y": 167.14285714285717,
+          "x": -422.8571428571429,
+          "y": 290,
           "rotation": 680
         },
         "placement_strategy": "MANUAL",

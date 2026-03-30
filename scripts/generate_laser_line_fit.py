@@ -1,7 +1,7 @@
 """
 Write repo-root laser_line_fit.npy for the UI /api/laser-line.
 
-Lab coordinates use x = a*y + b (mm). Canvas origin is table center; grid dots are 25 mm (see frontend/app.js).
+Lab coordinates use x = a*y + b (mm). Canvas origin is table center; grid dots are 25 mm (see frontend/js/config.js).
 
 - Vertical laser (aligned with breadboard columns): a = 0, b = x intercept in mm.
 - Typical tuning: b ≈ (hole_count) * (hole_spacing_mm). Old fit was ~389 mm (~15.5 × 25).
@@ -12,7 +12,7 @@ Examples (from project root):
   python scripts/generate_laser_line_fit.py --inches 16          # b = 16 * 25.4 mm
   python scripts/generate_laser_line_fit.py --b 400 --slope 0    # set b directly
 
-If the UI breadboard grid is shifted by ¼\" (see BREADBOARD_GRID_OFFSET_X_MM in app.js), subtract the same
+If the UI breadboard grid is shifted by ¼\" (see BREADBOARD_GRID_OFFSET_X_MM in frontend/js/config.js), subtract the same
 amount from b so the laser overlay matches: e.g. after --holes 16 --spacing-mm 25 (b=400), use --b 393.65
 or run: python -c "import numpy as np; np.save('laser_line_fit.npy', np.array([0.,400-25.4/4]))"
 """

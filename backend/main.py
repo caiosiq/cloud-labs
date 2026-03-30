@@ -165,7 +165,7 @@ def _read_index_html(path: str) -> str:
     """Read HTML file and inject cache-bust version for script assets."""
     with open(path, "r", encoding="utf-8") as f:
         html = f.read()
-    html = re.sub(r"app\.js\?v=\d+", f"app.js?v={_STATIC_VERSION}", html)
+    html = re.sub(r"js/main\.js\?v=\d+", f"js/main.js?v={_STATIC_VERSION}", html)
     return html
 
 
