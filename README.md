@@ -8,6 +8,29 @@ The UI separates **what you intend** (ghost / nominal poses on the canvas) from 
 
 ---
 
+## Why two worlds? `lab_automation`, experiment manager, and this repository
+
+If you have spent time in both places, it can feel as though you are **writing the same functions twice**: on one side, the **`lab_automation`** tree gives you an **experiment manager** built from modular optical components; on the other, **`LabCommunicator`** in this repo exposes **move**, **optimize**, and **motor** actions that ultimately call into that same stack. That overlap is real—and **deliberate**.
+
+**Start from the physical lab.** In **`lab_automation`**, components are represented in a modular way: mirrors, stages, cameras, and so on. The **experiment manager** gathers those pieces into something you can program: a set of **procedures** for building experimental plans. That power comes with **everything the hardware demands**: defining and finding components, bringing up cameras, speaking the robot’s native language, and handling failures at the level of serial ports, joint commands, and OpenCV arrays. Those APIs are **hardware-bound**: they are the truth of *this* arm, *this* camera driver, *this* wiring.
+
+**This project adds a second layer on top.** When you start the digital twin in real mode, **`RealLabCommunicator`** does the heavy setup once—scanning the table, wiring the experiment object, aligning conventions—so that the **browser** (and anything else speaking HTTP) does not have to repeat that ceremony. From the outside, the contract is intentionally narrow: **`POST /api/command`** carries **intent** in a small vocabulary—move a tagged part to a pose, run an optimization strategy, jog a motor, refresh state. The UI thinks in **lab frame** coordinates (what you see on the table and on camera overlays); the communicator is responsible for mapping that intent onto whatever **robot-frame** calls the experiment manager expects, including details that would change if you swapped hardware.
+
+So the two layers live in **different domains**:
+
+| Layer | What it knows | What it is for |
+|--------|----------------|----------------|
+| **Experiment manager** (`lab_automation`) | How to talk to the xArm6, how to interpret image arrays, how to sequence low-level motor and placement calls | **Hardware-accurate** experimental scripts: the full power—and full fragility—of the real system |
+| **Lab communicator + HTTP API** (this repo) | What a human or an automation client **wants** to happen next, in a **stable, safe payload** | **Intent**: the same mental model whether the backend is mock or real |
+
+If tomorrow you replace the xArm6 with a UR10, **reimplement or reconfigure the experiment manager and the robot drivers**—the commands at that level **will** change. But the **UI**, the **Command Console** (planned), and the **JSON** shape of **`/api/command`** can stay the same: they are not tied to a particular vendor pose format. The apparent redundancy between “experiment manager functions” and “communicator functions” is an **abstraction boundary**. You pay a thin translation layer so that everything above it—canvas, recipes, future LLM-driven plans—does not get rewritten when the bench changes.
+
+Historically, this repository began as **“cloud-labs”** in the sense of **a remote-facing UI** for the lab. The direction now is broader: treat the stack as a **durable language for running experiments**—commands, sequences, and eventually richer scripting—while keeping the **robot and vision specifics** fenced behind the communicator. That separation is what lets you iterate on **how people and tools ask for work** without constantly revisiting **how the arm moves**.
+
+For the distinction between **lab coordinates** (what you see) and **robot coordinates** (what the controller uses) in real mode, see **`coordinate_rotation.md`**.
+
+---
+
 ## What you see in the app
 
 - **Dark, lab-style UI** (Inter typography, Material Icons): main table in the center, **left** sidebar for placed components and selection, **right** sidebar for live/overhead-style video, table-camera capture, recipes, and activity log.
