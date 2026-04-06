@@ -70,12 +70,50 @@
         /* --- Sidebar (Right) --- */
         #sidebar-right {
             width: 320px;
+            height: 100vh;
+            min-height: 0;
             background-color: var(--bg-panel);
             border-left: 1px solid var(--border-color);
             display: flex;
             flex-direction: column;
             z-index: 10;
             box-shadow: -4px 0 24px rgba(0,0,0,0.2);
+        }
+
+        #sidebar-right-pinned {
+            flex-shrink: 0;
+        }
+
+        #sidebar-right-scroll {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Override global .btn { width:100% } for compact multi-button rows in right sidebar */
+        #sidebar-right .btn--sidebar-inline {
+            width: auto;
+            margin-top: 0;
+            flex: 1 1 0;
+            min-width: 0;
+            justify-content: center;
+            white-space: nowrap;
+        }
+
+        #sidebar-right .sidebar-right-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            padding: 0 12px 8px;
+        }
+
+        /* Global .btn-secondary margin-top stacks rows; reset in right sidebar scroll area */
+        #sidebar-right-scroll .btn {
+            margin-top: 0;
         }
 
         .logo-area {
@@ -468,6 +506,7 @@
 
     <!-- RIGHT SIDEBAR (Recipes & Monitor) -->
     <div id="sidebar-right">
+        <div id="sidebar-right-pinned">
         <!-- Live Feed Section -->
         <div style="height: 200px; background: black; position: relative; border-bottom: 1px solid var(--border-color);">
              <img id="live-video-img" src="/api/video-feed/stream" style="width: 100%; height: 100%; object-fit: cover; display: none;" onerror="this.style.display='none'; document.getElementById('video-placeholder').style.display='flex';">
@@ -495,34 +534,31 @@
                 <div class="log-entry info">System initialized.</div>
             </div>
         </div>
+        </div>
 
-        <!-- Table cam capture (real lab: on-demand capture from recorder cams) -->
+        <div id="sidebar-right-scroll">
+        <!-- Table cam capture: real = hardware; mock = synthetic PNG from /api/table-cam/capture -->
         <div id="table-cam-section" style="border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
             <div class="section-header">Table cam capture</div>
-            <div style="padding: 0 12px 6px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-                <span style="font-size: 11px; color: var(--text-secondary);">Camera:</span>
-                <button id="table-cam-btn-1" type="button" class="btn btn-secondary table-cam-sel" style="font-size: 11px; padding: 4px 10px;">CAM 1</button>
-                <button id="table-cam-btn-2" type="button" class="btn btn-secondary table-cam-sel" style="font-size: 11px; padding: 4px 10px;">CAM 2</button>
-                <button id="table-cam-capture-btn" type="button" class="btn btn-primary" style="font-size: 11px; padding: 4px 10px;">
+            <div id="table-cam-mock-hint" style="display: none; padding: 0 12px 6px; font-size: 10px; color: var(--text-muted); line-height: 1.35;">
+                Mock mode: <strong>Capture</strong> returns a synthetic PNG (grid + fake beam) so you can exercise this panel and <strong>Set Cobyla reference</strong> without hardware.
+            </div>
+            <div class="sidebar-right-toolbar" style="padding-top: 4px;">
+                <span style="font-size: 11px; color: var(--text-secondary); flex-shrink: 0;">Camera</span>
+                <button id="table-cam-btn-1" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-sel" style="font-size: 11px; padding: 4px 8px;">CAM 1</button>
+                <button id="table-cam-btn-2" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-sel" style="font-size: 11px; padding: 4px 8px;">CAM 2</button>
+            </div>
+            <div class="sidebar-right-toolbar" style="padding-top: 0;">
+                <label style="font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;" title="Exposure (seconds) for table camera capture">
+                    Exp (s)
+                    <input id="table-cam-exposure" type="number" value="0.2" min="0.001" max="30" step="0.05" style="width: 64px; font-size: 11px; padding: 4px 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                </label>
+                <button id="table-cam-capture-btn" type="button" class="btn btn-primary btn--sidebar-inline" style="font-size: 11px; padding: 4px 10px; margin-left: auto; flex: 0 1 auto; min-width: min-content;">
                     <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">camera</span> Capture
                 </button>
             </div>
-            <div style="padding: 0 12px 8px; display: flex; gap: 8px; align-items: center;">
-                <label style="font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px;">
-                    Exp (s)
-                    <input id="table-cam-exposure" type="number" value="0.2" min="0.001" max="30" step="0.05" style="width: 72px; font-size: 11px; padding: 4px 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" title="Exposure passed to table camera capture (video + capture)">
-                </label>
-            </div>
-            <div style="padding: 0 12px 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-                <button id="table-cam-cobyla-ref-btn" type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" title="Uses a fresh capture from the selected table camera">
-                    <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">bookmark_add</span> Set Cobyla reference
-                </button>
-                <button id="table-cam-cobyla-clear-btn" type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;">
-                    Clear ref
-                </button>
-                <span id="cobyla-ref-status" style="font-size: 10px; color: var(--text-muted); flex: 1; min-width: 120px;">Cobyla ref: …</span>
-            </div>
-            <div id="table-cam-preview" style="height: 160px; background: #0f1115; margin: 0 12px 12px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; transition: border-color 150ms ease, box-shadow 150ms ease;">
+            <div style="padding: 4px 12px 2px; font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Latest capture</div>
+            <div id="table-cam-preview" style="height: 160px; background: #0f1115; margin: 0 12px 10px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; transition: border-color 150ms ease, box-shadow 150ms ease;">
                 <img id="table-cam-img" src="" alt="Table cam" style="max-width: 100%; max-height: 100%; object-fit: contain; display: none;">
                 <div id="table-cam-placeholder" style="color: var(--text-muted); font-size: 12px; text-align: center;">Click Capture to get image</div>
                 <div id="table-cam-error" style="color: var(--status-error); font-size: 11px; display: none;"></div>
@@ -533,10 +569,37 @@
                     <span id="optimization-step-text">OPTIMIZING (Step 0)</span>
                 </div>
             </div>
+
+            <div style="padding: 4px 12px 2px; font-size: 10px; color: #f87171; text-transform: uppercase; letter-spacing: 0.04em;">Cobyla reference — stored for OPTIMIZE (COBYLA)</div>
+            <div id="cobyla-ref-preview-wrap" style="height: 140px; margin: 0 12px 10px; border-radius: 6px; border: 2px solid #ef4444; box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.15); background: #0a0c10; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;">
+                <img id="cobyla-ref-preview-img" src="" alt="Cobyla reference" style="max-width: 100%; max-height: 100%; object-fit: contain; display: none;">
+                <div id="cobyla-ref-placeholder" style="color: var(--text-muted); font-size: 11px; text-align: center; padding: 12px; line-height: 1.45;">No reference stored.<br><span style="font-size: 10px; opacity: 0.9;">Set from <strong>Latest capture</strong> above, or load a PNG you saved earlier.</span></div>
+            </div>
+
+            <div class="sidebar-right-toolbar">
+                <button id="table-cam-cobyla-ref-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 4px 8px;" title="Stores whatever is shown in Latest capture as the server-side Cobyla reference (does not replace Latest capture)">
+                    <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">bookmark_add</span> Set ref
+                </button>
+                <button id="table-cam-cobyla-clear-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 4px 8px;">
+                    Clear ref
+                </button>
+            </div>
+            <div class="sidebar-right-toolbar">
+                <button id="cobyla-ref-save-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 4px 8px;" disabled title="Download the stored reference as PNG">
+                    <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">download</span> Save ref
+                </button>
+                <button id="cobyla-ref-load-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 4px 8px;" title="Upload a PNG to set the Cobyla reference">
+                    <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">upload</span> Load ref
+                </button>
+                <input type="file" id="cobyla-ref-file-input" accept="image/png,.png" style="display: none;" aria-hidden="true">
+            </div>
+            <div style="padding: 0 12px 10px;">
+                <span id="cobyla-ref-status" style="font-size: 10px; color: var(--text-muted); display: block; line-height: 1.35;">Cobyla ref: …</span>
+            </div>
         </div>
 
         <!-- Recipe Editor -->
-        <div style="flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <div style="flex-shrink: 0; display: flex; flex-direction: column;">
              <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <span>Recipe Editor</span>
                 <div id="rec-indicator" style="display: none; color: #ef4444; font-weight: bold; font-size: 10px; align-items: center; gap: 4px;">
@@ -548,23 +611,24 @@
                  <input type="text" id="recipe-editor-name" placeholder="Recipe Name..." style="width: 100%; padding: 8px; background: #0f1115; border: 1px solid #2a2e36; border-radius: 6px; color: white; font-size: 12px; margin-bottom: 8px;">
                  
                  <div style="display: flex; gap: 8px;">
-                     <button id="record-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px;">
+                     <button id="record-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 6px;">
                         <span class="material-icons-round" style="font-size: 14px;">fiber_manual_record</span> Record
                     </button>
-                    <button id="recipe-editor-save" class="btn btn-primary" style="font-size: 11px; padding: 6px;">
+                    <button id="recipe-editor-save" type="button" class="btn btn-primary btn--sidebar-inline" style="font-size: 11px; padding: 6px;">
                         <span class="material-icons-round" style="font-size: 14px;">save</span> Save
                     </button>
                  </div>
             </div>
 
-            <div id="recipe-steps-container" style="flex-grow: 1; overflow-y: auto; background: rgba(0,0,0,0.2); margin: 0 16px 16px; border: 1px solid #2a2e36; border-radius: 6px;">
+            <div id="recipe-steps-container" style="background: rgba(0,0,0,0.2); margin: 0 16px 16px; border: 1px solid #2a2e36; border-radius: 6px; max-height: 280px; overflow-y: auto;">
                 <div style="padding: 20px; text-align: center; color: #64748b; font-size: 12px;">No steps recorded.</div>
             </div>
             
             <div class="section-header" style="border-top: 1px solid var(--border-color); padding-top: 12px;">Saved Recipes</div>
-            <div id="recipe-list" style="height: 120px; overflow-y: auto; padding: 0 16px 16px;">
+            <div id="recipe-list" style="max-height: 200px; overflow-y: auto; padding: 0 16px 16px;">
                 <!-- List -->
             </div>
+        </div>
         </div>
     </div>
 

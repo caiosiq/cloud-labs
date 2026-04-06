@@ -3,7 +3,8 @@ import json
 import asyncio
 import random
 from datetime import datetime
-from typing import Any, Dict, Tuple
+from io import BytesIO
+from typing import Any, Dict, Optional, Tuple
 
 from .base import LabCommunicator
 
@@ -262,22 +263,22 @@ class MockLabCommunicator(LabCommunicator):
         if not data or len(data) < 8:
             return False, "empty body"
         try:
-            import cv2
+            from PIL import Image
             import numpy as np
         except ImportError:
-            return False, "cv2/numpy required"
-        arr = np.frombuffer(data, dtype=np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
-        if img is None:
-            return False, "could not decode PNG"
-        if img.ndim == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        elif img.ndim == 3 and img.shape[2] == 4:
-            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        if img.ndim != 3 or img.shape[2] != 3:
-            return False, "decoded image must be BGR with 3 channels"
-        self._cobyla_reference_bgr = img.copy()
-        h, w = img.shape[:2]
+            return False, "Pillow and numpy required (pip install Pillow numpy)"
+        try:
+            pil = Image.open(BytesIO(data))
+            pil.load()
+            rgb = np.array(pil.convert("RGB"))
+        except Exception as e:
+            return False, f"could not decode PNG: {e}"
+        if rgb.ndim != 3 or rgb.shape[2] != 3:
+            return False, "decoded image must have 3 channels"
+        # BGR ndarray for parity with OpenCV / real lab
+        bgr = rgb[:, :, ::-1].copy()
+        self._cobyla_reference_bgr = bgr
+        h, w = bgr.shape[:2]
         print(f"[MOCK LAB] Cobyla reference image set ({w}x{h} BGR)")
         return True, f"stored {w}x{h} BGR reference (mock)"
 
@@ -298,8 +299,73 @@ class MockLabCommunicator(LabCommunicator):
             "channels": int(ref.shape[2]),
         }
 
+    def get_cobyla_reference_png_bytes(self) -> Optional[bytes]:
+        ref = self._cobyla_reference_bgr
+        if ref is None:
+            return None
+        try:
+            from PIL import Image
+            import numpy as np
+        except ImportError:
+            return None
+        # ref is BGR; PIL expects RGB
+        rgb = ref[:, :, ::-1]
+        img = Image.fromarray(np.ascontiguousarray(rgb))
+        buf = BytesIO()
+        img.save(buf, format="PNG", compress_level=6)
+        return buf.getvalue()
+
     def get_video_feed_status(self) -> Dict[str, Any]:
         return {"connected": True, "source": "/api/video-feed/stream"}
+
+    def capture_table_cam(self, cam_id: int, exposure: float = 0.2) -> bytes:
+        """
+        Return a synthetic PNG so the table-cam panel and Cobyla reference flow work in MOCK mode.
+        Real hardware uses RealLabCommunicator.capture_table_cam.
+        """
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError:
+            print("[MOCK LAB] capture_table_cam: Pillow not installed")
+            return None
+        if cam_id not in (1, 2):
+            return None
+
+        w, h = 640, 480
+        img = Image.new("RGB", (w, h), (18, 22, 30))
+        draw = ImageDraw.Draw(img)
+        grid = (36, 40, 52)
+        for x in range(0, w, 40):
+            draw.line([(x, 0), (x, h)], fill=grid, width=1)
+        for y in range(0, h, 40):
+            draw.line([(0, y), (w, y)], fill=grid, width=1)
+
+        try:
+            font = ImageFont.load_default()
+        except Exception:
+            font = None
+
+        title = f"MOCK table cam {cam_id}"
+        sub = f"exposure={exposure:g}s — LAB_MODE=MOCK"
+        hint = "Capture / Set Cobyla reference use this image for UI testing."
+        if font:
+            draw.text((24, 20), title, fill=(226, 232, 240), font=font)
+            draw.text((24, 38), sub, fill=(148, 163, 184), font=font)
+            draw.text((24, 58), hint, fill=(100, 116, 139), font=font)
+        else:
+            draw.text((24, 20), title, fill=(226, 232, 240))
+            draw.text((24, 38), sub, fill=(148, 163, 184))
+
+        # Offset "beam" spot slightly per cam so CAM1 vs CAM2 is visible
+        cx = w // 2 + (cam_id - 1) * 55
+        cy = h // 2 - 10
+        r = 28
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(248, 113, 113), width=3)
+        draw.line([(cx - 40, cy), (cx + 40, cy)], fill=(251, 191, 36), width=2)
+
+        buf = BytesIO()
+        img.save(buf, format="PNG", compress_level=6)
+        return buf.getvalue()
 
     def get_video_stream(self):
         """Yields a static placeholder image for mock mode."""

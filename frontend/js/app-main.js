@@ -1609,7 +1609,14 @@ function updateUI() {
         componentList.appendChild(card);
     });
 
+    syncTableCamMockHint();
     render();
+}
+
+function syncTableCamMockHint() {
+    const el = document.getElementById('table-cam-mock-hint');
+    if (!el || !store.labState) return;
+    el.style.display = store.labState.lab_mode === 'MOCK' ? 'block' : 'none';
 }
 
 // --- Library Controls ---
@@ -2233,7 +2240,7 @@ if (tableCamCaptureBtn) {
                 tableCamPlaceholder.style.display = 'none';
                 tableCamPlaceholder.textContent = 'Click Capture to get image';
             } else {
-                const err = (await res.json().catch(() => ({}))).detail || 'Capture failed (real lab only)';
+                const err = (await res.json().catch(() => ({}))).detail || 'Capture failed';
                 tableCamError.textContent = err;
                 tableCamError.style.display = 'block';
                 tableCamPlaceholder.style.display = 'none';
@@ -2251,40 +2258,90 @@ if (tableCamCaptureBtn) {
 // --- Cobyla reference image (server-side BGR ndarray for CobylaAlignmentStrategy.reference_image) ---
 const tableCamCobylaRefBtn = document.getElementById('table-cam-cobyla-ref-btn');
 const tableCamCobylaClearBtn = document.getElementById('table-cam-cobyla-clear-btn');
+const cobylaRefSaveBtn = document.getElementById('cobyla-ref-save-btn');
+const cobylaRefLoadBtn = document.getElementById('cobyla-ref-load-btn');
+const cobylaRefFileInput = document.getElementById('cobyla-ref-file-input');
 const cobylaRefStatusEl = document.getElementById('cobyla-ref-status');
+const cobylaRefPreviewImg = document.getElementById('cobyla-ref-preview-img');
+const cobylaRefPlaceholderEl = document.getElementById('cobyla-ref-placeholder');
 
+function revokeCobylaRefPreviewUrl() {
+    if (store.cobylaRefPreviewObjectUrl) {
+        URL.revokeObjectURL(store.cobylaRefPreviewObjectUrl);
+        store.cobylaRefPreviewObjectUrl = null;
+    }
+}
+
+function setCobylaRefPreviewVisible(hasImage) {
+    if (cobylaRefPreviewImg && cobylaRefPlaceholderEl) {
+        cobylaRefPreviewImg.style.display = hasImage ? 'block' : 'none';
+        cobylaRefPlaceholderEl.style.display = hasImage ? 'none' : 'block';
+    }
+}
+
+/** Load stored reference PNG into the red-bordered preview (Latest capture unchanged). */
+async function refreshCobylaRefPreview() {
+    if (!cobylaRefPreviewImg) return;
+    revokeCobylaRefPreviewUrl();
+    cobylaRefPreviewImg.src = '';
+    try {
+        const r = await fetch(`/api/cobyla-reference-image?t=${Date.now()}`);
+        if (!r.ok) {
+            setCobylaRefPreviewVisible(false);
+            return;
+        }
+        const blob = await r.blob();
+        store.cobylaRefPreviewObjectUrl = URL.createObjectURL(blob);
+        cobylaRefPreviewImg.src = store.cobylaRefPreviewObjectUrl;
+        setCobylaRefPreviewVisible(true);
+    } catch {
+        setCobylaRefPreviewVisible(false);
+    }
+}
+
+/** @returns {Promise<boolean>} whether a reference is set on the server */
 async function refreshCobylaRefStatus() {
-    if (!cobylaRefStatusEl) return;
+    if (!cobylaRefStatusEl) return false;
     try {
         const r = await fetch('/api/cobyla-reference-image/status');
         if (!r.ok) {
             cobylaRefStatusEl.textContent = 'Cobyla ref: status unavailable';
-            return;
+            if (cobylaRefSaveBtn) cobylaRefSaveBtn.disabled = true;
+            return false;
         }
         const d = await r.json();
         if (d.set && d.width && d.height) {
             cobylaRefStatusEl.textContent = `Cobyla ref: set (${d.width}×${d.height})`;
-        } else {
-            cobylaRefStatusEl.textContent = 'Cobyla ref: not set';
+            if (cobylaRefSaveBtn) cobylaRefSaveBtn.disabled = false;
+            return true;
         }
+        cobylaRefStatusEl.textContent = 'Cobyla ref: not set';
+        if (cobylaRefSaveBtn) cobylaRefSaveBtn.disabled = true;
+        return false;
     } catch (e) {
         cobylaRefStatusEl.textContent = 'Cobyla ref: status error';
+        if (cobylaRefSaveBtn) cobylaRefSaveBtn.disabled = true;
+        return false;
     }
+}
+
+async function syncCobylaRefUi() {
+    await refreshCobylaRefStatus();
+    await refreshCobylaRefPreview();
 }
 
 if (tableCamCobylaRefBtn) {
     tableCamCobylaRefBtn.addEventListener('click', async () => {
-        if (!cobylaRefStatusEl) return;
+        if (!cobylaRefStatusEl || !tableCamImg) return;
+        if (tableCamImg.style.display === 'none' || !tableCamImg.src) {
+            cobylaRefStatusEl.textContent = 'Cobyla ref: capture an image first (Latest capture)';
+            log('Set Cobyla reference: need an image in Latest capture.', 'warn');
+            return;
+        }
         cobylaRefStatusEl.textContent = 'Cobyla ref: uploading…';
         try {
-            const exp = getTableCamExposureSeconds();
-            const cap = await fetch(`/api/table-cam/capture?cam_id=${store.selectedTableCam}&exposure=${encodeURIComponent(exp)}`);
-            if (!cap.ok) {
-                const err = (await cap.json().catch(() => ({}))).detail || `Capture failed (${cap.status})`;
-                cobylaRefStatusEl.textContent = `Cobyla ref: ${err}`;
-                log(err, 'warn');
-                return;
-            }
+            const cap = await fetch(tableCamImg.src);
+            if (!cap.ok) throw new Error('Could not read Latest capture image');
             const blob = await cap.blob();
             const res = await fetch('/api/cobyla-reference-image', {
                 method: 'POST',
@@ -2298,8 +2355,8 @@ if (tableCamCobylaRefBtn) {
                 log(err, 'warn');
                 return;
             }
-            log(data.message || 'Cobyla reference stored', 'info');
-            await refreshCobylaRefStatus();
+            log(data.message || 'Cobyla reference stored from Latest capture', 'info');
+            await syncCobylaRefUi();
         } catch (e) {
             cobylaRefStatusEl.textContent = `Cobyla ref: ${e.message || 'failed'}`;
             log(e.message || 'Cobyla reference upload failed', 'error');
@@ -2313,15 +2370,86 @@ if (tableCamCobylaClearBtn) {
             const res = await fetch('/api/cobyla-reference-image', { method: 'DELETE' });
             const data = await res.json().catch(() => ({}));
             if (res.ok) log(data.message || 'Cobyla reference cleared', 'info');
-            await refreshCobylaRefStatus();
+            await syncCobylaRefUi();
         } catch (e) {
             log(e.message || 'Clear failed', 'error');
         }
     });
 }
 
-refreshCobylaRefStatus();
-setInterval(refreshCobylaRefStatus, 8000);
+if (cobylaRefSaveBtn) {
+    cobylaRefSaveBtn.addEventListener('click', async () => {
+        try {
+            const r = await fetch(`/api/cobyla-reference-image?t=${Date.now()}`);
+            if (!r.ok) {
+                log('No Cobyla reference to save.', 'warn');
+                return;
+            }
+            const blob = await r.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'cobyla-reference.png';
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+            log('Saved Cobyla reference as cobyla-reference.png', 'info');
+        } catch (e) {
+            log(e.message || 'Save failed', 'error');
+        }
+    });
+}
+
+if (cobylaRefLoadBtn && cobylaRefFileInput) {
+    cobylaRefLoadBtn.addEventListener('click', () => cobylaRefFileInput.click());
+    cobylaRefFileInput.addEventListener('change', async () => {
+        const file = cobylaRefFileInput.files && cobylaRefFileInput.files[0];
+        cobylaRefFileInput.value = '';
+        if (!file || !cobylaRefStatusEl) return;
+        if (!file.type.includes('png') && !file.name.toLowerCase().endsWith('.png')) {
+            log('Please choose a PNG file.', 'warn');
+            return;
+        }
+        cobylaRefStatusEl.textContent = 'Cobyla ref: uploading…';
+        try {
+            const buf = await file.arrayBuffer();
+            const head = new Uint8Array(buf.slice(0, 8));
+            const pngSig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+            if (head.length < 8 || !pngSig.every((b, i) => head[i] === b)) {
+                cobylaRefStatusEl.textContent = 'Cobyla ref: not a valid PNG';
+                log('File is not a valid PNG.', 'warn');
+                return;
+            }
+            const res = await fetch('/api/cobyla-reference-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'image/png' },
+                body: buf,
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                cobylaRefStatusEl.textContent = `Cobyla ref: ${data.detail || res.statusText}`;
+                log(data.detail || 'Upload failed', 'warn');
+                return;
+            }
+            log(data.message || 'Cobyla reference loaded from file', 'info');
+            await syncCobylaRefUi();
+        } catch (e) {
+            cobylaRefStatusEl.textContent = `Cobyla ref: ${e.message || 'failed'}`;
+            log(e.message || 'Load failed', 'error');
+        }
+    });
+}
+
+syncCobylaRefUi();
+setInterval(async () => {
+    const isSet = await refreshCobylaRefStatus();
+    if (!isSet && cobylaRefPreviewImg) {
+        revokeCobylaRefPreviewUrl();
+        cobylaRefPreviewImg.src = '';
+        setCobylaRefPreviewVisible(false);
+    }
+}, 8000);
 
 async function checkVideoStatus() {
     try {

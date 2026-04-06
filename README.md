@@ -228,7 +228,8 @@ The `backend-simple/` folder holds small lab-related Python snippets with **rela
 | GET | `/api/video-feed/status` | Stream availability + source URL |
 | GET | `/api/video-feed/stream` | MJPEG (real) or static mock SVG |
 | GET | `/api/optimization-feed/stream` | Optimization MJPEG when supported |
-| GET | `/api/table-cam/capture?cam_id=1\|2` | Single PNG (real) |
+| GET | `/api/table-cam/capture?cam_id=1\|2` | Single PNG — real hardware in **`LAB_MODE=REAL`**; synthetic PNG in **`MOCK`** (UI / Cobyla-ref testing) |
+| GET | `/api/cobyla-reference-image` | PNG bytes of the stored reference (**404** if none); used by the UI red “Cobyla reference” preview and **Save ref to file** |
 | POST | `/api/cobyla-reference-image` | Body: PNG bytes → stored as **`CobylaAlignmentStrategy.reference_image`** (BGR) for the next COBYLA run |
 | GET | `/api/cobyla-reference-image/status` | Whether a reference is set (+ size); includes **`lab_mode`** |
 | DELETE | `/api/cobyla-reference-image` | Clear stored reference |
@@ -283,7 +284,7 @@ Set `LAB_MODE=REAL` and a valid `LAB_AUTOMATION_PATH` so `from lab_automation...
 ## Typical workflow
 
 1. **Add parts** — Open the catalog, **Request** items; in mock this updates state quickly; in real lab this ties to your automation policy.
-2. **Place and align** — Drag on the canvas or use the context panel; confirm moves; run **Optimize** with strategy parameters. For **Cobyla** in real mode, capture a **single-beam** image on the table cam, then **Set Cobyla reference** so the server can pass it as `reference_image` (same class of image as `capture_image` / table-cam PNG).
+2. **Place and align** — Drag on the canvas or use the context panel; confirm moves; run **Optimize** with strategy parameters. For **Cobyla**, use **Latest capture** for new table-cam frames, then **Set Cobyla reference** to store that frame as the server reference (shown in the separate **red-bordered** preview so you can keep capturing). **Save ref to file** / **Load ref from file** reuses a PNG for testing without recapturing on hardware.
 3. **Record a recipe** — Toggle record, perform actions, save; play back from the sidebar.
 4. **Drift / golden** — After a good run, a golden file may exist; use **Debug** or `GET /api/recipes/{id}/compare` to compare poses to the current lab state.
 5. **Snapshots** — Use **Save / Load state** to persist JSON under `states/`.

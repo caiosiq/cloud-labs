@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 class LabCommunicator:
     """
@@ -31,5 +31,9 @@ class LabCommunicator:
         raise NotImplementedError
 
     def capture_table_cam(self, cam_id: int, exposure: float = 0.2):
-        """Capture one image from table recorder camera (cam_id 1 or 2). Returns PNG bytes or None if not supported."""
+        """Capture one image from table recorder camera (cam_id 1 or 2). Returns PNG bytes or None if not supported. Mock lab returns a synthetic PNG for UI testing."""
+        return None
+
+    def get_cobyla_reference_png_bytes(self) -> Optional[bytes]:
+        """PNG encoding of stored Cobyla reference for UI preview, or None if unset."""
         return None

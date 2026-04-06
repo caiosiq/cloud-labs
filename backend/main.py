@@ -357,7 +357,7 @@ async def table_cam_capture(
         description="Exposure (seconds) for both video and capture; passed to table-cam pipeline.",
     ),
 ):
-    """Capture one image from table recorder camera (1 or 2). Real lab only; on-demand (no stream)."""
+    """Capture one PNG from table recorder camera (1 or 2). Real: hardware; MOCK: synthetic image for UI/testing."""
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
     if not hasattr(lab, "capture_table_cam"):
@@ -367,6 +367,19 @@ async def table_cam_capture(
     data = lab.capture_table_cam(cam_id, exposure=float(exposure))
     if data is None:
         raise HTTPException(status_code=503, detail="Capture failed or table cams not available")
+    return Response(content=data, media_type="image/png")
+
+
+@app.get("/api/cobyla-reference-image")
+async def cobyla_reference_image_get():
+    """Return the stored Cobyla reference as PNG (for UI preview and download)."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if not hasattr(lab, "get_cobyla_reference_png_bytes"):
+        raise HTTPException(status_code=503, detail="Cobyla reference preview not available")
+    data = lab.get_cobyla_reference_png_bytes()
+    if not data:
+        raise HTTPException(status_code=404, detail="No Cobyla reference set")
     return Response(content=data, media_type="image/png")
 
 

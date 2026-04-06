@@ -23,4 +23,6 @@ export const store = {
     /** Seconds; used for GET /api/table-cam/capture exposure query param */
     tableCamExposure: 0.2,
     tableCamLastBlobUrl: null,
+    /** Object URL for Cobyla reference preview image (revoked when clearing/updating). */
+    cobylaRefPreviewObjectUrl: null,
 };

@@ -503,6 +503,18 @@ class RealLabCommunicator(LabCommunicator):
             "channels": int(ref.shape[2]),
         }
 
+    def get_cobyla_reference_png_bytes(self) -> Optional[bytes]:
+        import cv2
+
+        with self._cobyla_ref_lock:
+            ref = self._cobyla_reference_bgr
+            if ref is None:
+                return None
+            ok, buf = cv2.imencode(".png", ref)
+        if not ok:
+            return None
+        return buf.tobytes()
+
     def _tag_id_for_component(self, comp: Any) -> Optional[str]:
         for tid, c in self.component_map.items():
             if c is comp:
