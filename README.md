@@ -158,7 +158,7 @@ Copy/paste guidance and call-site examples live in:
 
 ### Optimization step counter and table-cam label
 
-`optimization_step` in lab state is advanced from a background watcher on **`Camera_Images/`** (repo root and, if set, **`LAB_AUTOMATION_PATH/Camera_Images`**). When filenames include a **`stepNN`** pattern (e.g. `test_step02.png`), the displayed step is taken from that number so double file-system events on a single save do not skip integers.
+`optimization_step` in lab state is advanced from a background watcher. In **REAL** mode each optimization run uses a **dedicated subfolder** under **`Camera_Images/`** (name like `opt_<YYYYMMDD_HHMMSS>_<NEWTON|COBYLA>`). The communicator watches **that folder** for the current run so successive optimizations do not overwrite PNGs. Lab state also exposes **`optimization_run_dir`** (folder basename) while optimizing. Strategies in **`lab_automation`** must accept an **`output_dir`** (or alias—see **`update_lab.md`**) and write frames there; filenames should still include a **`stepNN`** pattern (e.g. `test_step02.png`) when possible so the step index is unambiguous.
 
 ### Mock-only: “beam intensity” plot
 

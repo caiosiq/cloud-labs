@@ -268,7 +268,10 @@ async function fetchLabState() {
             const optStepText = document.getElementById('optimization-step-text');
             if (optOverlay && optStepText) {
                 optOverlay.style.display = 'flex';
-                optStepText.innerText = `OPTIMIZING (Step ${store.labState.optimization_step || 0})`;
+                const runBit = store.labState.optimization_run_dir
+                    ? ` · ${store.labState.optimization_run_dir}`
+                    : '';
+                optStepText.innerText = `OPTIMIZING (Step ${store.labState.optimization_step || 0})${runBit}`;
             }
 
             // Highlight the table cam preview while optimizing
@@ -293,7 +296,10 @@ async function fetchLabState() {
                     console.log(`[UI] switching table-cam to optimization-feed stream...`);
                     if (tableCamPlaceholder) {
                         tableCamPlaceholder.style.display = 'flex';
-                        tableCamPlaceholder.innerHTML = `<span class="material-icons-round" style="font-size: 18px; margin-bottom: 2px;">auto_awesome</span><div>Optimizing... (Step ${store.labState.optimization_step || 0})</div>`;
+                        const runBit2 = store.labState.optimization_run_dir
+                            ? `<br><span style="font-size:9px;opacity:0.85">${store.labState.optimization_run_dir}</span>`
+                            : '';
+                        tableCamPlaceholder.innerHTML = `<span class="material-icons-round" style="font-size: 18px; margin-bottom: 2px;">auto_awesome</span><div>Optimizing... (Step ${store.labState.optimization_step || 0})${runBit2}</div>`;
                     }
 
                     tableCamImg.src = `/api/optimization-feed/stream?t=${Date.now()}`;

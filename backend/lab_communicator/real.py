@@ -86,7 +86,9 @@ class RealLabCommunicator(LabCommunicator):
             "system_status": "IDLE",
             "last_updated": datetime.now().isoformat(),
             "components": {},
-            "optimization_step": 0
+            "optimization_step": 0,
+            # Basename of per-run folder under Camera_Images/ while OPTIMIZING (real lab).
+            "optimization_run_dir": None,
         }
         self._state_lock = threading.RLock()
         self._place_cloudlab_orig: Any = None
@@ -100,21 +102,67 @@ class RealLabCommunicator(LabCommunicator):
         self._start_recorder_processes()
         # Fallback when image names have no stepNN: count once per new basename (avoids double bumps on mtime+size).
         self._last_optimization_image_basename: Optional[str] = None
+        # During OPTIMIZING, watch only this run's subdirectory (see _make_optimization_run_dir).
+        self._active_optimization_image_dir: Optional[str] = None
 
         # Start a background thread to monitor optimization steps reliably
         self._opt_monitor_thread = threading.Thread(target=self._monitor_optimization_dir, daemon=True)
         self._opt_monitor_thread.start()
 
+    def _camera_images_base_dir(self) -> str:
+        """Canonical Camera_Images root for new optimization run folders."""
+        lab_path = os.getenv("LAB_AUTOMATION_PATH")
+        if lab_path:
+            base = os.path.join(os.path.abspath(lab_path), "Camera_Images")
+        else:
+            base = os.path.abspath("Camera_Images")
+        os.makedirs(base, exist_ok=True)
+        return base
+
+    def _make_optimization_run_dir(self, strategy_name: str) -> str:
+        """
+        Create a per-run subdirectory so successive optimizations do not overwrite PNGs.
+        Name: opt_<YYYYMMDD_HHMMSS>_<STRATEGY>
+        """
+        safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", (strategy_name or "OPT").strip())
+        safe = safe.strip("_")[:48] or "OPT"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder = f"opt_{ts}_{safe}"
+        path = os.path.join(self._camera_images_base_dir(), folder)
+        os.makedirs(path, exist_ok=True)
+        print(f"[REAL LAB] Optimization run image directory: {path}")
+        return path
+
+    @staticmethod
+    def _apply_optimization_output_dir_kw(strategy_cls: Any, kw: Dict[str, Any], run_dir: str) -> None:
+        """Pass run_dir into the strategy if it declares a supported parameter (lab_automation)."""
+        try:
+            sig = inspect.signature(strategy_cls.__init__)
+        except (TypeError, ValueError):
+            return
+        for param_name in ("output_dir", "camera_images_dir", "save_dir", "image_output_dir"):
+            if param_name in sig.parameters:
+                kw[param_name] = run_dir
+                print(f"[REAL LAB] {strategy_cls.__name__}: {param_name}={run_dir}")
+                return
+        print(
+            f"[REAL LAB] Warning: {getattr(strategy_cls, '__name__', strategy_cls)} has no "
+            f"output_dir-like parameter; images may still write to the flat Camera_Images folder. "
+            f"See update_lab.md in optics-digital-twin repo."
+        )
+
     def _get_optimization_watch_dirs(self) -> List[str]:
         """
-        Optimization images may be written from different working directories
-        (cloud-labs process vs lab_automation process). Watch both to avoid stale frames.
+        While an optimization run is active, watch only that run's subdirectory so step counts
+        and the MJPEG feed track the current run. Otherwise watch legacy flat Camera_Images dirs.
         """
+        active = getattr(self, "_active_optimization_image_dir", None)
+        if active and os.path.isdir(active):
+            return [active]
         candidates = {os.path.abspath("Camera_Images")}
         lab_path = os.getenv("LAB_AUTOMATION_PATH")
         if lab_path:
             candidates.add(os.path.join(os.path.abspath(lab_path), "Camera_Images"))
-        # Keep deterministic ordering
         return sorted(candidates)
 
     def _get_latest_optimization_png(self) -> Tuple[Optional[str], int]:
@@ -412,6 +460,7 @@ class RealLabCommunicator(LabCommunicator):
             with self._state_lock:
                 self.current_state["system_status"] = "IDLE"
                 self.current_state["optimization_step"] = 0
+                self.current_state["optimization_run_dir"] = None
                 self.current_state["last_updated"] = datetime.now().isoformat()
 
     def set_lab_state(self, state: Dict[str, Any]):
@@ -428,6 +477,8 @@ class RealLabCommunicator(LabCommunicator):
             self.current_state = state
             self.current_state["system_status"] = "IDLE"
             self.current_state["optimization_step"] = int(self.current_state.get("optimization_step", 0) or 0)
+            if "optimization_run_dir" not in self.current_state:
+                self.current_state["optimization_run_dir"] = None
             self.current_state["last_updated"] = datetime.now().isoformat()
             components = dict(self.current_state.get("components", {}) or {})
 
@@ -730,6 +781,7 @@ class RealLabCommunicator(LabCommunicator):
             with self._state_lock:
                 self.current_state["system_status"] = "IDLE"
                 self.current_state["optimization_step"] = 0
+                self.current_state["optimization_run_dir"] = None
                 self.current_state["last_updated"] = datetime.now().isoformat()
 
     async def move_motor(self, target_id: str, motor_id: int, distance: float):
@@ -765,20 +817,23 @@ class RealLabCommunicator(LabCommunicator):
 
     async def optimize_component(self, target_id: str, strategy_name: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Optimizing {target_id} with {strategy_name}...")
-        with self._state_lock:
-            self.current_state["system_status"] = "OPTIMIZING"
-            self.current_state["optimization_step"] = 0
-        self._last_optimization_image_basename = None
 
         if target_id not in self.component_map:
-            with self._state_lock:
-                self.current_state["system_status"] = "IDLE"
             return
+
+        run_dir = self._make_optimization_run_dir(strategy_name)
+        self._active_optimization_image_dir = run_dir
+        self._last_optimization_image_basename = None
 
         comp = self.component_map[target_id]
         newton_place_hook_installed = False
 
         try:
+            with self._state_lock:
+                self.current_state["system_status"] = "OPTIMIZING"
+                self.current_state["optimization_step"] = 0
+                self.current_state["optimization_run_dir"] = os.path.basename(run_dir)
+
             # 1. Select Strategy
             strategy = None
             if strategy_name == "NEWTON":
@@ -793,7 +848,7 @@ class RealLabCommunicator(LabCommunicator):
                     axis=params["axis"],
                     initial_move=-0.2,
                     do_repositioning=False,
-                    video_exposure = 1.0
+                    video_exposure=1.0,
                 )
                 try:
                     init_sig = inspect.signature(NewtonPlacementStrategy_cloudlab.__init__)
@@ -802,23 +857,16 @@ class RealLabCommunicator(LabCommunicator):
                 except (TypeError, ValueError):
                     pass
 
+                self._apply_optimization_output_dir_kw(NewtonPlacementStrategy_cloudlab, newton_kw, run_dir)
                 strategy = NewtonPlacementStrategy_cloudlab(**newton_kw)
                 print("DOING NEWTON STRATEGY")
             elif strategy_name == "COBYLA":
                 motor_ids = params.get("motor_ids")
+                if target_id in self.current_state["components"]:
+                    pass
+
                 if not motor_ids:
-                    # Fallback: check catalog/state if we have it
-                    # But params should ideally come from UI
-                    # Let's see if we can check our loaded catalog info?
-                    # We didn't persist the full catalog in component_map, but we have self.current_state
-                    if target_id in self.current_state["components"]:
-                        # We didn't save motor_ids in current_state["components"] entry in _initialize_state yet.
-                        # We should probably update _initialize_state to save it if we want to rely on it.
-                        # For now, expect it in params.
-                        pass
-                
-                if not motor_ids:
-                     raise ValueError("COBYLA strategy requires 'motor_ids' parameter.")
+                    raise ValueError("COBYLA strategy requires 'motor_ids' parameter.")
 
                 try:
                     _exp = float(params.get("exposure", 0.2))
@@ -845,8 +893,9 @@ class RealLabCommunicator(LabCommunicator):
                 else:
                     print("[REAL LAB] COBYLA: no reference image set via UI; strategy will use its own fallback if any.")
 
+                self._apply_optimization_output_dir_kw(CobylaAlignmentStrategy, cobyla_kw, run_dir)
                 strategy = CobylaAlignmentStrategy(**cobyla_kw)
-            
+
             if strategy:
                 # 2. Execute off the event loop. optimize_component() in lab_automation is synchronous and
                 # can run for minutes; if we block here, GET /api/lab-state never runs and the UI never
@@ -866,11 +915,13 @@ class RealLabCommunicator(LabCommunicator):
         finally:
             if newton_place_hook_installed:
                 self._remove_cloudlab_place_ui_hook()
+            self._active_optimization_image_dir = None
             with self._state_lock:
                 self.current_state["system_status"] = "IDLE"
                 self.current_state["optimization_step"] = 0
+                self.current_state["optimization_run_dir"] = None
                 self.current_state["last_updated"] = datetime.now().isoformat()
-            
+
     async def remove_component(self, target_id: str):
          print(f"[REAL LAB] Remove requested for {target_id} (Not implemented)")
          pass
