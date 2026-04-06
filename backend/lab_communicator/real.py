@@ -51,7 +51,7 @@ except ImportError:
 # coordinates as approximately Δx_robot = +2.5 mm and Δy_robot = +100 mm (same sign convention as your
 # robot axes). That implies sin(θ) ≈ −2.5/100 for the lab→robot rotation below → θ = atan2(-2.5, 100).
 # Refine by changing this constant after re-measurement.
-LAB_ROBOT_TABLE_ROTATION_RAD: float = math.atan2(-2.5, 100.0)
+LAB_ROBOT_TABLE_ROTATION_RAD: float = math.atan2(-2.66, 100.0)
 
 
 def lab_table_xy_to_robot_xy(x_lab: float, y_lab: float) -> Tuple[float, float]:
@@ -808,10 +808,18 @@ class RealLabCommunicator(LabCommunicator):
                 if not motor_ids:
                      raise ValueError("COBYLA strategy requires 'motor_ids' parameter.")
 
+                try:
+                    _exp = float(params.get("exposure", 0.2))
+                except (TypeError, ValueError):
+                    _exp = 0.2
+                _exp = max(0.001, min(30.0, _exp))
+
                 cobyla_kw: Dict[str, Any] = {
                     "camera_number": params.get("camera_number", 1),
                     "motor_ids": motor_ids,
                     "objective_threshold": params.get("objective_threshold", 100.0),
+                    "video_exposure": _exp,
+                    "capture_exposure": _exp,
                 }
                 with self._cobyla_ref_lock:
                     ref_copy = None if self._cobyla_reference_bgr is None else self._cobyla_reference_bgr.copy()
@@ -972,7 +980,7 @@ class RealLabCommunicator(LabCommunicator):
                        
             time.sleep(sleep_duration)
 
-    def capture_table_cam(self, cam_id: int):
+    def capture_table_cam(self, cam_id: int, exposure: float = 0.2):
         """Capture one image from table recorder camera (1 or 2). Returns PNG bytes or None."""
         if not RECORDER_CAPTURE_AVAILABLE or activate_cam_and_capture is None:
             return None
@@ -981,13 +989,14 @@ class RealLabCommunicator(LabCommunicator):
         import cv2
         import tempfile
         import os as _os
+        exp = float(exposure)
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             tmp_path = f.name
         try:
             img = activate_cam_and_capture(
                 cam_id=cam_id,
-                video_exposure=0.05,
-                capture_exposure=0.05,
+                video_exposure=exp,
+                capture_exposure=exp,
                 filename=tmp_path,
                 settle_s=0.5,
                 output_dir=None,

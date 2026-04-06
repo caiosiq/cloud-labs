@@ -499,13 +499,19 @@
         <!-- Table cam capture (real lab: on-demand capture from recorder cams) -->
         <div id="table-cam-section" style="border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
             <div class="section-header">Table cam capture</div>
-            <div style="padding: 0 12px 8px; display: flex; gap: 8px; align-items: center;">
+            <div style="padding: 0 12px 6px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
                 <span style="font-size: 11px; color: var(--text-secondary);">Camera:</span>
                 <button id="table-cam-btn-1" type="button" class="btn btn-secondary table-cam-sel" style="font-size: 11px; padding: 4px 10px;">CAM 1</button>
                 <button id="table-cam-btn-2" type="button" class="btn btn-secondary table-cam-sel" style="font-size: 11px; padding: 4px 10px;">CAM 2</button>
                 <button id="table-cam-capture-btn" type="button" class="btn btn-primary" style="font-size: 11px; padding: 4px 10px;">
                     <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">camera</span> Capture
                 </button>
+            </div>
+            <div style="padding: 0 12px 8px; display: flex; gap: 8px; align-items: center;">
+                <label style="font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px;">
+                    Exp (s)
+                    <input id="table-cam-exposure" type="number" value="0.2" min="0.001" max="30" step="0.05" style="width: 72px; font-size: 11px; padding: 4px 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" title="Exposure passed to table camera capture (video + capture)">
+                </label>
             </div>
             <div style="padding: 0 12px 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
                 <button id="table-cam-cobyla-ref-btn" type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" title="Uses a fresh capture from the selected table camera">

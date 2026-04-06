@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -348,7 +348,15 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
 # --- Video Feed Endpoints ---
 
 @app.get("/api/table-cam/capture")
-async def table_cam_capture(cam_id: int = 1):
+async def table_cam_capture(
+    cam_id: int = 1,
+    exposure: float = Query(
+        0.2,
+        ge=0.001,
+        le=30.0,
+        description="Exposure (seconds) for both video and capture; passed to table-cam pipeline.",
+    ),
+):
     """Capture one image from table recorder camera (1 or 2). Real lab only; on-demand (no stream)."""
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
@@ -356,7 +364,7 @@ async def table_cam_capture(cam_id: int = 1):
         raise HTTPException(status_code=503, detail="Table cam capture not available (real lab only)")
     if cam_id not in (1, 2):
         raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
-    data = lab.capture_table_cam(cam_id)
+    data = lab.capture_table_cam(cam_id, exposure=float(exposure))
     if data is None:
         raise HTTPException(status_code=503, detail="Capture failed or table cams not available")
     return Response(content=data, media_type="image/png")

@@ -15,7 +15,8 @@
     "parameters": {
       "camera_number": { "type": "integer", "default": 1, "description": "Target Camera ID" },
       "motor_ids": { "type": "array", "default": [1, 3], "description": "List of Motor IDs to adjust" },
-      "objective_threshold": { "type": "float", "default": 100.0, "description": "Stop when metric is below this" }
+      "objective_threshold": { "type": "float", "default": 100.0, "description": "Stop when metric is below this" },
+      "exposure": { "type": "float", "default": 0.2, "description": "Camera exposure (s) for Cobyla video + capture steps" }
     }
   },
   "BAYESIAN": {

@@ -20,5 +20,7 @@ export const store = {
     catalogMap: {},
     catalogCache: null,
     selectedTableCam: 1,
+    /** Seconds; used for GET /api/table-cam/capture exposure query param */
+    tableCamExposure: 0.2,
     tableCamLastBlobUrl: null,
 };

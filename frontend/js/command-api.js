@@ -70,6 +70,9 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
         if (p.camera_number === undefined) {
             p.camera_number = 1;
         }
+        if (p.exposure === undefined && typeof deps.getTableCamExposureSeconds === 'function') {
+            p.exposure = deps.getTableCamExposureSeconds();
+        }
         command = { ...command, parameters: p };
     }
 

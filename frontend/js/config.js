@@ -13,7 +13,8 @@ export const LAB_SCALE = Math.min(CANVAS_WIDTH / LAB_WIDTH_MM, CANVAS_HEIGHT / L
 export const LAB_CENTER_PX = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
 
 export const QUARTER_INCH_MM = 25.4 / 4;
-export const BREADBOARD_GRID_FINE_TUNE_X_MM = -2.05;
-export const BREADBOARD_GRID_OFFSET_X_MM = -QUARTER_INCH_MM + BREADBOARD_GRID_FINE_TUNE_X_MM;
+/** Arm-measured vertical laser at b = 392.6 mm in laser_line_fit.npy; grid aligned with same frame. */
+export const BREADBOARD_GRID_FINE_TUNE_X_MM = -1.05;
+export const BREADBOARD_GRID_OFFSET_X_MM = -QUARTER_INCH_MM + BREADBOARD_GRID_FINE_TUNE_X_MM; // −7.4 mm
 
 export const POLLING_INTERVAL = 500;

@@ -97,7 +97,8 @@ async function fetchStrategies() {
         "name": "Cobyla Alignment",
         "description": "Constrained Optimization by Linear Approximation.",
         "parameters": {
-          "objective_threshold": { "type": "float", "default": 100.0, "description": "Threshold" }
+          "objective_threshold": { "type": "float", "default": 100.0, "description": "Threshold" },
+          "exposure": { "type": "float", "default": 0.2, "description": "Exposure (s) for strategy camera video + capture" }
         }
       }
     };
@@ -1030,6 +1031,8 @@ function showParameterModal(strategyKey, strategyDef) {
         form.appendChild(field);
     });
 
+
+
     const btnRow = document.createElement('div');
     btnRow.style.display = 'flex';
     btnRow.style.justifyContent = 'flex-end';
@@ -1294,36 +1297,29 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.beginPath(); ctx.moveTo(0, -halfH - 2); ctx.lineTo(-triH/2, -halfH - triH - 2); ctx.lineTo(triH/2, -halfH - triH - 2); ctx.fill();
 
     } else if (catalogId === 'mirror_curved') {
-        // Curved Mirror (Semi-Circle Concave)
-        // Assume width is the diameter, height is the depth? Or vice versa.
-        // Catalog size: 90x90. Let's draw it fitting in the box.
+        // Curved (concave) OC: left semicircle in local space, opening toward +local X (canvas right before pose.rotation).
+        // Previous code used ±PI/4 extra on arc angles, rotating the opening ~45° and making e.g. 270° look ~225°.
         const radius = Math.min(w, h) / 2;
-        
-        // Mirror Surface (Semi-circle)
-        ctx.strokeStyle = '#3b82f6'; 
+        const startA = -Math.PI / 2;
+        const endA = Math.PI / 2;
+
+        ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 4;
         ctx.beginPath();
-        // Arc from -PI/2 (top) to PI/2 (bottom) counter-clockwise (Left Side)
-        ctx.arc(0, 0, radius, -Math.PI/2-Math.PI/4, Math.PI/2-Math.PI/4, true);
+        ctx.arc(0, 0, radius, startA, endA, true);
         ctx.stroke();
-        
-        // Mount backing (curved)
+
         ctx.fillStyle = '#444';
         ctx.beginPath();
-        // Outer arc (backing)
-        ctx.arc(0, 0, radius + 4, -Math.PI/2-Math.PI/4, Math.PI/2-Math.PI/4, true);
-        // Connect bottom
-        ctx.lineTo(0, radius);
-        // Inner arc (match mirror)
-        ctx.arc(0, 0, radius, Math.PI/2-Math.PI/4, -Math.PI/2-Math.PI/4, false);
+        ctx.arc(0, 0, radius + 4, startA, endA, true);
+        ctx.arc(0, 0, radius, endA, startA, false);
         ctx.closePath();
         ctx.fill();
 
-        // Reflective side hint (Gloss)
-        ctx.strokeStyle = 'rgba(255,255,255,0.6)'; 
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(0, 0, radius - 2, -Math.PI/2-Math.PI/4, Math.PI/2-Math.PI/4, true);
+        ctx.arc(0, 0, radius - 2, startA, endA, true);
         ctx.stroke();
 
     } else if (catalogId === 'mirror_planar' || type === 'OPTICAL_MIRROR') {
@@ -2208,16 +2204,26 @@ if (tableCamBtn1) tableCamBtn1.addEventListener('click', () => setTableCamSelect
 if (tableCamBtn2) tableCamBtn2.addEventListener('click', () => setTableCamSelection(2));
 setTableCamSelection(1);
 
+function getTableCamExposureSeconds() {
+    const el = document.getElementById('table-cam-exposure');
+    if (!el) return store.tableCamExposure;
+    const v = parseFloat(el.value);
+    if (!Number.isFinite(v) || v <= 0) return store.tableCamExposure;
+    store.tableCamExposure = v;
+    return v;
+}
+
 if (tableCamCaptureBtn) {
     tableCamCaptureBtn.addEventListener('click', async () => {
         if (!tableCamImg || !tableCamPlaceholder || !tableCamError) return;
+        const exp = getTableCamExposureSeconds();
         tableCamPlaceholder.textContent = 'Capturing...';
         tableCamPlaceholder.style.display = 'block';
         tableCamImg.style.display = 'none';
         tableCamImg.src = '';
         tableCamError.style.display = 'none';
         try {
-            const res = await fetch(`/api/table-cam/capture?cam_id=${store.selectedTableCam}`);
+            const res = await fetch(`/api/table-cam/capture?cam_id=${store.selectedTableCam}&exposure=${encodeURIComponent(exp)}`);
             if (res.ok) {
                 const blob = await res.blob();
                 if (store.tableCamLastBlobUrl) URL.revokeObjectURL(store.tableCamLastBlobUrl);
@@ -2271,7 +2277,8 @@ if (tableCamCobylaRefBtn) {
         if (!cobylaRefStatusEl) return;
         cobylaRefStatusEl.textContent = 'Cobyla ref: uploading…';
         try {
-            const cap = await fetch(`/api/table-cam/capture?cam_id=${store.selectedTableCam}`);
+            const exp = getTableCamExposureSeconds();
+            const cap = await fetch(`/api/table-cam/capture?cam_id=${store.selectedTableCam}&exposure=${encodeURIComponent(exp)}`);
             if (!cap.ok) {
                 const err = (await cap.json().catch(() => ({}))).detail || `Capture failed (${cap.status})`;
                 cobylaRefStatusEl.textContent = `Cobyla ref: ${err}`;
@@ -2365,6 +2372,7 @@ window.__commandConsoleDeps = {
     log,
     runLabStateRefresh,
     ensureGhostForConsole,
+    getTableCamExposureSeconds,
     get ghostState() {
         return store.ghostState;
     },

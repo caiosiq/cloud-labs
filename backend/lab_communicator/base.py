@@ -30,6 +30,6 @@ class LabCommunicator:
         """Returns a generator yielding MJPEG frames."""
         raise NotImplementedError
 
-    def capture_table_cam(self, cam_id: int):
+    def capture_table_cam(self, cam_id: int, exposure: float = 0.2):
         """Capture one image from table recorder camera (cam_id 1 or 2). Returns PNG bytes or None if not supported."""
         return None
