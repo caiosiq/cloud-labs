@@ -14,6 +14,38 @@ import {
 import { mmToPx, pxToMm } from './canvas/coordinates.js';
 import { store } from './state/store.js';
 
+/** Degrees per wheel tick while dragging a component (was 5°). */
+const ROTATION_WHEEL_STEP_DEG = 2.5;
+
+/**
+ * One wheel tick: move toward current ± ROTATION_WHEEL_STEP_DEG. If that segment crosses a
+ * cardinal angle (any multiple of 90°, i.e. … -180, -90, 0, 90, 180, 270, 360 …), land on that
+ * cardinal first (e.g. 88.7° +2.5 would reach 91.2, but stops at 90°; next tick goes 90° → 92.5°).
+ */
+function nextWheelRotationDeg(current, directionSign) {
+    const cur = typeof current === 'number' && Number.isFinite(current) ? current : 0;
+    if (directionSign === 0) return cur;
+    const step = ROTATION_WHEEL_STEP_DEG * directionSign;
+    const target = cur + step;
+    const low = Math.min(cur, target);
+    const high = Math.max(cur, target);
+    const EPS = 1e-6;
+    const cardinals = [];
+    const kMin = Math.floor(low / 90) - 5;
+    const kMax = Math.ceil(high / 90) + 5;
+    for (let k = kMin; k <= kMax; k++) {
+        const c = k * 90;
+        if (c > low + EPS && c < high - EPS) cardinals.push(c);
+    }
+    if (cardinals.length === 0) return target;
+    if (directionSign > 0) {
+        const forward = cardinals.filter((c) => c > cur + EPS);
+        return forward.length ? Math.min(...forward) : target;
+    }
+    const backward = cardinals.filter((c) => c < cur - EPS);
+    return backward.length ? Math.max(...backward) : target;
+}
+
 console.log('App main module loading...');
 
 // DOM Elements
@@ -830,15 +862,15 @@ canvas.addEventListener('wheel', (e) => {
     if (store.isDragging && store.draggingComponent && store.ghostState[store.draggingComponent]) {
         e.preventDefault();
         
-        // Scroll direction: positive deltaY (down) -> +5 deg, negative (up) -> -5 deg
+        // Scroll direction: positive deltaY (down) -> +step deg, negative (up) -> -step deg
         const direction = Math.sign(e.deltaY);
-        const step = 5;
         
         if (typeof store.ghostState[store.draggingComponent].rotation !== 'number') {
             store.ghostState[store.draggingComponent].rotation = 0;
         }
         
-        store.ghostState[store.draggingComponent].rotation += (direction * step);
+        const r = store.ghostState[store.draggingComponent].rotation;
+        store.ghostState[store.draggingComponent].rotation = nextWheelRotationDeg(r, direction);
         
         // Update UI immediately
         render();

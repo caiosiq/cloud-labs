@@ -32,7 +32,8 @@ else:
 try:
     from lab_automation.managers.experiment_manager import OpticalExperiment
     from lab_automation.objects.base import OpticalComponent, Pose
-    from lab_automation.objects.strategies import NewtonPlacementStrategy_cloudlab, CobylaAlignmentStrategy
+    from lab_automation.objects.strategies import NewtonPlacementStrategy_cloudlab, CobylaAlignmentStrategy_cloudlab
+
     LAB_LIB_AVAILABLE = True
 except ImportError as e:
     print(f"[REAL LAB] Critical Error: Failed to import lab_automation: {e}")
@@ -93,7 +94,7 @@ class RealLabCommunicator(LabCommunicator):
         self._state_lock = threading.RLock()
         self._place_cloudlab_orig: Any = None
 
-        # CobylaAlignmentStrategy.reference_image (BGR ndarray, same family as table-cam / capture_image)
+        # CobylaAlignmentStrategy_cloudlab.reference_image (BGR ndarray, same family as table-cam / capture_image)
         self._cobyla_ref_lock = threading.Lock()
         self._cobyla_reference_bgr: Optional[Any] = None  # np.ndarray when set
 
@@ -868,6 +869,14 @@ class RealLabCommunicator(LabCommunicator):
                 if not motor_ids:
                     raise ValueError("COBYLA strategy requires 'motor_ids' parameter.")
 
+                meta = self.catalog_map.get(target_id)
+                if not meta or not meta.get("motor_controller"):
+                    raise ValueError(
+                        f"COBYLA requires 'motor_controller' in component_catalog for {target_id} "
+                        '(e.g. "wifi_stepper1").'
+                    )
+                motor_controller = meta["motor_controller"]
+
                 try:
                     _exp = float(params.get("exposure", 0.2))
                 except (TypeError, ValueError):
@@ -875,6 +884,7 @@ class RealLabCommunicator(LabCommunicator):
                 _exp = max(0.001, min(30.0, _exp))
 
                 cobyla_kw: Dict[str, Any] = {
+                    "motor_controller": motor_controller,
                     "camera_number": params.get("camera_number", 1),
                     "motor_ids": motor_ids,
                     "objective_threshold": params.get("objective_threshold", 100.0),
@@ -885,7 +895,7 @@ class RealLabCommunicator(LabCommunicator):
                     ref_copy = None if self._cobyla_reference_bgr is None else self._cobyla_reference_bgr.copy()
                 if ref_copy is not None:
                     try:
-                        sig = inspect.signature(CobylaAlignmentStrategy.__init__)
+                        sig = inspect.signature(CobylaAlignmentStrategy_cloudlab.__init__)
                         if "reference_image" in sig.parameters:
                             cobyla_kw["reference_image"] = ref_copy
                     except (TypeError, ValueError):
@@ -893,8 +903,8 @@ class RealLabCommunicator(LabCommunicator):
                 else:
                     print("[REAL LAB] COBYLA: no reference image set via UI; strategy will use its own fallback if any.")
 
-                self._apply_optimization_output_dir_kw(CobylaAlignmentStrategy, cobyla_kw, run_dir)
-                strategy = CobylaAlignmentStrategy(**cobyla_kw)
+                self._apply_optimization_output_dir_kw(CobylaAlignmentStrategy_cloudlab, cobyla_kw, run_dir)
+                strategy = CobylaAlignmentStrategy_cloudlab(**cobyla_kw)
 
             if strategy:
                 # 2. Execute off the event loop. optimize_component() in lab_automation is synchronous and

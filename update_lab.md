@@ -14,13 +14,14 @@ The communicator watches **only that subfolder** during `OPTIMIZING`, feeds `/ap
 
 ## What you must change in `lab_automation` (if images still land in the flat `Camera_Images/` folder)
 
-1. **`NewtonPlacementStrategy_cloudlab`**
-   - Add an optional constructor argument, e.g. **`output_dir: str = "Camera_Images"`** (or `camera_images_dir`).
-   - Thread **`output_dir`** into every call that currently hardcodes `"Camera_Images"` (e.g. `change_camera_exposure(..., output_dir=...)`, file saves, debug plots).
-   - Keep filenames that include **`stepNN`** so the cloud-labs watcher can parse the step index (e.g. `test_step02.png`).
+1. **`NewtonPlacementStrategy_cloudlab`** — **done in `lab_automation`**
+   - Optional **`output_dir`** on the constructor; **`execute`** resolves it with `os.path.abspath`, `os.makedirs`, and passes it to **`change_camera_exposure(..., output_dir=...)`**.
+   - Filenames already use **`_filename_with_step`** (`test_step00.png`, …) for the cloud-labs step parser.
 
-2. **`CobylaAlignmentStrategy`** (if it writes optimization / alignment frames to disk)
-   - Same pattern: accept **`output_dir`** (or one of the aliases checked in optics-digital-twin: `output_dir`, `camera_images_dir`, `save_dir`, `image_output_dir`) and use it for all saves.
+2. **`CobylaAlignmentStrategy_cloudlab`** — **done in `lab_automation`**
+   - Optional **`output_dir`** (same pattern as above).
+   - Initial `activate_cam_and_capture` and every **`request_capture_safe`** in the COBYLA objective use **unique** paths: **`{base}_step{NN}.png`** under that folder so **`request_capture_safe` does not delete prior iterations** (it only removes the file about to be written).
+   - **`COBYLA_res.txt`** (or `file_name_position`) is written under **`output_dir`** when the path is relative.
 
 3. **Process / CWD**
    - If your code uses paths relative to a different working directory, prefer **absolute** paths built from the passed `output_dir` so files land in the folder the communicator created.
