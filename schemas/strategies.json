@@ -6,7 +6,8 @@
       "camera_number": { "type": "integer", "default": 1, "description": "Target Camera ID" },
       "target_x_pixel": { "type": "float", "default": null, "description": "Target Pixel X (null for center)" },
       "axis": { "type": "string", "enum": ["x", "y"], "default": "x", "description": "Axis to optimize" },
-      "tolerance_ratio": { "type": "float", "default": 0.05, "description": "Acceptable error margin" }
+      "tolerance_ratio": { "type": "float", "default": 0.05, "description": "Acceptable error margin" },
+      "exposure": { "type": "float", "default": 0.2, "description": "Camera exposure (s) for Newton placement captures" }
     }
   },
   "COBYLA": {

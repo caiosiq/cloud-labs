@@ -1,0 +1,94 @@
+{
+  "system_status": "IDLE",
+  "last_updated": "2026-04-08T15:49:10.889099",
+  "components": {
+    "tag_22": {
+      "id": "tag_22",
+      "type": "OPTICAL_CAMERA",
+      "state": "PLACED",
+      "pose": {
+        "x": 396.1207116201613,
+        "y": -381.2811023224703,
+        "rotation": 269.14531686754816,
+        "roll": -180,
+        "pitch": 0,
+        "yaw": 269.14531686754816
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 396.1207116201613,
+          "y": -381.2811023224703,
+          "rotation": 269.14531686754816,
+          "roll": -180,
+          "pitch": 0,
+          "yaw": 269.14531686754816
+        },
+        "is_optimized": false,
+        "placement_strategy": "MANUAL"
+      },
+      "metadata": {}
+    },
+    "tag_20": {
+      "id": "tag_20",
+      "type": "OPTICAL_MIRROR",
+      "state": "PLACED",
+      "pose": {
+        "x": 392.6,
+        "y": -30.26568576690376,
+        "rotation": 270
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 392.6,
+          "y": -30.26568576690376,
+          "rotation": 270
+        },
+        "is_optimized": true,
+        "placement_strategy": "COBYLA"
+      },
+      "metadata": {}
+    },
+    "tag_18": {
+      "id": "tag_18",
+      "type": "OPTICAL_MIRROR",
+      "state": "PLACED",
+      "pose": {
+        "x": 389.0,
+        "y": -208.7,
+        "rotation": -90
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 389.0,
+          "y": -208.7,
+          "rotation": -90
+        },
+        "is_optimized": true,
+        "placement_strategy": "NEWTON"
+      },
+      "metadata": {}
+    },
+    "tag_11": {
+      "id": "tag_11",
+      "type": "OPTICAL_LENS",
+      "state": "PLACED",
+      "pose": {
+        "x": 392.6,
+        "y": 104.78617187309536,
+        "rotation": 270
+      },
+      "intent": {
+        "nominal_pose": {
+          "x": 392.6,
+          "y": 104.78617187309536,
+          "rotation": 270
+        },
+        "is_optimized": false,
+        "placement_strategy": "MANUAL"
+      },
+      "metadata": {}
+    }
+  },
+  "optimization_step": 0,
+  "optimization_run_dir": null
+}

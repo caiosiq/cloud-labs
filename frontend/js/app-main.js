@@ -122,7 +122,8 @@ async function fetchStrategies() {
           "camera_number": { "type": "integer", "default": 2, "description": "Target Camera ID" },
           "target_x_pixel": { "type": "integer", "default": 2744, "description": "Target X (pixel)" },
           "axis": { "type": "string", "enum": ["x", "y"], "default": "x", "description": "Axis" },
-          "tolerance_ratio": { "type": "float", "default": 0.1, "description": "Tolerance" }
+          "tolerance_ratio": { "type": "float", "default": 0.1, "description": "Tolerance" },
+          "exposure": { "type": "float", "default": 0.2, "description": "Exposure (s) for strategy camera captures" }
         }
       },
       "COBYLA": {

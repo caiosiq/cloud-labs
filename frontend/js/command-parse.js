@@ -1,7 +1,7 @@
 /**
  * Shorthand parser for the Command Console.
  * Defaults for NEWTON/COBYLA must stay aligned with `fetchStrategies()` in js/app-main.js.
- * Console COBYLA omits `exposure`; `command-api.js` fills it from table-cam exposure when present.
+ * Console COBYLA / NEWTON may omit `exposure`; `command-api.js` fills it from table-cam exposure when present.
  * @see coding_on_the_ui.md
  */
 

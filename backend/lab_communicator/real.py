@@ -842,6 +842,12 @@ class RealLabCommunicator(LabCommunicator):
                 self._install_cloudlab_place_ui_hook(target_id)
                 newton_place_hook_installed = True
 
+                try:
+                    _nexp = float(params.get("exposure", 0.2))
+                except (TypeError, ValueError):
+                    _nexp = 0.2
+                _nexp = max(0.001, min(30.0, _nexp))
+
                 newton_kw: Dict[str, Any] = dict(
                     camera_number=params["camera_number"],
                     target_x_pixel=params["target_x_pixel"],
@@ -849,7 +855,8 @@ class RealLabCommunicator(LabCommunicator):
                     axis=params["axis"],
                     initial_move=-0.2,
                     do_repositioning=False,
-                    video_exposure=1.0,
+                    video_exposure=_nexp,
+                    capture_exposure=_nexp,
                 )
                 try:
                     init_sig = inspect.signature(NewtonPlacementStrategy_cloudlab.__init__)
