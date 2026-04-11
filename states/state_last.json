@@ -5,22 +5,32 @@
     "tag_11": {
       "id": "tag_11",
       "type": "OPTICAL_LENS",
-      "state": "PLACED",
-      "pose": {
-        "x": 386.1,
-        "y": 2.8,
-        "rotation": 270
-      },
-      "intent": {
+      "tunables": {
+        "presence": "breadboard",
         "nominal_pose": {
           "x": 386.1,
           "y": 2.8,
           "rotation": 270
         },
-        "is_optimized": false,
-        "placement_strategy": "MANUAL"
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
       },
-      "metadata": {}
+      "measurables": {
+        "pose": {
+          "x": 386.1,
+          "y": 2.8,
+          "rotation": 270
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
     }
   },
   "optimization_step": 0

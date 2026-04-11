@@ -4,12 +4,23 @@ Storage quadrant Q3: x < 0 and y < 0 (lab mm, origin at table center).
 Inventory uses a fixed row-major grid: each STORED part reserves one cell; nominal pose is the
 cell center. Vision pose is valid if the axis-aligned footprint (width × height) fits inside
 that cell rectangle.
+
+Geometry uses measurables.pose (physical center). Slot intent uses tunables.storage.
 """
 from __future__ import annotations
 
 import math
 import random
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+from .component_model import (
+    PRESENCE_BREADBOARD,
+    PRESENCE_STORAGE,
+    is_stored,
+    meas_pose,
+    presence_of,
+    storage_slot,
+)
 
 LAB_X_MIN = -500.0
 LAB_X_MAX = 500.0
@@ -37,10 +48,10 @@ def is_placed_region(x: float, y: float) -> bool:
     return not is_storage_region(x, y)
 
 
-def layout_consistent(state: str, x: float, y: float) -> bool:
-    if state == "STORED":
+def layout_consistent(presence: str, x: float, y: float) -> bool:
+    if presence == PRESENCE_STORAGE:
         return is_storage_region(x, y)
-    if state == "PLACED":
+    if presence == PRESENCE_BREADBOARD:
         return is_placed_region(x, y)
     return True
 
@@ -71,20 +82,19 @@ STORAGE_NOMINAL_ROTATION_DEG = 0.0
 def nominal_center_pose_for_stored_entry(entry: Dict[str, Any]) -> Optional[Tuple[float, float, int, int]]:
     """
     Nominal pose for a STORED part: center of its grid cell at standard rotation.
-    Uses metadata.storage_slot when present; otherwise infers the cell from the current center pose in Q3.
+    Uses tunables.storage.slot when present; otherwise infers the cell from the current center pose in Q3.
     Returns (cx_mm, cy_mm, i, j) or None if the cell cannot be resolved.
     """
-    if not isinstance(entry, dict) or entry.get("state") != "STORED":
+    if not isinstance(entry, dict) or not is_stored(entry):
         return None
-    pose = entry.get("pose") or {}
+    pose = meas_pose(entry)
     try:
         px = float(pose.get("x", 0.0))
         py = float(pose.get("y", 0.0))
     except (TypeError, ValueError):
         return None
-    md = entry.get("metadata") or {}
-    slot = md.get("storage_slot")
-    if isinstance(slot, dict) and "i" in slot and "j" in slot:
+    slot = storage_slot(entry)
+    if slot is not None:
         i, j = int(slot["i"]), int(slot["j"])
     else:
         inferred = cell_index_for_point(px, py)
@@ -155,11 +165,10 @@ def occupied_slots(components: Dict[str, Any], exclude_tag_id: Optional[str] = N
     for tid, entry in components.items():
         if exclude_tag_id is not None and tid == exclude_tag_id:
             continue
-        if not isinstance(entry, dict) or entry.get("state") != "STORED":
+        if not isinstance(entry, dict) or not is_stored(entry):
             continue
-        md = entry.get("metadata") or {}
-        slot = md.get("storage_slot")
-        if isinstance(slot, dict) and "i" in slot and "j" in slot:
+        slot = storage_slot(entry)
+        if slot is not None:
             occ.add((int(slot["i"]), int(slot["j"])))
     return occ
 
@@ -223,8 +232,8 @@ def analyze_layout_issues(
     for tag_id, entry in components.items():
         if not isinstance(entry, dict):
             continue
-        st = entry.get("state")
-        pose = entry.get("pose") or {}
+        pres = presence_of(entry)
+        pose = meas_pose(entry)
         try:
             px = float(pose.get("x", 0.0))
             py = float(pose.get("y", 0.0))
@@ -232,17 +241,17 @@ def analyze_layout_issues(
             continue
         w, h = get_size_for_tag(tag_id)
 
-        if st == "PLACED" and is_storage_region(px, py):
+        if pres == PRESENCE_BREADBOARD and is_storage_region(px, py):
             issues.append(
                 {
                     "tag_id": tag_id,
                     "kind": "PLACED_IN_Q3",
-                    "message": f"{tag_id} is PLACED but its center lies in the storage quadrant (Q3).",
+                    "message": f"{tag_id} is intended on the breadboard but its measured center lies in Q3.",
                 }
             )
             continue
 
-        if st != "STORED":
+        if pres != PRESENCE_STORAGE:
             continue
 
         if not is_storage_region(px, py):
@@ -250,16 +259,15 @@ def analyze_layout_issues(
                 {
                     "tag_id": tag_id,
                     "kind": "STORED_OUTSIDE_Q3",
-                    "message": f"{tag_id} is STORED but its center is not in Q3 (x<0, y<0).",
+                    "message": f"{tag_id} is STORED but its measured center is not in Q3 (x<0, y<0).",
                 }
             )
             continue
 
-        md = entry.get("metadata") or {}
-        slot = md.get("storage_slot")
+        slot = storage_slot(entry)
         i: Optional[int] = None
         j: Optional[int] = None
-        if isinstance(slot, dict) and "i" in slot and "j" in slot:
+        if slot is not None:
             i, j = int(slot["i"]), int(slot["j"])
         else:
             inferred = cell_index_for_point(px, py)
@@ -321,9 +329,9 @@ def random_placed_position(
             continue
         if not isinstance(entry, dict):
             continue
-        if entry.get("state") not in ("PLACED", "STORED"):
+        if presence_of(entry) not in (PRESENCE_BREADBOARD, PRESENCE_STORAGE):
             continue
-        pose = entry.get("pose") or {}
+        pose = meas_pose(entry)
         try:
             ox = float(pose.get("x", 0.0))
             oy = float(pose.get("y", 0.0))

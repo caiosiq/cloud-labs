@@ -1,232 +1,327 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-04-11T00:04:23.982788",
+  "last_updated": "2026-04-11T19:24:58.114608",
   "components": {
     "tag_9": {
       "id": "tag_9",
       "type": "OPTICAL_FILTER",
-      "state": "STORED",
-      "pose": {
-        "x": -450.0,
-        "y": -450.0,
-        "rotation": 0.0
-      },
-      "intent": {
+      "tunables": {
+        "presence": "storage",
         "nominal_pose": {
           "x": -450.0,
           "y": -450.0,
           "rotation": 0.0
         },
-        "placement_strategy": "STORAGE",
-        "last_optimized_pose": null,
-        "is_optimized": false
-      },
-      "metadata": {
-        "last_optimization_score": 0.99,
-        "storage_slot": {
-          "i": 0,
-          "j": 0
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": true,
+          "slot": {
+            "i": 0,
+            "j": 0
+          }
+        },
+        "placement": {
+          "mode": "STORAGE"
         }
+      },
+      "measurables": {
+        "pose": {
+          "x": -450.0,
+          "y": -450.0,
+          "rotation": 0.0
+        },
+        "last_optimization_score": 0.99,
+        "last_optimized_pose": null,
+        "camera_image": null
       }
     },
     "tag_22": {
       "id": "tag_22",
       "type": "OPTICAL_CAMERA",
-      "state": "PLACED",
-      "pose": {
-        "x": -423.0298640608087,
-        "y": 289.97865949867116,
-        "rotation": 680
-      },
-      "intent": {
+      "tunables": {
+        "presence": "breadboard",
         "nominal_pose": {
-          "x": -422.8571428571429,
-          "y": 290,
-          "rotation": 680
+          "x": -282.8571428571429,
+          "y": 264.2857142857143,
+          "rotation": 680.0
         },
-        "placement_strategy": "MANUAL",
-        "last_optimized_pose": null,
-        "is_optimized": false
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
       },
-      "metadata": {}
+      "measurables": {
+        "pose": {
+          "x": -282.6527744223036,
+          "y": 264.59497040802796,
+          "rotation": 680.0
+        },
+        "last_optimization_score": 0.99,
+        "last_optimized_pose": {
+          "x": -221.00418470877685,
+          "y": 304.5333807278503,
+          "rotation": 680.7747230668006
+        },
+        "camera_image": null
+      }
     },
     "tag_21": {
       "id": "tag_21",
       "type": "OPTICAL_CAMERA",
-      "state": "PLACED",
-      "pose": {
-        "x": 411.8453867888497,
-        "y": -265.0657066905643,
-        "rotation": 0
-      },
-      "intent": {
+      "tunables": {
+        "presence": "breadboard",
         "nominal_pose": {
-          "x": 411.42857142857144,
-          "y": -264.85714285714283,
-          "rotation": 0
+          "x": 171.42857142857144,
+          "y": -413.42857142857144,
+          "rotation": 0.0
         },
-        "placement_strategy": "MANUAL",
-        "last_optimized_pose": null,
-        "is_optimized": false
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
       },
-      "metadata": {}
+      "measurables": {
+        "pose": {
+          "x": 171.19008233346275,
+          "y": -413.2061032016584,
+          "rotation": 0.0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": {
+          "path": "C:\\Users\\CaioV\\OneDrive - Massachusetts Institute of Technology\\UROP - AI Optics\\optics-digital-twin\\schemas\\mock_camera_captures\\tag_21_last.png",
+          "source": "mock_table_cam",
+          "cam_id": 1,
+          "format": "png"
+        }
+      }
     },
     "tag_18": {
       "id": "tag_18",
       "type": "OPTICAL_MIRROR",
-      "state": "STORED",
-      "pose": {
-        "x": -350.0,
-        "y": -450.0,
-        "rotation": 0.0
-      },
-      "intent": {
+      "tunables": {
+        "presence": "storage",
         "nominal_pose": {
           "x": -350.0,
           "y": -450.0,
           "rotation": 0.0
         },
-        "placement_strategy": "STORAGE",
-        "last_optimized_pose": null,
-        "is_optimized": false
-      },
-      "metadata": {
-        "storage_slot": {
-          "i": 1,
-          "j": 0
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": true,
+          "slot": {
+            "i": 1,
+            "j": 0
+          }
+        },
+        "placement": {
+          "mode": "STORAGE"
         }
+      },
+      "measurables": {
+        "pose": {
+          "x": -350.0,
+          "y": -450.0,
+          "rotation": 0.0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
       }
     },
     "tag_2": {
       "id": "tag_2",
       "type": "OPTICAL_BEAMSPLITTER",
-      "state": "PLACED",
-      "pose": {
-        "x": -120.24217692819704,
-        "y": 86.27068898384157,
-        "rotation": 0.0
-      },
-      "intent": {
+      "tunables": {
+        "presence": "storage",
         "nominal_pose": {
-          "x": -119.76190476190474,
-          "y": 85.95238095238106,
+          "x": -150.0,
+          "y": -450.0,
           "rotation": 0.0
         },
-        "placement_strategy": "MANUAL",
-        "last_optimized_pose": null,
-        "is_optimized": false
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": true,
+          "slot": {
+            "i": 3,
+            "j": 0
+          }
+        },
+        "placement": {
+          "mode": "STORAGE"
+        }
       },
-      "metadata": {}
+      "measurables": {
+        "pose": {
+          "x": -150.0,
+          "y": -450.0,
+          "rotation": 0.0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
     },
     "tag_10": {
       "id": "tag_10",
       "type": "OPTICAL_BEAMSPLITTER",
-      "state": "PLACED",
-      "pose": {
-        "x": 257.16697603071907,
-        "y": -48.12350563999059,
-        "rotation": 0.0
-      },
-      "intent": {
+      "tunables": {
+        "presence": "breadboard",
         "nominal_pose": {
           "x": 256.9047619047618,
           "y": -48.33333333333323,
           "rotation": 0.0
         },
-        "placement_strategy": "MANUAL",
-        "last_optimized_pose": null,
-        "is_optimized": false
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
       },
-      "metadata": {}
+      "measurables": {
+        "pose": {
+          "x": 257.16697603071907,
+          "y": -48.12350563999059,
+          "rotation": 0.0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
     },
     "tag_11": {
       "id": "tag_11",
       "type": "OPTICAL_LENS",
-      "state": "STORED",
-      "pose": {
-        "x": -250.0,
-        "y": -450.0,
-        "rotation": 0.0
-      },
-      "intent": {
+      "tunables": {
+        "presence": "storage",
         "nominal_pose": {
           "x": -250.0,
           "y": -450.0,
           "rotation": 0.0
         },
-        "placement_strategy": "STORAGE",
-        "last_optimized_pose": null,
-        "is_optimized": false
-      },
-      "metadata": {
-        "storage_slot": {
-          "i": 2,
-          "j": 0
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": true,
+          "slot": {
+            "i": 2,
+            "j": 0
+          }
+        },
+        "placement": {
+          "mode": "STORAGE"
         }
+      },
+      "measurables": {
+        "pose": {
+          "x": -250.0,
+          "y": -450.0,
+          "rotation": 0.0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
       }
     },
     "tag_20": {
       "id": "tag_20",
       "type": "OPTICAL_MIRROR",
-      "state": "PLACED",
-      "pose": {
-        "x": 835.1626506753031,
-        "y": 199.98637547968232,
-        "rotation": 0
-      },
-      "intent": {
+      "tunables": {
+        "presence": "breadboard",
         "nominal_pose": {
           "x": 835,
           "y": 200,
           "rotation": 0
         },
-        "placement_strategy": "MANUAL",
-        "last_optimized_pose": null,
-        "is_optimized": false
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
       },
-      "metadata": {}
+      "measurables": {
+        "pose": {
+          "x": 835.1626506753031,
+          "y": 199.98637547968232,
+          "rotation": 0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
     },
     "tag_3": {
       "id": "tag_3",
       "type": "OPTICAL_FILTER",
-      "state": "PLACED",
-      "pose": {
-        "x": 371.2437593332153,
-        "y": 197.01167022205044,
-        "rotation": 0.0
-      },
-      "intent": {
+      "tunables": {
+        "presence": "breadboard",
         "nominal_pose": {
           "x": 371.66666666666663,
           "y": 197.3809523809525,
           "rotation": 0.0
         },
-        "placement_strategy": "MANUAL",
-        "last_optimized_pose": null,
-        "is_optimized": false
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
       },
-      "metadata": {}
+      "measurables": {
+        "pose": {
+          "x": 371.2437593332153,
+          "y": 197.01167022205044,
+          "rotation": 0.0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
     },
     "tag_19": {
       "id": "tag_19",
       "type": "OPTICAL_CRYSTAL",
-      "state": "PLACED",
-      "pose": {
-        "x": 239.76412628247976,
-        "y": -241.83573311565084,
-        "rotation": 0.0
-      },
-      "intent": {
+      "tunables": {
+        "presence": "breadboard",
         "nominal_pose": {
           "x": 240.23809523809535,
           "y": -242.14285714285717,
           "rotation": 0.0
         },
-        "placement_strategy": "MANUAL",
-        "last_optimized_pose": null,
-        "is_optimized": false
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
       },
-      "metadata": {}
+      "measurables": {
+        "pose": {
+          "x": 239.76412628247976,
+          "y": -241.83573311565084,
+          "rotation": 0.0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
     }
   }
 }

@@ -22,7 +22,10 @@ export function formatHelp() {
     return [
         'Commands (whitespace-separated):',
         '  help | ?          — this text',
-        '  refresh           — rescan lab state (same as Refresh State button)',
+        '  refresh           — refresh poses from camera (same as Refresh Pose button)',
+        '  tunables <tag>    — print tunables JSON for tag (alias: get_tunables)',
+        '  measurables <tag> — print measurables JSON for tag (alias: get_measurables; saved state only)',
+        '  observe <tag>     — OBSERVE_MEASURABLES (poll lab; e.g. camera → measurables.camera_image)',
         '  move <tag> <x> <y> <rot>     — MOVE_COMPONENT (lab mm, degrees)',
         '  motor <tag> <motor_id> <dist> — MOVE_MOTOR',
         '  motorhome <tag> <motor_id>   — MOTOR_SEND_HOME (move by −θ → tracked 0)',
@@ -89,6 +92,27 @@ export function parseCommandLine(line) {
             return { ok: false, error: 'refresh does not take arguments.' };
         }
         return { ok: true, result: { type: 'refresh' } };
+    }
+
+    if (verb === 'tunables' || verb === 'get_tunables') {
+        if (tokens.length !== 2) {
+            return { ok: false, error: 'Usage: tunables <tag_id>  (alias: get_tunables <tag_id>)' };
+        }
+        return { ok: true, result: { type: 'tunables', tagId: tokens[1] } };
+    }
+
+    if (verb === 'measurables' || verb === 'get_measurables') {
+        if (tokens.length !== 2) {
+            return { ok: false, error: 'Usage: measurables <tag_id>  (alias: get_measurables <tag_id>)' };
+        }
+        return { ok: true, result: { type: 'measurables', tagId: tokens[1] } };
+    }
+
+    if (verb === 'observe' || verb === 'observe_measurables') {
+        if (tokens.length !== 2) {
+            return { ok: false, error: 'Usage: observe <tag_id>  (alias: observe_measurables <tag_id>)' };
+        }
+        return { ok: true, result: { type: 'observe', tagId: tokens[1] } };
     }
 
     if (verb === 'move') {

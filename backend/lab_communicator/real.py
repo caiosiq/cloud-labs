@@ -14,15 +14,27 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from .base import LabCommunicator
-from . import motor_rotation_store as motor_rot
-from .storage_region import (
+from lab_model import motor_rotation_store as motor_rot
+from lab_model.component_model import (
+    PRESENCE_BREADBOARD,
+    PRESENCE_OFF_TABLE,
+    PRESENCE_STORAGE,
+    default_measurables,
+    default_tunables,
+    is_on_table,
+    is_stored,
+    set_presence_and_storage,
+)
+from lab_model.storage_region import (
     STORAGE_NOMINAL_ROTATION_DEG,
+    cell_index_for_point,
     find_storage_slot_and_center,
     is_placed_region,
     is_storage_region,
     nominal_center_pose_for_stored_entry,
 )
+
+from .base import LabCommunicator
 
 # Configuration for External Lab Automation Library
 # LAB_AUTOMATION_PATH = path to the lab_automation package folder (repo root).
@@ -431,42 +443,55 @@ class RealLabCommunicator(LabCommunicator):
                     val = getattr(inv, key, None)
                     if val is not None:
                         pose[key] = val
-                if is_storage_region(float(inv.x), float(inv.y)):
-                    state = "STORED"
+                in_q3 = is_storage_region(float(inv.x), float(inv.y))
+                if in_q3:
+                    presence = PRESENCE_STORAGE
+                    placement_mode = "STORAGE"
+                    inferred = cell_index_for_point(float(inv.x), float(inv.y))
+                    slot = {"i": inferred[0], "j": inferred[1]} if inferred else None
                 else:
-                    state = "PLACED"
-                print(f"  pose written: {pose} -> {state}")
+                    presence = PRESENCE_BREADBOARD
+                    placement_mode = "MANUAL"
+                    slot = None
+                print(f"  pose written: {pose} -> presence={presence}")
             else:
                 pose = {"x": 0, "y": 0, "rotation": 0}
-                state = "INVENTORY"
-                print(f"  state: INVENTORY (pose {pose})")
+                presence = PRESENCE_OFF_TABLE
+                placement_mode = "MANUAL"
+                slot = None
+                print(f"  presence: off_table (pose {pose})")
+
+            tun = default_tunables()
+            tun["presence"] = presence
+            tun["nominal_pose"] = dict(pose) if presence != PRESENCE_OFF_TABLE else {"x": 0.0, "y": 0.0, "rotation": 0.0}
+            tun["storage"] = {
+                "in_storage": presence == PRESENCE_STORAGE,
+                "slot": slot,
+            }
+            tun["placement"] = {"mode": placement_mode}
+            meas = default_measurables()
+            meas["pose"] = dict(pose)
 
             entry = {
                 "id": tag_id,
                 "type": item.get("type", "OPTICAL_MIRROR"),
-                "state": state,
-                "pose": pose,
-                "intent": {
-                    "nominal_pose": pose if state in ("PLACED", "STORED") else None,
-                    "is_optimized": False,
-                    "placement_strategy": "STORAGE" if state == "STORED" else "MANUAL",
-                },
-                "metadata": {}
+                "tunables": tun,
+                "measurables": meas,
             }
             new_components[tag_id] = entry
-            print(f"  entry keys: {list(entry.keys())}, intent.nominal_pose: {entry['intent'].get('nominal_pose')}")
+            print(f"  entry keys: {list(entry.keys())}, tunables.nominal_pose: {tun.get('nominal_pose')}")
 
         with self._state_lock:
             self.current_state["components"] = new_components
             self.current_state["last_updated"] = datetime.now().isoformat()
-        n_placed = len([c for c in new_components.values() if c["state"] == "PLACED"])
-        n_stored = len([c for c in new_components.values() if c["state"] == "STORED"])
-        print(f"[REAL LAB] Scan complete. PLACED={n_placed}, STORED={n_stored}.")
+        n_bb = len([c for c in new_components.values() if (c.get("tunables") or {}).get("presence") == PRESENCE_BREADBOARD])
+        n_st = len([c for c in new_components.values() if (c.get("tunables") or {}).get("presence") == PRESENCE_STORAGE])
+        print(f"[REAL LAB] Scan complete. breadboard={n_bb}, storage={n_st}.")
 
-    def refresh_state(self):
+    def refresh_pose_from_camera(self):
         """
-        Re-initialize lab state using the same logic as at startup.
-        This is used by the UI "Refresh State" button.
+        Re-scan the table with the experiment manager (overhead / table camera) and rebuild
+        **measurables.pose** for each catalog component — same path as initial startup scan.
         """
         with self._state_lock:
             self.current_state["system_status"] = "BUSY"
@@ -478,6 +503,10 @@ class RealLabCommunicator(LabCommunicator):
                 self.current_state["optimization_step"] = 0
                 self.current_state["optimization_run_dir"] = None
                 self.current_state["last_updated"] = datetime.now().isoformat()
+
+    def refresh_state(self):
+        """Deprecated name; use :meth:`refresh_pose_from_camera`."""
+        self.refresh_pose_from_camera()
 
     def set_lab_state(self, state: Dict[str, Any]):
         """
@@ -501,7 +530,7 @@ class RealLabCommunicator(LabCommunicator):
         # Apply to component_map so pick/place uses correct coordinates.
         # Snapshot poses are lab / UI mm; automation expects robot table mm.
         for tag_id, entry in components.items():
-            pose = (entry or {}).get("pose", {}) or {}
+            pose = ((entry or {}).get("measurables") or {}).get("pose") or {}
             x_lab = float(pose.get("x", 0.0))
             y_lab = float(pose.get("y", 0.0))
             x, y = lab_table_xy_to_robot_xy(x_lab, y_lab)
@@ -520,11 +549,10 @@ class RealLabCommunicator(LabCommunicator):
             comp.inventory_location = p
             comp.current_location = p
 
-            # Best-effort: keep flags consistent (robot cares about on-table pose for PLACED and STORED)
-            comp.is_placed = (entry or {}).get("state") in ("PLACED", "STORED")
+            comp.is_placed = is_on_table(entry) if isinstance(entry, dict) else False
 
     def _inject_motor_rotations_into_state(self, state: Dict[str, Any]) -> None:
-        """Merge software motor angle tracker into each component (pose + intent)."""
+        """Merge software motor angle tracker into measurables.pose and tunables.nominal_motor_positions."""
         components = state.get("components") or {}
         if not isinstance(components, dict):
             return
@@ -536,12 +564,14 @@ class RealLabCommunicator(LabCommunicator):
             if not mids:
                 continue
             mr = motor_rot.get_rotations_for_motor_ids(tag_id, list(mids))
-            pose = comp.setdefault("pose", {})
+            meas = comp.setdefault("measurables", default_measurables())
+            pose = meas.setdefault("pose", {})
             if isinstance(pose, dict):
                 pose["motor_rotations"] = dict(mr)
-            intent = comp.setdefault("intent", {})
-            if isinstance(intent, dict):
-                intent["nominal_motor_rotations"] = dict(mr)
+            tun = comp.setdefault("tunables", default_tunables())
+            nm = tun.setdefault("nominal_motor_positions", {})
+            for k, v in mr.items():
+                nm[str(k)] = float(v)
 
     def _motor_catalog_ok(self, target_id: str, motor_id: int) -> bool:
         meta = self.catalog_map.get(target_id)
@@ -628,7 +658,7 @@ class RealLabCommunicator(LabCommunicator):
         """
         with self._state_lock:
             comp_entry = (self.current_state.get("components") or {}).get(tag_id)
-            pose = dict((comp_entry or {}).get("pose") or {})
+            pose = dict(((comp_entry or {}).get("measurables") or {}).get("pose") or {})
         if target_x is not None and target_y is not None:
             nx, ny = robot_table_xy_to_lab_xy(float(target_x), float(target_y))
         else:
@@ -646,8 +676,8 @@ class RealLabCommunicator(LabCommunicator):
 
     def _apply_placement_ui_phase(self, tag_id: str, phase: str, pose: Dict[str, float]) -> None:
         """
-        phase='ghost' -> update intent.nominal_pose only (planned target before/at start of move).
-        phase='physical' -> update solid pose + intent to match (after successful place).
+        phase='ghost' -> update tunables.nominal_pose only (planned target before/at start of move).
+        phase='physical' -> update measurables.pose + tunables to match (after successful place).
         """
         if phase not in ("ghost", "physical"):
             return
@@ -655,13 +685,16 @@ class RealLabCommunicator(LabCommunicator):
             comp_entry = (self.current_state.get("components") or {}).get(tag_id)
             if not comp_entry:
                 return
-            intent = comp_entry.setdefault("intent", {})
+            tun = comp_entry.setdefault("tunables", default_tunables())
+            meas = comp_entry.setdefault("measurables", default_measurables())
             if phase == "ghost":
-                intent["nominal_pose"] = dict(pose)
+                tun["nominal_pose"] = dict(pose)
+                tun["placement"] = {"mode": "NEWTON"}
             else:
-                comp_entry["pose"] = dict(pose)
-                comp_entry["state"] = "PLACED"
-                intent["nominal_pose"] = dict(pose)
+                meas["pose"] = dict(pose)
+                set_presence_and_storage(comp_entry, PRESENCE_BREADBOARD, in_storage=False, slot=None)
+                tun["nominal_pose"] = dict(pose)
+                tun["placement"] = {"mode": "NEWTON"}
             self.current_state["last_updated"] = datetime.now().isoformat()
 
     def _cloudlab_progress_callback(self, target_tag_id: str):
@@ -780,10 +813,15 @@ class RealLabCommunicator(LabCommunicator):
 
         with self._state_lock:
             entry = (self.current_state.get("components") or {}).get(target_id)
-        if entry and entry.get("state") == "STORED" and self._place_from_storage_tag != target_id:
+        if entry and is_stored(entry) and self._place_from_storage_tag != target_id:
             print(f"[REAL LAB] Refusing move: {target_id} is STORED (use place from storage).")
             return
-        if entry and entry.get("state") == "PLACED" and is_storage_region(tx_lab, ty_lab) and self._store_component_tag != target_id:
+        if (
+            entry
+            and (entry.get("tunables") or {}).get("presence") == PRESENCE_BREADBOARD
+            and is_storage_region(tx_lab, ty_lab)
+            and self._store_component_tag != target_id
+        ):
             print(f"[REAL LAB] Refusing move into storage quadrant (use Store).")
             return
 
@@ -826,27 +864,28 @@ class RealLabCommunicator(LabCommunicator):
             #UPDATE TO GET REFORCE-SCAM
             with self._state_lock:
                 if target_id in self.current_state["components"]:
-                    self.current_state["components"][target_id]["pose"] = {
+                    ce = self.current_state["components"][target_id]
+                    meas = ce.setdefault("measurables", default_measurables())
+                    tun = ce.setdefault("tunables", default_tunables())
+                    meas["pose"] = {
                         "x": tx_lab,
                         "y": ty_lab,
                         "rotation": rot
                     }
                     if self._store_component_tag == target_id:
-                        self.current_state["components"][target_id]["state"] = "STORED"
-                        self.current_state["components"][target_id]["intent"]["placement_strategy"] = "STORAGE"
-                        md = self.current_state["components"][target_id].setdefault("metadata", {})
                         if self._store_pending_slot is not None:
                             si, sj = self._store_pending_slot
-                            md["storage_slot"] = {"i": int(si), "j": int(sj)}
+                            set_presence_and_storage(
+                                ce, PRESENCE_STORAGE, in_storage=True, slot={"i": int(si), "j": int(sj)}
+                            )
+                        else:
+                            set_presence_and_storage(ce, PRESENCE_STORAGE, in_storage=True, slot=None)
+                        tun["placement"] = {"mode": "STORAGE"}
                     else:
-                        self.current_state["components"][target_id]["state"] = "PLACED"
-                        self.current_state["components"][target_id]["intent"]["placement_strategy"] = "MANUAL"
-                        self.current_state["components"][target_id].setdefault("metadata", {}).pop(
-                            "storage_slot", None
-                        )
+                        set_presence_and_storage(ce, PRESENCE_BREADBOARD, in_storage=False, slot=None)
+                        tun["placement"] = {"mode": "MANUAL"}
 
-                    # Update intent to match reality
-                    self.current_state["components"][target_id]["intent"]["nominal_pose"] = {
+                    tun["nominal_pose"] = {
                         "x": tx_lab, "y": ty_lab, "rotation": rot
                     }
                     self.current_state["last_updated"] = datetime.now().isoformat()
@@ -867,7 +906,7 @@ class RealLabCommunicator(LabCommunicator):
         print(f"[REAL LAB] Moving motor {motor_id} of {target_id} by {distance} (RELATIVE)...")
         with self._state_lock:
             entry = (self.current_state.get("components") or {}).get(target_id)
-        if entry and entry.get("state") == "STORED":
+        if entry and is_stored(entry):
             print(f"[REAL LAB] Refusing motor move: {target_id} is STORED.")
             return
 
@@ -929,7 +968,7 @@ class RealLabCommunicator(LabCommunicator):
             return
         with self._state_lock:
             ent = (self.current_state.get("components") or {}).get(target_id)
-        if ent and ent.get("state") == "STORED":
+        if ent and is_stored(ent):
             print(f"[REAL LAB] Refusing optimize: {target_id} is STORED.")
             return
 
@@ -1033,8 +1072,16 @@ class RealLabCommunicator(LabCommunicator):
                 # 3. Update State
                 with self._state_lock:
                     if target_id in self.current_state["components"]:
-                        self.current_state["components"][target_id]["intent"]["is_optimized"] = True
-                        self.current_state["components"][target_id]["intent"]["placement_strategy"] = strategy_name
+                        ce = self.current_state["components"][target_id]
+                        tun = ce.setdefault("tunables", default_tunables())
+                        meas = ce.setdefault("measurables", default_measurables())
+                        tun["placement"] = {"mode": strategy_name.upper()}
+                        meas["last_optimization_score"] = 1.0
+                        mp = (meas.get("pose") or {}).copy()
+                        if mp:
+                            meas["last_optimized_pose"] = {
+                                k: mp[k] for k in ("x", "y", "rotation") if k in mp
+                            }
                         self.current_state["last_updated"] = datetime.now().isoformat()
 
         except Exception as e:
@@ -1203,12 +1250,42 @@ class RealLabCommunicator(LabCommunicator):
                 except Exception:
                     pass
 
+    async def observe_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(tag_id)
+        if not isinstance(entry, dict):
+            return {}
+        meta = (self.catalog_map or {}).get(tag_id) or {}
+        ctype = meta.get("type") or ""
+        if ctype != "OPTICAL_CAMERA":
+            return self.return_measurables_for_tag(tag_id)
+        png = self.capture_table_cam(1, exposure=0.2)
+        if not png:
+            return self.return_measurables_for_tag(tag_id)
+        base = self._camera_images_base_dir()
+        os.makedirs(base, exist_ok=True)
+        path = os.path.join(base, f"{tag_id}_observe.png")
+        with open(path, "wb") as f:
+            f.write(png)
+        with self._state_lock:
+            comps = self.current_state.setdefault("components", {})
+            comp = comps.setdefault(tag_id, {})
+            meas = comp.setdefault("measurables", default_measurables())
+            meas["camera_image"] = {
+                "path": path,
+                "source": "real_table_cam",
+                "cam_id": 1,
+                "format": "png",
+            }
+            self.current_state["last_updated"] = datetime.now().isoformat()
+        return self.return_measurables_for_tag(tag_id)
+
     async def store_component(self, target_id: str):
         print(f"[REAL LAB] store_component {target_id}...")
         with self._state_lock:
             entry = (self.current_state.get("components") or {}).get(target_id)
-        if not entry or entry.get("state") != "PLACED":
-            print(f"[REAL LAB] store_component: {target_id} must be PLACED.")
+        if not entry or (entry.get("tunables") or {}).get("presence") != PRESENCE_BREADBOARD:
+            print(f"[REAL LAB] store_component: {target_id} must be on breadboard intent.")
             return
         w, h = self._catalog_wh(target_id)
         with self._state_lock:
@@ -1233,13 +1310,20 @@ class RealLabCommunicator(LabCommunicator):
         print(f"[REAL LAB] affirm_placed_at_current {target_id}...")
         with self._state_lock:
             entry = (self.current_state.get("components") or {}).get(target_id)
-            if not entry or entry.get("state") != "STORED":
+            if not entry or not is_stored(entry):
                 print(f"[REAL LAB] affirm: {target_id} must be STORED.")
                 return
             comp = self.current_state["components"][target_id]
-            comp["state"] = "PLACED"
-            comp.setdefault("metadata", {}).pop("storage_slot", None)
-            comp["intent"]["placement_strategy"] = "MANUAL"
+            meas = comp.setdefault("measurables", default_measurables())
+            pose = meas.get("pose") or {}
+            tun = comp.setdefault("tunables", default_tunables())
+            set_presence_and_storage(comp, PRESENCE_BREADBOARD, in_storage=False, slot=None)
+            tun["nominal_pose"] = {
+                "x": float(pose.get("x", 0)),
+                "y": float(pose.get("y", 0)),
+                "rotation": float(pose.get("rotation", 0)),
+            }
+            tun["placement"] = {"mode": "MANUAL"}
             self.current_state["last_updated"] = datetime.now().isoformat()
         cobj = self.component_map.get(target_id)
         if cobj is not None:
@@ -1249,7 +1333,7 @@ class RealLabCommunicator(LabCommunicator):
         print(f"[REAL LAB] repack_storage_slot {target_id}...")
         with self._state_lock:
             entry = (self.current_state.get("components") or {}).get(target_id)
-        if not entry or entry.get("state") != "STORED":
+        if not entry or not is_stored(entry):
             print(f"[REAL LAB] repack: {target_id} must be STORED.")
             return
         w, h = self._catalog_wh(target_id)
@@ -1275,7 +1359,7 @@ class RealLabCommunicator(LabCommunicator):
         print(f"[REAL LAB] recenter_stored_in_inventory {target_id}...")
         with self._state_lock:
             entry = (self.current_state.get("components") or {}).get(target_id)
-        if not entry or entry.get("state") != "STORED":
+        if not entry or not is_stored(entry):
             print(f"[REAL LAB] recenter: {target_id} must be STORED.")
             return
         nom = nominal_center_pose_for_stored_entry(entry)
@@ -1297,7 +1381,7 @@ class RealLabCommunicator(LabCommunicator):
         print(f"[REAL LAB] place_from_storage {target_id}...")
         with self._state_lock:
             entry = (self.current_state.get("components") or {}).get(target_id)
-        if not entry or entry.get("state") != "STORED":
+        if not entry or not is_stored(entry):
             print(f"[REAL LAB] place_from_storage: {target_id} not STORED.")
             return
         tx = float(params.get("target_x", params.get("x", 0)))

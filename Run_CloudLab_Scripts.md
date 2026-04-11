@@ -46,7 +46,7 @@ Names are placeholders:
 - **`cloudlab_control`** (or under `backend/lab_communicator/client.py`):
   - `move_component(tag_id, x, y, rotation, ...)`
   - `optimize(tag_id, strategy, params)`
-  - `refresh_state()`
+  - `refresh_pose_from_camera()` (alias: `refresh_state()`)
   - `get_state()` → dict mirroring `get_lab_state`
   - Helpers: **`wait_until_idle()`**, **`wait_for_optimization_step(...)`** if needed
 

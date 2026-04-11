@@ -3,12 +3,64 @@
   "recipe_id": "cavity_recipe_v1",
   "components": {
     "Mirror_1": {
-      "pose": { "x": 105.5, "y": 200.1, "rotation": 45.1 },
-      "metrics": { "optimization_score": 0.98 }
+      "id": null,
+      "type": null,
+      "tunables": {
+        "presence": "breadboard",
+        "nominal_pose": {
+          "x": 105.5,
+          "y": 200.1,
+          "rotation": 45.1
+        },
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
+      },
+      "measurables": {
+        "pose": {
+          "x": 105.5,
+          "y": 200.1,
+          "rotation": 45.1
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
     },
     "BeamSplitter_1": {
-      "pose": { "x": 300.0, "y": 150.0, "rotation": 90.0 },
-      "metrics": {}
+      "id": null,
+      "type": null,
+      "tunables": {
+        "presence": "breadboard",
+        "nominal_pose": {
+          "x": 300.0,
+          "y": 150.0,
+          "rotation": 90.0
+        },
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
+      },
+      "measurables": {
+        "pose": {
+          "x": 300.0,
+          "y": 150.0,
+          "rotation": 90.0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
     }
   },
   "global_metrics": {

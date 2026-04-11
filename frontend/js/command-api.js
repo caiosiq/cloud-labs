@@ -13,7 +13,8 @@ import { formatHelp, parseCommandLine } from './command-parse.js';
  * @param {function} deps.sendCommand
  * @param {function} deps.checkCollision
  * @param {function} deps.log
- * @param {function} deps.runLabStateRefresh
+ * @param {function} deps.runLabPoseRefresh
+ * @param {function} deps.fetchLabState
  * @param {function} deps.ensureGhostForConsole
  * @param {object} deps.ghostState
  * @param {function} deps.render
@@ -35,13 +36,73 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
     }
 
     if (result.type === 'refresh') {
-        appendLine('Refreshing lab state…', 'info');
+        appendLine('Refreshing poses from camera…', 'info');
         try {
-            await deps.runLabStateRefresh();
-            appendLine('Refresh finished.', 'info');
+            await deps.runLabPoseRefresh();
+            appendLine('Pose refresh finished.', 'info');
         } catch (e) {
             const msg = e && e.message ? e.message : String(e);
             appendLine(`Refresh failed: ${msg}`, 'error');
+        }
+        return;
+    }
+
+    if (result.type === 'tunables' || result.type === 'measurables') {
+        const tagId = result.tagId;
+        const path =
+            result.type === 'tunables'
+                ? `/api/components/${encodeURIComponent(tagId)}/tunables`
+                : `/api/components/${encodeURIComponent(tagId)}/measurables`;
+        try {
+            const r = await fetch(path);
+            const text = await r.text();
+            let body;
+            try {
+                body = JSON.parse(text);
+            } catch {
+                appendLine(text || `HTTP ${r.status}`, r.ok ? 'info' : 'error');
+                return;
+            }
+            if (!r.ok) {
+                const detail = body && body.detail !== undefined ? body.detail : text;
+                appendLine(typeof detail === 'string' ? detail : JSON.stringify(detail), 'error');
+                return;
+            }
+            appendLine(JSON.stringify(body, null, 2), 'info');
+        } catch (e) {
+            const msg = e && e.message ? e.message : String(e);
+            appendLine(`Request failed: ${msg}`, 'error');
+        }
+        return;
+    }
+
+    if (result.type === 'observe') {
+        const tagId = result.tagId;
+        appendLine(`Observe measurables (${tagId})…`, 'info');
+        try {
+            const r = await fetch(`/api/components/${encodeURIComponent(tagId)}/measurables/observe`, {
+                method: 'POST',
+            });
+            const text = await r.text();
+            let body;
+            try {
+                body = JSON.parse(text);
+            } catch {
+                appendLine(text || `HTTP ${r.status}`, r.ok ? 'info' : 'error');
+                return;
+            }
+            if (!r.ok) {
+                const detail = body && body.detail !== undefined ? body.detail : text;
+                appendLine(typeof detail === 'string' ? detail : JSON.stringify(detail), 'error');
+                return;
+            }
+            appendLine(JSON.stringify(body.measurables ?? body, null, 2), 'info');
+            if (typeof deps.fetchLabState === 'function') {
+                await deps.fetchLabState();
+            }
+        } catch (e) {
+            const msg = e && e.message ? e.message : String(e);
+            appendLine(`Observe failed: ${msg}`, 'error');
         }
         return;
     }

@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 import json
 import os
 import re
@@ -12,6 +12,16 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import io
 import logging
+
+from lab_primitives import (
+    ObserveMeasurablesBody,
+    PrimitiveId,
+    execute_validated_command,
+    fetch_read_primitive,
+    parse_command_payload,
+    schedule_validated_command,
+    validation_error_detail,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,26 +115,17 @@ async def execute_recipe(recipe: Recipe):
         print(f"[RECIPE] Executing Step {step.step}: {step.action}")
         
         target = step.component or step.target
-        
-        if step.action == "PLACE" or step.action == "MOVE_COMPONENT":
-            await lab.move_component(target, step.parameters)
-        elif step.action == "OPTIMIZE":
-            strategy = step.parameters.get("strategy", "NEWTON")
-            await lab.optimize_component(target, strategy, step.parameters)
-        elif step.action == "REMOVE":
-            await lab.remove_component(target)
-        elif step.action == "MOTOR_SEND_HOME":
-            mid = step.parameters.get("motor_id")
-            if mid is not None:
-                await lab.motor_send_home(target, int(mid))
-        elif step.action == "MOTOR_SET_ZERO":
-            mid = step.parameters.get("motor_id")
-            if mid is not None:
-                await lab.motor_set_zero(target, int(mid))
-        elif step.action == "STORE_COMPONENT":
-            await lab.store_component(target)
-        elif step.action == "PLACE_FROM_STORAGE":
-            await lab.place_from_storage(target, step.parameters or {})
+        envelope = {
+            "action": step.action,
+            "target_id": target,
+            "parameters": step.parameters or {},
+        }
+        try:
+            cmd = parse_command_payload(envelope)
+        except ValidationError as e:
+            print(f"[RECIPE] Invalid step {step.step}: {validation_error_detail(e)}")
+            raise
+        await execute_validated_command(lab, cmd)
 
         await asyncio.sleep(0.5)
         
@@ -209,6 +210,45 @@ async def add_component(payload: Dict[str, Any], background_tasks: BackgroundTas
     mode = (payload.get("placement_mode") or "breadboard").lower()
     return {"status": "accepted", "message": f"Request submitted ({mode}): {payload.get('name')}"}
 
+@app.get("/api/components/{tag_id}/tunables")
+async def get_component_tunables(tag_id: str):
+    """Commanded intent for one component (see refactor.md). Primitive: ``GET_TUNABLES``."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    try:
+        return fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=validation_error_detail(e))
+
+
+@app.get("/api/components/{tag_id}/measurables")
+async def get_component_measurables(tag_id: str):
+    """Lab-reported values for one component. Primitive: ``GET_MEASURABLES``."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    try:
+        return fetch_read_primitive(lab, PrimitiveId.GET_MEASURABLES, tag_id)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=validation_error_detail(e))
+
+
+@app.post("/api/components/{tag_id}/measurables/observe")
+async def post_component_observe_measurables(tag_id: str):
+    """Refresh measurables for one component (camera capture, etc.). Primitive: ``OBSERVE_MEASURABLES``."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    state = lab.get_lab_state()
+    current_status = state.get("system_status")
+    if current_status == "BUSY" or current_status == "OPTIMIZING":
+        raise HTTPException(status_code=409, detail=f"System is {current_status}. Please wait.")
+    await lab.observe_measurables_for_tag(tag_id)
+    try:
+        meas = fetch_read_primitive(lab, PrimitiveId.GET_MEASURABLES, tag_id)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=validation_error_detail(e))
+    return {"status": "ok", "measurables": meas}
+
+
 @app.get("/api/lab-state")
 async def get_lab_state():
     # Polled every ~500ms from the UI — use debug to avoid flooding the console (see LOG_LEVEL).
@@ -226,22 +266,36 @@ async def get_lab_state():
         logger.exception("GET /api/lab-state failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read Lab State: {str(e)}")
 
-@app.post("/api/lab-state/refresh")
-async def refresh_lab_state(background_tasks: BackgroundTasks):
-    """
-    Re-initialize the lab state from sensors/top cameras (REAL) or reload the mock state file.
-    """
+def _schedule_pose_refresh(background_tasks: BackgroundTasks) -> Dict[str, Any]:
     if lab is None:
         raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
+    fn = getattr(lab, "refresh_pose_from_camera", None)
+    if fn is None and hasattr(lab, "refresh_state"):
+        fn = lab.refresh_state
+    if callable(fn):
+        background_tasks.add_task(fn)
+        return {
+            "status": "accepted",
+            "message": "Pose refresh from camera started (updates measurables.pose)",
+        }
+    return {
+        "status": "ok",
+        "message": "Pose refresh not supported for this lab backend",
+    }
 
-    # If the communicator provides a refresh method, run it.
-    if hasattr(lab, "refresh_state"):
-        # Run in background so the server stays responsive.
-        background_tasks.add_task(lab.refresh_state)
-        return {"status": "accepted", "message": "Lab state refresh started"}
 
-    # Fallback: no refresh capability, just return current state.
-    return {"status": "ok", "message": "Lab state refresh not supported; returning current state"}
+@app.post("/api/lab-state/refresh-pose")
+async def refresh_lab_pose_from_camera(background_tasks: BackgroundTasks):
+    """
+    Re-localize component poses from the overhead / table camera (real: full scan; mock: simulated noise).
+    """
+    return _schedule_pose_refresh(background_tasks)
+
+
+@app.post("/api/lab-state/refresh")
+async def refresh_lab_state_legacy(background_tasks: BackgroundTasks):
+    """Deprecated: use ``POST /api/lab-state/refresh-pose`` (same behavior)."""
+    return _schedule_pose_refresh(background_tasks)
 
 @app.get("/api/states")
 async def list_saved_states():
@@ -318,7 +372,7 @@ async def get_layout_conflicts():
     """Semantic vs geometry issues for inventory modals (PLACED in Q3, STORED off-slot, etc.)."""
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
-    from lab_communicator.storage_region import analyze_layout_issues
+    from lab_model.storage_region import analyze_layout_issues
 
     state = lab.get_lab_state()
     comps = state.get("components") or {}
@@ -329,7 +383,7 @@ async def get_layout_conflicts():
 @app.get("/api/storage-grid")
 async def get_storage_grid():
     """Inventory grid dimensions for canvas overlay (must match storage_region constants)."""
-    from lab_communicator.storage_region import storage_grid_spec
+    from lab_model.storage_region import storage_grid_spec
 
     return storage_grid_spec()
 
@@ -354,93 +408,23 @@ async def get_laser_line():
 @app.post("/api/command")
 async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundTasks):
     print(f"Received Command: {payload}")
-    
-    action = payload.get("action")
-    target_id = payload.get("target_id")
-    params = payload.get("parameters", {})
-    
+
     state = lab.get_lab_state()
     current_status = state.get("system_status")
     if current_status == "BUSY" or current_status == "OPTIMIZING":
-         raise HTTPException(status_code=409, detail=f"System is {current_status}. Please wait.")
+        raise HTTPException(status_code=409, detail=f"System is {current_status}. Please wait.")
 
-    if action == "MOVE_COMPONENT":
-        # Extract type if present in parameters
-        # params already has it if sent by frontend
-        background_tasks.add_task(lab.move_component, target_id, params)
-        return {"status": "accepted", "message": f"Robot dispatched to move {target_id}"}
+    try:
+        cmd = parse_command_payload(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=validation_error_detail(e))
 
-    elif action == "MOVE_MOTOR":
-        motor_id = params.get("motor_id")
-        distance = params.get("distance")
-        if motor_id is None or distance is None:
-             raise HTTPException(status_code=400, detail="MOVE_MOTOR requires 'motor_id' and 'distance'")
-        background_tasks.add_task(lab.move_motor, target_id, motor_id, distance)
-        return {"status": "accepted", "message": f"Motor {motor_id} on {target_id} moving by {distance}"}
+    if isinstance(cmd, ObserveMeasurablesBody):
+        await execute_validated_command(lab, cmd)
+        meas = fetch_read_primitive(lab, PrimitiveId.GET_MEASURABLES, cmd.target_id)
+        return {"status": "ok", "measurables": meas}
 
-    elif action == "MOTOR_SEND_HOME":
-        motor_id = params.get("motor_id")
-        if motor_id is None:
-            raise HTTPException(status_code=400, detail="MOTOR_SEND_HOME requires 'motor_id'")
-        try:
-            mid = int(motor_id)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="motor_id must be an integer")
-        background_tasks.add_task(lab.motor_send_home, target_id, mid)
-        return {"status": "accepted", "message": f"Motor {mid} on {target_id}: send to home (tracked → 0)"}
-
-    elif action == "MOTOR_SET_ZERO":
-        motor_id = params.get("motor_id")
-        if motor_id is None:
-            raise HTTPException(status_code=400, detail="MOTOR_SET_ZERO requires 'motor_id'")
-        try:
-            mid = int(motor_id)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="motor_id must be an integer")
-        background_tasks.add_task(lab.motor_set_zero, target_id, mid)
-        return {"status": "accepted", "message": f"Motor {mid} on {target_id}: set current position as 0"}
-    
-    elif action == "OPTIMIZE":
-        strategy = params.get("strategy", "NEWTON")
-        background_tasks.add_task(lab.optimize_component, target_id, strategy, params)
-        return {"status": "accepted", "message": f"Optimization ({strategy}) started for {target_id}"}
-
-    elif action == "STORE_COMPONENT":
-        background_tasks.add_task(lab.store_component, target_id)
-        return {"status": "accepted", "message": f"Storing {target_id} in inventory quadrant (packed)"}
-
-    elif action == "PLACE_FROM_STORAGE":
-        if params.get("target_x") is None or params.get("target_y") is None:
-            raise HTTPException(
-                status_code=400,
-                detail="PLACE_FROM_STORAGE requires target_x, target_y, and rotation in parameters",
-            )
-        background_tasks.add_task(lab.place_from_storage, target_id, params)
-        return {"status": "accepted", "message": f"Placing {target_id} from storage onto breadboard"}
-
-    elif action == "AFFIRM_PLACED_AT_CURRENT":
-        if not target_id:
-            raise HTTPException(status_code=400, detail="AFFIRM_PLACED_AT_CURRENT requires target_id")
-        background_tasks.add_task(lab.affirm_placed_at_current, target_id)
-        return {"status": "accepted", "message": f"Marking {target_id} as PLACED at current pose"}
-
-    elif action == "REPACK_STORAGE":
-        if not target_id:
-            raise HTTPException(status_code=400, detail="REPACK_STORAGE requires target_id")
-        background_tasks.add_task(lab.repack_storage_slot, target_id)
-        return {"status": "accepted", "message": f"Repacking {target_id} into inventory grid"}
-
-    elif action == "RECENTER_IN_STORAGE":
-        if not target_id:
-            raise HTTPException(status_code=400, detail="RECENTER_IN_STORAGE requires target_id")
-        background_tasks.add_task(lab.recenter_stored_in_inventory, target_id)
-        return {"status": "accepted", "message": f"Re-centering {target_id} in its inventory cell at 0°"}
-
-    elif action == "SCAN":
-        return {"status": "accepted", "message": "Scan started"}
-    
-    else:
-        raise HTTPException(status_code=400, detail="Unknown action")
+    return schedule_validated_command(lab, cmd, background_tasks)
 
 # --- Video Feed Endpoints ---
 
@@ -643,8 +627,8 @@ async def compare_golden_state(recipe_id: str):
             report["status"] = "DRIFT"
         else:
             c_comp = current_comps[comp_id]
-            g_pose = g_comp.get("pose", {})
-            c_pose = c_comp.get("pose", {})
+            g_pose = (g_comp.get("measurables") or {}).get("pose") or {}
+            c_pose = (c_comp.get("measurables") or {}).get("pose") or {}
             
             dx = g_pose.get("x", 0) - c_pose.get("x", 0)
             dy = g_pose.get("y", 0) - c_pose.get("y", 0)
@@ -677,23 +661,20 @@ async def compare_golden_state(recipe_id: str):
 async def get_ghost_state():
     """
     Constructs the 'Ghost State' (Tier 2) from the Lab State (Tier 1).
-    In a real app, this might be stored separately, but here it's derived
-    from the 'intent' fields in the lab state.
+    Derived from each component's **tunables** (nominal pose, placement, storage intent).
     """
     state = lab.get_lab_state()
     ghost_state = {}
     
     if "components" in state:
         for name, comp in state["components"].items():
-            if "intent" in comp:
-                ghost_state[name] = comp["intent"]
-            else:
-                # Fallback if no intent exists
-                ghost_state[name] = {
-                    "nominal_pose": comp.get("pose"),
-                    "placement_strategy": "UNKNOWN",
-                    "is_optimized": False
-                }
+            tun = comp.get("tunables") or {}
+            ghost_state[name] = {
+                "nominal_pose": tun.get("nominal_pose"),
+                "placement": tun.get("placement"),
+                "storage": tun.get("storage"),
+                "presence": tun.get("presence"),
+            }
     return ghost_state
 
 @app.get("/api/debug/golden-states")

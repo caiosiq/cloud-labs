@@ -19,6 +19,16 @@ import {
     isStorageRegion,
     isPlacedRegion,
 } from './storage-region.js';
+import {
+    measPose,
+    nominalPose,
+    componentPresence,
+    isStoredComponent,
+    isOnTableComponent,
+    isBreadboardIntent,
+    isOffTableComponent,
+    hasOptimizationOutcome,
+} from './component-model.js';
 
 /** Degrees per wheel tick while dragging a component (was 5°). */
 const ROTATION_WHEEL_STEP_DEG = 2.5;
@@ -54,6 +64,14 @@ function nextWheelRotationDeg(current, directionSign) {
 
 console.log('App main module loading...');
 
+/** Legacy-style label for context panel / drag rules (PLACED | STORED | INVENTORY). */
+function placementUiLabel(comp) {
+    if (!comp) return 'PLACED';
+    if (isStoredComponent(comp)) return 'STORED';
+    if (isOffTableComponent(comp)) return 'INVENTORY';
+    return 'PLACED';
+}
+
 // DOM Elements
 const canvas = document.getElementById('optical-table');
 const ctx = canvas.getContext('2d');
@@ -76,6 +94,10 @@ const ctxY = document.getElementById('ctx-y');
 const ctxRot = document.getElementById('ctx-rot');
 const ctxMoveBtn = document.getElementById('ctx-move-btn');
 const ctxStrategies = document.getElementById('ctx-strategies');
+const ctxObserveSlot = document.getElementById('ctx-observe-slot');
+const PRIMITIVE_DEV_HINTS =
+    typeof URLSearchParams !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('debug') === '1';
 
 // Recipe UI Elements (Right Sidebar)
 const recordBtn = document.getElementById('record-btn');
@@ -212,7 +234,7 @@ async function fetchLabState() {
             _dfs &&
             store.labState.components &&
             store.labState.components[_dfs] &&
-            store.labState.components[_dfs].state === 'PLACED'
+            isBreadboardIntent(store.labState.components[_dfs])
         ) {
             store.dragFromStorageTag = null;
             store.dragFromStorageStartPose = null;
@@ -237,25 +259,24 @@ async function fetchLabState() {
             }
 
             Object.entries(store.labState.components).forEach(([name, comp]) => {
-                if (comp.state === 'PLACED' || comp.state === 'STORED') {
+                if (isOnTableComponent(comp)) {
+                    const np = nominalPose(comp);
+                    const mp = measPose(comp);
                     // Always initialize if missing (first load)
                     if (!store.ghostState[name]) {
-                        if (comp.intent && comp.intent.nominal_pose) {
-                            store.ghostState[name] = { ...comp.intent.nominal_pose };
+                        if (np && Object.keys(np).length) {
+                            store.ghostState[name] = { ...np };
                         } else {
-                            store.ghostState[name] = { ...comp.pose };
+                            store.ghostState[name] = { ...mp };
                         }
-                        // Ensure rotation
                         if (typeof store.ghostState[name].rotation !== 'number') {
-                            store.ghostState[name].rotation = comp.pose.rotation || 0;
+                            store.ghostState[name].rotation = mp.rotation || 0;
                         }
                     }
-                    // During real Newton-style optimization the backend updates intent.nominal_pose before each
-                    // sub-move (ghost) and pose after the place completes (solid). Sync ghost every poll while OPTIMIZING.
-                    else if (store.labState.system_status === 'OPTIMIZING' && !store.isDragging && comp.intent && comp.intent.nominal_pose) {
-                        store.ghostState[name] = { ...comp.intent.nominal_pose };
+                    else if (store.labState.system_status === 'OPTIMIZING' && !store.isDragging && np && Object.keys(np).length) {
+                        store.ghostState[name] = { ...np };
                         if (typeof store.ghostState[name].rotation !== 'number') {
-                            store.ghostState[name].rotation = comp.pose.rotation || 0;
+                            store.ghostState[name].rotation = mp.rotation || 0;
                         }
                         if (store.selectedComponent === name && document.getElementById('ctx-x')) {
                             ctxX.value = store.ghostState[name].x.toFixed(1);
@@ -263,20 +284,15 @@ async function fetchLabState() {
                             ctxRot.value = store.ghostState[name].rotation.toFixed(1);
                         }
                     }
-                    // Otherwise only sync if allowed (command finished or forced refresh)
                     else if (shouldSync && !store.isDragging) {
-                        if (comp.intent && comp.intent.nominal_pose) {
-                            store.ghostState[name] = { ...comp.intent.nominal_pose };
+                        if (np && Object.keys(np).length) {
+                            store.ghostState[name] = { ...np };
                         } else {
-                            store.ghostState[name] = { ...comp.pose };
+                            store.ghostState[name] = { ...mp };
                         }
-                        
-                        // Ensure rotation
                         if (typeof store.ghostState[name].rotation !== 'number') {
-                            store.ghostState[name].rotation = comp.pose.rotation || 0;
+                            store.ghostState[name].rotation = mp.rotation || 0;
                         }
-
-                        // If selected, update UI inputs immediately
                         if (store.selectedComponent === name) {
                             if (document.getElementById('ctx-x')) {
                                 ctxX.value = store.ghostState[name].x.toFixed(1);
@@ -296,19 +312,21 @@ async function fetchLabState() {
         const selCtx = store.selectedComponent;
         if (selCtx && store.labState.components && store.labState.components[selCtx]) {
             const compCtx = store.labState.components[selCtx];
-            const stCtx = compCtx.state;
+            const stCtx = placementUiLabel(compCtx);
             if (
                 store.contextPanelStateSnapshot != null &&
                 store.contextPanelStateSnapshot !== stCtx
             ) {
-                if ((compCtx.state === 'PLACED' || compCtx.state === 'STORED') && !store.isDragging) {
-                    if (compCtx.intent && compCtx.intent.nominal_pose) {
-                        store.ghostState[selCtx] = { ...compCtx.intent.nominal_pose };
+                if (isOnTableComponent(compCtx) && !store.isDragging) {
+                    const np = nominalPose(compCtx);
+                    const mp = measPose(compCtx);
+                    if (np && Object.keys(np).length) {
+                        store.ghostState[selCtx] = { ...np };
                     } else {
-                        store.ghostState[selCtx] = { ...compCtx.pose };
+                        store.ghostState[selCtx] = { ...mp };
                     }
                     if (typeof store.ghostState[selCtx].rotation !== 'number') {
-                        store.ghostState[selCtx].rotation = compCtx.pose.rotation || 0;
+                        store.ghostState[selCtx].rotation = mp.rotation || 0;
                     }
                 }
                 updateContextPanel(selCtx);
@@ -545,8 +563,8 @@ async function sendCommand(command) {
                     // Cancelled: Revert ghost state if possible
                     log("Move cancelled by user.", "info");
                     
-                    if (command.target_id && store.labState && store.labState.components && store.labState.components[command.target_id] && store.labState.components[command.target_id].state === 'PLACED') {
-                        const original = store.labState.components[command.target_id].pose;
+                    if (command.target_id && store.labState && store.labState.components && store.labState.components[command.target_id] && isBreadboardIntent(store.labState.components[command.target_id])) {
+                        const original = measPose(store.labState.components[command.target_id]);
                         // Only revert if we have the ghost state object
                         if (store.ghostState[command.target_id]) {
                             store.ghostState[command.target_id].x = original.x;
@@ -701,7 +719,7 @@ function getComponentRadius(name) {
 function checkCollision(targetId, x, y, opts = {}) {
     const { forPlaceFromStorageDrag = false } = opts;
     const comp = store.labState && store.labState.components && store.labState.components[targetId];
-    const st = comp ? comp.state : 'PLACED';
+    const breadboardIntent = comp ? isBreadboardIntent(comp) : true;
     if (forPlaceFromStorageDrag) {
         if (!isPlacedRegion(x, y)) {
             return {
@@ -710,7 +728,7 @@ function checkCollision(targetId, x, y, opts = {}) {
             };
         }
     } else {
-        const reg = regionMoveBlocked(st, x, y);
+        const reg = regionMoveBlocked(breadboardIntent, x, y);
         if (reg.blocked) {
             return { detected: true, other: reg.reason };
         }
@@ -779,8 +797,8 @@ canvas.addEventListener('mousedown', (e) => {
             render(); 
             log(`Selected ${hit.name}`, "info");
         } else {
-            const st = store.labState.components[hit.name] && store.labState.components[hit.name].state;
-            if (st === 'STORED') {
+            const stComp = store.labState.components[hit.name];
+            if (isStoredComponent(stComp)) {
                 if (store.dragFromStorageTag === hit.name) {
                     store.isDragging = true;
                     store.draggingComponent = hit.name;
@@ -843,10 +861,101 @@ function updateContextPanel(name) {
 
     document.querySelectorAll('.ctx-dynamic-storage').forEach((el) => el.remove());
 
-    const placementState = comp.state || 'PLACED';
+    const placementState = placementUiLabel(comp);
     ctxX.value = pose.x.toFixed(1);
     ctxY.value = pose.y.toFixed(1);
     ctxRot.value = (pose.rotation || 0).toFixed(1);
+
+    if (ctxObserveSlot) {
+        ctxObserveSlot.innerHTML = '';
+        const wrap = document.createElement('div');
+        wrap.style.borderTop = '1px solid #2a2e36';
+        wrap.style.paddingTop = '10px';
+        wrap.style.marginTop = '4px';
+        const h = document.createElement('div');
+        h.style.fontSize = '10px';
+        h.style.color = '#94a3b8';
+        h.style.fontWeight = '600';
+        h.style.marginBottom = '6px';
+        h.textContent = 'MEASURABLES: SAVED VS OBSERVE';
+        wrap.appendChild(h);
+        const p = document.createElement('p');
+        p.style.fontSize = '9px';
+        p.style.color = '#64748b';
+        p.style.lineHeight = '1.35';
+        p.style.margin = '0 0 8px 0';
+        p.innerHTML =
+            'Coordinates above are <strong>intent</strong> (ghost). The UI polls <strong>saved</strong> measurables via lab state. <strong>Observe</strong> asks the lab to refresh this tag’s measurables (e.g. camera → <code style="color:#94a3b8;">camera_image</code>).';
+        wrap.appendChild(p);
+        if (PRIMITIVE_DEV_HINTS) {
+            const dev = document.createElement('div');
+            dev.style.fontSize = '9px';
+            dev.style.color = '#475569';
+            dev.style.marginBottom = '6px';
+            dev.innerHTML =
+                'Dev: <code>OBSERVE_MEASURABLES</code> · <code>POST /api/components/{tag}/measurables/observe</code>';
+            wrap.appendChild(dev);
+        }
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.flexWrap = 'wrap';
+        row.style.gap = '8px';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary';
+        btn.style.fontSize = '11px';
+        btn.style.padding = '6px 10px';
+        btn.innerHTML =
+            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">photo_camera</span> Observe measurables';
+        const status = document.createElement('span');
+        status.style.fontSize = '10px';
+        status.style.color = '#94a3b8';
+        btn.onclick = async () => {
+            status.textContent = '…';
+            btn.disabled = true;
+            try {
+                const r = await fetch(
+                    `/api/components/${encodeURIComponent(name)}/measurables/observe`,
+                    { method: 'POST' }
+                );
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    const det = data.detail !== undefined ? data.detail : r.status;
+                    const msg = typeof det === 'string' ? det : JSON.stringify(det);
+                    log(`Observe failed: ${msg}`, 'error');
+                    status.textContent = 'Failed';
+                    return;
+                }
+                status.textContent = 'OK';
+                const ci = data.measurables && data.measurables.camera_image;
+                if (ci && typeof ci === 'object' && ci.path) {
+                    const base = String(ci.path).replace(/^.*[/\\\\]/, '');
+                    status.textContent = `OK · ${base}`;
+                }
+                await fetchLabState();
+                updateContextPanel(name);
+            } catch (e) {
+                log(`Observe error: ${e && e.message ? e.message : e}`, 'error');
+                status.textContent = 'Error';
+            } finally {
+                btn.disabled = false;
+            }
+        };
+        row.appendChild(btn);
+        row.appendChild(status);
+        wrap.appendChild(row);
+        const lu = store.labState && store.labState.last_updated;
+        if (lu) {
+            const luEl = document.createElement('div');
+            luEl.style.fontSize = '9px';
+            luEl.style.color = '#64748b';
+            luEl.style.marginTop = '6px';
+            luEl.textContent = `Lab state last_updated: ${lu}`;
+            wrap.appendChild(luEl);
+        }
+        ctxObserveSlot.appendChild(wrap);
+    }
 
     if (placementState === 'STORED') {
         ctxMoveBtn.style.display = 'none';
@@ -1139,7 +1248,7 @@ function updateMotorAngleLabels(tagId) {
     if (!tagId || !store.labState || !store.labState.components) return;
     const comp = store.labState.components[tagId];
     if (!comp) return;
-    const mr = (comp.pose && comp.pose.motor_rotations) || {};
+    const mr = (measPose(comp).motor_rotations) || {};
     const mids = store.catalogMap[tagId] && store.catalogMap[tagId].motor_ids;
     if (!mids || !mids.length) return;
     mids.forEach((mid) => {
@@ -1261,7 +1370,7 @@ canvas.addEventListener('mouseup', async (e) => {
         store.isDragging = false;
         const dc = store.draggingComponent;
         const current = store.ghostState[dc];
-        const labSt = store.labState.components[dc] && store.labState.components[dc].state;
+        const labSt = placementUiLabel(store.labState.components[dc]);
         const isDragFromStoragePlace =
             store.dragFromStorageTag === dc && labSt === 'STORED';
 
@@ -1273,7 +1382,7 @@ canvas.addEventListener('mouseup', async (e) => {
             log(`Move cancelled: ${collision.other}`, 'error');
 
             if (labSt === 'PLACED') {
-                const original = store.labState.components[dc].pose;
+                const original = measPose(store.labState.components[dc]);
                 store.ghostState[dc].x = original.x;
                 store.ghostState[dc].y = original.y;
                 store.ghostState[dc].rotation = original.rotation;
@@ -1904,7 +2013,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     }
     
     ctx.fillText(displayName, 0, -halfH - 10);
-    const stLab = store.labState && store.labState.components[name] && store.labState.components[name].state;
+    const stLab = store.labState && store.labState.components[name] && placementUiLabel(store.labState.components[name]);
     if (mode === 'SOLID' && stLab === 'STORED') {
         ctx.fillStyle = 'rgba(165, 180, 252, 0.95)';
         ctx.font = '600 9px Inter, sans-serif';
@@ -1972,13 +2081,12 @@ function render() {
 
     // 1. Draw Physical Components (Solid)
     Object.entries(store.labState.components).forEach(([name, comp]) => {
-        if (comp.state === 'PLACED' || comp.state === 'STORED') {
-            drawComponent(name, comp.pose, comp.type, 'SOLID');
+        if (isOnTableComponent(comp)) {
+            drawComponent(name, measPose(comp), comp.type, 'SOLID');
         }
     });
 
-    // 2. Draw Ghost Components (Intent)
-    // We now use store.ghostState which is initialized from comp.intent.nominal_pose
+    // 2. Draw Ghost Components (Intent) — synced from tunables.nominal_pose
     Object.entries(store.ghostState).forEach(([name, pose]) => {
         const type = store.labState.components[name]?.type || 'UNKNOWN';
         const isPending = store.pendingCommands.has(name);
@@ -1986,8 +2094,9 @@ function render() {
         
         // Draw Drift Line (Nominal vs Physical)
         const physical = store.labState.components[name];
-        if (physical && (physical.state === 'PLACED' || physical.state === 'STORED')) {
-            const from = mmToPx(physical.pose.x, physical.pose.y);
+        if (physical && isOnTableComponent(physical)) {
+            const mp = measPose(physical);
+            const from = mmToPx(mp.x, mp.y);
             const to = mmToPx(pose.x, pose.y);
             ctx.strokeStyle = isPending ? '#f59e0b' : 'rgba(255, 255, 255, 0.2)';
             ctx.setLineDash([5, 5]);
@@ -2059,7 +2168,7 @@ function updateUI() {
         // card.draggable = true; // Dragging from sidebar to move? Maybe, but mostly we select and use context panel.
         
         // card.addEventListener('dragstart', (e) => handleInventoryDragStart(e, name));
-        const isPlaced = comp.state === 'PLACED' || comp.state === 'STORED';
+        const isPlaced = isOnTableComponent(comp);
         
         // Resolve Real Name from Catalog using Tag ID
         let displayName = name; // Default to key if unknown
@@ -2078,12 +2187,12 @@ function updateUI() {
         const icon = getComponentIcon(comp.type);
         
         // Show status dot
-        let statusDot = `<div class="status-dot ${isPlaced ? 'placed' : 'inventory'}" title="${comp.state}"></div>`;
-        if (comp.intent && comp.intent.is_optimized) {
+        let statusDot = `<div class="status-dot ${isPlaced ? 'placed' : 'inventory'}" title="${placementUiLabel(comp)}"></div>`;
+        if (hasOptimizationOutcome(comp)) {
             statusDot = `<div class="status-dot" style="background-color: #10b981; box-shadow: 0 0 6px #10b981;" title="Optimized"></div>`;
-        } else if (comp.state === 'STORED') {
+        } else if (isStoredComponent(comp)) {
             statusDot = `<div class="status-dot" style="background-color: #6366f1; box-shadow: 0 0 6px rgba(99,102,241,0.5);" title="Stored (Q3)"></div>`;
-        } else if (comp.state === 'PLACED') {
+        } else if (isBreadboardIntent(comp)) {
              // statusDot = `<div class="status-dot" style="background-color: #f59e0b;" title="Drifted/Manual"></div>`;
         }
 
@@ -2152,7 +2261,8 @@ function layoutIssueKey(issue) {
 function layoutConflictMoveDefaults(tagId) {
     const c = store.labState?.components?.[tagId];
     const g = store.ghostState[tagId];
-    const rot = (c?.pose && typeof c.pose.rotation === 'number' ? c.pose.rotation : 0);
+    const mp = measPose(c || {});
+    const rot = typeof mp.rotation === 'number' ? mp.rotation : 0;
     if (g && typeof g.x === 'number' && typeof g.y === 'number' && !isStorageRegion(g.x, g.y)) {
         return { x: g.x, y: g.y, rotation: typeof g.rotation === 'number' ? g.rotation : rot };
     }
@@ -2623,22 +2733,23 @@ function log(message, type = 'info') {
 function ensureGhostForConsole(tagId) {
     if (store.ghostState[tagId]) return true;
     const comp = store.labState && store.labState.components && store.labState.components[tagId];
-    if (!comp || comp.state !== 'PLACED' || !comp.pose) return false;
+    const mp = measPose(comp || {});
+    if (!comp || !isBreadboardIntent(comp) || (mp.x === undefined && mp.y === undefined)) return false;
     store.ghostState[tagId] = {
-        x: comp.pose.x,
-        y: comp.pose.y,
-        rotation: typeof comp.pose.rotation === 'number' ? comp.pose.rotation : 0
+        x: mp.x,
+        y: mp.y,
+        rotation: typeof mp.rotation === 'number' ? mp.rotation : 0
     };
     return true;
 }
 
-/** Same behavior as the Refresh State button (shared with Command Console). */
-async function runLabStateRefresh() {
-    log("Refreshing lab state (re-scan)...", "warn");
-    const res = await fetch('/api/lab-state/refresh', { method: 'POST' });
+/** Same behavior as the Refresh Pose button (shared with Command Console): camera pose pass → measurables.pose. */
+async function runLabPoseRefresh() {
+    log("Refreshing poses from camera (re-localize)...", "warn");
+    const res = await fetch('/api/lab-state/refresh-pose', { method: 'POST' });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Refresh failed');
+        throw new Error(err.detail || 'Refresh pose failed');
     }
 
     const start = Date.now();
@@ -2664,11 +2775,11 @@ function init() {
     setInterval(fetchLabState, POLLING_INTERVAL);
     refreshBtn.addEventListener('click', async () => {
         try {
-            await runLabStateRefresh();
+            await runLabPoseRefresh();
         } catch (e) {
-            console.error("Refresh state failed:", e);
-            log(`Refresh failed: ${e.message || e}`, "error");
-            showErrorModal("Refresh Failed", e.message || String(e));
+            console.error("Refresh pose failed:", e);
+            log(`Refresh pose failed: ${e.message || e}`, "error");
+            showErrorModal("Refresh Pose Failed", e.message || String(e));
         }
     });
 
@@ -3063,7 +3174,8 @@ window.__commandConsoleDeps = {
     sendCommand,
     checkCollision,
     log,
-    runLabStateRefresh,
+    runLabPoseRefresh,
+    fetchLabState,
     ensureGhostForConsole,
     getTableCamExposureSeconds,
     get ghostState() {

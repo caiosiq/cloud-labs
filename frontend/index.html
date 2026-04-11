@@ -420,8 +420,8 @@
         </div>
 
         <div class="controls-area">
-            <button id="refresh-btn" class="btn btn-secondary">
-                <span class="material-icons-round">sync</span> Refresh State
+            <button id="refresh-btn" class="btn btn-secondary" title="Re-localize component poses from the overhead / table camera (updates measurables.pose).">
+                <span class="material-icons-round">sync</span> Refresh Pose
             </button>
             <div style="height: 8px;"></div>
             <button id="save-state-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px; width: 100%;">
@@ -451,6 +451,8 @@
                 </div>
                 <button id="ctx-move-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px;">Move to Coordinates</button>
             </div>
+
+            <div id="ctx-observe-slot"></div>
 
             <div style="margin-top: 20px;">
                 <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 8px;">OPTIMIZATION STRATEGIES</label>

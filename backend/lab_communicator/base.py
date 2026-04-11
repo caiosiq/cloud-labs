@@ -1,12 +1,42 @@
 import os
 from typing import Any, Dict, Optional
 
+from lab_model.component_model import get_measurables, get_tunables
+
+
 class LabCommunicator:
     """
     Abstract Base Class for Lab Communication.
     """
     def get_lab_state(self) -> Dict[str, Any]:
         raise NotImplementedError
+
+    def return_tunables_for_tag(self, tag_id: str) -> Dict[str, Any]:
+        """Saved tunables slice (no I/O). Prefer this name over legacy ``get_*``."""
+        st = self.get_lab_state()
+        comp = (st.get("components") or {}).get(tag_id)
+        return get_tunables(comp) if isinstance(comp, dict) else {}
+
+    def return_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
+        """Saved measurables slice (no I/O). Prefer this name over legacy ``get_*``."""
+        st = self.get_lab_state()
+        comp = (st.get("components") or {}).get(tag_id)
+        return get_measurables(comp) if isinstance(comp, dict) else {}
+
+    def get_tunables_for_tag(self, tag_id: str) -> Dict[str, Any]:
+        """Slice of lab state: commanded intent for one component (see refactor.md)."""
+        return self.return_tunables_for_tag(tag_id)
+
+    def get_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
+        """Slice of lab state: lab-reported values for one component."""
+        return self.return_measurables_for_tag(tag_id)
+
+    async def observe_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
+        """
+        Poll / refresh lab-reported values for one component (e.g. camera capture → ``measurables``).
+        Default: return saved measurables only. Mock/real may update state before returning.
+        """
+        return self.return_measurables_for_tag(tag_id)
 
     async def move_component(self, target_id: str, target_pose: Dict[str, float]):
         raise NotImplementedError
@@ -65,3 +95,11 @@ class LabCommunicator:
     def get_cobyla_reference_png_bytes(self) -> Optional[bytes]:
         """PNG encoding of stored Cobyla reference for UI preview, or None if unset."""
         return None
+
+    def refresh_pose_from_camera(self) -> None:
+        """
+        Re-localize component poses from the overhead / table camera pipeline and write
+        **measurables.pose** (and related fields). Used by **POST /api/lab-state/refresh-pose**.
+        Default: no-op.
+        """
+        return

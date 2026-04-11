@@ -6,9 +6,17 @@ from datetime import datetime
 from io import BytesIO
 from typing import Any, Dict, Optional, Tuple
 
-from .base import LabCommunicator
-from . import motor_rotation_store as motor_rot
-from .storage_region import (
+from lab_model import motor_rotation_store as motor_rot
+from lab_model.component_model import (
+    PRESENCE_BREADBOARD,
+    PRESENCE_STORAGE,
+    default_measurables,
+    default_tunables,
+    is_stored,
+    new_component_entry,
+    set_presence_and_storage,
+)
+from lab_model.storage_region import (
     STORAGE_NOMINAL_ROTATION_DEG,
     find_storage_slot_and_center,
     is_placed_region,
@@ -17,11 +25,14 @@ from .storage_region import (
     random_placed_position,
 )
 
+from .base import LabCommunicator
+
 # Constants
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCHEMAS_DIR = os.path.join(BASE_DIR, "..", "..", "schemas")
 LAB_STATE_FILE = os.path.abspath(os.path.join(SCHEMAS_DIR, "mock_lab_state.json"))
 CATALOG_FILE = os.path.abspath(os.path.join(SCHEMAS_DIR, "component_catalog.json"))
+
 
 class MockLabCommunicator(LabCommunicator):
     """
@@ -39,8 +50,7 @@ class MockLabCommunicator(LabCommunicator):
     def _ensure_state(self):
         if not os.path.exists(self.state_file):
             raise FileNotFoundError(f"CRITICAL: Lab State file not found at: {self.state_file}")
-        
-        # Validate content
+
         try:
             with open(self.state_file, "r") as f:
                 data = json.load(f)
@@ -61,7 +71,6 @@ class MockLabCommunicator(LabCommunicator):
                 print(f"[MOCK LAB] Failed to load catalog: {e}")
 
     def _get_component_size(self, tag_id: str) -> float:
-        # Default 90mm
         size = 90.0
         for item in self.catalog:
             if item.get("tag_id") == tag_id:
@@ -110,29 +119,61 @@ class MockLabCommunicator(LabCommunicator):
             if not mids:
                 continue
             mr = motor_rot.get_rotations_for_motor_ids(tag_id, list(mids))
-            pose = comp.setdefault("pose", {})
+            meas = comp.setdefault("measurables", default_measurables())
+            pose = meas.setdefault("pose", {})
             if isinstance(pose, dict):
                 pose["motor_rotations"] = dict(mr)
-            intent = comp.setdefault("intent", {})
-            if isinstance(intent, dict):
-                intent["nominal_motor_rotations"] = dict(mr)
+            tun = comp.setdefault("tunables", default_tunables())
+            nm = tun.setdefault("nominal_motor_positions", {})
+            for k, v in mr.items():
+                nm[str(k)] = float(v)
 
     def get_lab_state(self) -> Dict[str, Any]:
         state = self._read_state()
         self._inject_motor_rotations_into_state(state)
         return state
 
+    def refresh_pose_from_camera(self):
+        """
+        Simulate an overhead-camera pose pass: update **measurables.pose** toward
+        **tunables.nominal_pose** with small localization noise (mock only).
+        """
+        state = self._read_state()
+        comps = state.get("components") or {}
+        if not isinstance(comps, dict):
+            return
+        state["system_status"] = "BUSY"
+        self._write_state(state)
+
+        state = self._read_state()
+        comps = state.get("components") or {}
+        for _tag_id, comp in comps.items():
+            if not isinstance(comp, dict):
+                continue
+            tun = comp.get("tunables") or {}
+            pres = tun.get("presence")
+            if pres not in (PRESENCE_BREADBOARD, PRESENCE_STORAGE):
+                continue
+            np = tun.get("nominal_pose") or {}
+            meas = comp.setdefault("measurables", default_measurables())
+            pose = meas.setdefault("pose", {})
+            nx = float(np.get("x", pose.get("x", 0.0)))
+            ny = float(np.get("y", pose.get("y", 0.0)))
+            nr = float(np.get("rotation", pose.get("rotation", 0.0)))
+            pose["x"] = nx + random.uniform(-0.8, 0.8)
+            pose["y"] = ny + random.uniform(-0.8, 0.8)
+            pose["rotation"] = nr + random.uniform(-0.35, 0.35)
+
+        state["system_status"] = "IDLE"
+        state["last_updated"] = datetime.now().isoformat()
+        self._write_state(state)
+        print("[MOCK LAB] refresh_pose_from_camera: updated measurables.pose (simulated camera)")
+
     def refresh_state(self):
-        """
-        Mock mode has no sensors to re-scan; keep the in-file state as-is.
-        """
-        # No-op: the state is already persisted in `self.state_file`.
-        return
+        """Deprecated name; use :meth:`refresh_pose_from_camera`."""
+        self.refresh_pose_from_camera()
 
     def set_lab_state(self, state: Dict[str, Any]):
-        """
-        Load a previously saved lab state snapshot into the mock persistence file.
-        """
         self._write_state(state)
 
     async def move_component(self, target_id: str, target_pose: Dict[str, float]):
@@ -143,7 +184,7 @@ class MockLabCommunicator(LabCommunicator):
             return
 
         comp = state["components"][target_id]
-        if comp.get("state") == "STORED":
+        if is_stored(comp):
             print(f"[MOCK LAB] Refusing move: {target_id} is STORED (use Place from storage).")
             return
 
@@ -151,48 +192,43 @@ class MockLabCommunicator(LabCommunicator):
         ty = float(target_pose.get("target_y", target_pose.get("y", 0)))
         trot = float(target_pose.get("rotation", 0))
 
-        if comp.get("state") == "PLACED" and is_storage_region(tx, ty):
+        if comp.get("tunables", {}).get("presence") == PRESENCE_BREADBOARD and is_storage_region(tx, ty):
             print(f"[MOCK LAB] Refusing move: target ({tx},{ty}) is in storage quadrant (use Store).")
             return
 
-        # 1. Lock
         state["system_status"] = "BUSY"
         self._write_state(state)
 
-        # 2. Simulate Delay
         await asyncio.sleep(2)
 
-        # 3. Update State
         state = self._read_state()
         comp = state["components"][target_id]
 
         noise_x = random.uniform(-0.5, 0.5)
         noise_y = random.uniform(-0.5, 0.5)
 
-        comp["state"] = "PLACED"
-        comp["pose"] = {
+        tun = comp.setdefault("tunables", default_tunables())
+        meas = comp.setdefault("measurables", default_measurables())
+
+        set_presence_and_storage(comp, PRESENCE_BREADBOARD, in_storage=False, slot=None)
+        tun["nominal_pose"] = {"x": tx, "y": ty, "rotation": trot}
+        tun["placement"] = {"mode": "MANUAL"}
+        meas["pose"] = {
             "x": tx + noise_x,
             "y": ty + noise_y,
             "rotation": trot,
         }
-        comp["intent"] = {
-            "nominal_pose": {"x": tx, "y": ty, "rotation": trot},
-            "placement_strategy": "MANUAL",
-            "last_optimized_pose": None,
-            "is_optimized": False,
-        }
-        comp.setdefault("metadata", {}).pop("storage_slot", None)
 
         state["last_updated"] = datetime.now().isoformat()
         state["system_status"] = "IDLE"
         self._write_state(state)
-        print(f"[MOCK LAB] Moved {target_id} to ({comp['pose']['x']:.2f}, {comp['pose']['y']:.2f})")
+        print(f"[MOCK LAB] Moved {target_id} to ({meas['pose']['x']:.2f}, {meas['pose']['y']:.2f})")
 
     async def move_motor(self, target_id: str, motor_id: int, distance: float):
         print(f"[MOCK LAB] Moving motor {motor_id} of {target_id} by {distance}...")
         state = self._read_state()
         comp = (state.get("components") or {}).get(target_id)
-        if comp and comp.get("state") == "STORED":
+        if comp and is_stored(comp):
             print(f"[MOCK LAB] Refusing motor move: {target_id} is STORED.")
             return
         meta = self._catalog_meta_for_tag(target_id)
@@ -201,16 +237,14 @@ class MockLabCommunicator(LabCommunicator):
             print(f"[MOCK LAB] Error: motor_id {motor_id} invalid for {target_id} (motor_ids={mids}).")
             return
 
-        # Lock
         state = self._read_state()
         state["system_status"] = "BUSY"
         self._write_state(state)
-        
+
         await asyncio.sleep(1)
-        
+
         motor_rot.add_delta(target_id, motor_id, float(distance))
 
-        # Unlock
         state = self._read_state()
         state["system_status"] = "IDLE"
         self._write_state(state)
@@ -240,30 +274,29 @@ class MockLabCommunicator(LabCommunicator):
         print(f"[MOCK LAB] Optimizing {target_id} with {strategy}...")
         state = self._read_state()
         comp = (state.get("components") or {}).get(target_id)
-        if comp and comp.get("state") == "STORED":
+        if comp and is_stored(comp):
             print(f"[MOCK LAB] Refusing optimize: {target_id} is STORED.")
             return
 
         state = self._read_state()
         state["system_status"] = "OPTIMIZING"
         self._write_state(state)
-        
+
         await asyncio.sleep(3)
-        
+
         state = self._read_state()
         if "components" in state and target_id in state["components"]:
             comp = state["components"][target_id]
-            
-            # Simulate result
-            optimized_rotation = comp["pose"].get("rotation", 0) + random.uniform(-1, 1)
-            comp["pose"]["rotation"] = optimized_rotation
-            comp["metadata"]["last_optimization_score"] = 0.99
-            
-            if not comp.get("intent"): comp["intent"] = {}
-            comp["intent"]["placement_strategy"] = strategy
-            comp["intent"]["last_optimized_pose"] = comp["pose"].copy()
-            comp["intent"]["is_optimized"] = True
-            
+            meas = comp.setdefault("measurables", default_measurables())
+            pose = meas.setdefault("pose", {})
+            tun = comp.setdefault("tunables", default_tunables())
+
+            optimized_rotation = pose.get("rotation", 0) + random.uniform(-1, 1)
+            pose["rotation"] = optimized_rotation
+            meas["last_optimization_score"] = 0.99
+            meas["last_optimized_pose"] = {k: pose[k] for k in ("x", "y", "rotation") if k in pose}
+            tun["placement"] = {"mode": strategy.upper()}
+
         state["system_status"] = "IDLE"
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
@@ -285,8 +318,8 @@ class MockLabCommunicator(LabCommunicator):
         if not comp:
             print(f"[MOCK LAB] store: {target_id} not in state")
             return
-        if comp.get("state") != "PLACED":
-            print(f"[MOCK LAB] store: {target_id} must be PLACED (got {comp.get('state')})")
+        if comp.get("tunables", {}).get("presence") != PRESENCE_BREADBOARD:
+            print(f"[MOCK LAB] store: {target_id} must be on breadboard (got {comp.get('tunables', {}).get('presence')})")
             return
         w, h = self._get_component_wh(target_id)
         slot = find_storage_slot_and_center(
@@ -306,16 +339,12 @@ class MockLabCommunicator(LabCommunicator):
         await asyncio.sleep(1.5)
         state = self._read_state()
         comp = state["components"][target_id]
-        comp["state"] = "STORED"
-        comp["pose"] = {"x": x, "y": y, "rotation": rot}
-        comp["intent"] = {
-            "nominal_pose": {"x": x, "y": y, "rotation": rot},
-            "placement_strategy": "STORAGE",
-            "last_optimized_pose": None,
-            "is_optimized": False,
-        }
-        md = comp.setdefault("metadata", {})
-        md["storage_slot"] = {"i": si, "j": sj}
+        tun = comp.setdefault("tunables", default_tunables())
+        meas = comp.setdefault("measurables", default_measurables())
+        set_presence_and_storage(comp, PRESENCE_STORAGE, in_storage=True, slot={"i": si, "j": sj})
+        tun["nominal_pose"] = {"x": x, "y": y, "rotation": rot}
+        tun["placement"] = {"mode": "STORAGE"}
+        meas["pose"] = {"x": x, "y": y, "rotation": rot}
         state["system_status"] = "IDLE"
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
@@ -325,7 +354,7 @@ class MockLabCommunicator(LabCommunicator):
         print(f"[MOCK LAB] Place from storage {target_id}...")
         state = self._read_state()
         comp = (state.get("components") or {}).get(target_id)
-        if not comp or comp.get("state") != "STORED":
+        if not comp or not is_stored(comp):
             print(f"[MOCK LAB] place_from_storage: {target_id} not STORED")
             return
         tx = float(target_pose.get("target_x", target_pose.get("x", 0)))
@@ -341,15 +370,12 @@ class MockLabCommunicator(LabCommunicator):
         comp = state["components"][target_id]
         noise_x = random.uniform(-0.5, 0.5)
         noise_y = random.uniform(-0.5, 0.5)
-        comp["state"] = "PLACED"
-        comp["pose"] = {"x": tx + noise_x, "y": ty + noise_y, "rotation": trot}
-        comp["intent"] = {
-            "nominal_pose": {"x": tx, "y": ty, "rotation": trot},
-            "placement_strategy": "MANUAL",
-            "last_optimized_pose": None,
-            "is_optimized": False,
-        }
-        comp.setdefault("metadata", {}).pop("storage_slot", None)
+        tun = comp.setdefault("tunables", default_tunables())
+        meas = comp.setdefault("measurables", default_measurables())
+        set_presence_and_storage(comp, PRESENCE_BREADBOARD, in_storage=False, slot=None)
+        tun["nominal_pose"] = {"x": tx, "y": ty, "rotation": trot}
+        tun["placement"] = {"mode": "MANUAL"}
+        meas["pose"] = {"x": tx + noise_x, "y": ty + noise_y, "rotation": trot}
         state["system_status"] = "IDLE"
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
@@ -388,9 +414,16 @@ class MockLabCommunicator(LabCommunicator):
                 print("[MOCK LAB] FAILED to find free storage slot.")
                 return
             x, y, si, sj = slot
-            st = "STORED"
-            strat = "STORAGE"
-            meta_extra = {"storage_slot": {"i": si, "j": sj}}
+            state["components"][tag_id] = new_component_entry(
+                tag_id,
+                comp_type,
+                presence=PRESENCE_STORAGE,
+                nominal_pose={"x": x, "y": y, "rotation": 0.0},
+                meas_pose={"x": x, "y": y, "rotation": 0.0},
+                placement_mode="STORAGE",
+                in_storage=True,
+                slot={"i": si, "j": sj},
+            )
         else:
             pos = random_placed_position(
                 state.get("components") or {},
@@ -403,33 +436,27 @@ class MockLabCommunicator(LabCommunicator):
                 print("[MOCK LAB] FAILED to find free pose for component.")
                 return
             x, y = pos
-            st = "PLACED"
-            strat = "MANUAL"
-            meta_extra = {}
-
-        state["components"][tag_id] = {
-            "id": tag_id,
-            "type": comp_type,
-            "state": st,
-            "pose": {"x": x, "y": y, "rotation": 0},
-            "intent": {
-                "nominal_pose": {"x": x, "y": y, "rotation": 0},
-                "placement_strategy": strat,
-                "last_optimized_pose": None,
-                "is_optimized": False,
-            },
-            "metadata": dict(meta_extra),
-        }
+            state["components"][tag_id] = new_component_entry(
+                tag_id,
+                comp_type,
+                presence=PRESENCE_BREADBOARD,
+                nominal_pose={"x": x, "y": y, "rotation": 0.0},
+                meas_pose={"x": x, "y": y, "rotation": 0.0},
+                placement_mode="MANUAL",
+                in_storage=False,
+                slot=None,
+            )
 
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
-        print(f"[MOCK LAB] Added {tag_id} at ({x:.1f}, {y:.1f}) state={st}")
+        pres = state["components"][tag_id]["tunables"]["presence"]
+        print(f"[MOCK LAB] Added {tag_id} presence={pres}")
 
     async def affirm_placed_at_current(self, target_id: str):
         print(f"[MOCK LAB] affirm_placed_at_current {target_id}...")
         state = self._read_state()
         comp = (state.get("components") or {}).get(target_id)
-        if not comp or comp.get("state") != "STORED":
+        if not comp or not is_stored(comp):
             print(f"[MOCK LAB] affirm: {target_id} must be STORED")
             return
         state["system_status"] = "BUSY"
@@ -437,9 +464,16 @@ class MockLabCommunicator(LabCommunicator):
         await asyncio.sleep(0.3)
         state = self._read_state()
         comp = state["components"][target_id]
-        comp["state"] = "PLACED"
-        comp.setdefault("metadata", {}).pop("storage_slot", None)
-        comp["intent"]["placement_strategy"] = "MANUAL"
+        meas = comp.setdefault("measurables", default_measurables())
+        pose = meas.get("pose") or {}
+        tun = comp.setdefault("tunables", default_tunables())
+        set_presence_and_storage(comp, PRESENCE_BREADBOARD, in_storage=False, slot=None)
+        tun["nominal_pose"] = {
+            "x": float(pose.get("x", 0)),
+            "y": float(pose.get("y", 0)),
+            "rotation": float(pose.get("rotation", 0)),
+        }
+        tun["placement"] = {"mode": "MANUAL"}
         state["system_status"] = "IDLE"
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
@@ -449,7 +483,7 @@ class MockLabCommunicator(LabCommunicator):
         print(f"[MOCK LAB] repack_storage_slot {target_id}...")
         state = self._read_state()
         comp = (state.get("components") or {}).get(target_id)
-        if not comp or comp.get("state") != "STORED":
+        if not comp or not is_stored(comp):
             print(f"[MOCK LAB] repack: {target_id} must be STORED")
             return
         w, h = self._get_component_wh(target_id)
@@ -470,14 +504,12 @@ class MockLabCommunicator(LabCommunicator):
         await asyncio.sleep(1.0)
         state = self._read_state()
         comp = state["components"][target_id]
-        comp["pose"] = {"x": x, "y": y, "rotation": rot}
-        comp["intent"] = {
-            "nominal_pose": {"x": x, "y": y, "rotation": rot},
-            "placement_strategy": "STORAGE",
-            "last_optimized_pose": None,
-            "is_optimized": False,
-        }
-        comp.setdefault("metadata", {})["storage_slot"] = {"i": si, "j": sj}
+        tun = comp.setdefault("tunables", default_tunables())
+        meas = comp.setdefault("measurables", default_measurables())
+        set_presence_and_storage(comp, PRESENCE_STORAGE, in_storage=True, slot={"i": si, "j": sj})
+        tun["nominal_pose"] = {"x": x, "y": y, "rotation": rot}
+        tun["placement"] = {"mode": "STORAGE"}
+        meas["pose"] = {"x": x, "y": y, "rotation": rot}
         state["system_status"] = "IDLE"
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
@@ -487,7 +519,7 @@ class MockLabCommunicator(LabCommunicator):
         print(f"[MOCK LAB] recenter_stored_in_inventory {target_id}...")
         state = self._read_state()
         comp = (state.get("components") or {}).get(target_id)
-        if not comp or comp.get("state") != "STORED":
+        if not comp or not is_stored(comp):
             print(f"[MOCK LAB] recenter: {target_id} must be STORED")
             return
         nom = nominal_center_pose_for_stored_entry(comp)
@@ -501,14 +533,12 @@ class MockLabCommunicator(LabCommunicator):
         await asyncio.sleep(1.0)
         state = self._read_state()
         comp = state["components"][target_id]
-        comp["pose"] = {"x": x, "y": y, "rotation": rot}
-        comp["intent"] = {
-            "nominal_pose": {"x": x, "y": y, "rotation": rot},
-            "placement_strategy": "STORAGE",
-            "last_optimized_pose": None,
-            "is_optimized": False,
-        }
-        comp.setdefault("metadata", {})["storage_slot"] = {"i": si, "j": sj}
+        tun = comp.setdefault("tunables", default_tunables())
+        meas = comp.setdefault("measurables", default_measurables())
+        set_presence_and_storage(comp, PRESENCE_STORAGE, in_storage=True, slot={"i": si, "j": sj})
+        tun["nominal_pose"] = {"x": x, "y": y, "rotation": rot}
+        tun["placement"] = {"mode": "STORAGE"}
+        meas["pose"] = {"x": x, "y": y, "rotation": rot}
         state["system_status"] = "IDLE"
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
@@ -531,7 +561,6 @@ class MockLabCommunicator(LabCommunicator):
             return False, f"could not decode PNG: {e}"
         if rgb.ndim != 3 or rgb.shape[2] != 3:
             return False, "decoded image must have 3 channels"
-        # BGR ndarray for parity with OpenCV / real lab
         bgr = rgb[:, :, ::-1].copy()
         self._cobyla_reference_bgr = bgr
         h, w = bgr.shape[:2]
@@ -564,7 +593,6 @@ class MockLabCommunicator(LabCommunicator):
             import numpy as np
         except ImportError:
             return None
-        # ref is BGR; PIL expects RGB
         rgb = ref[:, :, ::-1]
         img = Image.fromarray(np.ascontiguousarray(rgb))
         buf = BytesIO()
@@ -574,11 +602,35 @@ class MockLabCommunicator(LabCommunicator):
     def get_video_feed_status(self) -> Dict[str, Any]:
         return {"connected": True, "source": "/api/video-feed/stream"}
 
+    async def observe_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
+        meta = self._catalog_meta_for_tag(tag_id)
+        ctype = (meta or {}).get("type") or ""
+        state = self._read_state()
+        comp = (state.get("components") or {}).get(tag_id)
+        if not isinstance(comp, dict):
+            return {}
+        if ctype != "OPTICAL_CAMERA":
+            return self.return_measurables_for_tag(tag_id)
+        png = self.capture_table_cam(1, exposure=0.2)
+        meas = comp.setdefault("measurables", default_measurables())
+        if png:
+            cap_dir = os.path.abspath(os.path.join(SCHEMAS_DIR, "mock_camera_captures"))
+            os.makedirs(cap_dir, exist_ok=True)
+            rel_name = f"{tag_id}_last.png"
+            out_path = os.path.join(cap_dir, rel_name)
+            with open(out_path, "wb") as f:
+                f.write(png)
+            meas["camera_image"] = {
+                "path": out_path,
+                "source": "mock_table_cam",
+                "cam_id": 1,
+                "format": "png",
+            }
+        state["last_updated"] = datetime.now().isoformat()
+        self._write_state(state)
+        return self.return_measurables_for_tag(tag_id)
+
     def capture_table_cam(self, cam_id: int, exposure: float = 0.2) -> bytes:
-        """
-        Return a synthetic PNG so the table-cam panel and Cobyla reference flow work in MOCK mode.
-        Real hardware uses RealLabCommunicator.capture_table_cam.
-        """
         try:
             from PIL import Image, ImageDraw, ImageFont
         except ImportError:
@@ -612,7 +664,6 @@ class MockLabCommunicator(LabCommunicator):
             draw.text((24, 20), title, fill=(226, 232, 240))
             draw.text((24, 38), sub, fill=(148, 163, 184))
 
-        # Offset "beam" spot slightly per cam so CAM1 vs CAM2 is visible
         cx = w // 2 + (cam_id - 1) * 55
         cy = h // 2 - 10
         r = 28
@@ -624,32 +675,7 @@ class MockLabCommunicator(LabCommunicator):
         return buf.getvalue()
 
     def get_video_stream(self):
-        """Yields a static placeholder image for mock mode."""
         import time
         while True:
-            # Yield the SVG bytes or a placeholder text
-            # Since browsers expect MJPEG (usually JPEGs), yielding SVG might not work in an <img src> expecting a stream.
-            # But we can try yielding a multipart response where each part is the SVG? 
-            # No, MJPEG is specifically JPEG.
-            # Let's yield a simple text frame if we can't generate JPEG.
-            # OR, we can just yield the same bytes as the SVG file if we change the content type in main.py?
-            # No, main.py sets multipart/x-mixed-replace; boundary=frame
-            
-            # Let's generate a minimal JPEG header and some dummy data? No, that's corrupt.
-            # We should probably use the same SVG file response approach for Mock in main.py,
-            # BUT since we want to unify the API, let's make get_video_stream return None for Mock,
-            # and handle it in main.py.
-            
-            # Actually, let's just sleep forever, effectively "hanging" the stream (not good).
-            
-            # Better approach: The user wants to see the Mock Feed.
-            # The Mock Feed is an SVG.
-            # We can't easily stream an SVG as MJPEG.
-            # So for Mock, we should probably stick to the static file.
-            # I will modify main.py to handle this distinction.
-            # But I must implement this method to satisfy the abstract base class.
-            
-            # Raise an error to signal main.py to use fallback?
-            # Or yield nothing and return.
-            yield b'' 
+            yield b''
             break

@@ -4,8 +4,25 @@
  */
 
 import { COBYLA_DEFAULT_OBJECTIVE, NEWTON_DEFAULTS } from './command-parse.js';
+import { isOnTableComponent } from './component-model.js';
 
-const VERBS = ['?', 'help', 'refresh', 'move', 'motor', 'motorhome', 'motorset0', 'optimize', 'json'];
+const VERBS = [
+    '?',
+    'help',
+    'refresh',
+    'tunables',
+    'get_tunables',
+    'measurables',
+    'get_measurables',
+    'observe',
+    'observe_measurables',
+    'move',
+    'motor',
+    'motorhome',
+    'motorset0',
+    'optimize',
+    'json',
+];
 const STRATEGIES = ['NEWTON', 'COBYLA'];
 const AXES = ['x', 'y'];
 
@@ -23,11 +40,15 @@ function placedTagIds(deps) {
     const ls = deps.getLabState && deps.getLabState();
     if (!ls || !ls.components) return [];
     return Object.keys(ls.components)
-        .filter((id) => {
-            const s = ls.components[id].state;
-            return s === 'PLACED' || s === 'STORED';
-        })
+        .filter((id) => isOnTableComponent(ls.components[id]))
         .sort();
+}
+
+/** All component keys in current lab state (for tunables/measurables queries). */
+function allTagIds(deps) {
+    const ls = deps.getLabState && deps.getLabState();
+    if (!ls || !ls.components) return [];
+    return Object.keys(ls.components).sort();
 }
 
 function motorIdStrings(deps, tagId) {
@@ -83,6 +104,7 @@ export function getTabCompletions(line, caret, deps) {
     const before = line.slice(0, caret);
     const { endsWithSpace, tokens, current } = parsePartialLine(before);
     const tags = placedTagIds(deps);
+    const allTags = allTagIds(deps);
 
     if (tokens.length === 0) {
         return filterPrefix(VERBS, current);
@@ -100,6 +122,16 @@ export function getTabCompletions(line, caret, deps) {
         if (v === 'json' || v === 'help' || v === '?' || v === 'refresh') {
             return [];
         }
+        if (
+            v === 'tunables' ||
+            v === 'get_tunables' ||
+            v === 'measurables' ||
+            v === 'get_measurables' ||
+            v === 'observe' ||
+            v === 'observe_measurables'
+        ) {
+            return allTags;
+        }
         if (v === 'move' || v === 'motor' || v === 'motorhome' || v === 'motorset0' || v === 'optimize') {
             return tags;
         }
@@ -115,6 +147,23 @@ export function getTabCompletions(line, caret, deps) {
     }
 
     if (verb === 'refresh') {
+        return [];
+    }
+
+    if (
+        verb === 'tunables' ||
+        verb === 'get_tunables' ||
+        verb === 'measurables' ||
+        verb === 'get_measurables' ||
+        verb === 'observe' ||
+        verb === 'observe_measurables'
+    ) {
+        if (tokens.length === 1 && endsWithSpace) {
+            return allTags;
+        }
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(allTags, current);
+        }
         return [];
     }
 

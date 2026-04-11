@@ -6,6 +6,8 @@ This repository is a **digital twin** for an autonomous optics lab: a browser-ba
 
 The UI separates **what you intend** (ghost / nominal poses on the canvas) from **what the lab reports** (solid geometry from polled state), including recipe replay and **golden** snapshots for drift checks.
 
+**Design reference:** **`model.md`** explains **return vs observe** for tunables/measurables; **`primitives.md`** lists HTTP primitives and routes. Implementation detail: **`backend/lab_primitives/README.md`**.
+
 ---
 
 ## Why two worlds? `lab_automation`, experiment manager, and this repository
@@ -14,7 +16,7 @@ If you have spent time in both places, it can feel as though you are **writing t
 
 **Start from the physical lab.** In **`lab_automation`**, components are represented in a modular way: mirrors, stages, cameras, and so on. The **experiment manager** gathers those pieces into something you can program: a set of **procedures** for building experimental plans. That power comes with **everything the hardware demands**: defining and finding components, bringing up cameras, speaking the robot’s native language, and handling failures at the level of serial ports, joint commands, and OpenCV arrays. Those APIs are **hardware-bound**: they are the truth of *this* arm, *this* camera driver, *this* wiring.
 
-**This project adds a second layer on top.** When you start the digital twin in real mode, **`RealLabCommunicator`** does the heavy setup once—scanning the table, wiring the experiment object, aligning conventions—so that the **browser** (and anything else speaking HTTP) does not have to repeat that ceremony. From the outside, the contract is intentionally narrow: **`POST /api/command`** carries **intent** in a small vocabulary—move a tagged part to a pose, run an optimization strategy, jog a motor, refresh state. The UI thinks in **lab frame** coordinates (what you see on the table and on camera overlays); the communicator is responsible for mapping that intent onto whatever **robot-frame** calls the experiment manager expects, including details that would change if you swapped hardware.
+**This project adds a second layer on top.** When you start the digital twin in real mode, **`RealLabCommunicator`** does the heavy setup once—scanning the table, wiring the experiment object, aligning conventions—so that the **browser** (and anything else speaking HTTP) does not have to repeat that ceremony. From the outside, the contract is intentionally narrow: **`POST /api/command`** carries **intent** in a small vocabulary—move a tagged part to a pose, run an optimization strategy, jog a motor, refresh poses from the camera. The UI thinks in **lab frame** coordinates (what you see on the table and on camera overlays); the communicator is responsible for mapping that intent onto whatever **robot-frame** calls the experiment manager expects, including details that would change if you swapped hardware.
 
 So the two layers live in **different domains**:
 
@@ -27,7 +29,7 @@ If tomorrow you replace the xArm6 with a UR10, **reimplement or reconfigure the 
 
 Historically, this repository began as **“cloud-labs”** in the sense of **a remote-facing UI** for the lab. The direction now is broader: treat the stack as a **durable language for running experiments**—commands, sequences, and eventually richer scripting—while keeping the **robot and vision specifics** fenced behind the communicator. That separation is what lets you iterate on **how people and tools ask for work** without constantly revisiting **how the arm moves**.
 
-For the distinction between **lab coordinates** (what you see) and **robot coordinates** (what the controller uses) in real mode, see **`coordinate_rotation.md`**.
+In **real** mode, **`RealLabCommunicator`** maps **lab-frame** intent (what the UI sends) onto **robot-frame** and experiment-manager calls inside **`lab_automation`**—details live in **`lab_communicator/real.py`**.
 
 ---
 
@@ -39,7 +41,7 @@ For the distinction between **lab coordinates** (what you see) and **robot coord
 - **Interaction**: select a part, edit X/Y/rotation, **move** (with collision checks and confirm for non-recording moves), drag on canvas with optional **snap toward the laser line**, wheel to rotate while dragging, and **optimization** strategies (e.g. Newton / Cobyla) from the context panel. **Motor jog** controls appear for catalog entries that declare `motor_ids`.
 - **Recipes**: record MOVE/OPTIMIZE steps, save under `recipes/`, play back via the API; successful runs can emit a `{recipe_id}_golden.json` reference.
 - **Saved layouts**: **Save / Load lab state** writes JSON under `states/` (mock-friendly; useful for repeatable demos).
-- **Command Console** (bottom of the main page): typed shorthand for moves, optimize, and related actions; backed by ES modules under **`frontend/js/`** and wired through **`window.__commandConsoleDeps`** (see **Frontend code layout** below).
+- **Command Console** (bottom of the main page): typed shorthand for moves, optimize, and related actions; backed by ES modules (`command-parse.js`, `command-api.js`, `command-complete.js`, …) and wired through **`window.__commandConsoleDeps`** (see **Frontend code layout** below).
 - **Debug page** at `/debug` for deeper inspection (ghost derivation, golden listing, etc.).
 
 ---
@@ -69,7 +71,7 @@ The root route rewrites **`js/main.js?v=…`** in the served HTML with a startup
 | **`js/canvas/coordinates.js`** | **`mmToPx`** / **`pxToMm`** for the lab frame (origin at table center, +Y up on screen). |
 | **`js/command-console.js`** | Console UI loop; depends on **`command-parse.js`**, **`command-api.js`**, **`command-complete.js`**. |
 
-Larger slices of logic (dedicated API client, separate render module) can be peeled out of **`app-main.js`** over time; **`frontend_refactor.md`** tracks that optional breakdown.
+Larger slices of logic (dedicated API client, separate render module) can be peeled out of **`app-main.js`** over time.
 
 ---
 
@@ -78,10 +80,10 @@ Larger slices of logic (dedicated API client, separate render module) can be pee
 ### Four tiers of state (conceptual)
 
 1. **Tier 1 — Lab state (physical truth)**  
-   Authoritative snapshot from the communicator: component poses, `system_status` (`IDLE`, `BUSY`, `OPTIMIZING`, …), timestamps, and per-component **`intent`** (nominal vs optimized metadata) when present.
+   Authoritative snapshot from the communicator: `system_status` (`IDLE`, `BUSY`, `OPTIMIZING`, …), timestamps, and per-component **`measurables`** (measured pose, optimization score, optional camera image ref) plus **`tunables`** (nominal pose, storage slot intent, placement mode). Shapes and helpers are documented in **`lab_model`** (see **`backend/lab_model/README.md`**).
 
 2. **Tier 2 — Ghost / intent (what the UI plans)**  
-   Client-side **ghost** poses track targets; the backend can embed **`intent`** on each component (`nominal_pose`, `placement_strategy`, `last_optimized_pose`, `is_optimized`). Debug: `GET /api/debug/ghost-state` derives a ghost view from stored intent.
+   Client-side **ghost** poses track targets; the backend stores commanded values under **`tunables`** (`nominal_pose`, `placement.mode`, `storage`, `presence`). Debug: `GET /api/debug/ghost-state` exposes tunables-derived intent. **`GET /api/components/{tag_id}/tunables`** and **`/measurables`** return slices for one tag.
 
 3. **Tier 3 — Recipe (procedure)**  
    JSON sequences of steps (`MOVE_COMPONENT`, `OPTIMIZE`, `PLACE`, `REMOVE`, …) stored in `recipes/{id}.json`, played asynchronously by the server.
@@ -98,10 +100,21 @@ Larger slices of logic (dedicated API client, separate render module) can be pee
 | **Static assets** | Mounted at `/static` → `frontend/` |
 | **Hardware** | **LabCommunicator** abstraction: `MockLabCommunicator` \| `RealLabCommunicator` |
 
+### Backend packages (how `main.py` is organized)
+
+| Package | Role |
+|---------|------|
+| **`lab_model`** | **Domain model** shared by mock and real: **tunables vs measurables** helpers (`component_model.py`), **storage quadrant Q3** geometry and layout checks (`storage_region.py`), **software-tracked motor angles** on disk (`motor_rotation_store` → `schemas/mock_motor_rotations.json` / `real_motor_rotations.json`). Does **not** talk to hardware. See **`backend/lab_model/README.md`**. |
+| **`lab_primitives`** | **HTTP-facing command contract**: `PrimitiveId`, **Pydantic** bodies for `POST /api/command`, **`PRIMITIVE_REGISTRY`**, **`dispatch`** (`parse_command_payload`, `execute_validated_command`, `schedule_validated_command`), **read primitives** for **`GET /api/components/{tag}/tunables`** and **`.../measurables`**, and **macros** that compose atomic steps (today: `MOTOR_SEND_HOME` → tracked angle + `MOVE_MOTOR`). Design narrative: **`primitives.md`**. Package overview + roadmap: **`backend/lab_primitives/README.md`**, **`backend/lab_primitives/ROADMAP.md`**. |
+| **`lab_communicator`** | **`LabCommunicator`** interface and **mock** / **real** implementations: lab state JSON, robot/vision/`lab_automation` integration. |
+
+**`main.py`** delegates command validation and scheduling to **`lab_primitives`** (same path for the recipe executor). Tunables/measurables per tag use **`fetch_read_primitive`** so reads stay aligned with the primitive vocabulary.
+
 ### Command–query style
 
-- **Query**: browser polls **`GET /api/lab-state`** (~every 500 ms) to refresh solids, status, and **`lab_mode`**. Ghost/intent sync: after commands finish (or while **`OPTIMIZING`** in real mode—see **Newton optimization in real mode** below); **`intent.nominal_pose`** drives the ghost overlay when present.
-- **Command**: **`POST /api/command`** with actions such as `MOVE_COMPONENT`, `MOVE_MOTOR`, `OPTIMIZE`. Successful accepts return **HTTP 200** with `"status": "accepted"` in the JSON body; **`409`** if the lab reports `BUSY` / `OPTIMIZING`.
+- **Query**: browser polls **`GET /api/lab-state`** (~every 500 ms) to refresh solids, status, and **`lab_mode`**. Ghost sync: after commands finish (or while **`OPTIMIZING`** in real mode—see **Newton optimization in real mode** below); **`tunables.nominal_pose`** drives the ghost overlay when present. Per-tag slices: **`GET /api/components/{tag_id}/tunables`** and **`.../measurables`** (saved state only; **`lab_primitives`** **return** primitives).
+- **Observe**: **`POST /api/components/{tag_id}/measurables/observe`** (or **`POST /api/command`** with **`OBSERVE_MEASURABLES`**) refreshes that tag’s measurables (e.g. camera capture → **`camera_image`**). Same **`409`** guard as commands when the system is **`BUSY`** / **`OPTIMIZING`**. See **`model.md`**.
+- **Command**: **`POST /api/command`** with JSON `{ "action", "target_id", "parameters" }`. Bodies are **validated** by **`lab_primitives`** (Pydantic); actions include `MOVE_COMPONENT`, `MOVE_MOTOR`, `OPTIMIZE`, `STORE_COMPONENT`, …. Successful accepts return **HTTP 200** with `"status": "accepted"`; **`409`** if the lab reports `BUSY` / `OPTIMIZING`; **`400`/`422`** on invalid payloads.
 - **Placement request**: **`POST /api/components`** queues `add_component_to_state` (mock vs real behavior lives in the communicator).
 
 ### Real lab mode
@@ -122,12 +135,12 @@ This is easy to misunderstand because **two different poses** drive the canvas, 
 
 | Layer | Source in API | Meaning |
 |--------|----------------|--------|
-| **Solid** (opaque) | `components[id].pose` | Best current model of **where the part is on the table** (after a completed move / place). |
-| **Ghost** (semi-transparent) | Client **`ghostState`**, synced from **`components[id].intent.nominal_pose`** when applicable | **Target / intent** pose—where you are asking the system to put the part, or where the optimizer is **heading** on the next sub-step. |
+| **Solid** (opaque) | `components[id].measurables.pose` | Best current model of **where the part is on the table** (after a completed move / place). |
+| **Ghost** (semi-transparent) | Client **`ghostState`**, synced from **`components[id].tunables.nominal_pose`** when applicable | **Target / intent** pose—where you are asking the system to put the part, or where the optimizer is **heading** on the next sub-step. |
 
 Normally the frontend only resyncs ghost from the server when a command **finishes** (or you force refresh), so the dashed “drift” line is stable while something is running.
 
-During **`system_status === "OPTIMIZING"`** (real Newton runs), the client **also** refreshes ghost from **`intent.nominal_pose` on every poll** (~500 ms). That way you can see the **planned** sub-target move ahead of or separate from the **solid** pose.
+During **`system_status === "OPTIMIZING"`** (real Newton runs), the client **also** refreshes ghost from **`tunables.nominal_pose` on every poll** (~500 ms). That way you can see the **planned** sub-target move ahead of or separate from the **solid** pose.
 
 ### What the backend does during Newton (`RealLabCommunicator`)
 
@@ -135,10 +148,10 @@ Optimization runs in a **worker thread** (`asyncio.to_thread`), while **`GET /ap
 
 For **`OPTIMIZE`** with strategy **`NEWTON`** only, the communicator **temporarily wraps** your lab’s **`place_component_wo_home_specific_xy_cloudlab`** method on **`OpticalExperiment`**:
 
-1. **Before** each call: update **`intent.nominal_pose`** only (**`ghost`** phase)—UI can show where the strategy is about to place the part.
-2. **After** the call **succeeds** (no exception): update **`pose`**, set **`state`** to **`PLACED`**, and align **`intent.nominal_pose`** with that pose (**`physical`** phase)—solid catches up.
+1. **Before** each call: update **`tunables.nominal_pose`** only (**`ghost`** phase)—UI can show where the strategy is about to place the part.
+2. **After** the call **succeeds** (no exception): update **`measurables.pose`**, set **`tunables.presence`** to breadboard (not storage), and align **`tunables.nominal_pose`** with that pose (**`physical`** phase)—solid catches up.
 
-For both phases, **X/Y** come from the place call’s **`target_x` / `target_y`**. **Rotation** on the canvas is **not** taken from the robot’s **`angle`** argument (that vector does not match the UI’s top-down `rotation` field and produced wrong values such as ~29° when the table pose was ~270°). Instead, **`rotation`** (and any existing **`roll` / `pitch` / `yaw`** on the component) are **carried forward** from the current lab-state pose so only the table translation updates step to step.
+For both phases, **X/Y** come from the place call’s **`target_x` / `target_y`**. **Rotation** on the canvas is **not** taken from the robot’s **`angle`** argument (that vector does not match the UI’s top-down `rotation` field and produced wrong values such as ~29° when the table pose was ~270°). Instead, **`rotation`** (and any existing **`roll` / `pitch` / `yaw`** on the component) are **carried forward** from the current lab-state **`measurables.pose`** so only the table translation updates step to step.
 
 The original unwrapped method is restored in a **`finally`** block so manual **`MOVE_COMPONENT`** paths are not left patched.
 
@@ -171,13 +184,27 @@ The canvas plot labeled **Optimization Metric (Beam Intensity)** is **synthetic*
 ```
 cloud-labs/                   # repository root (historically also called optics-digital-twin in docs)
 ├── .env                      # Optional: LAB_MODE, LAB_AUTOMATION_PATH (loaded from repo root)
+├── primitives.md             # Primitive vocabulary, tunables/measurables context, macro design notes
+├── model.md                  # Observation vs saved state; get vs return measurables (design; see lab_model/)
 ├── backend/
-│   ├── main.py               # FastAPI app, REST routes, static mount, recipe executor
-│   └── lab_communicator/
-│       ├── base.py           # LabCommunicator interface
-│       ├── mock.py           # Simulated lab (delays, noise, local JSON state)
-│       ├── real.py           # Adapter for external lab_automation package
-│       └── newton_cloudlab_progress_example.py  # Paste guide for optional Newton UI callback in lab_automation
+│   ├── main.py               # FastAPI app; delegates /api/command + recipe steps to lab_primitives
+│   ├── lab_model/            # Domain: tunables/measurables, storage Q3 geometry, motor rotation JSON
+│   │   ├── README.md         # Conceptual overview (tunables vs measurables)
+│   │   ├── component_model.py
+│   │   ├── storage_region.py
+│   │   └── motor_rotation_store.py
+│   ├── lab_primitives/       # PrimitiveId, Pydantic schemas, registry, dispatch, read primitives, macros
+│   │   ├── README.md         # Package overview (what runs on each HTTP path)
+│   │   ├── ROADMAP.md        # Next steps (tests, more macros, Protocol, …)
+│   │   ├── ids.py            # PrimitiveId, PrimitiveKind, READ_/MACRO_ primitive id sets
+│   │   ├── schemas.py        # Validated POST /api/command bodies (discriminated by action)
+│   │   ├── registry.py       # PRIMITIVE_REGISTRY (metadata + handler names)
+│   │   └── dispatch.py       # parse_command_payload, execute_validated_command, schedule_validated_command, fetch_read_primitive
+│   ├── lab_communicator/
+│   │   ├── base.py           # LabCommunicator interface
+│   │   ├── mock.py           # Simulated lab (delays, noise, local JSON state)
+│   │   ├── real.py           # Adapter for external lab_automation package
+│   │   └── newton_cloudlab_progress_example.py  # Paste guide for optional Newton UI callback in lab_automation
 ├── frontend/
 │   ├── index.html            # layout + inline styles; script: js/main.js then command-console.js
 │   ├── debug.html
@@ -207,7 +234,7 @@ cloud-labs/                   # repository root (historically also called optics
 └── Camera_Images/            # Optimization frames may be read/watched here (real workflows)
 ```
 
-**Laser line (`laser_line_fit.npy`):** In **`LAB_MODE=REAL`**, `GET /api/laser-line` loads **`[a, b]`** from this file so the UI draws the red dashed path and snap-to-line behavior. Coordinates are **lab mm** with **origin at table center**; the breadboard grid in the UI is **25 mm** between holes. The **grid dots** use **`BREADBOARD_GRID_OFFSET_X_MM`** in **`frontend/js/config.js`**: a **−¼ inch** base plus an extra fine-tune (e.g. **−7.4 mm** total when the arm-measured vertical beam is at **`b ≈ 392.6`**) so dots track the real hole columns—**component poses** are unchanged. Set **`b`** to the arm-measured **x** of the beam for a vertical line (**`a = 0`**). After editing **`laser_line_fit.npy`**, use **Refresh state** (or reload) to refetch coefficients.
+**Laser line (`laser_line_fit.npy`):** In **`LAB_MODE=REAL`**, `GET /api/laser-line` loads **`[a, b]`** from this file so the UI draws the red dashed path and snap-to-line behavior. Coordinates are **lab mm** with **origin at table center**; the breadboard grid in the UI is **25 mm** between holes. The **grid dots** use **`BREADBOARD_GRID_OFFSET_X_MM`** in **`frontend/js/config.js`**: a **−¼ inch** base plus an extra fine-tune (e.g. **−7.4 mm** total when the arm-measured vertical beam is at **`b ≈ 392.6`**) so dots track the real hole columns—**component poses** are unchanged. Set **`b`** to the arm-measured **x** of the beam for a vertical line (**`a = 0`**). After editing **`laser_line_fit.npy`**, use **Refresh Pose** (or reload) to refetch coefficients.
 
 The `backend-simple/` folder holds small lab-related Python snippets with **relative imports** meant for use inside a larger **`lab_automation`** tree; it is **not** the FastAPI entrypoint.
 
@@ -221,9 +248,11 @@ The `backend-simple/` folder holds small lab-related Python snippets with **rela
 | GET | `/debug` | Debugger / visualizer |
 | GET | `/api/catalog` | Component catalog |
 | GET | `/api/lab-state` | Current lab JSON (includes **`lab_mode`**: `MOCK` \| `REAL`) |
-| POST | `/api/lab-state/refresh` | Trigger rescan / mock reload (background if supported) |
+| GET | `/api/components/{tag_id}/tunables` | Commanded **tunables** for one component |
+| GET | `/api/components/{tag_id}/measurables` | Lab-reported **measurables** for one component |
+| POST | `/api/lab-state/refresh-pose` | Re-localize **measurables.pose** from overhead / table camera (real: full scan; mock: simulated). Alias: `POST /api/lab-state/refresh` |
 | POST | `/api/components` | Request add-to-lab (catalog item payload) |
-| POST | `/api/command` | Move / motor / optimize |
+| POST | `/api/command` | Move / motor / optimize / store / … — body validated by **`lab_primitives`** (`parse_command_payload` → `schedule_validated_command`) |
 | GET | `/api/laser-line` | Laser line coefficients `{ a, b, source, … }` |
 | GET | `/api/video-feed/status` | Stream availability + source URL |
 | GET | `/api/video-feed/stream` | MJPEG (real) or static mock SVG |
@@ -297,4 +326,4 @@ Set `LAB_MODE=REAL` and a valid `LAB_AUTOMATION_PATH` so `from lab_automation...
 2. Add or edit **`schemas/component_catalog.json`** (`tag_id`, type, size, optional `motor_ids`, properties).
 3. Restart the backend so **`GET /api/catalog`** picks up changes.
 
-See **`ROADMAP.md`** for planned features (auto drift correction, richer simulation, etc.).
+See **`ROADMAP.md`** (repo-wide) and **`backend/lab_primitives/ROADMAP.md`** (primitive layer: tests, macros, tooling).
