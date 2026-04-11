@@ -15,6 +15,14 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from .base import LabCommunicator
+from . import motor_rotation_store as motor_rot
+from .storage_region import (
+    STORAGE_NOMINAL_ROTATION_DEG,
+    find_storage_slot_and_center,
+    is_placed_region,
+    is_storage_region,
+    nominal_center_pose_for_stored_entry,
+)
 
 # Configuration for External Lab Automation Library
 # LAB_AUTOMATION_PATH = path to the lab_automation package folder (repo root).
@@ -93,6 +101,9 @@ class RealLabCommunicator(LabCommunicator):
         }
         self._state_lock = threading.RLock()
         self._place_cloudlab_orig: Any = None
+        self._place_from_storage_tag: Optional[str] = None
+        self._store_component_tag: Optional[str] = None
+        self._store_pending_slot: Optional[Tuple[int, int]] = None
 
         # CobylaAlignmentStrategy_cloudlab.reference_image (BGR ndarray, same family as table-cam / capture_image)
         self._cobyla_ref_lock = threading.Lock()
@@ -420,8 +431,11 @@ class RealLabCommunicator(LabCommunicator):
                     val = getattr(inv, key, None)
                     if val is not None:
                         pose[key] = val
-                state = "PLACED"
-                print(f"  pose written: {pose}")
+                if is_storage_region(float(inv.x), float(inv.y)):
+                    state = "STORED"
+                else:
+                    state = "PLACED"
+                print(f"  pose written: {pose} -> {state}")
             else:
                 pose = {"x": 0, "y": 0, "rotation": 0}
                 state = "INVENTORY"
@@ -433,9 +447,9 @@ class RealLabCommunicator(LabCommunicator):
                 "state": state,
                 "pose": pose,
                 "intent": {
-                    "nominal_pose": pose if state == "PLACED" else None,
+                    "nominal_pose": pose if state in ("PLACED", "STORED") else None,
                     "is_optimized": False,
-                    "placement_strategy": "MANUAL"
+                    "placement_strategy": "STORAGE" if state == "STORED" else "MANUAL",
                 },
                 "metadata": {}
             }
@@ -446,7 +460,8 @@ class RealLabCommunicator(LabCommunicator):
             self.current_state["components"] = new_components
             self.current_state["last_updated"] = datetime.now().isoformat()
         n_placed = len([c for c in new_components.values() if c["state"] == "PLACED"])
-        print(f"[REAL LAB] Scan complete. {n_placed} components PLACED.")
+        n_stored = len([c for c in new_components.values() if c["state"] == "STORED"])
+        print(f"[REAL LAB] Scan complete. PLACED={n_placed}, STORED={n_stored}.")
 
     def refresh_state(self):
         """
@@ -505,12 +520,41 @@ class RealLabCommunicator(LabCommunicator):
             comp.inventory_location = p
             comp.current_location = p
 
-            # Best-effort: keep flags consistent
-            comp.is_placed = (entry or {}).get("state") == "PLACED"
+            # Best-effort: keep flags consistent (robot cares about on-table pose for PLACED and STORED)
+            comp.is_placed = (entry or {}).get("state") in ("PLACED", "STORED")
+
+    def _inject_motor_rotations_into_state(self, state: Dict[str, Any]) -> None:
+        """Merge software motor angle tracker into each component (pose + intent)."""
+        components = state.get("components") or {}
+        if not isinstance(components, dict):
+            return
+        for tag_id, comp in components.items():
+            if not isinstance(comp, dict):
+                continue
+            meta = self.catalog_map.get(tag_id)
+            mids = (meta or {}).get("motor_ids") or []
+            if not mids:
+                continue
+            mr = motor_rot.get_rotations_for_motor_ids(tag_id, list(mids))
+            pose = comp.setdefault("pose", {})
+            if isinstance(pose, dict):
+                pose["motor_rotations"] = dict(mr)
+            intent = comp.setdefault("intent", {})
+            if isinstance(intent, dict):
+                intent["nominal_motor_rotations"] = dict(mr)
+
+    def _motor_catalog_ok(self, target_id: str, motor_id: int) -> bool:
+        meta = self.catalog_map.get(target_id)
+        if not meta:
+            return False
+        mids = meta.get("motor_ids") or []
+        return motor_id in mids
 
     def get_lab_state(self) -> Dict[str, Any]:
         with self._state_lock:
-            return json.loads(json.dumps(self.current_state))
+            state = json.loads(json.dumps(self.current_state))
+        self._inject_motor_rotations_into_state(state)
+        return state
 
     def set_cobyla_reference_from_png_bytes(self, data: bytes) -> Tuple[bool, str]:
         """Decode PNG bytes to BGR (OpenCV) and store for the next COBYLA optimize run."""
@@ -714,8 +758,34 @@ class RealLabCommunicator(LabCommunicator):
             print(f"[REAL LAB] Error in get_rotation_from_angle: {e}")
             return 0.0
 
+    def _catalog_wh(self, tag_id: str) -> Tuple[float, float]:
+        meta = self.catalog_map.get(tag_id) or {}
+        s = meta.get("size")
+        if isinstance(s, dict):
+            return float(s.get("width", 62)), float(s.get("height", 62))
+        if isinstance(s, (int, float)):
+            v = float(s)
+            return v, v
+        return 90.0, 90.0
+
     async def move_component(self, target_id: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Moving {target_id}...")
+
+        tx = params.get("target_x")
+        ty = params.get("target_y")
+        rot = params.get("rotation", 0)
+        tx_lab = float(tx)
+        ty_lab = float(ty)
+        rot = float(rot)
+
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+        if entry and entry.get("state") == "STORED" and self._place_from_storage_tag != target_id:
+            print(f"[REAL LAB] Refusing move: {target_id} is STORED (use place from storage).")
+            return
+        if entry and entry.get("state") == "PLACED" and is_storage_region(tx_lab, ty_lab) and self._store_component_tag != target_id:
+            print(f"[REAL LAB] Refusing move into storage quadrant (use Store).")
+            return
 
         # 1. Update Status
         with self._state_lock:
@@ -729,13 +799,7 @@ class RealLabCommunicator(LabCommunicator):
             return
 
         comp = self.component_map[target_id]
-        
-        # 3. Extract Coordinates (UI / API uses lab mm)
-        tx = params.get("target_x")
-        ty = params.get("target_y")
-        rot = params.get("rotation")
-        tx_lab = float(tx)
-        ty_lab = float(ty)
+
         tx_robot, ty_robot = lab_table_xy_to_robot_xy(tx_lab, ty_lab)
         
         # 4. Execute Move
@@ -767,13 +831,26 @@ class RealLabCommunicator(LabCommunicator):
                         "y": ty_lab,
                         "rotation": rot
                     }
-                    self.current_state["components"][target_id]["state"] = "PLACED"
+                    if self._store_component_tag == target_id:
+                        self.current_state["components"][target_id]["state"] = "STORED"
+                        self.current_state["components"][target_id]["intent"]["placement_strategy"] = "STORAGE"
+                        md = self.current_state["components"][target_id].setdefault("metadata", {})
+                        if self._store_pending_slot is not None:
+                            si, sj = self._store_pending_slot
+                            md["storage_slot"] = {"i": int(si), "j": int(sj)}
+                    else:
+                        self.current_state["components"][target_id]["state"] = "PLACED"
+                        self.current_state["components"][target_id]["intent"]["placement_strategy"] = "MANUAL"
+                        self.current_state["components"][target_id].setdefault("metadata", {}).pop(
+                            "storage_slot", None
+                        )
 
                     # Update intent to match reality
                     self.current_state["components"][target_id]["intent"]["nominal_pose"] = {
                         "x": tx_lab, "y": ty_lab, "rotation": rot
                     }
                     self.current_state["last_updated"] = datetime.now().isoformat()
+                    self._store_pending_slot = None
             print(comp)
         except Exception as e:
             print(f"[REAL LAB] Move Failed: {e}")
@@ -784,14 +861,24 @@ class RealLabCommunicator(LabCommunicator):
                 self.current_state["optimization_step"] = 0
                 self.current_state["optimization_run_dir"] = None
                 self.current_state["last_updated"] = datetime.now().isoformat()
+                self._store_pending_slot = None
 
     async def move_motor(self, target_id: str, motor_id: int, distance: float):
         print(f"[REAL LAB] Moving motor {motor_id} of {target_id} by {distance} (RELATIVE)...")
-        
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+        if entry and entry.get("state") == "STORED":
+            print(f"[REAL LAB] Refusing motor move: {target_id} is STORED.")
+            return
+
         # Determine controller from catalog metadata
         meta = self.catalog_map.get(target_id)
         if not meta:
             print(f"[REAL LAB] Error: {target_id} not in component_catalog.")
+            return
+        mids = meta.get("motor_ids") or []
+        if motor_id not in mids:
+            print(f"[REAL LAB] Error: motor_id {motor_id} not in motor_ids {mids} for {target_id}.")
             return
         controller_name = meta.get("motor_controller")
         if not controller_name:
@@ -812,14 +899,38 @@ class RealLabCommunicator(LabCommunicator):
                 distance,
                 wait_completion=True,
             )
+            motor_rot.add_delta(target_id, motor_id, float(distance))
             print(f"[REAL LAB] Motor moved.")
         except Exception as e:
             print(f"[REAL LAB] Motor move failed: {e}")
+
+    async def motor_send_home(self, target_id: str, motor_id: int):
+        """Hardware move by -tracked angle; tracker ends at 0 via move_motor delta."""
+        if not self._motor_catalog_ok(target_id, motor_id):
+            print(f"[REAL LAB] motor_send_home: invalid tag or motor_id for {target_id} m{motor_id}")
+            return
+        cur = motor_rot.get_angle(target_id, motor_id)
+        if abs(cur) < 1e-12:
+            return
+        await self.move_motor(target_id, motor_id, -cur)
+
+    async def motor_set_zero(self, target_id: str, motor_id: int):
+        """Software-only: define current position as angle 0."""
+        if not self._motor_catalog_ok(target_id, motor_id):
+            print(f"[REAL LAB] motor_set_zero: invalid tag or motor_id for {target_id} m{motor_id}")
+            return
+        motor_rot.set_zero(target_id, motor_id)
+        print(f"[REAL LAB] Motor {motor_id} on {target_id}: zero reference set (software).")
 
     async def optimize_component(self, target_id: str, strategy_name: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Optimizing {target_id} with {strategy_name}...")
 
         if target_id not in self.component_map:
+            return
+        with self._state_lock:
+            ent = (self.current_state.get("components") or {}).get(target_id)
+        if ent and ent.get("state") == "STORED":
+            print(f"[REAL LAB] Refusing optimize: {target_id} is STORED.")
             return
 
         run_dir = self._make_optimization_run_dir(strategy_name)
@@ -1091,6 +1202,114 @@ class RealLabCommunicator(LabCommunicator):
                     _os.remove(tmp_path)
                 except Exception:
                     pass
+
+    async def store_component(self, target_id: str):
+        print(f"[REAL LAB] store_component {target_id}...")
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+        if not entry or entry.get("state") != "PLACED":
+            print(f"[REAL LAB] store_component: {target_id} must be PLACED.")
+            return
+        w, h = self._catalog_wh(target_id)
+        with self._state_lock:
+            comps = dict(self.current_state.get("components") or {})
+        slot = find_storage_slot_and_center(comps, target_id, w, h, lambda tid: self._catalog_wh(tid))
+        if not slot:
+            print("[REAL LAB] No free storage slot in Q3.")
+            return
+        sx, sy, si, sj = slot
+        rot = STORAGE_NOMINAL_ROTATION_DEG
+        self._store_pending_slot = (si, sj)
+        self._store_component_tag = target_id
+        try:
+            await self.move_component(
+                target_id,
+                {"target_x": sx, "target_y": sy, "rotation": rot},
+            )
+        finally:
+            self._store_component_tag = None
+
+    async def affirm_placed_at_current(self, target_id: str):
+        print(f"[REAL LAB] affirm_placed_at_current {target_id}...")
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+            if not entry or entry.get("state") != "STORED":
+                print(f"[REAL LAB] affirm: {target_id} must be STORED.")
+                return
+            comp = self.current_state["components"][target_id]
+            comp["state"] = "PLACED"
+            comp.setdefault("metadata", {}).pop("storage_slot", None)
+            comp["intent"]["placement_strategy"] = "MANUAL"
+            self.current_state["last_updated"] = datetime.now().isoformat()
+        cobj = self.component_map.get(target_id)
+        if cobj is not None:
+            cobj.is_placed = True
+
+    async def repack_storage_slot(self, target_id: str):
+        print(f"[REAL LAB] repack_storage_slot {target_id}...")
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+        if not entry or entry.get("state") != "STORED":
+            print(f"[REAL LAB] repack: {target_id} must be STORED.")
+            return
+        w, h = self._catalog_wh(target_id)
+        with self._state_lock:
+            comps = dict(self.current_state.get("components") or {})
+        slot = find_storage_slot_and_center(comps, target_id, w, h, lambda tid: self._catalog_wh(tid))
+        if not slot:
+            print("[REAL LAB] repack: no free storage slot.")
+            return
+        sx, sy, si, sj = slot
+        rot = STORAGE_NOMINAL_ROTATION_DEG
+        self._store_pending_slot = (si, sj)
+        self._store_component_tag = target_id
+        try:
+            await self.move_component(
+                target_id,
+                {"target_x": sx, "target_y": sy, "rotation": rot},
+            )
+        finally:
+            self._store_component_tag = None
+
+    async def recenter_stored_in_inventory(self, target_id: str):
+        print(f"[REAL LAB] recenter_stored_in_inventory {target_id}...")
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+        if not entry or entry.get("state") != "STORED":
+            print(f"[REAL LAB] recenter: {target_id} must be STORED.")
+            return
+        nom = nominal_center_pose_for_stored_entry(entry)
+        if nom is None:
+            print("[REAL LAB] recenter: could not resolve storage cell (need slot metadata or pose in Q3).")
+            return
+        sx, sy, si, sj = nom
+        self._store_pending_slot = (si, sj)
+        self._store_component_tag = target_id
+        try:
+            await self.move_component(
+                target_id,
+                {"target_x": sx, "target_y": sy, "rotation": STORAGE_NOMINAL_ROTATION_DEG},
+            )
+        finally:
+            self._store_component_tag = None
+
+    async def place_from_storage(self, target_id: str, params: Dict[str, Any]):
+        print(f"[REAL LAB] place_from_storage {target_id}...")
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+        if not entry or entry.get("state") != "STORED":
+            print(f"[REAL LAB] place_from_storage: {target_id} not STORED.")
+            return
+        tx = float(params.get("target_x", params.get("x", 0)))
+        ty = float(params.get("target_y", params.get("y", 0)))
+        if not is_placed_region(tx, ty):
+            print("[REAL LAB] Target must be outside storage quadrant (Q3).")
+            return
+        self._place_from_storage_tag = target_id
+        try:
+            await self.move_component(target_id, params)
+        finally:
+            self._place_from_storage_tag = None
 
     async def add_component_to_state(self, component_data: Dict[str, Any]):
         print(f"[REAL LAB] User requested to add {component_data.get('tag_id')}. Please place it on the table and Rescan.")

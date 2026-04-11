@@ -407,25 +407,15 @@
             </a>
         </div>
 
-        <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <div id="layout-warnings" style="display: none; margin: 0 16px 10px; padding: 8px 10px; font-size: 11px; color: #fcd34d; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; line-height: 1.35;"></div>
+
+        <div class="section-header">
             <span>Optical Components</span>
-            <span id="add-component-btn" class="material-icons-round" style="cursor: pointer; font-size: 16px; color: var(--primary-accent);" title="Open Inventory">add_circle</span>
         </div>
         <div id="component-list" style="flex-grow: 0; height: 35%; overflow-y: auto;">
             <!-- Placed components will appear here -->
             <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px;">
                 No components placed.
-            </div>
-        </div>
-
-        <!-- Inventory Library Popup (Hidden by default) -->
-        <div id="library-popup" style="display: none; position: absolute; top: 80px; left: 290px; width: 260px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 2000; padding: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
-                <span style="font-weight: 600; font-size: 12px; color: var(--text-primary);">Component Library</span>
-                <span id="library-close" class="material-icons-round" style="font-size: 16px; cursor: pointer; color: var(--text-muted);">close</span>
-            </div>
-            <div id="library-list" style="max-height: 300px; overflow-y: auto;">
-                <!-- Inventory items injected here -->
             </div>
         </div>
 
@@ -500,7 +490,7 @@
         <div class="command-console__panel" id="command-console-panel">
             <div class="command-console__output" id="command-console-output" role="log" aria-live="polite"></div>
             <input type="text" class="command-console__input" id="command-console-input" autocomplete="off" spellcheck="false"
-                placeholder="help | refresh | move tag_22 0 0 0 | motor … | optimize …" />
+                placeholder="help | refresh | move tag_22 0 0 0 | motor … | motorhome … | motorset0 … | optimize …" />
         </div>
     </div>
 

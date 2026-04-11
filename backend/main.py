@@ -9,7 +9,7 @@ import re
 import asyncio
 import time
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import io
 import logging
 
@@ -113,7 +113,19 @@ async def execute_recipe(recipe: Recipe):
             await lab.optimize_component(target, strategy, step.parameters)
         elif step.action == "REMOVE":
             await lab.remove_component(target)
-            
+        elif step.action == "MOTOR_SEND_HOME":
+            mid = step.parameters.get("motor_id")
+            if mid is not None:
+                await lab.motor_send_home(target, int(mid))
+        elif step.action == "MOTOR_SET_ZERO":
+            mid = step.parameters.get("motor_id")
+            if mid is not None:
+                await lab.motor_set_zero(target, int(mid))
+        elif step.action == "STORE_COMPONENT":
+            await lab.store_component(target)
+        elif step.action == "PLACE_FROM_STORAGE":
+            await lab.place_from_storage(target, step.parameters or {})
+
         await asyncio.sleep(0.5)
         
     print(f"[RECIPE] Recipe {recipe.name} complete. Saving Golden State...")
@@ -190,12 +202,12 @@ async def get_component_catalog():
 @app.post("/api/components")
 async def add_component(payload: Dict[str, Any], background_tasks: BackgroundTasks):
     """
-    Simulates "Request to Place": adds a component to the lab state.
-    In a real lab, this would notify an operator or robot.
-    In Mock mode, it directly updates the state.
+    Adds a component: `placement_mode` is `breadboard` (default) or `storage` (mock: packed in Q3).
+    Real lab still expects a physical place + rescan unless using mock.
     """
     background_tasks.add_task(lab.add_component_to_state, payload)
-    return {"status": "accepted", "message": f"Request to place {payload.get('name')} submitted."}
+    mode = (payload.get("placement_mode") or "breadboard").lower()
+    return {"status": "accepted", "message": f"Request submitted ({mode}): {payload.get('name')}"}
 
 @app.get("/api/lab-state")
 async def get_lab_state():
@@ -290,6 +302,38 @@ async def load_lab_state(payload: StateName):
 
     return {"status": "success", "name": safe, "state": state}
 
+def _lab_component_wh(tag_id: str) -> Tuple[float, float]:
+    """Catalog width/height in mm for layout analysis (mock vs real)."""
+    if lab is None:
+        return (90.0, 90.0)
+    if hasattr(lab, "_get_component_wh"):
+        return lab._get_component_wh(tag_id)
+    if hasattr(lab, "_catalog_wh"):
+        return lab._catalog_wh(tag_id)
+    return (90.0, 90.0)
+
+
+@app.get("/api/layout-conflicts")
+async def get_layout_conflicts():
+    """Semantic vs geometry issues for inventory modals (PLACED in Q3, STORED off-slot, etc.)."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    from lab_communicator.storage_region import analyze_layout_issues
+
+    state = lab.get_lab_state()
+    comps = state.get("components") or {}
+    issues = analyze_layout_issues(comps, _lab_component_wh)
+    return {"issues": issues}
+
+
+@app.get("/api/storage-grid")
+async def get_storage_grid():
+    """Inventory grid dimensions for canvas overlay (must match storage_region constants)."""
+    from lab_communicator.storage_region import storage_grid_spec
+
+    return storage_grid_spec()
+
+
 @app.get("/api/laser-line")
 async def get_laser_line():
     """Laser path in lab coords: x = a*y + b (mm). Mock: fixed params; Real: from laser_line_fit.npy."""
@@ -333,12 +377,65 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
              raise HTTPException(status_code=400, detail="MOVE_MOTOR requires 'motor_id' and 'distance'")
         background_tasks.add_task(lab.move_motor, target_id, motor_id, distance)
         return {"status": "accepted", "message": f"Motor {motor_id} on {target_id} moving by {distance}"}
+
+    elif action == "MOTOR_SEND_HOME":
+        motor_id = params.get("motor_id")
+        if motor_id is None:
+            raise HTTPException(status_code=400, detail="MOTOR_SEND_HOME requires 'motor_id'")
+        try:
+            mid = int(motor_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="motor_id must be an integer")
+        background_tasks.add_task(lab.motor_send_home, target_id, mid)
+        return {"status": "accepted", "message": f"Motor {mid} on {target_id}: send to home (tracked → 0)"}
+
+    elif action == "MOTOR_SET_ZERO":
+        motor_id = params.get("motor_id")
+        if motor_id is None:
+            raise HTTPException(status_code=400, detail="MOTOR_SET_ZERO requires 'motor_id'")
+        try:
+            mid = int(motor_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="motor_id must be an integer")
+        background_tasks.add_task(lab.motor_set_zero, target_id, mid)
+        return {"status": "accepted", "message": f"Motor {mid} on {target_id}: set current position as 0"}
     
     elif action == "OPTIMIZE":
         strategy = params.get("strategy", "NEWTON")
         background_tasks.add_task(lab.optimize_component, target_id, strategy, params)
         return {"status": "accepted", "message": f"Optimization ({strategy}) started for {target_id}"}
-    
+
+    elif action == "STORE_COMPONENT":
+        background_tasks.add_task(lab.store_component, target_id)
+        return {"status": "accepted", "message": f"Storing {target_id} in inventory quadrant (packed)"}
+
+    elif action == "PLACE_FROM_STORAGE":
+        if params.get("target_x") is None or params.get("target_y") is None:
+            raise HTTPException(
+                status_code=400,
+                detail="PLACE_FROM_STORAGE requires target_x, target_y, and rotation in parameters",
+            )
+        background_tasks.add_task(lab.place_from_storage, target_id, params)
+        return {"status": "accepted", "message": f"Placing {target_id} from storage onto breadboard"}
+
+    elif action == "AFFIRM_PLACED_AT_CURRENT":
+        if not target_id:
+            raise HTTPException(status_code=400, detail="AFFIRM_PLACED_AT_CURRENT requires target_id")
+        background_tasks.add_task(lab.affirm_placed_at_current, target_id)
+        return {"status": "accepted", "message": f"Marking {target_id} as PLACED at current pose"}
+
+    elif action == "REPACK_STORAGE":
+        if not target_id:
+            raise HTTPException(status_code=400, detail="REPACK_STORAGE requires target_id")
+        background_tasks.add_task(lab.repack_storage_slot, target_id)
+        return {"status": "accepted", "message": f"Repacking {target_id} into inventory grid"}
+
+    elif action == "RECENTER_IN_STORAGE":
+        if not target_id:
+            raise HTTPException(status_code=400, detail="RECENTER_IN_STORAGE requires target_id")
+        background_tasks.add_task(lab.recenter_stored_in_inventory, target_id)
+        return {"status": "accepted", "message": f"Re-centering {target_id} in its inventory cell at 0°"}
+
     elif action == "SCAN":
         return {"status": "accepted", "message": "Scan started"}
     

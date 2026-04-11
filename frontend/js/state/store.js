@@ -18,11 +18,20 @@ export const store = {
     isRecording: false,
     currentRecipeSteps: [],
     catalogMap: {},
-    catalogCache: null,
     selectedTableCam: 1,
     /** Seconds; used for GET /api/table-cam/capture exposure query param */
     tableCamExposure: 0.2,
     tableCamLastBlobUrl: null,
     /** Object URL for Cobyla reference preview image (revoked when clearing/updating). */
     cobylaRefPreviewObjectUrl: null,
+    /** From GET /api/layout-conflicts */
+    layoutIssues: [],
+    /** From GET /api/storage-grid (inventory cell overlay) */
+    storageGridSpec: null,
+    /** Last `state` (PLACED/STORED/…) shown in the context panel for the selected part — used to refresh controls when lab state updates. */
+    contextPanelStateSnapshot: null,
+    /** STORED part id when "Drag from storage" mode is active (only that part can be dragged to place). */
+    dragFromStorageTag: null,
+    /** Ghost pose snapshot at mousedown when starting a drag-from-storage move (for cancel/revert). */
+    dragFromStorageStartPose: null,
 };

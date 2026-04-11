@@ -1,28 +1,32 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-03-30T16:35:41.795405",
+  "last_updated": "2026-04-11T00:04:23.982788",
   "components": {
     "tag_9": {
       "id": "tag_9",
       "type": "OPTICAL_FILTER",
-      "state": "PLACED",
+      "state": "STORED",
       "pose": {
-        "x": -380.4155447529666,
-        "y": 60.19608391369862,
-        "rotation": 0
+        "x": -450.0,
+        "y": -450.0,
+        "rotation": 0.0
       },
       "intent": {
         "nominal_pose": {
-          "x": -380,
-          "y": 60,
-          "rotation": 0
+          "x": -450.0,
+          "y": -450.0,
+          "rotation": 0.0
         },
-        "placement_strategy": "MANUAL",
+        "placement_strategy": "STORAGE",
         "last_optimized_pose": null,
         "is_optimized": false
       },
       "metadata": {
-        "last_optimization_score": 0.99
+        "last_optimization_score": 0.99,
+        "storage_slot": {
+          "i": 0,
+          "j": 0
+        }
       }
     },
     "tag_22": {
@@ -70,38 +74,43 @@
     "tag_18": {
       "id": "tag_18",
       "type": "OPTICAL_MIRROR",
-      "state": "PLACED",
+      "state": "STORED",
       "pose": {
-        "x": -151.0346802971465,
-        "y": -334.61156818799,
-        "rotation": 290
+        "x": -350.0,
+        "y": -450.0,
+        "rotation": 0.0
       },
       "intent": {
         "nominal_pose": {
-          "x": -151.42857142857144,
-          "y": -334.28571428571433,
-          "rotation": 290
+          "x": -350.0,
+          "y": -450.0,
+          "rotation": 0.0
         },
-        "placement_strategy": "MANUAL",
+        "placement_strategy": "STORAGE",
         "last_optimized_pose": null,
         "is_optimized": false
       },
-      "metadata": {}
+      "metadata": {
+        "storage_slot": {
+          "i": 1,
+          "j": 0
+        }
+      }
     },
     "tag_2": {
       "id": "tag_2",
       "type": "OPTICAL_BEAMSPLITTER",
       "state": "PLACED",
       "pose": {
-        "x": -377.5408887743121,
-        "y": -267.5773033939975,
-        "rotation": 40
+        "x": -120.24217692819704,
+        "y": 86.27068898384157,
+        "rotation": 0.0
       },
       "intent": {
         "nominal_pose": {
-          "x": -377.14285714285717,
-          "y": -267.14285714285717,
-          "rotation": 40
+          "x": -119.76190476190474,
+          "y": 85.95238095238106,
+          "rotation": 0.0
         },
         "placement_strategy": "MANUAL",
         "last_optimized_pose": null,
@@ -114,15 +123,15 @@
       "type": "OPTICAL_BEAMSPLITTER",
       "state": "PLACED",
       "pose": {
-        "x": 259.0845975997807,
-        "y": 173.50186376700566,
-        "rotation": 0
+        "x": 257.16697603071907,
+        "y": -48.12350563999059,
+        "rotation": 0.0
       },
       "intent": {
         "nominal_pose": {
-          "x": 259.5278522037456,
-          "y": 173.15900670711792,
-          "rotation": 0
+          "x": 256.9047619047618,
+          "y": -48.33333333333323,
+          "rotation": 0.0
         },
         "placement_strategy": "MANUAL",
         "last_optimized_pose": null,
@@ -133,23 +142,28 @@
     "tag_11": {
       "id": "tag_11",
       "type": "OPTICAL_LENS",
-      "state": "PLACED",
+      "state": "STORED",
       "pose": {
-        "x": 213.7986302534366,
-        "y": -136.19354548666132,
-        "rotation": 85
+        "x": -250.0,
+        "y": -450.0,
+        "rotation": 0.0
       },
       "intent": {
         "nominal_pose": {
-          "x": 213.6,
-          "y": -135.7,
-          "rotation": 85
+          "x": -250.0,
+          "y": -450.0,
+          "rotation": 0.0
         },
-        "placement_strategy": "MANUAL",
+        "placement_strategy": "STORAGE",
         "last_optimized_pose": null,
         "is_optimized": false
       },
-      "metadata": {}
+      "metadata": {
+        "storage_slot": {
+          "i": 2,
+          "j": 0
+        }
+      }
     },
     "tag_20": {
       "id": "tag_20",
@@ -177,15 +191,15 @@
       "type": "OPTICAL_FILTER",
       "state": "PLACED",
       "pose": {
-        "x": -86.9827529445462,
-        "y": 374.4173871065666,
-        "rotation": 70
+        "x": 371.2437593332153,
+        "y": 197.01167022205044,
+        "rotation": 0.0
       },
       "intent": {
         "nominal_pose": {
-          "x": -87.14285714285715,
-          "y": 374.28571428571433,
-          "rotation": 70
+          "x": 371.66666666666663,
+          "y": 197.3809523809525,
+          "rotation": 0.0
         },
         "placement_strategy": "MANUAL",
         "last_optimized_pose": null,
@@ -198,15 +212,15 @@
       "type": "OPTICAL_CRYSTAL",
       "state": "PLACED",
       "pose": {
-        "x": 348.4009854913448,
-        "y": 351.62615072478724,
-        "rotation": 50
+        "x": 239.76412628247976,
+        "y": -241.83573311565084,
+        "rotation": 0.0
       },
       "intent": {
         "nominal_pose": {
-          "x": 348.85714285714295,
-          "y": 351.14285714285717,
-          "rotation": 50
+          "x": 240.23809523809535,
+          "y": -242.14285714285717,
+          "rotation": 0.0
         },
         "placement_strategy": "MANUAL",
         "last_optimized_pose": null,

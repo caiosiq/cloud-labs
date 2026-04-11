@@ -25,6 +25,8 @@ export function formatHelp() {
         '  refresh           — rescan lab state (same as Refresh State button)',
         '  move <tag> <x> <y> <rot>     — MOVE_COMPONENT (lab mm, degrees)',
         '  motor <tag> <motor_id> <dist> — MOVE_MOTOR',
+        '  motorhome <tag> <motor_id>   — MOTOR_SEND_HOME (move by −θ → tracked 0)',
+        '  motorset0 <tag> <motor_id>   — MOTOR_SET_ZERO (current pos → θ=0, no move)',
         '  optimize <tag> NEWTON [cam] [px] [axis] [tol]',
         '                      — OPTIMIZE NEWTON (0 or 4 optional args)',
         '  optimize <tag> COBYLA [threshold]',
@@ -138,6 +140,50 @@ export function parseCommandLine(line) {
                         motor_id: motorId,
                         distance
                     }
+                }
+            }
+        };
+    }
+
+    if (verb === 'motorhome') {
+        if (tokens.length !== 3) {
+            return { ok: false, error: 'Usage: motorhome <tag_id> <motor_id>' };
+        }
+        const tag = tokens[1];
+        const motorId = parseInt(tokens[2], 10);
+        if (!Number.isInteger(motorId)) {
+            return { ok: false, error: 'motorhome: motor_id must be an integer.' };
+        }
+        return {
+            ok: true,
+            result: {
+                type: 'command',
+                command: {
+                    action: 'MOTOR_SEND_HOME',
+                    target_id: tag,
+                    parameters: { motor_id: motorId }
+                }
+            }
+        };
+    }
+
+    if (verb === 'motorset0') {
+        if (tokens.length !== 3) {
+            return { ok: false, error: 'Usage: motorset0 <tag_id> <motor_id>' };
+        }
+        const tag = tokens[1];
+        const motorId = parseInt(tokens[2], 10);
+        if (!Number.isInteger(motorId)) {
+            return { ok: false, error: 'motorset0: motor_id must be an integer.' };
+        }
+        return {
+            ok: true,
+            result: {
+                type: 'command',
+                command: {
+                    action: 'MOTOR_SET_ZERO',
+                    target_id: tag,
+                    parameters: { motor_id: motorId }
                 }
             }
         };

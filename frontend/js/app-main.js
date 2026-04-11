@@ -13,6 +13,12 @@ import {
 } from './config.js';
 import { mmToPx, pxToMm } from './canvas/coordinates.js';
 import { store } from './state/store.js';
+import {
+    collectLayoutWarnings,
+    regionMoveBlocked,
+    isStorageRegion,
+    isPlacedRegion,
+} from './storage-region.js';
 
 /** Degrees per wheel tick while dragging a component (was 5°). */
 const ROTATION_WHEEL_STEP_DEG = 2.5;
@@ -54,10 +60,6 @@ const ctx = canvas.getContext('2d');
 const logOutput = document.getElementById('log-output');
 const statusBadge = document.getElementById('system-status-badge');
 const componentList = document.getElementById('component-list');
-const libraryPopup = document.getElementById('library-popup');
-const libraryList = document.getElementById('library-list');
-const addComponentBtn = document.getElementById('add-component-btn');
-const libraryClose = document.getElementById('library-close');
 const refreshBtn = document.getElementById('refresh-btn');
 const saveStateBtn = document.getElementById('save-state-btn');
 const loadStateBtn = document.getElementById('load-state-btn');
@@ -137,6 +139,32 @@ async function fetchStrategies() {
     };
 }
 
+async function fetchStorageGridSpec() {
+    try {
+        const response = await fetch('/api/storage-grid');
+        if (response.ok) {
+            store.storageGridSpec = await response.json();
+        }
+    } catch (e) {
+        console.warn('storage-grid fetch failed', e);
+    }
+}
+
+async function fetchLayoutConflicts() {
+    try {
+        const response = await fetch('/api/layout-conflicts');
+        if (!response.ok) {
+            store.layoutIssues = [];
+            return;
+        }
+        const data = await response.json();
+        store.layoutIssues = data.issues || [];
+    } catch (e) {
+        console.warn('layout-conflicts fetch failed', e);
+        store.layoutIssues = [];
+    }
+}
+
 async function fetchLaserLine() {
     try {
         const response = await fetch('/api/laser-line');
@@ -178,7 +206,18 @@ async function fetchLabState() {
         
         store.labState = await response.json();
         console.log(`[${new Date().toLocaleTimeString()}] Received Lab State successfully.`);
-        
+
+        const _dfs = store.dragFromStorageTag;
+        if (
+            _dfs &&
+            store.labState.components &&
+            store.labState.components[_dfs] &&
+            store.labState.components[_dfs].state === 'PLACED'
+        ) {
+            store.dragFromStorageTag = null;
+            store.dragFromStorageStartPose = null;
+        }
+
         // Clear error modal if it was open (recovery)
         const existingError = document.getElementById('error-modal');
         if (existingError) existingError.remove();
@@ -198,7 +237,7 @@ async function fetchLabState() {
             }
 
             Object.entries(store.labState.components).forEach(([name, comp]) => {
-                if (comp.state === 'PLACED') {
+                if (comp.state === 'PLACED' || comp.state === 'STORED') {
                     // Always initialize if missing (first load)
                     if (!store.ghostState[name]) {
                         if (comp.intent && comp.intent.nominal_pose) {
@@ -252,7 +291,31 @@ async function fetchLabState() {
             // Reset flags
             if (shouldSync) store.forceGhostSync = false;
         }
-        
+
+        // Rebuild context panel when the selected component's placement state changes (e.g. store / place finished).
+        const selCtx = store.selectedComponent;
+        if (selCtx && store.labState.components && store.labState.components[selCtx]) {
+            const compCtx = store.labState.components[selCtx];
+            const stCtx = compCtx.state;
+            if (
+                store.contextPanelStateSnapshot != null &&
+                store.contextPanelStateSnapshot !== stCtx
+            ) {
+                if ((compCtx.state === 'PLACED' || compCtx.state === 'STORED') && !store.isDragging) {
+                    if (compCtx.intent && compCtx.intent.nominal_pose) {
+                        store.ghostState[selCtx] = { ...compCtx.intent.nominal_pose };
+                    } else {
+                        store.ghostState[selCtx] = { ...compCtx.pose };
+                    }
+                    if (typeof store.ghostState[selCtx].rotation !== 'number') {
+                        store.ghostState[selCtx].rotation = compCtx.pose.rotation || 0;
+                    }
+                }
+                updateContextPanel(selCtx);
+                updateMotorAngleLabels(selCtx);
+            }
+        }
+
         store.previousSystemStatus = store.labState.system_status;
         
         // --- ADDED: Auto-refresh available components list for sidebar ---
@@ -350,6 +413,13 @@ async function fetchLabState() {
                 });
             }
         }
+
+        fetchLayoutConflicts()
+            .then(() => {
+                updateLayoutWarningBanner();
+                updateLayoutConflictModal();
+            })
+            .catch(() => {});
 
         updateUI();
     } catch (error) {
@@ -556,6 +626,53 @@ async function executeSendCommand(command) {
     }
 }
 
+/**
+ * After dragging a STORED part onto the breadboard: confirm PLACE_FROM_STORAGE (same flow as move confirm).
+ */
+async function confirmPlaceFromStorageDrag(targetId, parameters) {
+    const tx = parameters.target_x;
+    const ty = parameters.target_y;
+    const tr = parameters.rotation;
+    const msg =
+        `Place <strong>${targetId}</strong> from storage onto the breadboard?<br><br>` +
+        `This will change the part from <strong>STORED</strong> to <strong>PLACED</strong>.<br><br>` +
+        `X: ${Number(tx).toFixed(1)} mm<br>Y: ${Number(ty).toFixed(1)} mm<br>Rot: ${Number(tr).toFixed(1)}°`;
+
+    return new Promise((resolve) => {
+        showConfirmationModal(
+            msg,
+            async () => {
+                const r = await executeSendCommand({
+                    action: 'PLACE_FROM_STORAGE',
+                    target_id: targetId,
+                    parameters: {
+                        target_x: tx,
+                        target_y: ty,
+                        rotation: tr,
+                    },
+                });
+                store.dragFromStorageTag = null;
+                store.dragFromStorageStartPose = null;
+                resolve(r);
+            },
+            () => {
+                log('Place from storage cancelled.', 'info');
+                if (store.ghostState[targetId] && store.dragFromStorageStartPose) {
+                    const o = store.dragFromStorageStartPose;
+                    store.ghostState[targetId].x = o.x;
+                    store.ghostState[targetId].y = o.y;
+                    store.ghostState[targetId].rotation = o.rotation;
+                }
+                if (store.selectedComponent === targetId) {
+                    updateContextPanel(targetId);
+                }
+                render();
+                resolve({ ok: false, error: 'cancelled' });
+            }
+        );
+    });
+}
+
 // --- 2. Interaction Logic ---
 
 function getComponentSize(name) {
@@ -581,7 +698,24 @@ function getComponentRadius(name) {
     return Math.sqrt(size.width * size.width + size.height * size.height) / 2;
 }
 
-function checkCollision(targetId, x, y) {
+function checkCollision(targetId, x, y, opts = {}) {
+    const { forPlaceFromStorageDrag = false } = opts;
+    const comp = store.labState && store.labState.components && store.labState.components[targetId];
+    const st = comp ? comp.state : 'PLACED';
+    if (forPlaceFromStorageDrag) {
+        if (!isPlacedRegion(x, y)) {
+            return {
+                detected: true,
+                other: 'BREADBOARD AREA (release outside storage: not both x<0 and y<0)',
+            };
+        }
+    } else {
+        const reg = regionMoveBlocked(st, x, y);
+        if (reg.blocked) {
+            return { detected: true, other: reg.reason };
+        }
+    }
+
     const PADDING_MM = 5; // Minimal padding distance between circumscribed circles
     const r1 = getComponentRadius(targetId);
 
@@ -630,12 +764,39 @@ canvas.addEventListener('mousedown', (e) => {
     const hit = getComponentAtPosition(mouseX, mouseY);
     
     if (hit) {
+        if (store.dragFromStorageTag && hit.name !== store.dragFromStorageTag) {
+            store.dragFromStorageTag = null;
+            store.dragFromStorageStartPose = null;
+            store.selectedComponent = hit.name;
+            updateContextPanel(hit.name);
+            render();
+            log('Drag from storage cancelled (another part was selected).', 'info');
+            return;
+        }
         if (store.selectedComponent !== hit.name) {
             store.selectedComponent = hit.name;
             updateContextPanel(hit.name);
             render(); 
             log(`Selected ${hit.name}`, "info");
         } else {
+            const st = store.labState.components[hit.name] && store.labState.components[hit.name].state;
+            if (st === 'STORED') {
+                if (store.dragFromStorageTag === hit.name) {
+                    store.isDragging = true;
+                    store.draggingComponent = hit.name;
+                    const g = store.ghostState[hit.name];
+                    store.dragFromStorageStartPose = {
+                        x: g.x,
+                        y: g.y,
+                        rotation: typeof g.rotation === 'number' ? g.rotation : 0,
+                    };
+                    const p = mmToPx(g.x, g.y);
+                    store.dragOffset = { x: mouseX - p.x, y: mouseY - p.y };
+                    return;
+                }
+                log('Stored parts cannot be dragged; use Drag from storage in the panel, or type a pose.', 'warn');
+                return;
+            }
             store.isDragging = true;
             store.draggingComponent = hit.name;
             const p = mmToPx(store.ghostState[hit.name].x, store.ghostState[hit.name].y);
@@ -643,6 +804,9 @@ canvas.addEventListener('mousedown', (e) => {
         }
     } else {
         store.selectedComponent = null;
+        store.contextPanelStateSnapshot = null;
+        store.dragFromStorageTag = null;
+        store.dragFromStorageStartPose = null;
         contextPanel.style.display = 'none';
         render();
     }
@@ -676,56 +840,201 @@ function updateContextPanel(name) {
     }
 
     contextPanel.style.display = 'block';
-    
+
+    document.querySelectorAll('.ctx-dynamic-storage').forEach((el) => el.remove());
+
+    const placementState = comp.state || 'PLACED';
     ctxX.value = pose.x.toFixed(1);
     ctxY.value = pose.y.toFixed(1);
     ctxRot.value = (pose.rotation || 0).toFixed(1);
-    
-    // Generate Strategies Buttons
+
+    if (placementState === 'STORED') {
+        ctxMoveBtn.style.display = 'none';
+        const hint = document.createElement('div');
+        hint.className = 'ctx-dynamic-storage';
+        hint.style.marginTop = '8px';
+        hint.style.fontSize = '10px';
+        hint.style.color = '#94a3b8';
+        hint.style.lineHeight = '1.35';
+        hint.innerHTML =
+            'Stored in Q3 at <strong>cell center</strong> and <strong>0°</strong> by default. Use <strong>Drag from storage</strong> or set X/Y/Rot and <strong>Place from storage</strong>.';
+        selectedCompProperties.appendChild(hint);
+    } else {
+        ctxMoveBtn.style.display = 'flex';
+    }
+
+    // Generate Strategies Buttons (breadboard only)
     ctxStrategies.innerHTML = '';
-    Object.entries(store.availableStrategies).forEach(([stratKey, strat]) => {
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-secondary';
-        btn.style.width = '100%';
-        btn.style.marginBottom = '4px';
-        btn.style.fontSize = '10px';
-        btn.style.padding = '6px';
-        btn.style.textAlign = 'left';
-        btn.innerHTML = `<span class="material-icons-round" style="font-size: 12px; vertical-align: middle;">settings_suggest</span> ${strat.name}`;
-        btn.onclick = () => showParameterModal(stratKey, strat);
-        ctxStrategies.appendChild(btn);
-    });
+    if (placementState !== 'STORED' && store.availableStrategies) {
+        Object.entries(store.availableStrategies).forEach(([stratKey, strat]) => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-secondary';
+            btn.style.width = '100%';
+            btn.style.marginBottom = '4px';
+            btn.style.fontSize = '10px';
+            btn.style.padding = '6px';
+            btn.style.textAlign = 'left';
+            btn.innerHTML = `<span class="material-icons-round" style="font-size: 12px; vertical-align: middle;">settings_suggest</span> ${strat.name}`;
+            btn.onclick = () => showParameterModal(stratKey, strat);
+            ctxStrategies.appendChild(btn);
+        });
+    }
+
+    if (placementState === 'PLACED') {
+        const row = document.createElement('div');
+        row.className = 'ctx-dynamic-storage';
+        row.style.marginTop = '10px';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-secondary';
+        b.style.fontSize = '11px';
+        b.style.width = '100%';
+        b.innerHTML = '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">inventory_2</span> Move to storage (auto pack)';
+        b.onclick = () =>
+            sendCommand({ action: 'STORE_COMPONENT', target_id: name, parameters: {} });
+        row.appendChild(b);
+        ctxMoveBtn.parentNode.insertBefore(row, ctxMoveBtn.nextSibling);
+    }
+
+    if (placementState === 'STORED') {
+        const rowPlace = document.createElement('div');
+        rowPlace.className = 'ctx-dynamic-storage';
+        rowPlace.style.marginTop = '10px';
+        rowPlace.style.display = 'flex';
+        rowPlace.style.flexDirection = 'column';
+        rowPlace.style.gap = '6px';
+
+        const bPlace = document.createElement('button');
+        bPlace.type = 'button';
+        bPlace.className = 'btn btn-primary';
+        bPlace.style.fontSize = '11px';
+        bPlace.style.width = '100%';
+        bPlace.innerHTML =
+            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">north_east</span> Place from storage';
+        bPlace.onclick = async () => {
+            store.dragFromStorageTag = null;
+            store.dragFromStorageStartPose = null;
+            const tx = parseFloat(ctxX.value);
+            const ty = parseFloat(ctxY.value);
+            const trot = parseFloat(ctxRot.value);
+            if (!Number.isFinite(tx) || !Number.isFinite(ty) || !Number.isFinite(trot)) {
+                log('Invalid coordinates.', 'error');
+                return;
+            }
+            if (isStorageRegion(tx, ty)) {
+                log('Target must be outside the storage quadrant (not both x<0 and y<0).', 'error');
+                return;
+            }
+            await sendCommand({
+                action: 'PLACE_FROM_STORAGE',
+                target_id: name,
+                parameters: { target_x: tx, target_y: ty, rotation: trot },
+            });
+        };
+        rowPlace.appendChild(bPlace);
+
+        const bRecenter = document.createElement('button');
+        bRecenter.type = 'button';
+        bRecenter.className = 'btn btn-secondary';
+        bRecenter.style.fontSize = '11px';
+        bRecenter.style.width = '100%';
+        bRecenter.title = 'Robot moves part to cell center at 0° (standard storage pose).';
+        bRecenter.innerHTML =
+            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">center_focus_strong</span> Re-center in cell (0°)';
+        bRecenter.onclick = () => {
+            store.dragFromStorageTag = null;
+            store.dragFromStorageStartPose = null;
+            void sendCommand({ action: 'RECENTER_IN_STORAGE', target_id: name, parameters: {} });
+        };
+        rowPlace.appendChild(bRecenter);
+
+        const bDragFs = document.createElement('button');
+        bDragFs.type = 'button';
+        bDragFs.className = 'btn btn-secondary';
+        bDragFs.style.fontSize = '11px';
+        bDragFs.style.width = '100%';
+        bDragFs.title =
+            'Only this part can be dragged until you place or cancel. Release on the breadboard to confirm placement.';
+        if (store.dragFromStorageTag === name) {
+            bDragFs.disabled = true;
+            bDragFs.style.opacity = '0.95';
+            bDragFs.innerHTML =
+                '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">pan_tool</span> Drag mode — pull on canvas';
+            rowPlace.appendChild(bDragFs);
+            const bCancelDrag = document.createElement('button');
+            bCancelDrag.type = 'button';
+            bCancelDrag.className = 'btn btn-secondary';
+            bCancelDrag.style.fontSize = '10px';
+            bCancelDrag.style.width = '100%';
+            bCancelDrag.textContent = 'Cancel drag-from-storage mode';
+            bCancelDrag.onclick = () => {
+                store.dragFromStorageTag = null;
+                store.dragFromStorageStartPose = null;
+                log('Drag from storage mode cancelled.', 'info');
+                render();
+                updateContextPanel(name);
+            };
+            rowPlace.appendChild(bCancelDrag);
+        } else {
+            bDragFs.innerHTML =
+                '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">touch_app</span> Drag from storage';
+            bDragFs.onclick = () => {
+                store.dragFromStorageTag = name;
+                log('Drag mode: only this part can be dragged. Pull it onto the breadboard, release, then confirm.', 'info');
+                render();
+                updateContextPanel(name);
+            };
+            rowPlace.appendChild(bDragFs);
+        }
+
+        ctxMoveBtn.parentNode.insertBefore(rowPlace, ctxMoveBtn.nextSibling);
+    }
 
     // --- Motor Controls ---
     const existingMotor = document.getElementById('ctx-motor-controls');
     if (existingMotor) existingMotor.remove();
 
-    if (store.catalogMap[name] && store.catalogMap[name].motor_ids && store.catalogMap[name].motor_ids.length > 0) {
+    if (
+        placementState !== 'STORED' &&
+        store.catalogMap[name] &&
+        store.catalogMap[name].motor_ids &&
+        store.catalogMap[name].motor_ids.length > 0
+    ) {
         const motorSection = document.createElement('div');
         motorSection.id = 'ctx-motor-controls';
         motorSection.style.marginTop = '12px';
         motorSection.style.paddingTop = '12px';
         motorSection.style.borderTop = '1px solid #2a2e36';
         
-        motorSection.innerHTML = '<div style="font-size:11px; color:#94a3b8; margin-bottom:8px; font-weight:600;">MOTOR CONTROL (Relative)</div>';
+        motorSection.innerHTML = '<div style="font-size:11px; color:#94a3b8; margin-bottom:8px; font-weight:600;">MOTOR CONTROL (Relative) — θ = server-tracked cumulative angle</div>';
         
         store.catalogMap[name].motor_ids.forEach(mid => {
+            const block = document.createElement('div');
+            block.style.marginBottom = '10px';
+
             const row = document.createElement('div');
             row.style.display = 'flex';
             row.style.alignItems = 'center';
-            row.style.gap = '10px';
-            row.style.marginBottom = '8px';
+            row.style.flexWrap = 'wrap';
+            row.style.gap = '8px';
             
             const label = document.createElement('span');
             label.textContent = `M${mid}`;
             label.style.fontSize = '12px';
             label.style.color = '#cbd5e1';
-            label.style.width = '25px';
+            label.style.minWidth = '28px';
             
+            const angleSpan = document.createElement('span');
+            angleSpan.id = `ctx-motor-angle-${mid}`;
+            angleSpan.style.fontSize = '11px';
+            angleSpan.style.color = '#94a3b8';
+            angleSpan.style.fontFamily = 'ui-monospace, monospace';
+            angleSpan.textContent = 'θ —';
+
             const input = document.createElement('input');
             input.type = 'number';
             input.value = '100'; 
-            input.style.width = '60px';
+            input.style.width = '56px';
             input.style.fontSize = '12px';
             input.style.padding = '6px 8px';
             input.style.background = '#0f1115';
@@ -736,7 +1045,7 @@ function updateContextPanel(name) {
             
             const btnRev = document.createElement('button');
             btnRev.className = 'btn btn-secondary';
-            btnRev.style.padding = '6px 12px';
+            btnRev.style.padding = '6px 10px';
             btnRev.style.fontSize = '12px';
             btnRev.style.width = 'auto';
             btnRev.innerHTML = '<span class="material-icons-round" style="font-size:14px">remove</span>';
@@ -745,22 +1054,57 @@ function updateContextPanel(name) {
 
             const btnFwd = document.createElement('button');
             btnFwd.className = 'btn btn-secondary';
-            btnFwd.style.padding = '6px 12px';
+            btnFwd.style.padding = '6px 10px';
             btnFwd.style.fontSize = '12px';
             btnFwd.style.width = 'auto';
             btnFwd.innerHTML = '<span class="material-icons-round" style="font-size:14px">add</span>';
             btnFwd.title = "Jog Forward";
             btnFwd.onclick = () => moveMotor(name, mid, parseFloat(input.value));
-            
+
             row.appendChild(label);
+            row.appendChild(angleSpan);
             row.appendChild(btnRev);
             row.appendChild(input);
             row.appendChild(btnFwd);
-            motorSection.appendChild(row);
+            block.appendChild(row);
+
+            const row2 = document.createElement('div');
+            row2.style.display = 'flex';
+            row2.style.gap = '8px';
+            row2.style.marginTop = '4px';
+            row2.style.paddingLeft = '36px';
+
+            const btnHome = document.createElement('button');
+            btnHome.type = 'button';
+            btnHome.className = 'btn btn-secondary';
+            btnHome.style.padding = '4px 10px';
+            btnHome.style.fontSize = '10px';
+            btnHome.style.width = 'auto';
+            btnHome.textContent = 'Send to home';
+            btnHome.title = 'Move motor by −θ so tracked angle becomes 0';
+            btnHome.onclick = () => motorSendHome(name, mid);
+
+            const btnZero = document.createElement('button');
+            btnZero.type = 'button';
+            btnZero.className = 'btn btn-secondary';
+            btnZero.style.padding = '4px 10px';
+            btnZero.style.fontSize = '10px';
+            btnZero.style.width = 'auto';
+            btnZero.textContent = 'Set 0';
+            btnZero.title = 'Define current position as θ = 0 (no move)';
+            btnZero.onclick = () => motorSetZero(name, mid);
+
+            row2.appendChild(btnHome);
+            row2.appendChild(btnZero);
+            block.appendChild(row2);
+
+            motorSection.appendChild(block);
         });
         
         ctxStrategies.parentNode.appendChild(motorSection);
     }
+
+    store.contextPanelStateSnapshot = placementState;
 }
 
 async function moveMotor(targetId, motorId, dist) {
@@ -771,6 +1115,39 @@ async function moveMotor(targetId, motorId, dist) {
             motor_id: motorId,
             distance: dist
         }
+    });
+}
+
+async function motorSendHome(targetId, motorId) {
+    await sendCommand({
+        action: "MOTOR_SEND_HOME",
+        target_id: targetId,
+        parameters: { motor_id: motorId }
+    });
+}
+
+async function motorSetZero(targetId, motorId) {
+    await sendCommand({
+        action: "MOTOR_SET_ZERO",
+        target_id: targetId,
+        parameters: { motor_id: motorId }
+    });
+}
+
+/** Refresh tracked motor angle labels from lab-state (pose.motor_rotations). */
+function updateMotorAngleLabels(tagId) {
+    if (!tagId || !store.labState || !store.labState.components) return;
+    const comp = store.labState.components[tagId];
+    if (!comp) return;
+    const mr = (comp.pose && comp.pose.motor_rotations) || {};
+    const mids = store.catalogMap[tagId] && store.catalogMap[tagId].motor_ids;
+    if (!mids || !mids.length) return;
+    mids.forEach((mid) => {
+        const el = document.getElementById(`ctx-motor-angle-${mid}`);
+        if (!el) return;
+        const v = mr[String(mid)];
+        const n = (v !== undefined && v !== null && Number.isFinite(Number(v))) ? Number(v) : 0;
+        el.textContent = `θ ${n.toFixed(2)}`;
     });
 }
 
@@ -882,36 +1259,58 @@ canvas.addEventListener('wheel', (e) => {
 canvas.addEventListener('mouseup', async (e) => {
     if (store.isDragging && store.draggingComponent) {
         store.isDragging = false;
-        
-        // Collision Check
-        const current = store.ghostState[store.draggingComponent];
-        const collision = checkCollision(store.draggingComponent, current.x, current.y);
-        
+        const dc = store.draggingComponent;
+        const current = store.ghostState[dc];
+        const labSt = store.labState.components[dc] && store.labState.components[dc].state;
+        const isDragFromStoragePlace =
+            store.dragFromStorageTag === dc && labSt === 'STORED';
+
+        const collision = isDragFromStoragePlace
+            ? checkCollision(dc, current.x, current.y, { forPlaceFromStorageDrag: true })
+            : checkCollision(dc, current.x, current.y);
+
         if (collision.detected) {
-             log(`Move cancelled: Collision with ${collision.other}`, "error");
-             
-             // Snap back to original position from store.labState if possible
-             if (store.labState.components[store.draggingComponent] && store.labState.components[store.draggingComponent].state === 'PLACED') {
-                 const original = store.labState.components[store.draggingComponent].pose;
-                 store.ghostState[store.draggingComponent].x = original.x;
-                 store.ghostState[store.draggingComponent].y = original.y;
-                 store.ghostState[store.draggingComponent].rotation = original.rotation;
-             }
-             render();
-             store.draggingComponent = null;
-             return;
+            log(`Move cancelled: ${collision.other}`, 'error');
+
+            if (labSt === 'PLACED') {
+                const original = store.labState.components[dc].pose;
+                store.ghostState[dc].x = original.x;
+                store.ghostState[dc].y = original.y;
+                store.ghostState[dc].rotation = original.rotation;
+            } else if (
+                labSt === 'STORED' &&
+                store.dragFromStorageStartPose &&
+                store.dragFromStorageTag === dc
+            ) {
+                const o = store.dragFromStorageStartPose;
+                store.ghostState[dc].x = o.x;
+                store.ghostState[dc].y = o.y;
+                store.ghostState[dc].rotation = o.rotation;
+            }
+            render();
+            store.draggingComponent = null;
+            return;
         }
 
-        await sendCommand({
-            action: "MOVE_COMPONENT",
-            target_id: store.draggingComponent,
-            parameters: {
-                target_x: store.ghostState[store.draggingComponent].x,
-                target_y: store.ghostState[store.draggingComponent].y,
-                rotation: store.ghostState[store.draggingComponent].rotation
-            }
-        });
-        
+        if (isDragFromStoragePlace) {
+            const g = store.ghostState[dc];
+            await confirmPlaceFromStorageDrag(dc, {
+                target_x: g.x,
+                target_y: g.y,
+                rotation: typeof g.rotation === 'number' ? g.rotation : 0,
+            });
+        } else {
+            await sendCommand({
+                action: 'MOVE_COMPONENT',
+                target_id: dc,
+                parameters: {
+                    target_x: store.ghostState[dc].x,
+                    target_y: store.ghostState[dc].y,
+                    rotation: store.ghostState[dc].rotation,
+                },
+            });
+        }
+
         store.draggingComponent = null;
     }
 });
@@ -1200,6 +1599,57 @@ function clearCanvas() {
     }
 }
 
+/** Visual for third quadrant (x<0, y<0): storage / inventory area. */
+function drawStorageZone() {
+    const pSw = mmToPx(LAB_X_MIN, LAB_Y_MIN);
+    const pSe = mmToPx(0, LAB_Y_MIN);
+    const pNe = mmToPx(0, 0);
+    const pNw = mmToPx(LAB_X_MIN, 0);
+    ctx.beginPath();
+    ctx.moveTo(pSw.x, pSw.y);
+    ctx.lineTo(pSe.x, pSe.y);
+    ctx.lineTo(pNe.x, pNe.y);
+    ctx.lineTo(pNw.x, pNw.y);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.07)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.95)';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.fillText('Storage (Q3)', pSw.x + 10, pSw.y - 10);
+
+    const spec = store.storageGridSpec;
+    if (!spec || !spec.nx || !spec.ny) return;
+    const { nx, ny, cell_width_mm: cw, cell_height_mm: ch, q3 } = spec;
+    const x0 = q3.x_min;
+    const y0 = q3.y_min;
+    ctx.strokeStyle = 'rgba(96, 165, 250, 0.55)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    for (let i = 0; i <= nx; i++) {
+        const xm = x0 + i * cw;
+        const a = mmToPx(xm, y0);
+        const b = mmToPx(xm, 0);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+    }
+    for (let j = 0; j <= ny; j++) {
+        const ym = y0 + j * ch;
+        const a = mmToPx(x0, ym);
+        const b = mmToPx(0, ym);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+    }
+}
+
 /** Clip segment of line x = a*y + b to lab bounds; returns [p1, p2] in mm or null. */
 function clipLaserLineToBounds(a, b) {
     const pts = [];
@@ -1273,6 +1723,15 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         // Use circumscribed circle for halo to ensure it covers the shape
         const r = Math.sqrt(halfW*halfW + halfH*halfH) + 5;
         ctx.arc(0, 0, r, 0, Math.PI * 2); 
+        ctx.stroke();
+    }
+
+    if (store.dragFromStorageTag === name) {
+        ctx.strokeStyle = 'rgba(34, 211, 238, 0.95)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        const rDrag = Math.sqrt(halfW * halfW + halfH * halfH) + 10;
+        ctx.arc(0, 0, rDrag, 0, Math.PI * 2);
         ctx.stroke();
     }
 
@@ -1445,7 +1904,13 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     }
     
     ctx.fillText(displayName, 0, -halfH - 10);
-    
+    const stLab = store.labState && store.labState.components[name] && store.labState.components[name].state;
+    if (mode === 'SOLID' && stLab === 'STORED') {
+        ctx.fillStyle = 'rgba(165, 180, 252, 0.95)';
+        ctx.font = '600 9px Inter, sans-serif';
+        ctx.fillText('STORAGE', 0, -halfH - 24);
+    }
+
     if (mode === 'PENDING') {
         ctx.fillStyle = '#f59e0b';
         ctx.font = 'bold 10px Inter, sans-serif';
@@ -1500,13 +1965,14 @@ function drawOptimizationGraph() {
 
 function render() {
     clearCanvas();
+    drawStorageZone();
     drawLaserPath();
 
     if (!store.labState) return;
 
     // 1. Draw Physical Components (Solid)
     Object.entries(store.labState.components).forEach(([name, comp]) => {
-        if (comp.state === 'PLACED') {
+        if (comp.state === 'PLACED' || comp.state === 'STORED') {
             drawComponent(name, comp.pose, comp.type, 'SOLID');
         }
     });
@@ -1520,7 +1986,7 @@ function render() {
         
         // Draw Drift Line (Nominal vs Physical)
         const physical = store.labState.components[name];
-        if (physical && physical.state === 'PLACED') {
+        if (physical && (physical.state === 'PLACED' || physical.state === 'STORED')) {
             const from = mmToPx(physical.pose.x, physical.pose.y);
             const to = mmToPx(pose.x, pose.y);
             ctx.strokeStyle = isPending ? '#f59e0b' : 'rgba(255, 255, 255, 0.2)';
@@ -1575,8 +2041,7 @@ function updateUI() {
     }
 
     componentList.innerHTML = '';
-    // libraryList.innerHTML = ''; // DO NOT TOUCH LIBRARY LIST IN UPDATE LOOP
-    
+
     const components = store.labState.components || {};
     
     // Check if there are any placed items
@@ -1587,9 +2052,6 @@ function updateUI() {
         componentList.innerHTML = '<div style="padding: 20px; text-align: center; color: #64748b; font-size: 11px;">No components placed.</div>';
     }
     
-    // REMOVED: All logic that tries to put items into libraryList based on state
-    // The libraryList is exclusively for the CATALOG (Add Component Popup)
-
     Object.entries(components).forEach(([name, comp]) => {
         const card = document.createElement('div');
         card.className = 'component-card';
@@ -1597,7 +2059,7 @@ function updateUI() {
         // card.draggable = true; // Dragging from sidebar to move? Maybe, but mostly we select and use context panel.
         
         // card.addEventListener('dragstart', (e) => handleInventoryDragStart(e, name));
-        const isPlaced = comp.state === 'PLACED';
+        const isPlaced = comp.state === 'PLACED' || comp.state === 'STORED';
         
         // Resolve Real Name from Catalog using Tag ID
         let displayName = name; // Default to key if unknown
@@ -1619,6 +2081,8 @@ function updateUI() {
         let statusDot = `<div class="status-dot ${isPlaced ? 'placed' : 'inventory'}" title="${comp.state}"></div>`;
         if (comp.intent && comp.intent.is_optimized) {
             statusDot = `<div class="status-dot" style="background-color: #10b981; box-shadow: 0 0 6px #10b981;" title="Optimized"></div>`;
+        } else if (comp.state === 'STORED') {
+            statusDot = `<div class="status-dot" style="background-color: #6366f1; box-shadow: 0 0 6px rgba(99,102,241,0.5);" title="Stored (Q3)"></div>`;
         } else if (comp.state === 'PLACED') {
              // statusDot = `<div class="status-dot" style="background-color: #f59e0b;" title="Drifted/Manual"></div>`;
         }
@@ -1649,7 +2113,159 @@ function updateUI() {
     });
 
     syncTableCamMockHint();
+    updateMotorAngleLabels(store.selectedComponent);
+    updateLayoutWarningBanner();
     render();
+}
+
+function updateLayoutWarningBanner() {
+    const el = document.getElementById('layout-warnings');
+    if (!el || !store.labState) return;
+    const local = collectLayoutWarnings(store.labState);
+    const server = (store.layoutIssues || []).map((i) => i.message);
+    const seen = new Set();
+    const lines = [];
+    for (const s of [...server, ...local]) {
+        if (!seen.has(s)) {
+            seen.add(s);
+            lines.push(s);
+        }
+    }
+    if (!lines.length) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    el.style.display = 'block';
+    el.innerHTML =
+        '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;color:#f59e0b;">warning</span> ' +
+        '<strong>Layout</strong>: ' +
+        lines.map((w) => `<span style="display:block;margin-top:4px;">${w}</span>`).join('');
+}
+
+const dismissedLayoutIssueKeys = new Set();
+
+function layoutIssueKey(issue) {
+    return `${issue.kind}:${issue.tag_id}`;
+}
+
+function layoutConflictMoveDefaults(tagId) {
+    const c = store.labState?.components?.[tagId];
+    const g = store.ghostState[tagId];
+    const rot = (c?.pose && typeof c.pose.rotation === 'number' ? c.pose.rotation : 0);
+    if (g && typeof g.x === 'number' && typeof g.y === 'number' && !isStorageRegion(g.x, g.y)) {
+        return { x: g.x, y: g.y, rotation: typeof g.rotation === 'number' ? g.rotation : rot };
+    }
+    return { x: 150, y: 150, rotation: rot };
+}
+
+function removeLayoutConflictModal() {
+    document.getElementById('layout-conflict-modal')?.remove();
+}
+
+function updateLayoutConflictModal() {
+    if (!store.labState || store.labState.system_status !== 'IDLE') {
+        removeLayoutConflictModal();
+        return;
+    }
+    const issues = store.layoutIssues || [];
+    for (const k of [...dismissedLayoutIssueKeys]) {
+        if (!issues.some((i) => layoutIssueKey(i) === k)) dismissedLayoutIssueKeys.delete(k);
+    }
+    const next = issues.find((i) => !dismissedLayoutIssueKeys.has(layoutIssueKey(i)));
+    if (!next) {
+        removeLayoutConflictModal();
+        return;
+    }
+    const existing = document.getElementById('layout-conflict-modal');
+    const prevKey = existing?.dataset?.issueKey;
+    const key = layoutIssueKey(next);
+    if (existing && prevKey === key) return;
+
+    removeLayoutConflictModal();
+    const overlay = document.createElement('div');
+    overlay.id = 'layout-conflict-modal';
+    overlay.dataset.issueKey = key;
+    overlay.style.cssText =
+        'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:2990;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+
+    const card = document.createElement('div');
+    card.style.cssText =
+        'background:#181b21;border:1px solid rgba(245,158,11,0.45);border-radius:10px;padding:22px;max-width:440px;width:92%;box-shadow:0 20px 50px rgba(0,0,0,0.65);';
+
+    const kind = next.kind;
+    const tid = next.tag_id;
+    let bodyHtml = `<h3 style="margin:0 0 8px 0;color:#e2e8f0;font-size:16px;display:flex;align-items:center;gap:8px;"><span class="material-icons-round" style="color:#f59e0b;font-size:22px;">warning</span> Inventory layout</h3>`;
+    bodyHtml += `<p style="margin:0 0 16px 0;color:#94a3b8;font-size:13px;line-height:1.45;">${next.message}</p>`;
+
+    if (kind === 'PLACED_IN_Q3') {
+        const d = layoutConflictMoveDefaults(tid);
+        bodyHtml += `<div style="font-size:11px;color:#64748b;margin-bottom:8px;">Move to a breadboard pose (mm, degrees):</div>`;
+        bodyHtml += `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">`;
+        bodyHtml += `<label style="font-size:10px;color:#94a3b8;">X<br><input id="lconf-tx" type="number" step="0.1" value="${d.x.toFixed(1)}" style="width:100%;padding:6px;border-radius:6px;border:1px solid #334155;background:#0f1115;color:#e2e8f0;"></label>`;
+        bodyHtml += `<label style="font-size:10px;color:#94a3b8;">Y<br><input id="lconf-ty" type="number" step="0.1" value="${d.y.toFixed(1)}" style="width:100%;padding:6px;border-radius:6px;border:1px solid #334155;background:#0f1115;color:#e2e8f0;"></label>`;
+        bodyHtml += `<label style="font-size:10px;color:#94a3b8;">Rot<br><input id="lconf-tr" type="number" step="0.1" value="${d.rotation.toFixed(1)}" style="width:100%;padding:6px;border-radius:6px;border:1px solid #334155;background:#0f1115;color:#e2e8f0;"></label>`;
+        bodyHtml += `</div>`;
+        bodyHtml += `<div style="display:flex;flex-direction:column;gap:8px;">`;
+        bodyHtml += `<button type="button" id="lconf-move" class="btn btn-primary" style="width:100%;justify-content:center;">Move to target</button>`;
+        bodyHtml += `<button type="button" id="lconf-store" class="btn btn-secondary" style="width:100%;justify-content:center;">Store with packing (grid)</button>`;
+        bodyHtml += `<button type="button" id="lconf-dismiss" class="btn btn-secondary" style="width:100%;opacity:0.85;">Dismiss</button>`;
+        bodyHtml += `</div>`;
+    } else if (kind === 'STORED_OUTSIDE_Q3' || kind === 'STORED_OFF_SLOT') {
+        bodyHtml += `<div style="display:flex;flex-direction:column;gap:8px;">`;
+        bodyHtml += `<button type="button" id="lconf-affirm" class="btn btn-primary" style="width:100%;justify-content:center;">Mark as PLACED (keep current pose)</button>`;
+        bodyHtml += `<button type="button" id="lconf-repack" class="btn btn-secondary" style="width:100%;justify-content:center;">Repack into storage (grid)</button>`;
+        bodyHtml += `<button type="button" id="lconf-dismiss" class="btn btn-secondary" style="width:100%;opacity:0.85;">Dismiss</button>`;
+        bodyHtml += `</div>`;
+    } else {
+        bodyHtml += `<button type="button" id="lconf-dismiss" class="btn btn-secondary" style="width:100%;">Dismiss</button>`;
+    }
+
+    card.innerHTML = bodyHtml;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const dismiss = () => {
+        dismissedLayoutIssueKeys.add(key);
+        removeLayoutConflictModal();
+    };
+
+    overlay.querySelector('#lconf-dismiss')?.addEventListener('click', dismiss);
+
+    overlay.querySelector('#lconf-move')?.addEventListener('click', async () => {
+        const tx = parseFloat(document.getElementById('lconf-tx')?.value || '0');
+        const ty = parseFloat(document.getElementById('lconf-ty')?.value || '0');
+        const tr = parseFloat(document.getElementById('lconf-tr')?.value || '0');
+        if (isStorageRegion(tx, ty)) {
+            log('Target must not be in storage quadrant (not both x<0 and y<0).', 'error');
+            return;
+        }
+        dismissedLayoutIssueKeys.add(key);
+        removeLayoutConflictModal();
+        await executeSendCommand({
+            action: 'MOVE_COMPONENT',
+            target_id: tid,
+            parameters: { target_x: tx, target_y: ty, rotation: tr },
+        });
+    });
+
+    overlay.querySelector('#lconf-store')?.addEventListener('click', async () => {
+        dismissedLayoutIssueKeys.add(key);
+        removeLayoutConflictModal();
+        await executeSendCommand({ action: 'STORE_COMPONENT', target_id: tid, parameters: {} });
+    });
+
+    overlay.querySelector('#lconf-affirm')?.addEventListener('click', async () => {
+        dismissedLayoutIssueKeys.add(key);
+        removeLayoutConflictModal();
+        await executeSendCommand({ action: 'AFFIRM_PLACED_AT_CURRENT', target_id: tid, parameters: {} });
+    });
+
+    overlay.querySelector('#lconf-repack')?.addEventListener('click', async () => {
+        dismissedLayoutIssueKeys.add(key);
+        removeLayoutConflictModal();
+        await executeSendCommand({ action: 'REPACK_STORAGE', target_id: tid, parameters: {} });
+    });
 }
 
 function syncTableCamMockHint() {
@@ -1657,97 +2273,6 @@ function syncTableCamMockHint() {
     if (!el || !store.labState) return;
     el.style.display = store.labState.lab_mode === 'MOCK' ? 'block' : 'none';
 }
-
-// --- Library Controls ---
-
-addComponentBtn.addEventListener('click', async () => {
-    libraryPopup.style.display = 'block'; // Show immediately
-    
-    // Use cached catalog if available to avoid refetching
-    // if (store.catalogCache) {
-    //    renderCatalog(store.catalogCache);
-    //    return;
-    // }
-
-    libraryList.innerHTML = '<div style="padding:10px; text-align:center; color:#64748b">Loading catalog...</div>';
-    
-    try {
-        const response = await fetch('/api/catalog');
-        if (!response.ok) throw new Error("Failed to load catalog");
-        store.catalogCache = await response.json();
-        renderCatalog(store.catalogCache);
-    } catch (e) {
-        libraryList.innerHTML = `<div style="padding:10px; text-align:center; color:#ef4444">Error: ${e.message}</div>`;
-    }
-});
-
-function renderCatalog(catalog) {
-    libraryList.innerHTML = '';
-    if (catalog.length === 0) {
-        libraryList.innerHTML = '<div style="padding:10px; text-align:center; color:#64748b">Catalog empty.</div>';
-        return;
-    }
-
-    // Get current lab components to check what is already placed
-    const labComponents = store.labState ? store.labState.components : {};
-    const placedTagIds = new Set(Object.values(labComponents).map(c => c.id));
-
-    catalog.forEach(item => {
-        const card = document.createElement('div');
-        card.className = 'component-card';
-        
-        const icon = getComponentIcon(item.type);
-        const isAlreadyPlaced = placedTagIds.has(item.tag_id);
-        
-        let actionBtn = '';
-        if (isAlreadyPlaced) {
-            actionBtn = `<div style="font-size: 10px; color: #10b981; font-weight: 600; padding: 4px 8px;">IN LAB</div>`;
-        } else {
-            actionBtn = `<div class="btn btn-primary req-btn" style="padding: 4px 8px; font-size: 10px; width: auto;">Request</div>`;
-        }
-        
-        card.innerHTML = `
-            <div class="comp-icon material-icons-round">${icon}</div>
-            <div class="comp-info">
-                <span class="comp-name">${item.name}</span>
-                <span class="comp-meta">${item.type.replace('OPTICAL_', '')} • ${item.tag_id}</span>
-            </div>
-            ${actionBtn}
-        `;
-        
-        if (!isAlreadyPlaced) {
-            // Click to Request Placement
-            const btn = card.querySelector('.req-btn');
-            btn.addEventListener('click', async () => {
-                log(`Requesting placement for ${item.name}...`, "info");
-                try {
-                    const res = await fetch('/api/components', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(item)
-                    });
-                    if (res.ok) {
-                        const data = await res.json();
-                        log(data.message, "success");
-                        libraryPopup.style.display = 'none';
-                    } else {
-                        log("Placement request failed.", "error");
-                    }
-                } catch (e) {
-                    log("Network error requesting placement.", "error");
-                }
-            });
-        }
-        
-        libraryList.appendChild(card);
-    });
-}
-
-// Removed: handleInventoryDragStart for new items (logic replaced by Request to Place)
-
-libraryClose.addEventListener('click', () => {
-    libraryPopup.style.display = 'none';
-});
 
 function renderRecipes() {
     recipeList.innerHTML = '';
@@ -2132,6 +2657,7 @@ async function runLabStateRefresh() {
 
 function init() {
     log("Interface loaded.");
+    fetchStorageGridSpec();
     fetchStrategies();
     fetchRecipes();
     fetchLabState();

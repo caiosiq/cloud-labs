@@ -5,7 +5,7 @@
 
 import { COBYLA_DEFAULT_OBJECTIVE, NEWTON_DEFAULTS } from './command-parse.js';
 
-const VERBS = ['?', 'help', 'refresh', 'move', 'motor', 'optimize', 'json'];
+const VERBS = ['?', 'help', 'refresh', 'move', 'motor', 'motorhome', 'motorset0', 'optimize', 'json'];
 const STRATEGIES = ['NEWTON', 'COBYLA'];
 const AXES = ['x', 'y'];
 
@@ -23,7 +23,10 @@ function placedTagIds(deps) {
     const ls = deps.getLabState && deps.getLabState();
     if (!ls || !ls.components) return [];
     return Object.keys(ls.components)
-        .filter((id) => ls.components[id].state === 'PLACED')
+        .filter((id) => {
+            const s = ls.components[id].state;
+            return s === 'PLACED' || s === 'STORED';
+        })
         .sort();
 }
 
@@ -97,7 +100,7 @@ export function getTabCompletions(line, caret, deps) {
         if (v === 'json' || v === 'help' || v === '?' || v === 'refresh') {
             return [];
         }
-        if (v === 'move' || v === 'motor' || v === 'optimize') {
+        if (v === 'move' || v === 'motor' || v === 'motorhome' || v === 'motorset0' || v === 'optimize') {
             return tags;
         }
         return [];
@@ -126,6 +129,23 @@ export function getTabCompletions(line, caret, deps) {
     }
 
     if (verb === 'motor') {
+        if (tokens.length === 1 && endsWithSpace) {
+            return tags;
+        }
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(tags, current);
+        }
+        if (tokens.length === 2 && endsWithSpace) {
+            const mids = motorIdStrings(deps, tokens[1]);
+            return mids.length ? mids : [];
+        }
+        if (tokens.length === 3 && !endsWithSpace) {
+            return filterPrefix(motorIdStrings(deps, tokens[1]), current);
+        }
+        return [];
+    }
+
+    if (verb === 'motorhome' || verb === 'motorset0') {
         if (tokens.length === 1 && endsWithSpace) {
             return tags;
         }

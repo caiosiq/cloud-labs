@@ -7,6 +7,15 @@ from io import BytesIO
 from typing import Any, Dict, Optional, Tuple
 
 from .base import LabCommunicator
+from . import motor_rotation_store as motor_rot
+from .storage_region import (
+    STORAGE_NOMINAL_ROTATION_DEG,
+    find_storage_slot_and_center,
+    is_placed_region,
+    is_storage_region,
+    nominal_center_pose_for_stored_entry,
+    random_placed_position,
+)
 
 # Constants
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -64,6 +73,17 @@ class MockLabCommunicator(LabCommunicator):
                 break
         return size
 
+    def _get_component_wh(self, tag_id: str) -> Tuple[float, float]:
+        for item in self.catalog:
+            if item.get("tag_id") == tag_id:
+                s = item.get("size")
+                if isinstance(s, dict):
+                    return float(s.get("width", 90)), float(s.get("height", 90))
+                if isinstance(s, (int, float)):
+                    v = float(s)
+                    return v, v
+        return 90.0, 90.0
+
     def _read_state(self) -> Dict[str, Any]:
         with open(self.state_file, "r") as f:
             return json.load(f)
@@ -72,8 +92,35 @@ class MockLabCommunicator(LabCommunicator):
         with open(self.state_file, "w") as f:
             json.dump(state, f, indent=2)
 
+    def _catalog_meta_for_tag(self, tag_id: str) -> Optional[Dict[str, Any]]:
+        for item in self.catalog:
+            if item.get("tag_id") == tag_id:
+                return item
+        return None
+
+    def _inject_motor_rotations_into_state(self, state: Dict[str, Any]) -> None:
+        components = state.get("components") or {}
+        if not isinstance(components, dict):
+            return
+        for tag_id, comp in components.items():
+            if not isinstance(comp, dict):
+                continue
+            meta = self._catalog_meta_for_tag(tag_id)
+            mids = (meta or {}).get("motor_ids") or []
+            if not mids:
+                continue
+            mr = motor_rot.get_rotations_for_motor_ids(tag_id, list(mids))
+            pose = comp.setdefault("pose", {})
+            if isinstance(pose, dict):
+                pose["motor_rotations"] = dict(mr)
+            intent = comp.setdefault("intent", {})
+            if isinstance(intent, dict):
+                intent["nominal_motor_rotations"] = dict(mr)
+
     def get_lab_state(self) -> Dict[str, Any]:
-        return self._read_state()
+        state = self._read_state()
+        self._inject_motor_rotations_into_state(state)
+        return state
 
     def refresh_state(self):
         """
@@ -90,50 +137,52 @@ class MockLabCommunicator(LabCommunicator):
 
     async def move_component(self, target_id: str, target_pose: Dict[str, float]):
         print(f"[MOCK LAB] Moving {target_id}...")
-        
-        # 1. Lock
         state = self._read_state()
-        state["system_status"] = "BUSY"
-        self._write_state(state)
-        
-        # 2. Simulate Delay
-        await asyncio.sleep(2)
-        
-        # 3. Update State
-        state = self._read_state()
-        
-        # Simulate Noise
-        noise_x = random.uniform(-0.5, 0.5)
-        noise_y = random.uniform(-0.5, 0.5)
-        
-        if "components" not in state: state["components"] = {}
-        
-        if target_id not in state["components"]:
+        if "components" not in state or target_id not in state["components"]:
             print(f"[MOCK LAB] Error: Cannot move component {target_id} - Not found in Lab State.")
-            state["system_status"] = "IDLE"
-            self._write_state(state)
             return
 
         comp = state["components"][target_id]
+        if comp.get("state") == "STORED":
+            print(f"[MOCK LAB] Refusing move: {target_id} is STORED (use Place from storage).")
+            return
+
+        tx = float(target_pose.get("target_x", target_pose.get("x", 0)))
+        ty = float(target_pose.get("target_y", target_pose.get("y", 0)))
+        trot = float(target_pose.get("rotation", 0))
+
+        if comp.get("state") == "PLACED" and is_storage_region(tx, ty):
+            print(f"[MOCK LAB] Refusing move: target ({tx},{ty}) is in storage quadrant (use Store).")
+            return
+
+        # 1. Lock
+        state["system_status"] = "BUSY"
+        self._write_state(state)
+
+        # 2. Simulate Delay
+        await asyncio.sleep(2)
+
+        # 3. Update State
+        state = self._read_state()
+        comp = state["components"][target_id]
+
+        noise_x = random.uniform(-0.5, 0.5)
+        noise_y = random.uniform(-0.5, 0.5)
+
         comp["state"] = "PLACED"
-        
-        tx = target_pose.get("target_x", target_pose.get("x", 0))
-        ty = target_pose.get("target_y", target_pose.get("y", 0))
-        trot = target_pose.get("rotation", 0)
-        
         comp["pose"] = {
             "x": tx + noise_x,
             "y": ty + noise_y,
-            "rotation": trot
+            "rotation": trot,
         }
-        
         comp["intent"] = {
             "nominal_pose": {"x": tx, "y": ty, "rotation": trot},
             "placement_strategy": "MANUAL",
             "last_optimized_pose": None,
-            "is_optimized": False
+            "is_optimized": False,
         }
-        
+        comp.setdefault("metadata", {}).pop("storage_slot", None)
+
         state["last_updated"] = datetime.now().isoformat()
         state["system_status"] = "IDLE"
         self._write_state(state)
@@ -141,7 +190,17 @@ class MockLabCommunicator(LabCommunicator):
 
     async def move_motor(self, target_id: str, motor_id: int, distance: float):
         print(f"[MOCK LAB] Moving motor {motor_id} of {target_id} by {distance}...")
-        
+        state = self._read_state()
+        comp = (state.get("components") or {}).get(target_id)
+        if comp and comp.get("state") == "STORED":
+            print(f"[MOCK LAB] Refusing motor move: {target_id} is STORED.")
+            return
+        meta = self._catalog_meta_for_tag(target_id)
+        mids = (meta or {}).get("motor_ids") or []
+        if not meta or motor_id not in mids:
+            print(f"[MOCK LAB] Error: motor_id {motor_id} invalid for {target_id} (motor_ids={mids}).")
+            return
+
         # Lock
         state = self._read_state()
         state["system_status"] = "BUSY"
@@ -149,15 +208,42 @@ class MockLabCommunicator(LabCommunicator):
         
         await asyncio.sleep(1)
         
+        motor_rot.add_delta(target_id, motor_id, float(distance))
+
         # Unlock
         state = self._read_state()
         state["system_status"] = "IDLE"
         self._write_state(state)
         print(f"[MOCK LAB] Motor move complete.")
 
+    async def motor_send_home(self, target_id: str, motor_id: int):
+        meta = self._catalog_meta_for_tag(target_id)
+        mids = (meta or {}).get("motor_ids") or []
+        if not meta or motor_id not in mids:
+            print(f"[MOCK LAB] motor_send_home: invalid tag or motor_id for {target_id} m{motor_id}")
+            return
+        cur = motor_rot.get_angle(target_id, motor_id)
+        if abs(cur) < 1e-12:
+            return
+        await self.move_motor(target_id, motor_id, -cur)
+
+    async def motor_set_zero(self, target_id: str, motor_id: int):
+        meta = self._catalog_meta_for_tag(target_id)
+        mids = (meta or {}).get("motor_ids") or []
+        if not meta or motor_id not in mids:
+            print(f"[MOCK LAB] motor_set_zero: invalid tag or motor_id for {target_id} m{motor_id}")
+            return
+        motor_rot.set_zero(target_id, motor_id)
+        print(f"[MOCK LAB] Motor {motor_id} on {target_id}: zero reference set (software).")
+
     async def optimize_component(self, target_id: str, strategy: str, params: Dict[str, Any]):
         print(f"[MOCK LAB] Optimizing {target_id} with {strategy}...")
-        
+        state = self._read_state()
+        comp = (state.get("components") or {}).get(target_id)
+        if comp and comp.get("state") == "STORED":
+            print(f"[MOCK LAB] Refusing optimize: {target_id} is STORED.")
+            return
+
         state = self._read_state()
         state["system_status"] = "OPTIMIZING"
         self._write_state(state)
@@ -192,71 +278,241 @@ class MockLabCommunicator(LabCommunicator):
             self._write_state(state)
         await asyncio.sleep(1)
 
+    async def store_component(self, target_id: str):
+        print(f"[MOCK LAB] Storing {target_id}...")
+        state = self._read_state()
+        comp = (state.get("components") or {}).get(target_id)
+        if not comp:
+            print(f"[MOCK LAB] store: {target_id} not in state")
+            return
+        if comp.get("state") != "PLACED":
+            print(f"[MOCK LAB] store: {target_id} must be PLACED (got {comp.get('state')})")
+            return
+        w, h = self._get_component_wh(target_id)
+        slot = find_storage_slot_and_center(
+            state.get("components") or {},
+            target_id,
+            w,
+            h,
+            lambda tid: self._get_component_wh(tid),
+        )
+        if not slot:
+            print("[MOCK LAB] No free storage slot in Q3.")
+            return
+        x, y, si, sj = slot
+        rot = STORAGE_NOMINAL_ROTATION_DEG
+        state["system_status"] = "BUSY"
+        self._write_state(state)
+        await asyncio.sleep(1.5)
+        state = self._read_state()
+        comp = state["components"][target_id]
+        comp["state"] = "STORED"
+        comp["pose"] = {"x": x, "y": y, "rotation": rot}
+        comp["intent"] = {
+            "nominal_pose": {"x": x, "y": y, "rotation": rot},
+            "placement_strategy": "STORAGE",
+            "last_optimized_pose": None,
+            "is_optimized": False,
+        }
+        md = comp.setdefault("metadata", {})
+        md["storage_slot"] = {"i": si, "j": sj}
+        state["system_status"] = "IDLE"
+        state["last_updated"] = datetime.now().isoformat()
+        self._write_state(state)
+        print(f"[MOCK LAB] Stored {target_id} at ({x:.1f}, {y:.1f}) slot=({si},{sj})")
+
+    async def place_from_storage(self, target_id: str, target_pose: Dict[str, float]):
+        print(f"[MOCK LAB] Place from storage {target_id}...")
+        state = self._read_state()
+        comp = (state.get("components") or {}).get(target_id)
+        if not comp or comp.get("state") != "STORED":
+            print(f"[MOCK LAB] place_from_storage: {target_id} not STORED")
+            return
+        tx = float(target_pose.get("target_x", target_pose.get("x", 0)))
+        ty = float(target_pose.get("target_y", target_pose.get("y", 0)))
+        trot = float(target_pose.get("rotation", 0))
+        if not is_placed_region(tx, ty):
+            print("[MOCK LAB] Target must be outside storage quadrant (x<0 and y<0).")
+            return
+        state["system_status"] = "BUSY"
+        self._write_state(state)
+        await asyncio.sleep(2)
+        state = self._read_state()
+        comp = state["components"][target_id]
+        noise_x = random.uniform(-0.5, 0.5)
+        noise_y = random.uniform(-0.5, 0.5)
+        comp["state"] = "PLACED"
+        comp["pose"] = {"x": tx + noise_x, "y": ty + noise_y, "rotation": trot}
+        comp["intent"] = {
+            "nominal_pose": {"x": tx, "y": ty, "rotation": trot},
+            "placement_strategy": "MANUAL",
+            "last_optimized_pose": None,
+            "is_optimized": False,
+        }
+        comp.setdefault("metadata", {}).pop("storage_slot", None)
+        state["system_status"] = "IDLE"
+        state["last_updated"] = datetime.now().isoformat()
+        self._write_state(state)
+        print(f"[MOCK LAB] Placed from storage {target_id}")
+
     async def add_component_to_state(self, component_data: Dict[str, Any]):
         print(f"[MOCK LAB] Adding component: {component_data}")
         state = self._read_state()
-        
+
         comp_type = component_data.get("type", "OPTICAL_MIRROR")
         tag_id = component_data.get("tag_id")
-        
+
         if not tag_id:
-             print("[MOCK LAB] Error: No tag_id provided for add_component")
-             return
+            print("[MOCK LAB] Error: No tag_id provided for add_component")
+            return
 
-        if "components" not in state: state["components"] = {}
-        
+        if "components" not in state:
+            state["components"] = {}
+
         if tag_id in state["components"]:
-             print(f"[MOCK LAB] Component {tag_id} already exists. Skipping placement.")
-             return
+            print(f"[MOCK LAB] Component {tag_id} already exists. Skipping placement.")
+            return
 
-        # Determine size for collision check
-        my_size = self._get_component_size(tag_id)
-        
-        # Place at a random valid location
-        valid_pose = False
-        attempts = 0
-        x, y = 0, 0
-        
-        while not valid_pose and attempts < 100:
-            x = random.uniform(100, 900)
-            y = random.uniform(100, 600)
-            valid_pose = True
-            
-            for cid, comp in state["components"].items():
-                cx = comp["pose"]["x"]
-                cy = comp["pose"]["y"]
-                other_size = self._get_component_size(cid)
-                
-                min_dist_x = (my_size / 2) + (other_size / 2)
-                min_dist_y = (my_size / 2) + (other_size / 2)
-                
-                if abs(x - cx) < min_dist_x and abs(y - cy) < min_dist_y:
-                    valid_pose = False
-                    break
-            
-            attempts += 1
-            
-        if not valid_pose:
-            print("[MOCK LAB] FAILED to find free space for component after 100 attempts.")
-            return 
+        placement_mode = (component_data.get("placement_mode") or "breadboard").lower()
+        w, h = self._get_component_wh(tag_id)
+
+        if placement_mode == "storage":
+            slot = find_storage_slot_and_center(
+                state.get("components") or {},
+                tag_id,
+                w,
+                h,
+                lambda tid: self._get_component_wh(tid),
+            )
+            if not slot:
+                print("[MOCK LAB] FAILED to find free storage slot.")
+                return
+            x, y, si, sj = slot
+            st = "STORED"
+            strat = "STORAGE"
+            meta_extra = {"storage_slot": {"i": si, "j": sj}}
+        else:
+            pos = random_placed_position(
+                state.get("components") or {},
+                tag_id,
+                w,
+                h,
+                lambda tid: self._get_component_wh(tid),
+            )
+            if not pos:
+                print("[MOCK LAB] FAILED to find free pose for component.")
+                return
+            x, y = pos
+            st = "PLACED"
+            strat = "MANUAL"
+            meta_extra = {}
 
         state["components"][tag_id] = {
-            "id": tag_id, 
+            "id": tag_id,
             "type": comp_type,
-            "state": "PLACED",
-            "pose": { "x": x, "y": y, "rotation": 0 },
+            "state": st,
+            "pose": {"x": x, "y": y, "rotation": 0},
             "intent": {
-                "nominal_pose": { "x": x, "y": y, "rotation": 0 },
-                "placement_strategy": "MANUAL",
+                "nominal_pose": {"x": x, "y": y, "rotation": 0},
+                "placement_strategy": strat,
                 "last_optimized_pose": None,
-                "is_optimized": False
+                "is_optimized": False,
             },
-            "metadata": {}
+            "metadata": dict(meta_extra),
         }
-        
+
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
-        print(f"[MOCK LAB] Placed {tag_id} at ({x:.1f}, {y:.1f})")
+        print(f"[MOCK LAB] Added {tag_id} at ({x:.1f}, {y:.1f}) state={st}")
+
+    async def affirm_placed_at_current(self, target_id: str):
+        print(f"[MOCK LAB] affirm_placed_at_current {target_id}...")
+        state = self._read_state()
+        comp = (state.get("components") or {}).get(target_id)
+        if not comp or comp.get("state") != "STORED":
+            print(f"[MOCK LAB] affirm: {target_id} must be STORED")
+            return
+        state["system_status"] = "BUSY"
+        self._write_state(state)
+        await asyncio.sleep(0.3)
+        state = self._read_state()
+        comp = state["components"][target_id]
+        comp["state"] = "PLACED"
+        comp.setdefault("metadata", {}).pop("storage_slot", None)
+        comp["intent"]["placement_strategy"] = "MANUAL"
+        state["system_status"] = "IDLE"
+        state["last_updated"] = datetime.now().isoformat()
+        self._write_state(state)
+        print(f"[MOCK LAB] {target_id} marked PLACED at current pose")
+
+    async def repack_storage_slot(self, target_id: str):
+        print(f"[MOCK LAB] repack_storage_slot {target_id}...")
+        state = self._read_state()
+        comp = (state.get("components") or {}).get(target_id)
+        if not comp or comp.get("state") != "STORED":
+            print(f"[MOCK LAB] repack: {target_id} must be STORED")
+            return
+        w, h = self._get_component_wh(target_id)
+        slot = find_storage_slot_and_center(
+            state.get("components") or {},
+            target_id,
+            w,
+            h,
+            lambda tid: self._get_component_wh(tid),
+        )
+        if not slot:
+            print("[MOCK LAB] repack: no free storage slot")
+            return
+        x, y, si, sj = slot
+        rot = STORAGE_NOMINAL_ROTATION_DEG
+        state["system_status"] = "BUSY"
+        self._write_state(state)
+        await asyncio.sleep(1.0)
+        state = self._read_state()
+        comp = state["components"][target_id]
+        comp["pose"] = {"x": x, "y": y, "rotation": rot}
+        comp["intent"] = {
+            "nominal_pose": {"x": x, "y": y, "rotation": rot},
+            "placement_strategy": "STORAGE",
+            "last_optimized_pose": None,
+            "is_optimized": False,
+        }
+        comp.setdefault("metadata", {})["storage_slot"] = {"i": si, "j": sj}
+        state["system_status"] = "IDLE"
+        state["last_updated"] = datetime.now().isoformat()
+        self._write_state(state)
+        print(f"[MOCK LAB] Repacked {target_id} to ({x:.1f},{y:.1f}) slot=({si},{sj})")
+
+    async def recenter_stored_in_inventory(self, target_id: str):
+        print(f"[MOCK LAB] recenter_stored_in_inventory {target_id}...")
+        state = self._read_state()
+        comp = (state.get("components") or {}).get(target_id)
+        if not comp or comp.get("state") != "STORED":
+            print(f"[MOCK LAB] recenter: {target_id} must be STORED")
+            return
+        nom = nominal_center_pose_for_stored_entry(comp)
+        if nom is None:
+            print("[MOCK LAB] recenter: could not resolve storage cell (need slot metadata or pose in Q3).")
+            return
+        x, y, si, sj = nom
+        rot = STORAGE_NOMINAL_ROTATION_DEG
+        state["system_status"] = "BUSY"
+        self._write_state(state)
+        await asyncio.sleep(1.0)
+        state = self._read_state()
+        comp = state["components"][target_id]
+        comp["pose"] = {"x": x, "y": y, "rotation": rot}
+        comp["intent"] = {
+            "nominal_pose": {"x": x, "y": y, "rotation": rot},
+            "placement_strategy": "STORAGE",
+            "last_optimized_pose": None,
+            "is_optimized": False,
+        }
+        comp.setdefault("metadata", {})["storage_slot"] = {"i": si, "j": sj}
+        state["system_status"] = "IDLE"
+        state["last_updated"] = datetime.now().isoformat()
+        self._write_state(state)
+        print(f"[MOCK LAB] Recentered {target_id} at ({x:.1f},{y:.1f}) slot=({si},{sj}) rot=0°")
 
     def set_cobyla_reference_from_png_bytes(self, data: bytes) -> Tuple[bool, str]:
         """Same API as real lab; mock optimize does not use it, but UI can test the flow."""

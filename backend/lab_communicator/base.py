@@ -14,6 +14,14 @@ class LabCommunicator:
     async def move_motor(self, target_id: str, motor_id: int, distance: float):
         raise NotImplementedError
 
+    async def motor_send_home(self, target_id: str, motor_id: int):
+        """Move motor by -tracked angle so cumulative angle becomes 0 (hardware move)."""
+        raise NotImplementedError
+
+    async def motor_set_zero(self, target_id: str, motor_id: int):
+        """Set current physical position as angle 0 in software (no hardware move)."""
+        raise NotImplementedError
+
     async def optimize_component(self, target_id: str, strategy: str, params: Dict[str, Any]):
         raise NotImplementedError
 
@@ -21,6 +29,26 @@ class LabCommunicator:
         raise NotImplementedError
 
     async def add_component_to_state(self, component_data: Dict[str, Any]):
+        raise NotImplementedError
+
+    async def store_component(self, target_id: str):
+        """Move a breadboard (PLACED) part into the storage quadrant with packed placement."""
+        raise NotImplementedError
+
+    async def place_from_storage(self, target_id: str, target_pose: Dict[str, Any]):
+        """Place a STORED part onto the breadboard at the given lab pose (must not be in storage Q3)."""
+        raise NotImplementedError
+
+    async def affirm_placed_at_current(self, target_id: str):
+        """Mark a STORED part as PLACED at its current pose (resolves layout when pose is outside Q3)."""
+        raise NotImplementedError
+
+    async def repack_storage_slot(self, target_id: str):
+        """Move a STORED part to the next free inventory cell (row-major packing) at cell center."""
+        raise NotImplementedError
+
+    async def recenter_stored_in_inventory(self, target_id: str):
+        """Move a STORED part to the center of its assigned (or inferred) cell at standard storage rotation (0°)."""
         raise NotImplementedError
 
     def get_video_feed_status(self) -> Dict[str, Any]:
