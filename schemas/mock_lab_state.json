@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-04-11T19:24:58.114608",
+  "last_updated": "2026-04-11T19:32:12.079269",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -66,7 +66,12 @@
           "y": 304.5333807278503,
           "rotation": 680.7747230668006
         },
-        "camera_image": null
+        "camera_image": {
+          "path": "C:\\Users\\CaioV\\OneDrive - Massachusetts Institute of Technology\\UROP - AI Optics\\optics-digital-twin\\schemas\\mock_camera_captures\\tag_22_last.png",
+          "source": "mock_table_cam",
+          "cam_id": 1,
+          "format": "png"
+        }
       }
     },
     "tag_21": {
@@ -267,25 +272,28 @@
       "id": "tag_3",
       "type": "OPTICAL_FILTER",
       "tunables": {
-        "presence": "breadboard",
+        "presence": "storage",
         "nominal_pose": {
-          "x": 371.66666666666663,
-          "y": 197.3809523809525,
+          "x": -50.0,
+          "y": -450.0,
           "rotation": 0.0
         },
         "nominal_motor_positions": {},
         "storage": {
-          "in_storage": false,
-          "slot": null
+          "in_storage": true,
+          "slot": {
+            "i": 4,
+            "j": 0
+          }
         },
         "placement": {
-          "mode": "MANUAL"
+          "mode": "STORAGE"
         }
       },
       "measurables": {
         "pose": {
-          "x": 371.2437593332153,
-          "y": 197.01167022205044,
+          "x": -50.0,
+          "y": -450.0,
           "rotation": 0.0
         },
         "last_optimization_score": null,

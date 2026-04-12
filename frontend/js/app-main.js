@@ -94,6 +94,7 @@ const ctxY = document.getElementById('ctx-y');
 const ctxRot = document.getElementById('ctx-rot');
 const ctxMoveBtn = document.getElementById('ctx-move-btn');
 const ctxStrategies = document.getElementById('ctx-strategies');
+const ctxPanelCloseBtn = document.getElementById('ctx-panel-close');
 const ctxObserveSlot = document.getElementById('ctx-observe-slot');
 const PRIMITIVE_DEV_HINTS =
     typeof URLSearchParams !== 'undefined' &&
@@ -772,6 +773,16 @@ function getComponentAtPosition(canvasX, canvasY) {
     return null;
 }
 
+/** Same as clicking empty canvas: clear selection and hide the floating component panel. */
+function clearSelectionAndHideContextPanel() {
+    store.selectedComponent = null;
+    store.contextPanelStateSnapshot = null;
+    store.dragFromStorageTag = null;
+    store.dragFromStorageStartPose = null;
+    contextPanel.style.display = 'none';
+    render();
+}
+
 canvas.addEventListener('mousedown', (e) => {
     if (store.labState && store.labState.system_status !== 'IDLE') return;
 
@@ -821,12 +832,7 @@ canvas.addEventListener('mousedown', (e) => {
             store.dragOffset = { x: mouseX - p.x, y: mouseY - p.y };
         }
     } else {
-        store.selectedComponent = null;
-        store.contextPanelStateSnapshot = null;
-        store.dragFromStorageTag = null;
-        store.dragFromStorageStartPose = null;
-        contextPanel.style.display = 'none';
-        render();
+        clearSelectionAndHideContextPanel();
     }
 });
 
@@ -2782,6 +2788,14 @@ function init() {
             showErrorModal("Refresh Pose Failed", e.message || String(e));
         }
     });
+
+    if (ctxPanelCloseBtn) {
+        ctxPanelCloseBtn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            clearSelectionAndHideContextPanel();
+        });
+    }
 
     if (saveStateBtn) {
         saveStateBtn.addEventListener('click', async () => {
