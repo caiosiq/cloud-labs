@@ -24,10 +24,10 @@ from lab_model.component_model import (
     is_on_table,
     is_stored,
     set_presence_and_storage,
+    storage_slot,
 )
 from lab_model.storage_region import (
     STORAGE_NOMINAL_ROTATION_DEG,
-    cell_index_for_point,
     find_storage_slot_and_center,
     is_placed_region,
     is_storage_region,
@@ -120,6 +120,10 @@ class RealLabCommunicator(LabCommunicator):
         # CobylaAlignmentStrategy_cloudlab.reference_image (BGR ndarray, same family as table-cam / capture_image)
         self._cobyla_ref_lock = threading.Lock()
         self._cobyla_reference_bgr: Optional[Any] = None  # np.ndarray when set
+
+        # Tags intentionally in storage (tag_id -> {i,j}); persisted under states/real_lab_stored_intent.json
+        self._stored_intent: Dict[str, Dict[str, int]] = {}
+        self._load_stored_intent_from_disk()
 
         self._initialize_state()
         self._recorder_procs: List[subprocess.Popen] = []
@@ -369,10 +373,78 @@ class RealLabCommunicator(LabCommunicator):
                     pass
         self._recorder_procs = []
 
+    def _stored_intent_path(self) -> str:
+        """Persisted map of which catalog tags are in inventory storage and at which grid cell."""
+        return os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "states", "real_lab_stored_intent.json")
+        )
+
+    def _load_stored_intent_from_disk(self) -> None:
+        path = self._stored_intent_path()
+        self._stored_intent = {}
+        if not os.path.isfile(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            raw = data.get("stored") or {}
+            for tid, slot in raw.items():
+                if not isinstance(tid, str) or not isinstance(slot, dict):
+                    continue
+                if "i" in slot and "j" in slot:
+                    self._stored_intent[tid] = {"i": int(slot["i"]), "j": int(slot["j"])}
+        except Exception as e:
+            print(f"[REAL LAB] Warning: could not load {path}: {e}")
+
+    def _save_stored_intent_to_disk(self) -> None:
+        path = self._stored_intent_path()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            payload = {
+                "version": 1,
+                "updated_at": datetime.now().isoformat(),
+                "stored": {k: {"i": int(v["i"]), "j": int(v["j"])} for k, v in sorted(self._stored_intent.items())},
+            }
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+        except Exception as e:
+            print(f"[REAL LAB] Warning: could not save stored intent: {e}")
+
+    def _stored_intent_set_slot(self, tag_id: str, i: int, j: int) -> None:
+        with self._state_lock:
+            self._stored_intent[tag_id] = {"i": int(i), "j": int(j)}
+        self._save_stored_intent_to_disk()
+
+    def _stored_intent_remove(self, tag_id: str) -> None:
+        with self._state_lock:
+            self._stored_intent.pop(tag_id, None)
+        self._save_stored_intent_to_disk()
+
+    def _rebuild_stored_intent_from_lab_state(self, components: Dict[str, Any]) -> None:
+        """After loading a snapshot, align the manifest with STORED entries in state."""
+        new_m: Dict[str, Dict[str, int]] = {}
+        for tid, ent in (components or {}).items():
+            if not isinstance(ent, dict):
+                continue
+            if not is_stored(ent):
+                continue
+            sl = storage_slot(ent)
+            if sl is not None:
+                new_m[str(tid)] = {"i": int(sl["i"]), "j": int(sl["j"])}
+        with self._state_lock:
+            self._stored_intent = new_m
+        self._save_stored_intent_to_disk()
+
+    def get_stored_intent_for_layout(self) -> Dict[str, Dict[str, int]]:
+        """Copy for ``analyze_layout_issues`` (layout-conflicts API)."""
+        with self._state_lock:
+            return {k: dict(v) for k, v in self._stored_intent.items()}
+
     def _initialize_state(self):
         """Scans the table based on the catalog and populates the component map."""
         print("[REAL LAB] Scanning components...")
-        
+        self._load_stored_intent_from_disk()
+
         # 1. Load Catalog to know what to look for
         # Assuming we are in backend/lab_communicator/real.py
         catalog_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "schemas", "component_catalog.json"))
@@ -444,16 +516,17 @@ class RealLabCommunicator(LabCommunicator):
                     if val is not None:
                         pose[key] = val
                 in_q3 = is_storage_region(float(inv.x), float(inv.y))
-                if in_q3:
+                stored_slot = self._stored_intent.get(tag_id)
+                if stored_slot is not None:
+                    # Intent file says this tag belongs in inventory; do not infer storage from Q3 geometry alone.
                     presence = PRESENCE_STORAGE
                     placement_mode = "STORAGE"
-                    inferred = cell_index_for_point(float(inv.x), float(inv.y))
-                    slot = {"i": inferred[0], "j": inferred[1]} if inferred else None
+                    slot = {"i": int(stored_slot["i"]), "j": int(stored_slot["j"])}
                 else:
                     presence = PRESENCE_BREADBOARD
                     placement_mode = "MANUAL"
                     slot = None
-                print(f"  pose written: {pose} -> presence={presence}")
+                print(f"  pose written: {pose} in_q3={in_q3} -> presence={presence} slot={slot}")
             else:
                 pose = {"x": 0, "y": 0, "rotation": 0}
                 presence = PRESENCE_OFF_TABLE
@@ -550,6 +623,8 @@ class RealLabCommunicator(LabCommunicator):
             comp.current_location = p
 
             comp.is_placed = is_on_table(entry) if isinstance(entry, dict) else False
+
+        self._rebuild_stored_intent_from_lab_state(components)
 
     def _inject_motor_rotations_into_state(self, state: Dict[str, Any]) -> None:
         """Merge software motor angle tracker into measurables.pose and tunables.nominal_motor_positions."""
@@ -862,6 +937,7 @@ class RealLabCommunicator(LabCommunicator):
             
             # 5. Update State
             #UPDATE TO GET REFORCE-SCAM
+            place_from = self._place_from_storage_tag
             with self._state_lock:
                 if target_id in self.current_state["components"]:
                     ce = self.current_state["components"][target_id]
@@ -878,12 +954,15 @@ class RealLabCommunicator(LabCommunicator):
                             set_presence_and_storage(
                                 ce, PRESENCE_STORAGE, in_storage=True, slot={"i": int(si), "j": int(sj)}
                             )
+                            self._stored_intent_set_slot(target_id, si, sj)
                         else:
                             set_presence_and_storage(ce, PRESENCE_STORAGE, in_storage=True, slot=None)
                         tun["placement"] = {"mode": "STORAGE"}
                     else:
                         set_presence_and_storage(ce, PRESENCE_BREADBOARD, in_storage=False, slot=None)
                         tun["placement"] = {"mode": "MANUAL"}
+                        if place_from == target_id:
+                            self._stored_intent_remove(target_id)
 
                     tun["nominal_pose"] = {
                         "x": tx_lab, "y": ty_lab, "rotation": rot
@@ -1325,6 +1404,7 @@ class RealLabCommunicator(LabCommunicator):
             }
             tun["placement"] = {"mode": "MANUAL"}
             self.current_state["last_updated"] = datetime.now().isoformat()
+        self._stored_intent_remove(target_id)
         cobj = self.component_map.get(target_id)
         if cobj is not None:
             cobj.is_placed = True

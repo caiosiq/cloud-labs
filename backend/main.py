@@ -376,7 +376,11 @@ async def get_layout_conflicts():
 
     state = lab.get_lab_state()
     comps = state.get("components") or {}
-    issues = analyze_layout_issues(comps, _lab_component_wh)
+    stored_intent = None
+    getter = getattr(lab, "get_stored_intent_for_layout", None)
+    if callable(getter):
+        stored_intent = getter()
+    issues = analyze_layout_issues(comps, _lab_component_wh, stored_intent=stored_intent)
     return {"issues": issues}
 
 

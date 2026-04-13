@@ -1,7 +1,15 @@
 """Primitive identifiers and classification (see primitives.md)."""
 from __future__ import annotations
 
-from enum import StrEnum
+try:
+    from enum import StrEnum
+except ImportError:  # Python < 3.11
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        """Subset of stdlib StrEnum (3.11+); enough for string-valued enums here."""
+
+        pass
 
 
 class PrimitiveKind(StrEnum):

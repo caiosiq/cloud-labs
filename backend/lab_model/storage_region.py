@@ -223,10 +223,17 @@ def storage_grid_spec() -> Dict[str, Any]:
 def analyze_layout_issues(
     components: Dict[str, Any],
     get_size_for_tag: Callable[[str], Tuple[float, float]],
+    stored_intent: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Structured issues for UI modals.
-    Kinds: PLACED_IN_Q3, STORED_OUTSIDE_Q3, STORED_OFF_SLOT
+    Kinds: PLACED_IN_Q3, STORED_OUTSIDE_Q3, STORED_OFF_SLOT, STORED_WRONG_SLOT
+
+    When ``stored_intent`` is provided (real lab: ``states/real_lab_stored_intent.json``), only tags
+    listed there are treated as *intended* storage inventory. Breadboard parts physically in Q3
+    that are **not** in ``stored_intent`` do not raise PLACED_IN_Q3 (e.g. temporary layout in the
+    storage quadrant). Tags in ``stored_intent`` get an extra check that the measured cell matches
+    the recorded slot ``{i,j}``.
     """
     issues: List[Dict[str, Any]] = []
     for tag_id, entry in components.items():
@@ -242,6 +249,9 @@ def analyze_layout_issues(
         w, h = get_size_for_tag(tag_id)
 
         if pres == PRESENCE_BREADBOARD and is_storage_region(px, py):
+            if stored_intent is not None and tag_id not in stored_intent:
+                # Physical Q3 is OK when this tag is not recorded as storage inventory.
+                continue
             issues.append(
                 {
                     "tag_id": tag_id,
@@ -281,6 +291,23 @@ def analyze_layout_issues(
                 )
                 continue
             i, j = inferred
+
+        if stored_intent is not None and tag_id in stored_intent:
+            exp = stored_intent[tag_id]
+            ei, ej = int(exp["i"]), int(exp["j"])
+            if i != ei or j != ej:
+                issues.append(
+                    {
+                        "tag_id": tag_id,
+                        "kind": "STORED_WRONG_SLOT",
+                        "message": (
+                            f"{tag_id} is recorded as stored in cell ({ei},{ej}) but the measured center "
+                            f"maps to cell ({i},{j})."
+                        ),
+                        "expected_cell": {"i": ei, "j": ej},
+                        "measured_cell": {"i": i, "j": j},
+                    }
+                )
 
         if not pose_valid_for_storage_slot(px, py, w, h, i, j):
             issues.append(
