@@ -174,7 +174,27 @@ class MockLabCommunicator(LabCommunicator):
         self.refresh_pose_from_camera()
 
     def set_lab_state(self, state: Dict[str, Any]):
-        self._write_state(state)
+        """
+        Apply snapshot to mock state file. Catalog tags missing from the snapshot keep their
+        current mock entries (parity with real lab merge load).
+        """
+        if not isinstance(state, dict):
+            raise ValueError("Loaded state must be a JSON object/dict")
+        prev = self._read_state()
+        prev_comps = dict(prev.get("components") or {})
+        loaded_comps = dict(state.get("components") or {})
+        catalog_ids = {item.get("tag_id") for item in (self.catalog or []) if item.get("tag_id")}
+        merged: Dict[str, Any] = {}
+        for tid, entry in prev_comps.items():
+            if tid in catalog_ids and tid not in loaded_comps:
+                merged[tid] = json.loads(json.dumps(entry))
+        for tid, entry in loaded_comps.items():
+            merged[tid] = entry
+        out = dict(state)
+        out["components"] = merged
+        out["system_status"] = "IDLE"
+        out["last_updated"] = datetime.now().isoformat()
+        self._write_state(out)
 
     async def move_component(self, target_id: str, target_pose: Dict[str, float]):
         print(f"[MOCK LAB] Moving {target_id}...")

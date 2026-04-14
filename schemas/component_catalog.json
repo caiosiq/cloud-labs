@@ -9,41 +9,29 @@
       "resolution": "1920x1080",
       "fov": 60
     }
-  },
+  },  
   {
-    "id": "beam_splitter",
-    "type": "OPTICAL_BEAMSPLITTER",
-    "name": "Beam Splitter (BS)",
-    "tag_id": "tag_10",
+    "id": "lens_main",
+    "type": "OPTICAL_LENS",
+    "name": "Main Lens",
+    "tag_id": "tag_11",
     "size": { "width": 62, "height": 62 },
     "properties": {
-      "split_ratio": "50:50",
-      "polarization": "Non-polarizing"
+      "focal_length": "50mm",
+      "material": "BK7",
+      "coating": "AR 400-700nm"
     }
   },
   {
-    "id": "mirror_planar",
-    "type": "OPTICAL_MIRROR",
-    "name": "Planar Mirror (Pump Coupler)",
+    "id": "lens_main_2",
+    "type": "OPTICAL_LENS",
+    "name": "Main Lens 2",
     "tag_id": "tag_9",
     "size": { "width": 62, "height": 62 },
     "properties": {
-      "radius_of_curvature": "Infinity",
-      "reflectivity": 0.99,
-      "details": "Pump Coupler"
-    },
-    "motor_ids": [1, 3],
-    "motor_controller": "wifi_stepper3"
-  },
-  {
-    "id": "cam_gripper_2",
-    "type": "OPTICAL_CAMERA",
-    "name": "Gripper Camera 2",
-    "tag_id": "tag_21",
-    "size": { "width": 62, "height": 62 },
-    "properties": {
-      "resolution": "1920x1080",
-      "fov": 60
+      "focal_length": "50mm",
+      "material": "BK7",
+      "coating": "AR 400-700nm"
     }
   }
 

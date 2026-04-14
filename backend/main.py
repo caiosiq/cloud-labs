@@ -354,7 +354,9 @@ async def load_lab_state(payload: StateName):
     if hasattr(lab, "set_lab_state"):
         lab.set_lab_state(state)
 
-    return {"status": "success", "name": safe, "state": state}
+    # Return merged lab state (e.g. catalog parts not in the file are preserved on load).
+    out_state = lab.get_lab_state() if hasattr(lab, "get_lab_state") else state
+    return {"status": "success", "name": safe, "state": out_state}
 
 def _lab_component_wh(tag_id: str) -> Tuple[float, float]:
     """Catalog width/height in mm for layout analysis (mock vs real)."""

@@ -586,18 +586,42 @@ class RealLabCommunicator(LabCommunicator):
         Load a previously saved lab state snapshot and apply it to both:
         1) `self.current_state` (what the UI reads)
         2) `self.component_map` (what the robot uses)
+
+        **Merge:** catalog tags that exist in the current lab state but are **missing** from the
+        snapshot file keep their previous entries (e.g. camera-estimated poses for parts added
+        after the save). Snapshot entries overwrite matching tags.
         """
         if not isinstance(state, dict):
             raise ValueError("Loaded state must be a JSON object/dict")
 
+        catalog_ids = set(self.catalog_map.keys())
+
         with self._state_lock:
-            # Update the current_state that the UI reads.
-            self.current_state = state
-            self.current_state["system_status"] = "IDLE"
-            self.current_state["optimization_step"] = int(self.current_state.get("optimization_step", 0) or 0)
-            if "optimization_run_dir" not in self.current_state:
-                self.current_state["optimization_run_dir"] = None
-            self.current_state["last_updated"] = datetime.now().isoformat()
+            prev_components = dict((self.current_state.get("components") or {}))
+
+        loaded_components = dict(state.get("components") or {})
+        merged_components: Dict[str, Any] = {}
+        kept: List[str] = []
+        for tag_id, prev_entry in prev_components.items():
+            if tag_id in catalog_ids and tag_id not in loaded_components:
+                merged_components[tag_id] = json.loads(json.dumps(prev_entry))
+                kept.append(tag_id)
+        for tag_id, loaded_entry in loaded_components.items():
+            merged_components[tag_id] = loaded_entry
+
+        if kept:
+            print(f"[REAL LAB] Load state merge: kept {len(kept)} catalog component(s) not in snapshot: {kept}")
+
+        merged_state = dict(state)
+        merged_state["components"] = merged_components
+        merged_state["system_status"] = "IDLE"
+        merged_state["optimization_step"] = int(merged_state.get("optimization_step", 0) or 0)
+        if "optimization_run_dir" not in merged_state:
+            merged_state["optimization_run_dir"] = None
+        merged_state["last_updated"] = datetime.now().isoformat()
+
+        with self._state_lock:
+            self.current_state = merged_state
             components = dict(self.current_state.get("components", {}) or {})
 
         # Apply to component_map so pick/place uses correct coordinates.
