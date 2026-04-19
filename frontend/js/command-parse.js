@@ -34,6 +34,15 @@ export function formatHelp() {
         '                      — OPTIMIZE NEWTON (0 or 4 optional args)',
         '  optimize <tag> COBYLA [threshold]',
         '                      — OPTIMIZE COBYLA (needs motor_ids in catalog)',
+        '',
+        'In-air manipulation (see new_primitives.md):',
+        '  pick <tag>                          — PICK_COMPONENT (grasp + lift → HOLDING)',
+        '  hover <tag> <x> <y> <rot> <z>       — HOVER (re-pose held part in air)',
+        '  placehover <tag> <x> <y> <rot>      — PLACE_FROM_HOVER (held → on table)',
+        '  scanrotate <tag> <theta_min> <theta_max> <speed>',
+        '                                      — SCAN_ROTATE_IN_PLACE around z',
+        '  confirmhold <tag>                   — CONFIRM_HOLDING_TAG (clear unconfirmed flag)',
+        '',
         '  json <object>       — raw POST /api/command body (single-line JSON)',
         '',
         'Tab cycles completions for the current word (commands, tag ids, NEWTON/COBYLA, defaults).',
@@ -295,6 +304,119 @@ export function parseCommandLine(line) {
         }
 
         return { ok: false, error: `Unknown strategy "${tokens[2]}". Use NEWTON or COBYLA.` };
+    }
+
+    if (verb === 'pick') {
+        if (tokens.length !== 2) {
+            return { ok: false, error: 'Usage: pick <tag_id>' };
+        }
+        return {
+            ok: true,
+            result: {
+                type: 'command',
+                command: {
+                    action: 'PICK_COMPONENT',
+                    target_id: tokens[1],
+                    parameters: {},
+                },
+            },
+        };
+    }
+
+    if (verb === 'hover') {
+        if (tokens.length !== 6) {
+            return { ok: false, error: 'Usage: hover <tag_id> <x_mm> <y_mm> <rotation_deg> <z_mm>' };
+        }
+        const tag = tokens[1];
+        const x = Number(tokens[2]);
+        const y = Number(tokens[3]);
+        const rot = Number(tokens[4]);
+        const z = Number(tokens[5]);
+        if (![x, y, rot, z].every(Number.isFinite)) {
+            return { ok: false, error: 'hover: x, y, rotation, and z must be numbers.' };
+        }
+        return {
+            ok: true,
+            result: {
+                type: 'command',
+                command: {
+                    action: 'HOVER',
+                    target_id: tag,
+                    parameters: { target_x: x, target_y: y, rotation: rot, z },
+                },
+            },
+        };
+    }
+
+    if (verb === 'placehover' || verb === 'place-from-hover' || verb === 'placefromhover') {
+        if (tokens.length !== 5) {
+            return { ok: false, error: 'Usage: placehover <tag_id> <x_mm> <y_mm> <rotation_deg>' };
+        }
+        const tag = tokens[1];
+        const x = Number(tokens[2]);
+        const y = Number(tokens[3]);
+        const rot = Number(tokens[4]);
+        if (![x, y, rot].every(Number.isFinite)) {
+            return { ok: false, error: 'placehover: x, y, rotation must be numbers.' };
+        }
+        return {
+            ok: true,
+            result: {
+                type: 'command',
+                command: {
+                    action: 'PLACE_FROM_HOVER',
+                    target_id: tag,
+                    parameters: { target_x: x, target_y: y, rotation: rot },
+                },
+            },
+        };
+    }
+
+    if (verb === 'scanrotate' || verb === 'scan-rotate' || verb === 'scan_rotate') {
+        if (tokens.length !== 5) {
+            return {
+                ok: false,
+                error: 'Usage: scanrotate <tag_id> <theta_min_deg> <theta_max_deg> <speed_deg_per_s>',
+            };
+        }
+        const tag = tokens[1];
+        const theta_min = Number(tokens[2]);
+        const theta_max = Number(tokens[3]);
+        const speed = Number(tokens[4]);
+        if (![theta_min, theta_max, speed].every(Number.isFinite)) {
+            return { ok: false, error: 'scanrotate: theta_min, theta_max, speed must be numbers.' };
+        }
+        if (!(speed > 0)) {
+            return { ok: false, error: 'scanrotate: speed_deg_per_s must be > 0.' };
+        }
+        return {
+            ok: true,
+            result: {
+                type: 'command',
+                command: {
+                    action: 'SCAN_ROTATE_IN_PLACE',
+                    target_id: tag,
+                    parameters: { theta_min, theta_max, speed_deg_per_s: speed, axis: 'z' },
+                },
+            },
+        };
+    }
+
+    if (verb === 'confirmhold' || verb === 'confirm-holding-tag' || verb === 'confirm_holding') {
+        if (tokens.length !== 2) {
+            return { ok: false, error: 'Usage: confirmhold <tag_id>' };
+        }
+        return {
+            ok: true,
+            result: {
+                type: 'command',
+                command: {
+                    action: 'CONFIRM_HOLDING_TAG',
+                    target_id: tokens[1],
+                    parameters: {},
+                },
+            },
+        };
     }
 
     return { ok: false, error: `Unknown command "${tokens[0]}". Type help.` };

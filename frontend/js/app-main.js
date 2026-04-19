@@ -28,6 +28,11 @@ import {
     isBreadboardIntent,
     isOffTableComponent,
     hasOptimizationOutcome,
+    isOptimizedPlacement,
+    getHolding,
+    isHoldingState,
+    isHeldTag,
+    isHoldingUnconfirmed,
 } from './component-model.js';
 
 /** Degrees per wheel tick while dragging a component (was 5°). */
@@ -88,6 +93,7 @@ const recipeList = document.getElementById('recipe-list');
 // Context Panel Elements (Left Sidebar)
 const contextPanel = document.getElementById('context-panel');
 const selectedCompName = document.getElementById('selected-comp-name');
+const selectedCompTag = document.getElementById('selected-comp-tag');
 const selectedCompProperties = document.getElementById('selected-comp-properties');
 const ctxX = document.getElementById('ctx-x');
 const ctxY = document.getElementById('ctx-y');
@@ -285,6 +291,27 @@ async function fetchLabState() {
                             ctxRot.value = store.ghostState[name].rotation.toFixed(1);
                         }
                     }
+                    // HOLDING: only the held tag's ghost follows live nominal_pose (incl. z)
+                    // -- all other components stay on the user's last intent.
+                    //
+                    // IMPORTANT: we deliberately do NOT overwrite the ctx-x/y/rot/z
+                    // input fields here. Those inputs represent the operator's
+                    // *intent* for the next HOVER / PLACE_FROM_HOVER and must
+                    // stay editable. Their initial values are set once by
+                    // ``renderInAirControlsForContext`` when the HOLDING panel
+                    // is rebuilt (see contextPanelStatusSnapshot logic below).
+                    else if (
+                        isHoldingState(store.labState) &&
+                        isHeldTag(name, store.labState) &&
+                        !store.isDragging &&
+                        np &&
+                        Object.keys(np).length
+                    ) {
+                        store.ghostState[name] = { ...np };
+                        if (typeof store.ghostState[name].rotation !== 'number') {
+                            store.ghostState[name].rotation = mp.rotation || 0;
+                        }
+                    }
                     else if (shouldSync && !store.isDragging) {
                         if (np && Object.keys(np).length) {
                             store.ghostState[name] = { ...np };
@@ -309,16 +336,29 @@ async function fetchLabState() {
             if (shouldSync) store.forceGhostSync = false;
         }
 
-        // Rebuild context panel when the selected component's placement state changes (e.g. store / place finished).
+        // Rebuild context panel when EITHER the selected component's placement
+        // label OR the top-level (system_status, holding) snapshot changes.
+        // The latter is what flips IDLE -> HOLDING / HOLDING -> IDLE so the
+        // Pick / Hover / Place buttons appear or disappear without the user
+        // having to click the sidebar card again. We intentionally ignore
+        // transient BUSY states so the panel doesn't briefly revert mid-
+        // command -- the pending overlay on canvas signals "in flight".
         const selCtx = store.selectedComponent;
+        const hldCtx = getHolding(store.labState);
+        const rawStatus = store.labState.system_status || 'IDLE';
+        const statusKey = `${rawStatus}|${hldCtx.tag_id || ''}|${hldCtx.requires_operator_confirm ? '1' : '0'}`;
         if (selCtx && store.labState.components && store.labState.components[selCtx]) {
             const compCtx = store.labState.components[selCtx];
             const stCtx = placementUiLabel(compCtx);
-            if (
+            const placementChanged =
                 store.contextPanelStateSnapshot != null &&
-                store.contextPanelStateSnapshot !== stCtx
-            ) {
-                if (isOnTableComponent(compCtx) && !store.isDragging) {
+                store.contextPanelStateSnapshot !== stCtx;
+            const statusChanged =
+                store.contextPanelStatusSnapshot != null &&
+                store.contextPanelStatusSnapshot !== statusKey &&
+                rawStatus !== 'BUSY';
+            if (placementChanged || statusChanged) {
+                if (placementChanged && isOnTableComponent(compCtx) && !store.isDragging) {
                     const np = nominalPose(compCtx);
                     const mp = measPose(compCtx);
                     if (np && Object.keys(np).length) {
@@ -334,6 +374,12 @@ async function fetchLabState() {
                 updateMotorAngleLabels(selCtx);
             }
         }
+        // Only snapshot stable states so a transient BUSY in-between doesn't
+        // "use up" the real transition (IDLE -> BUSY -> HOLDING should still
+        // rebuild once on the HOLDING edge).
+        if (rawStatus !== 'BUSY') {
+            store.contextPanelStatusSnapshot = statusKey;
+        }
 
         store.previousSystemStatus = store.labState.system_status;
         
@@ -344,8 +390,20 @@ async function fetchLabState() {
              // We rely on 'updateUI' to handle rendering.
         }
         
+        // Clear in-flight overlays once the system has settled into any
+        // stable (non-BUSY, non-OPTIMIZING) state. PICK_COMPONENT and HOVER
+        // land in HOLDING -- not IDLE -- so gating this on IDLE only would
+        // leave the amber/purple "PICKING UP..." / "HOVERING..." label on
+        // the ghost forever and prevent render() from swapping in the
+        // steady-state "HOLDING" overlay.
+        const stableStatus =
+            store.labState.system_status === 'IDLE' ||
+            store.labState.system_status === 'HOLDING';
+        if (stableStatus) {
+            store.pendingCommands.clear();
+            store.pendingActions.clear();
+        }
         if (store.labState.system_status === 'IDLE') {
-            store.pendingCommands.clear(); 
             if (store.isOptimizing) {
                 store.isOptimizing = false; 
                 log("Optimization sequence complete.", "info");
@@ -606,8 +664,11 @@ async function executeSendCommand(command) {
             // We still execute it live so the user sees the result!
         }
 
-        if (command.target_id) store.pendingCommands.add(command.target_id);
-        
+        if (command.target_id) {
+            store.pendingCommands.add(command.target_id);
+            if (command.action) store.pendingActions.set(command.target_id, command.action);
+        }
+
         const response = await fetch('/api/command', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -615,9 +676,14 @@ async function executeSendCommand(command) {
         });
         
         if (response.status === 409) {
-             log("System BUSY. Command rejected.", "warn");
-             store.pendingCommands.delete(command.target_id);
-             return { ok: false, error: 'System is BUSY or OPTIMIZING (409).' };
+             const body = await response.json().catch(() => ({}));
+             const detail = (body && body.detail) ? String(body.detail) : 'System BUSY or command not allowed in current state.';
+             log(`Command rejected (409): ${detail}`, "warn");
+             if (command.target_id) {
+                 store.pendingCommands.delete(command.target_id);
+                 store.pendingActions.delete(command.target_id);
+             }
+             return { ok: false, error: detail };
         }
 
         const result = await response.json().catch(() => ({}));
@@ -625,7 +691,10 @@ async function executeSendCommand(command) {
         if (!response.ok) {
             const detail = result.detail || `HTTP ${response.status}`;
             log(`Command rejected: ${detail}`, "error");
-            if (command.target_id) store.pendingCommands.delete(command.target_id);
+            if (command.target_id) {
+                store.pendingCommands.delete(command.target_id);
+                store.pendingActions.delete(command.target_id);
+            }
             return { ok: false, error: detail };
         }
 
@@ -640,7 +709,10 @@ async function executeSendCommand(command) {
 
     } catch (error) {
         log(`Command failed: ${error.message}`, "error");
-        if (command.target_id) store.pendingCommands.delete(command.target_id);
+        if (command.target_id) {
+            store.pendingCommands.delete(command.target_id);
+            store.pendingActions.delete(command.target_id);
+        }
         return { ok: false, error: error.message || String(error) };
     }
 }
@@ -777,6 +849,7 @@ function getComponentAtPosition(canvasX, canvasY) {
 function clearSelectionAndHideContextPanel() {
     store.selectedComponent = null;
     store.contextPanelStateSnapshot = null;
+    store.contextPanelStatusSnapshot = null;
     store.dragFromStorageTag = null;
     store.dragFromStorageStartPose = null;
     contextPanel.style.display = 'none';
@@ -836,6 +909,73 @@ canvas.addEventListener('mousedown', (e) => {
     }
 });
 
+function ensureHoldingBannerEl() {
+    let el = document.getElementById('holding-banner');
+    if (el) return el;
+    const anchor = document.getElementById('layout-warnings');
+    el = document.createElement('div');
+    el.id = 'holding-banner';
+    el.style.cssText =
+        'display: none; margin: 0 16px 10px; padding: 10px 12px; font-size: 11px; ' +
+        'color: #f3e8ff; background: rgba(168, 85, 247, 0.12); ' +
+        'border: 1px solid rgba(168, 85, 247, 0.45); border-radius: 6px; line-height: 1.4;';
+    if (anchor && anchor.parentNode) {
+        anchor.parentNode.insertBefore(el, anchor);
+    } else {
+        document.body.insertBefore(el, document.body.firstChild);
+    }
+    return el;
+}
+
+function updateHoldingBanner() {
+    const el = ensureHoldingBannerEl();
+    if (!store.labState || !isHoldingState(store.labState)) {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+    }
+    const hld = getHolding(store.labState);
+    el.style.display = 'block';
+    if (hld.requires_operator_confirm) {
+        el.style.background = 'rgba(239, 68, 68, 0.12)';
+        el.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+        el.style.color = '#fee2e2';
+        el.innerHTML =
+            '<div style="display:flex; align-items:flex-start; gap:8px;">' +
+            '<span class="material-icons-round" style="font-size:16px;color:#fecaca;">lock</span>' +
+            '<div style="flex:1;">' +
+            '<div style="font-weight:600; margin-bottom:2px;">HOLDING (unconfirmed)</div>' +
+            'The gripper reports closed on startup but the held tag is unknown. ' +
+            'Use <code>confirmhold &lt;tag&gt;</code> in the Command Console (or the confirm button in the part panel) to continue. ' +
+            'All other commands are blocked until confirmed.' +
+            '</div></div>';
+    } else {
+        el.style.background = 'rgba(168, 85, 247, 0.12)';
+        el.style.borderColor = 'rgba(168, 85, 247, 0.45)';
+        el.style.color = '#f3e8ff';
+        const pose = hld.nominal_pose || {};
+        const poseStr = [
+            Number.isFinite(Number(pose.x)) ? `x=${Number(pose.x).toFixed(1)}` : null,
+            Number.isFinite(Number(pose.y)) ? `y=${Number(pose.y).toFixed(1)}` : null,
+            Number.isFinite(Number(pose.rotation)) ? `rot=${Number(pose.rotation).toFixed(1)}°` : null,
+            Number.isFinite(Number(pose.z)) ? `z=${Number(pose.z).toFixed(1)}` : null,
+        ].filter(Boolean).join(' ');
+        el.innerHTML =
+            '<div style="display:flex; align-items:flex-start; gap:8px;">' +
+            '<span class="material-icons-round" style="font-size:16px;color:#d8b4fe;">pan_tool</span>' +
+            '<div style="flex:1;">' +
+            `<div style="font-weight:600; margin-bottom:2px;">HOLDING ${hld.tag_id || '<tag>'}</div>` +
+            (poseStr
+                ? `<div style="color:#c4b5fd; font-family: monospace; font-size: 10px;">${poseStr}</div>`
+                : '') +
+            '<div style="margin-top:4px;">' +
+            'Only <strong>HOVER</strong>, <strong>PLACE_FROM_HOVER</strong>, <strong>SCAN_ROTATE_IN_PLACE</strong>, or ' +
+            '<strong>CONFIRM_HOLDING_TAG</strong> are accepted for this tag until released.' +
+            '</div>' +
+            '</div></div>';
+    }
+}
+
 function updateContextPanel(name) {
     const comp = store.labState.components[name];
     const pose = store.ghostState[name];
@@ -851,6 +991,7 @@ function updateContextPanel(name) {
     }
     
     selectedCompName.textContent = displayName;
+    if (selectedCompTag) selectedCompTag.textContent = name;
 
     // Render Properties
     selectedCompProperties.innerHTML = '';
@@ -1219,7 +1360,312 @@ function updateContextPanel(name) {
         ctxStrategies.parentNode.appendChild(motorSection);
     }
 
+    renderInAirControlsForContext(name, comp, placementState);
+
     store.contextPanelStateSnapshot = placementState;
+    const hld = getHolding(store.labState);
+    store.contextPanelStatusSnapshot = `${(store.labState && store.labState.system_status) || 'IDLE'}|${hld.tag_id || ''}|${hld.requires_operator_confirm ? '1' : '0'}`;
+}
+
+/**
+ * Render the in-air manipulation section (Pick / Hover / Place-from-hover /
+ * Scan-rotate / Confirm) in the context panel. Behavior depends on the
+ * current HOLDING state (see new_primitives.md §6):
+ *
+ *  - IDLE & selected part is on-table:  show Pick button.
+ *  - HOLDING_UNCONFIRMED:                show confirm button + lock message.
+ *  - HOLDING & selected is held tag:     show Hover form + Place + Scan.
+ *  - HOLDING & selected is NOT held:     disable ctx-move-btn with notice.
+ */
+function renderInAirControlsForContext(name, comp, placementState) {
+    document.querySelectorAll('.ctx-in-air').forEach((el) => el.remove());
+
+    const labState = store.labState || {};
+    const holding = isHoldingState(labState);
+    const unconfirmed = isHoldingUnconfirmed(labState);
+    const held = getHolding(labState).tag_id;
+    const selectedIsHeld = isHeldTag(name, labState);
+
+    const section = document.createElement('div');
+    section.className = 'ctx-in-air';
+    section.style.marginTop = '14px';
+    section.style.paddingTop = '10px';
+    section.style.borderTop = '1px solid #2a2e36';
+
+    const header = document.createElement('div');
+    header.style.fontSize = '10px';
+    header.style.color = '#94a3b8';
+    header.style.fontWeight = '600';
+    header.style.marginBottom = '6px';
+    header.textContent = 'IN-AIR MANIPULATION';
+    section.appendChild(header);
+
+    if (unconfirmed) {
+        const p = document.createElement('p');
+        p.style.fontSize = '10px';
+        p.style.color = '#fca5a5';
+        p.style.lineHeight = '1.4';
+        p.style.margin = '0 0 8px 0';
+        p.innerHTML =
+            'Gripper reports closed on startup. Select the tag physically in the gripper and click <strong>Confirm held tag</strong>. All other commands are blocked until confirmed.';
+        section.appendChild(p);
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-primary';
+        btn.style.width = '100%';
+        btn.style.fontSize = '11px';
+        btn.innerHTML =
+            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">verified</span> Confirm held tag: ' +
+            name;
+        btn.onclick = () =>
+            sendCommand({ action: 'CONFIRM_HOLDING_TAG', target_id: name, parameters: {} });
+        section.appendChild(btn);
+        ctxStrategies.parentNode.appendChild(section);
+        // Block regular move while unconfirmed.
+        if (ctxMoveBtn) {
+            ctxMoveBtn.disabled = true;
+            ctxMoveBtn.title = 'Disabled while HOLDING is unconfirmed.';
+        }
+        return;
+    }
+
+    if (holding && !selectedIsHeld) {
+        const p = document.createElement('p');
+        p.style.fontSize = '10px';
+        p.style.color = '#c4b5fd';
+        p.style.lineHeight = '1.4';
+        p.style.margin = '0 0 4px 0';
+        p.innerHTML =
+            `Robot is currently holding <strong>${held || '<tag>'}</strong>. ` +
+            'Release it (Place from hover) before interacting with another part.';
+        section.appendChild(p);
+        ctxStrategies.parentNode.appendChild(section);
+        if (ctxMoveBtn) {
+            ctxMoveBtn.disabled = true;
+            ctxMoveBtn.title = `Disabled: robot is holding ${held || 'another part'}.`;
+        }
+        return;
+    }
+
+    // From here on, the regular move button is re-enabled.
+    if (ctxMoveBtn) {
+        ctxMoveBtn.disabled = false;
+        ctxMoveBtn.title = '';
+    }
+
+    if (holding && selectedIsHeld) {
+        // Hide the generic Move button — use Hover / Place-from-hover instead.
+        if (ctxMoveBtn) ctxMoveBtn.style.display = 'none';
+
+        const hld = getHolding(labState);
+        const currentZ =
+            (hld.nominal_pose && Number.isFinite(Number(hld.nominal_pose.z)))
+                ? Number(hld.nominal_pose.z)
+                : 40.0;
+
+        const zRow = document.createElement('div');
+        zRow.style.marginBottom = '8px';
+        const zLabel = document.createElement('label');
+        zLabel.style.fontSize = '10px';
+        zLabel.style.color = '#94a3b8';
+        zLabel.style.display = 'block';
+        zLabel.style.marginBottom = '4px';
+        zLabel.textContent = 'Z CLEARANCE (mm)';
+        zRow.appendChild(zLabel);
+        const zInp = document.createElement('input');
+        zInp.type = 'number';
+        zInp.id = 'ctx-z';
+        zInp.step = '0.5';
+        zInp.className = 'coord-input';
+        zInp.style.width = '100%';
+        zInp.value = currentZ.toFixed(1);
+        zRow.appendChild(zInp);
+        section.appendChild(zRow);
+
+        const btnRow = document.createElement('div');
+        btnRow.style.display = 'flex';
+        btnRow.style.flexDirection = 'column';
+        btnRow.style.gap = '6px';
+
+        const bHover = document.createElement('button');
+        bHover.type = 'button';
+        bHover.className = 'btn btn-secondary';
+        bHover.style.fontSize = '11px';
+        bHover.style.width = '100%';
+        bHover.innerHTML =
+            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">open_with</span> Hover to X/Y/Rot/Z';
+        bHover.onclick = async () => {
+            const tx = parseFloat(ctxX.value);
+            const ty = parseFloat(ctxY.value);
+            const trot = parseFloat(ctxRot.value);
+            const tz = parseFloat(zInp.value);
+            if (![tx, ty, trot, tz].every(Number.isFinite)) {
+                log('Invalid coordinates for HOVER (need x, y, rotation, z).', 'error');
+                return;
+            }
+            await sendCommand({
+                action: 'HOVER',
+                target_id: name,
+                parameters: { target_x: tx, target_y: ty, rotation: trot, z: tz },
+            });
+        };
+        btnRow.appendChild(bHover);
+
+        const bPlace = document.createElement('button');
+        bPlace.type = 'button';
+        bPlace.className = 'btn btn-primary';
+        bPlace.style.fontSize = '11px';
+        bPlace.style.width = '100%';
+        bPlace.innerHTML =
+            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">south_east</span> Place from hover';
+        bPlace.onclick = async () => {
+            const tx = parseFloat(ctxX.value);
+            const ty = parseFloat(ctxY.value);
+            const trot = parseFloat(ctxRot.value);
+            if (![tx, ty, trot].every(Number.isFinite)) {
+                log('Invalid coordinates.', 'error');
+                return;
+            }
+            if (isStorageRegion(tx, ty)) {
+                log('Place target must be outside the storage quadrant.', 'error');
+                return;
+            }
+            await sendCommand({
+                action: 'PLACE_FROM_HOVER',
+                target_id: name,
+                parameters: { target_x: tx, target_y: ty, rotation: trot },
+            });
+        };
+        btnRow.appendChild(bPlace);
+
+        section.appendChild(btnRow);
+
+        // Scan-rotate sub-section -------------------------------------------
+        section.appendChild(buildScanRotateSubPanel(name, { contextHint: 'held' }));
+
+        ctxStrategies.parentNode.appendChild(section);
+        return;
+    }
+
+    // IDLE path: expose PICK for on-table parts + Scan Rotate (placed-mode).
+    if (comp && isOnTableComponent(comp) && placementState !== 'STORED') {
+        const p = document.createElement('p');
+        p.style.fontSize = '10px';
+        p.style.color = '#94a3b8';
+        p.style.lineHeight = '1.4';
+        p.style.margin = '0 0 6px 0';
+        p.innerHTML =
+            '<strong>Pick</strong> closes the gripper on this part and lifts to a safe Z (→ HOLDING). ' +
+            'Then use <strong>Hover</strong> to re-pose mid-air, <strong>Place from hover</strong> to set down. ' +
+            '<strong>Scan rotate</strong> sweeps θ in place — the robot decides whether to rotate it in-air or on the table.';
+        section.appendChild(p);
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary';
+        btn.style.fontSize = '11px';
+        btn.style.width = '100%';
+        btn.innerHTML =
+            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">pan_tool</span> Pick up (start HOLDING)';
+        btn.onclick = () =>
+            sendCommand({ action: 'PICK_COMPONENT', target_id: name, parameters: {} });
+        section.appendChild(btn);
+
+        // Placed-mode scan-rotate: same user intent (sweep θ at constant rate),
+        // but the backend dispatches to ``scan_rotate_placed_cloudlab`` in
+        // lab_automation instead of the held-mode function.
+        section.appendChild(buildScanRotateSubPanel(name, { contextHint: 'placed' }));
+
+        ctxStrategies.parentNode.appendChild(section);
+    }
+}
+
+/**
+ * Build the Scan-Rotate In Place sub-panel (θ_min, θ_max, deg/s, Start).
+ * The UI is identical regardless of whether the component is currently held
+ * or placed — the backend decides which ``lab_automation`` function to call
+ * based on ``system_status`` at dispatch time (see new_primitives.md §7 and
+ * labautomation_new_primitives.md §2.4).
+ *
+ * ``contextHint`` ("held" | "placed") only tweaks the helper text.
+ */
+function buildScanRotateSubPanel(tagId, { contextHint = 'held' } = {}) {
+    const scan = document.createElement('div');
+    scan.style.marginTop = '12px';
+    scan.style.paddingTop = '10px';
+    scan.style.borderTop = '1px dashed #2a2e36';
+    const scanHdr = document.createElement('div');
+    scanHdr.style.fontSize = '10px';
+    scanHdr.style.color = '#94a3b8';
+    scanHdr.style.fontWeight = '600';
+    scanHdr.style.marginBottom = '6px';
+    scanHdr.textContent = 'SCAN ROTATE IN PLACE';
+    scan.appendChild(scanHdr);
+
+    const hint = document.createElement('p');
+    hint.style.fontSize = '10px';
+    hint.style.color = '#94a3b8';
+    hint.style.lineHeight = '1.4';
+    hint.style.margin = '0 0 6px 0';
+    hint.innerHTML = contextHint === 'placed'
+        ? 'Briefly grips the part with the robot arm, sweeps \u03b8, then releases it back at the same XY at the new rotation. Works regardless of whether the component has a motor.'
+        : 'Rotates the held part in-air while XY + Z stay locked at the hover pose.';
+    scan.appendChild(hint);
+
+    const scanGrid = document.createElement('div');
+    scanGrid.style.display = 'grid';
+    scanGrid.style.gridTemplateColumns = '1fr 1fr 1fr';
+    scanGrid.style.gap = '6px';
+    const scanTMin = document.createElement('input');
+    scanTMin.type = 'number';
+    scanTMin.className = 'coord-input';
+    scanTMin.placeholder = 'θ min°';
+    scanTMin.value = '-45';
+    const scanTMax = document.createElement('input');
+    scanTMax.type = 'number';
+    scanTMax.className = 'coord-input';
+    scanTMax.placeholder = 'θ max°';
+    scanTMax.value = '45';
+    const scanSpd = document.createElement('input');
+    scanSpd.type = 'number';
+    scanSpd.className = 'coord-input';
+    scanSpd.placeholder = 'deg/s';
+    scanSpd.value = '30';
+    scanGrid.appendChild(scanTMin);
+    scanGrid.appendChild(scanTMax);
+    scanGrid.appendChild(scanSpd);
+    scan.appendChild(scanGrid);
+
+    const bScan = document.createElement('button');
+    bScan.type = 'button';
+    bScan.className = 'btn btn-secondary';
+    bScan.style.marginTop = '6px';
+    bScan.style.fontSize = '11px';
+    bScan.style.width = '100%';
+    bScan.innerHTML =
+        '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">rotate_right</span> Start scan rotate';
+    bScan.onclick = async () => {
+        const tmin = parseFloat(scanTMin.value);
+        const tmax = parseFloat(scanTMax.value);
+        const spd = parseFloat(scanSpd.value);
+        if (![tmin, tmax, spd].every(Number.isFinite) || !(spd > 0)) {
+            log('Invalid scan params (need numbers; speed > 0).', 'error');
+            return;
+        }
+        await sendCommand({
+            action: 'SCAN_ROTATE_IN_PLACE',
+            target_id: tagId,
+            parameters: {
+                theta_min: tmin,
+                theta_max: tmax,
+                speed_deg_per_s: spd,
+                axis: 'z',
+            },
+        });
+    };
+    scan.appendChild(bScan);
+    return scan;
 }
 
 async function moveMotor(targetId, motorId, dist) {
@@ -1807,6 +2253,40 @@ function drawLaserPath() {
     ctx.shadowBlur = 0;
 }
 
+/**
+ * Base purple used by the HOLDING system status badge and reused here for the
+ * steady-state "HOLDING" ghost overlay (solid halo + label) so the canvas
+ * stays visually consistent with the top-right status pill and the holding
+ * banner.
+ */
+const HOLDING_STEADY_COLOR = '#a855f7';
+
+/**
+ * Style + label for the amber / purple "in flight" overlay drawn on the
+ * ghost while ``store.pendingCommands`` is non-empty for ``name``.
+ *
+ * In-air actions (PICK/HOVER/PLACE_FROM_HOVER/SCAN_ROTATE_IN_PLACE) render
+ * in purple with a descriptive label — e.g. HOVERING... — instead of the
+ * generic amber "MOVING..." used for everything else, to match the
+ * HOLDING status badge and make it obvious that the robot is manipulating
+ * the part in mid-air rather than doing a plain table move.
+ */
+function pendingOverlayStyle(name) {
+    const action = store.pendingActions.get(name);
+    switch (action) {
+        case 'PICK_COMPONENT':
+            return { color: '#a855f7', label: 'PICKING UP...' };
+        case 'HOVER':
+            return { color: '#a855f7', label: 'HOVERING...' };
+        case 'PLACE_FROM_HOVER':
+            return { color: '#a855f7', label: 'PLACING...' };
+        case 'SCAN_ROTATE_IN_PLACE':
+            return { color: '#a855f7', label: 'SCAN ROTATING...' };
+        default:
+            return { color: '#f59e0b', label: 'MOVING...' };
+    }
+}
+
 function drawComponent(name, pose, type, mode = 'SOLID') {
     const p = mmToPx(pose.x, pose.y);
     const x = p.x;
@@ -1826,9 +2306,11 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
 
     if (mode === 'GHOST') ctx.globalAlpha = 0.5;
     if (mode === 'PENDING') ctx.globalAlpha = 0.7;
+    if (mode === 'HOLDING') ctx.globalAlpha = 0.75;
 
-    ctx.shadowColor = (mode === 'GHOST') ? 'transparent' : 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = (mode === 'GHOST') ? 0 : 10;
+    const isTranslucent = mode === 'GHOST' || mode === 'HOLDING';
+    ctx.shadowColor = isTranslucent ? 'transparent' : 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = isTranslucent ? 0 : 10;
     
     // Selection Halo
     if (name === store.selectedComponent) {
@@ -1851,12 +2333,20 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     }
 
     if (mode === 'PENDING') {
-        ctx.strokeStyle = '#f59e0b'; // Amber
+        const style = pendingOverlayStyle(name);
+        ctx.strokeStyle = style.color;
         ctx.lineWidth = 2;
         ctx.setLineDash([4, 2]);
         const r = Math.sqrt(halfW*halfW + halfH*halfH);
         ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
         ctx.setLineDash([]);
+    }
+
+    if (mode === 'HOLDING') {
+        ctx.strokeStyle = HOLDING_STEADY_COLOR;
+        ctx.lineWidth = 2;
+        const r = Math.sqrt(halfW*halfW + halfH*halfH);
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
     }
 
     if (store.isOptimizing && store.pendingCommands.has(name)) {
@@ -2008,7 +2498,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     
     ctx.save();
     ctx.translate(x, y);
-    ctx.fillStyle = (mode === 'GHOST') ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.9)';
+    ctx.fillStyle = (mode === 'GHOST' || mode === 'HOLDING') ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.9)';
     ctx.font = '500 11px Inter, sans-serif';
     ctx.textAlign = 'center';
     
@@ -2027,9 +2517,15 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     }
 
     if (mode === 'PENDING') {
-        ctx.fillStyle = '#f59e0b';
+        const style = pendingOverlayStyle(name);
+        ctx.fillStyle = style.color;
         ctx.font = 'bold 10px Inter, sans-serif';
-        ctx.fillText("MOVING...", 0, halfH + 15);
+        ctx.fillText(style.label, 0, halfH + 15);
+    }
+    if (mode === 'HOLDING') {
+        ctx.fillStyle = HOLDING_STEADY_COLOR;
+        ctx.font = 'bold 10px Inter, sans-serif';
+        ctx.fillText('HOLDING', 0, halfH + 15);
     }
     if (store.isOptimizing && store.pendingCommands.has(name)) {
         ctx.fillStyle = '#10b981';
@@ -2096,15 +2592,25 @@ function render() {
     Object.entries(store.ghostState).forEach(([name, pose]) => {
         const type = store.labState.components[name]?.type || 'UNKNOWN';
         const isPending = store.pendingCommands.has(name);
-        drawComponent(name, pose, type, isPending ? 'PENDING' : 'GHOST');
-        
+        // Steady-state HOLDING: system reports HOLDING and this tag is the
+        // one in the gripper, with no primitive currently in flight. We draw
+        // a distinct "HOLDING" ghost (solid purple halo) so the label
+        // oscillates naturally: PICKING UP... -> HOLDING -> HOVERING... ->
+        // HOLDING -> PLACING... as the operator works in-air.
+        const isHeldSteady = !isPending && isHeldTag(name, store.labState);
+        const mode = isPending ? 'PENDING' : (isHeldSteady ? 'HOLDING' : 'GHOST');
+        drawComponent(name, pose, type, mode);
+
         // Draw Drift Line (Nominal vs Physical)
         const physical = store.labState.components[name];
         if (physical && isOnTableComponent(physical)) {
             const mp = measPose(physical);
             const from = mmToPx(mp.x, mp.y);
             const to = mmToPx(pose.x, pose.y);
-            ctx.strokeStyle = isPending ? '#f59e0b' : 'rgba(255, 255, 255, 0.2)';
+            let driftColor = 'rgba(255, 255, 255, 0.2)';
+            if (isPending) driftColor = pendingOverlayStyle(name).color;
+            else if (isHeldSteady) driftColor = HOLDING_STEADY_COLOR;
+            ctx.strokeStyle = driftColor;
             ctx.setLineDash([5, 5]);
             ctx.beginPath();
             ctx.moveTo(from.x, from.y);
@@ -2136,6 +2642,7 @@ function updateUI() {
     let badgeClass = 'active';
     let badgeColor = 'placed'; // green
     let badgeStyle = '';
+    let badgeSuffix = '';
 
     if (status === 'BUSY') {
         badgeClass = '';
@@ -2145,10 +2652,23 @@ function updateUI() {
         badgeClass = '';
         badgeColor = 'placed';
         badgeStyle = 'background-color: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);';
+    } else if (status === 'HOLDING') {
+        badgeClass = '';
+        badgeColor = '';
+        const hld = getHolding(store.labState);
+        if (hld.requires_operator_confirm) {
+            badgeStyle = 'background-color: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);';
+            badgeSuffix = ' · UNCONFIRMED';
+        } else {
+            badgeStyle = 'background-color: #a855f7; box-shadow: 0 0 8px rgba(168, 85, 247, 0.45);';
+            badgeSuffix = hld.tag_id ? ` · ${hld.tag_id}` : '';
+        }
     }
 
     statusBadge.className = `system-status ${badgeClass}`;
-    statusBadge.innerHTML = `<span class="status-dot ${badgeColor}" style="${badgeStyle}"></span> ${status}`;
+    statusBadge.innerHTML = `<span class="status-dot ${badgeColor}" style="${badgeStyle}"></span> ${status}${badgeSuffix}`;
+
+    updateHoldingBanner();
 
     // Update Sidebar Selection if active
     if (store.selectedComponent) {
@@ -2192,14 +2712,26 @@ function updateUI() {
 
         const icon = getComponentIcon(comp.type);
         
-        // Show status dot
-        let statusDot = `<div class="status-dot ${isPlaced ? 'placed' : 'inventory'}" title="${placementUiLabel(comp)}"></div>`;
-        if (hasOptimizationOutcome(comp)) {
-            statusDot = `<div class="status-dot" style="background-color: #10b981; box-shadow: 0 0 6px #10b981;" title="Optimized"></div>`;
+        // Sidebar status-dot priority ladder (highest wins):
+        //   1. HOLDING (this tag is in the gripper right now)   — purple
+        //   2. OPTIMIZED (current placement came from a strategy)— green + gold halo
+        //   3. STORED (Q3 storage region)                       — indigo
+        //   4. PLACED on breadboard                             — green
+        //   5. OFF_TABLE inventory                              — blue
+        // Note: hasOptimizationOutcome() alone is NOT enough for "optimized"
+        // styling -- isOptimizedPlacement() also requires the current
+        // placement.mode to be a strategy name (i.e. the part hasn't been
+        // manually re-moved since the optimizer ran). Hovering tooltip shows
+        // the raw placement label (e.g. MANUAL / COBYLA / HOVER) for detail.
+        let statusDot;
+        if (isHeldTag(name, store.labState)) {
+            statusDot = `<div class="status-dot holding" title="Held by gripper"></div>`;
+        } else if (isOptimizedPlacement(comp)) {
+            statusDot = `<div class="status-dot optimized" title="Optimized (${placementUiLabel(comp)})"></div>`;
         } else if (isStoredComponent(comp)) {
-            statusDot = `<div class="status-dot" style="background-color: #6366f1; box-shadow: 0 0 6px rgba(99,102,241,0.5);" title="Stored (Q3)"></div>`;
-        } else if (isBreadboardIntent(comp)) {
-             // statusDot = `<div class="status-dot" style="background-color: #f59e0b;" title="Drifted/Manual"></div>`;
+            statusDot = `<div class="status-dot stored" title="Stored (Q3)"></div>`;
+        } else {
+            statusDot = `<div class="status-dot ${isPlaced ? 'placed' : 'inventory'}" title="${placementUiLabel(comp)}"></div>`;
         }
 
         // Motor Badge

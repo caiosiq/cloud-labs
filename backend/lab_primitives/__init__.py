@@ -16,7 +16,16 @@ from .dispatch import (
 from .ids import MACRO_PRIMITIVE_IDS, READ_PRIMITIVE_IDS, PrimitiveId, PrimitiveKind
 from .protocol import LabPrimitiveSurface
 from .registry import PRIMITIVE_REGISTRY
-from .schemas import ObserveMeasurablesBody, TagQuery
+from .schemas import (
+    ConfirmHoldingTagBody,
+    HoverBody,
+    MoveComponentBody,
+    ObserveMeasurablesBody,
+    PickComponentBody,
+    PlaceFromHoverBody,
+    ScanRotateInPlaceBody,
+    TagQuery,
+)
 
 __all__ = [
     "PrimitiveId",
@@ -26,6 +35,12 @@ __all__ = [
     "PRIMITIVE_REGISTRY",
     "TagQuery",
     "ObserveMeasurablesBody",
+    "MoveComponentBody",
+    "PickComponentBody",
+    "HoverBody",
+    "PlaceFromHoverBody",
+    "ScanRotateInPlaceBody",
+    "ConfirmHoldingTagBody",
     "LabPrimitiveSurface",
     "parse_command_payload",
     "execute_validated_command",

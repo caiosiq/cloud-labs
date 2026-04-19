@@ -24,6 +24,27 @@ class PoseTargetParameters(BaseModel):
     rotation: float = 0.0
 
 
+class HoverParameters(PoseTargetParameters):
+    """
+    Mid-air pose for HOVER: same fields as PoseTargetParameters, plus ``z``
+    (clearance above table in mm). ``z`` is **required** here because HOVER is
+    explicitly about where the part sits in the air.
+    """
+
+    z: float
+
+
+class ScanRotateParameters(BaseModel):
+    """Constant-rate angular sweep for SCAN_ROTATE_IN_PLACE."""
+
+    model_config = ConfigDict(extra="allow")
+
+    theta_min: float
+    theta_max: float
+    speed_deg_per_s: float = Field(..., gt=0.0)
+    axis: Literal["z"] = "z"
+
+
 class MoveMotorParameters(BaseModel):
     motor_id: int
     distance: float
@@ -120,6 +141,49 @@ class ObserveMeasurablesBody(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
+# --- In-air manipulation bodies (see new_primitives.md) -----------------------
+
+
+class PickComponentBody(BaseModel):
+    """Grasp part ``target_id`` on the breadboard; transitions to HOLDING."""
+
+    action: Literal["PICK_COMPONENT"]
+    target_id: str = Field(..., min_length=1)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class HoverBody(BaseModel):
+    """Re-position an already held part in mid-air (does NOT grasp)."""
+
+    action: Literal["HOVER"]
+    target_id: str = Field(..., min_length=1)
+    parameters: HoverParameters
+
+
+class PlaceFromHoverBody(BaseModel):
+    """Place a held part on the breadboard; HOLDING → IDLE."""
+
+    action: Literal["PLACE_FROM_HOVER"]
+    target_id: str = Field(..., min_length=1)
+    parameters: PoseTargetParameters
+
+
+class ScanRotateInPlaceBody(BaseModel):
+    """Sweep the held part's rotation from theta_min to theta_max at constant speed."""
+
+    action: Literal["SCAN_ROTATE_IN_PLACE"]
+    target_id: str = Field(..., min_length=1)
+    parameters: ScanRotateParameters
+
+
+class ConfirmHoldingTagBody(BaseModel):
+    """Operator confirms the tag currently in the gripper (clears HOLDING_UNCONFIRMED flag)."""
+
+    action: Literal["CONFIRM_HOLDING_TAG"]
+    target_id: str = Field(..., min_length=1)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
 ValidatedCommand = Annotated[
     Union[
         MoveComponentBody,
@@ -135,6 +199,11 @@ ValidatedCommand = Annotated[
         ScanBody,
         RemoveComponentBody,
         ObserveMeasurablesBody,
+        PickComponentBody,
+        HoverBody,
+        PlaceFromHoverBody,
+        ScanRotateInPlaceBody,
+        ConfirmHoldingTagBody,
     ],
     Field(discriminator="action"),
 ]

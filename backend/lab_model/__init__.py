@@ -8,7 +8,8 @@ See ``README.md`` in this directory for tunables vs measurables.
 """
 
 from . import component_model
+from . import holding
 from . import motor_rotation_store
 from . import storage_region
 
-__all__ = ["component_model", "motor_rotation_store", "storage_region"]
+__all__ = ["component_model", "holding", "motor_rotation_store", "storage_region"]

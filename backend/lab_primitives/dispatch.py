@@ -13,6 +13,8 @@ from lab_model.motor_rotation_store import get_angle
 from .ids import READ_PRIMITIVE_IDS, PrimitiveId
 from .schemas import (
     AffirmPlacedBody,
+    ConfirmHoldingTagBody,
+    HoverBody,
     MoveComponentBody,
     MotorSendHomeBody,
     MotorSetZeroBody,
@@ -20,11 +22,14 @@ from .schemas import (
     MoveMotorParameters,
     ObserveMeasurablesBody,
     OptimizeBody,
+    PickComponentBody,
+    PlaceFromHoverBody,
     PlaceFromStorageBody,
     RecenterInStorageBody,
     RemoveComponentBody,
     RepackStorageBody,
     ScanBody,
+    ScanRotateInPlaceBody,
     StoreComponentBody,
     TagQuery,
     COMMAND_ADAPTER,
@@ -60,6 +65,11 @@ ValidatedCommand = Union[
     ScanBody,
     RemoveComponentBody,
     ObserveMeasurablesBody,
+    PickComponentBody,
+    HoverBody,
+    PlaceFromHoverBody,
+    ScanRotateInPlaceBody,
+    ConfirmHoldingTagBody,
 ]
 
 
@@ -81,14 +91,34 @@ def fetch_read_primitive(
     return lab.return_measurables_for_tag(tid)
 
 
+#: Recipe-step action aliases resolved BEFORE Pydantic validation so recipe
+#: JSON can use the shorter / historical names. Keep the mapping flat and
+#: obvious -- no regex, no case transformations beyond a strip.
+RECIPE_ACTION_ALIASES: Dict[str, str] = {
+    "PLACE": "MOVE_COMPONENT",
+    # In-air manipulation aliases (see new_primitives.md §8 / §12 Stage 7).
+    "PICK": "PICK_COMPONENT",
+    "PLACE_HOVER": "PLACE_FROM_HOVER",
+    "SCAN_ROTATE": "SCAN_ROTATE_IN_PLACE",
+    "CONFIRM_HOLDING": "CONFIRM_HOLDING_TAG",
+}
+
+
 def parse_command_payload(payload: Dict[str, Any]) -> ValidatedCommand:
     """
     Validate POST /api/command (or recipe-shaped) body.
-    Recipe alias: action PLACE → MOVE_COMPONENT before validation.
+
+    Recipe aliases (see :data:`RECIPE_ACTION_ALIASES`) are resolved before
+    Pydantic validation, so a recipe step may use ``"action": "PICK"`` and
+    get validated as ``PICK_COMPONENT``. This keeps recipe files readable
+    without forcing the canonical primitive name on authors.
     """
     raw = dict(payload) if payload else {}
-    if raw.get("action") == "PLACE":
-        raw["action"] = "MOVE_COMPONENT"
+    action = raw.get("action")
+    if isinstance(action, str):
+        canonical = RECIPE_ACTION_ALIASES.get(action.strip())
+        if canonical:
+            raw["action"] = canonical
     return COMMAND_ADAPTER.validate_python(raw)
 
 
@@ -153,10 +183,27 @@ async def _invoke_atomic(
         await lab.observe_measurables_for_tag(cmd.target_id)
     elif isinstance(cmd, ScanBody):
         _log_primitive("SCAN", cmd.target_id, macro_parent=macro_parent)
-        pass
+        _LOG.warning(
+            "Legacy SCAN primitive is a no-op stub; use SCAN_ROTATE_IN_PLACE instead."
+        )
     elif isinstance(cmd, RemoveComponentBody):
         _log_primitive("REMOVE", cmd.target_id, macro_parent=macro_parent)
         await lab.remove_component(cmd.target_id)
+    elif isinstance(cmd, PickComponentBody):
+        _log_primitive("PICK_COMPONENT", cmd.target_id, macro_parent=macro_parent)
+        await lab.pick_component(cmd.target_id, cmd.parameters)
+    elif isinstance(cmd, HoverBody):
+        _log_primitive("HOVER", cmd.target_id, macro_parent=macro_parent)
+        await lab.hover_component(cmd.target_id, cmd.parameters.model_dump())
+    elif isinstance(cmd, PlaceFromHoverBody):
+        _log_primitive("PLACE_FROM_HOVER", cmd.target_id, macro_parent=macro_parent)
+        await lab.place_from_hover(cmd.target_id, cmd.parameters.model_dump())
+    elif isinstance(cmd, ScanRotateInPlaceBody):
+        _log_primitive("SCAN_ROTATE_IN_PLACE", cmd.target_id, macro_parent=macro_parent)
+        await lab.scan_rotate_in_place(cmd.target_id, cmd.parameters.model_dump())
+    elif isinstance(cmd, ConfirmHoldingTagBody):
+        _log_primitive("CONFIRM_HOLDING_TAG", cmd.target_id, macro_parent=macro_parent)
+        await lab.confirm_holding_tag(cmd.target_id)
     else:
         raise NotImplementedError(type(cmd))
 
@@ -262,6 +309,48 @@ def schedule_validated_command(
         return {
             "status": "accepted",
             "message": f"Observation refresh queued for {cmd.target_id}",
+        }
+
+    if isinstance(cmd, PickComponentBody):
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": f"Picking up {cmd.target_id} (will enter HOLDING)",
+        }
+
+    if isinstance(cmd, HoverBody):
+        p = cmd.parameters
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": f"Hovering {cmd.target_id} to ({p.target_x:.1f}, {p.target_y:.1f}) "
+            f"rot={p.rotation:.1f} z={p.z:.1f}",
+        }
+
+    if isinstance(cmd, PlaceFromHoverBody):
+        p = cmd.parameters
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": f"Placing {cmd.target_id} from hover at ({p.target_x:.1f}, {p.target_y:.1f})",
+        }
+
+    if isinstance(cmd, ScanRotateInPlaceBody):
+        p = cmd.parameters
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": (
+                f"Scan-rotate {cmd.target_id}: {p.theta_min:.1f}° → {p.theta_max:.1f}° "
+                f"@ {p.speed_deg_per_s:g}°/s (axis={p.axis})"
+            ),
+        }
+
+    if isinstance(cmd, ConfirmHoldingTagBody):
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": f"Operator confirmed held tag: {cmd.target_id}",
         }
 
     raise NotImplementedError(type(cmd))

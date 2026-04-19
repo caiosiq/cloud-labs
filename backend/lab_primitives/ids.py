@@ -44,6 +44,13 @@ class PrimitiveId(StrEnum):
     SCAN = "SCAN"
     REMOVE = "REMOVE"
 
+    # --- In-air manipulation (see new_primitives.md) ---
+    PICK_COMPONENT = "PICK_COMPONENT"
+    HOVER = "HOVER"
+    PLACE_FROM_HOVER = "PLACE_FROM_HOVER"
+    SCAN_ROTATE_IN_PLACE = "SCAN_ROTATE_IN_PLACE"
+    CONFIRM_HOLDING_TAG = "CONFIRM_HOLDING_TAG"
+
 
 # Read primitives: not POST /api/command; used by GET routes + `fetch_read_primitive`.
 READ_PRIMITIVE_IDS: frozenset[PrimitiveId] = frozenset(

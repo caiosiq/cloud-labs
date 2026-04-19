@@ -221,7 +221,8 @@ cloud-labs/                   # repository root (historically also called optics
 │       ├── command-api.js
 │       └── command-complete.js
 ├── schemas/                  # JSON contracts & reference data
-│   ├── component_catalog.json
+│   ├── component_catalog.real.json  # Real lab inventory (physical parts on the table)
+│   ├── component_catalog.mock.json  # Mock-only catalog (richer, for UI demos)
 │   ├── mock_lab_state.json   # Seed / reference for mock
 │   └── …                     # e.g. client_payload, strategies examples
 ├── recipes/                  # Saved recipes + optional *_golden.json
@@ -322,8 +323,12 @@ Set `LAB_MODE=REAL` and a valid `LAB_AUTOMATION_PATH` so `from lab_automation...
 
 ## Extending the inventory
 
+Mock and real modes load **different** catalog files so UI demos in mock mode can showcase parts the real table may not have yet. `GET /api/catalog` automatically serves the catalog for the **currently running** mode (resolved via `lab.get_catalog()`).
+
 1. Tag physical parts (e.g. ArUco) consistently with your vision stack.
-2. Add or edit **`schemas/component_catalog.json`** (`tag_id`, type, size, optional `motor_ids`, properties).
-3. Restart the backend so **`GET /api/catalog`** picks up changes.
+2. Add or edit the appropriate catalog:
+   - **Real lab:** **`schemas/component_catalog.real.json`** — the physical inventory on the table (`tag_id`, type, size, optional `motor_ids`, properties). Keep this in sync with what is literally tagged on the breadboard.
+   - **Mock / UI demos:** **`schemas/component_catalog.mock.json`** — freely extend with parts you want to showcase in mock mode.
+3. `GET /api/catalog` is re-read from disk on every call, so edits are picked up without restart; restart the backend only if you changed `LAB_MODE`.
 
 See **`ROADMAP.md`** (repo-wide) and **`backend/lab_primitives/ROADMAP.md`** (primitive layer: tests, macros, tooling).

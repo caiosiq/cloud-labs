@@ -123,7 +123,7 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
                 const motorIds = entry && entry.motor_ids;
                 if (!motorIds || !motorIds.length) {
                     appendLine(
-                        'COBYLA needs motor_ids (in JSON or component_catalog.json).',
+                        'COBYLA needs motor_ids (in JSON or the component catalog for the current mode).',
                         'error'
                     );
                     return;

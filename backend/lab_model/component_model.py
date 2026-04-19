@@ -12,6 +12,15 @@ PRESENCE_BREADBOARD = "breadboard"
 PRESENCE_STORAGE = "storage"
 PRESENCE_OFF_TABLE = "off_table"
 
+# placement.mode values (tunables.placement.mode) — non-exhaustive; free-form strings
+# allowed for forward compatibility with new optimizer names.
+PLACEMENT_MODE_MANUAL = "MANUAL"
+PLACEMENT_MODE_STORAGE = "STORAGE"
+PLACEMENT_MODE_HOVER = "HOVER"
+"""Set by HOVER (component is held in mid-air at nominal pose incl. z, not placed)."""
+PLACEMENT_MODE_PICK = "PICK"
+"""Set by PICK_COMPONENT on first grasp before any HOVER relocation."""
+
 
 def default_tunables() -> Dict[str, Any]:
     return {

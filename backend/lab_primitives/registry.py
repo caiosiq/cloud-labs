@@ -96,4 +96,29 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "read_only": False,
         "handler": "remove_component",
     },
+    PrimitiveId.PICK_COMPONENT: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "pick_component",
+    },
+    PrimitiveId.HOVER: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "hover_component",
+    },
+    PrimitiveId.PLACE_FROM_HOVER: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "place_from_hover",
+    },
+    PrimitiveId.SCAN_ROTATE_IN_PLACE: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "scan_rotate_in_place",
+    },
+    PrimitiveId.CONFIRM_HOLDING_TAG: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "confirm_holding_tag",
+    },
 }

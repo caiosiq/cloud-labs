@@ -204,6 +204,26 @@
         }
         .status-dot.placed { background-color: var(--status-success); box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
         .status-dot.inventory { background-color: var(--primary-accent); }
+        /* Optimized: emerald core with a gold highlight + halo so it reads as
+           "placed, but specifically by an optimization strategy" (not the same
+           as plain green "placed"). See isOptimizedPlacement() in
+           frontend/js/component-model.js for the gating logic. */
+        .status-dot.optimized {
+            background: radial-gradient(circle at 30% 30%, #fde68a 0%, #facc15 35%, #10b981 75%);
+            box-shadow: 0 0 10px rgba(250, 204, 21, 0.85), 0 0 4px rgba(16, 185, 129, 0.9);
+        }
+        /* Stored in Q3 storage region. */
+        .status-dot.stored {
+            background-color: #6366f1;
+            box-shadow: 0 0 6px rgba(99, 102, 241, 0.5);
+        }
+        /* Currently in the robot gripper (system_status = HOLDING + this tag).
+           Matches the top-right HOLDING status badge and the canvas ghost
+           overlay color, so the three UI surfaces stay consistent. */
+        .status-dot.holding {
+            background-color: #a855f7;
+            box-shadow: 0 0 8px rgba(168, 85, 247, 0.55);
+        }
 
         .controls-area {
             padding: 20px;
@@ -291,6 +311,36 @@
             border-radius: 4px;
             font-size: 11px;
             width: 100%;
+        }
+
+        /* Context panel buttons: scoped overrides so secondary buttons stop
+           blending with labels like "POSITION (mm)" / "IN-AIR MANIPULATION".
+           Brighter text, a subtle filled background, a stronger border, and
+           accent-colored icons give them a clear "this is clickable" read
+           while still looking quieter than the primary blue CTA buttons. */
+        #context-panel .btn-secondary {
+            background-color: rgba(148, 163, 184, 0.08);
+            border-color: rgba(148, 163, 184, 0.28);
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        #context-panel .btn-secondary:hover {
+            background-color: rgba(148, 163, 184, 0.16);
+            border-color: rgba(148, 163, 184, 0.55);
+            color: var(--text-primary);
+        }
+        #context-panel .btn-secondary:disabled,
+        #context-panel .btn-secondary[disabled] {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+        #context-panel .btn-secondary .material-icons-round {
+            color: var(--primary-accent);
+        }
+        /* Primary buttons (Move, Place from hover, Confirm held tag) already
+           sit on a bright blue fill, so just make sure the icon contrasts. */
+        #context-panel .btn-primary .material-icons-round {
+            color: #ffffff;
         }
 
         .context-panel__close {
@@ -503,6 +553,10 @@
                 <div style="flex: 1; min-width: 0;">
                     <div style="font-size: 10px; color: var(--text-muted); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px;">Selected part</div>
                     <div><span id="selected-comp-name" style="color: var(--primary-accent);">Component</span></div>
+                    <div style="margin-top: 4px; font-size: 10px; color: var(--text-muted); letter-spacing: 0.04em;">
+                        <span style="text-transform: uppercase;">Tag ID:</span>
+                        <span id="selected-comp-tag" style="color: var(--text-secondary); font-family: 'JetBrains Mono', 'Fira Code', monospace;">—</span>
+                    </div>
                     <div id="selected-comp-properties" style="margin-top: 6px; font-size: 11px; font-style: italic; color: var(--text-muted); font-weight: 400; text-transform: none; line-height: 1.4;"></div>
                 </div>
                 <button type="button" id="ctx-panel-close" class="context-panel__close" title="Close" aria-label="Close component controls">

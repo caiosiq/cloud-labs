@@ -14,8 +14,14 @@ import io
 import logging
 
 from lab_primitives import (
+    ConfirmHoldingTagBody,
+    HoverBody,
+    MoveComponentBody,
     ObserveMeasurablesBody,
+    PickComponentBody,
+    PlaceFromHoverBody,
     PrimitiveId,
+    ScanRotateInPlaceBody,
     execute_validated_command,
     fetch_read_primitive,
     parse_command_payload,
@@ -130,13 +136,19 @@ async def execute_recipe(recipe: Recipe):
         await asyncio.sleep(0.5)
         
     print(f"[RECIPE] Recipe {recipe.name} complete. Saving Golden State...")
-    
-    # Save Golden State using Lab State
+
+    # Save Golden State using Lab State. We capture ``holding`` alongside
+    # ``components`` so recipes that end mid-HOLDING (e.g. PICK with no
+    # PLACE_FROM_HOVER) are reproducible, and so the compare endpoint can
+    # flag an unexpected held tag on replay. Older goldens predating this
+    # field are still valid and compare fine -- see ``compare_golden_state``.
     state = lab.get_lab_state()
     golden_state = {
         "recipe_id": recipe.id,
         "timestamp": datetime.now().isoformat(),
         "components": state.get("components", {}),
+        "holding": state.get("holding"),
+        "system_status": state.get("system_status"),
         "metrics": {"completion_status": "SUCCESS"}
     }
     
@@ -194,11 +206,21 @@ async def read_index():
 
 @app.get("/api/catalog")
 async def get_component_catalog():
-    catalog_path = os.path.join(SCHEMAS_DIR, "component_catalog.json")
-    if not os.path.exists(catalog_path):
+    """
+    Return the component catalog for the *currently running* lab mode.
+
+    Mock and real labs load from *different* catalog files
+    (``component_catalog.mock.json`` vs ``component_catalog.real.json``)
+    so UI demos in mock mode can showcase parts the real table may not have
+    physically installed yet. Resolved via ``lab.get_catalog()``.
+    """
+    if lab is None:
         return []
-    with open(catalog_path, "r") as f:
-        return json.load(f)
+    try:
+        return lab.get_catalog()
+    except Exception as e:
+        logger.exception("GET /api/catalog failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to read catalog: {e}")
 
 @app.post("/api/components")
 async def add_component(payload: Dict[str, Any], background_tasks: BackgroundTasks):
@@ -411,6 +433,100 @@ async def get_laser_line():
         print(f"[CONFIG] Failed to load laser_line_fit.npy: {e}")
         return {"a": 0.0, "b": 0.0, "source": "real", "loaded": False}
 
+def _enforce_holding_rules(cmd, state: Dict[str, Any]) -> None:
+    """
+    Reject commands that would be unsafe given the current HOLDING state.
+
+    See ``new_primitives.md`` §6. BUSY/OPTIMIZING are already rejected upstream.
+    """
+    status = state.get("system_status") or "IDLE"
+    holding = state.get("holding") or {}
+    held = holding.get("tag_id") if isinstance(holding, dict) else None
+    unconfirmed = bool(holding.get("requires_operator_confirm")) if isinstance(holding, dict) else False
+
+    if unconfirmed:
+        # Only CONFIRM_HOLDING_TAG is allowed when the gripper-closed boot flag is set.
+        if not isinstance(cmd, ConfirmHoldingTagBody):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Gripper reports closed but held tag is unconfirmed. "
+                    "Confirm the tag in the gripper (CONFIRM_HOLDING_TAG) before sending other commands."
+                ),
+            )
+        return
+
+    if isinstance(cmd, PickComponentBody):
+        if status == "HOLDING":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Already HOLDING {held or '<tag>'}. "
+                    "Use PLACE_FROM_HOVER or HOVER to resolve before another PICK_COMPONENT."
+                ),
+            )
+        return
+
+    if isinstance(cmd, (HoverBody, PlaceFromHoverBody)):
+        # HOVER / PLACE_FROM_HOVER manipulate an already-held part -> must be
+        # in HOLDING and must target the held tag.
+        if status != "HOLDING":
+            raise HTTPException(
+                status_code=409,
+                detail=f"{cmd.action} requires HOLDING state; current status is {status}. "
+                       "Call PICK_COMPONENT first.",
+            )
+        if held and cmd.target_id != held:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Currently holding {held}; cannot {cmd.action} on {cmd.target_id}.",
+            )
+        return
+
+    if isinstance(cmd, ScanRotateInPlaceBody):
+        # SCAN_ROTATE_IN_PLACE has the SAME user intent in both cases ("sweep
+        # theta at constant rate") but dispatches to two different
+        # ``lab_automation`` paths in RealLabCommunicator:
+        #   - HOLDING  -> rotate the in-air held part (no pick/place).
+        #   - IDLE     -> rotate the placed part in situ on the table.
+        # In IDLE the lab backend is responsible for rejecting unsuitable
+        # targets (off-table, in storage, etc.); we only enforce the
+        # HOLDING tag-match rule here.
+        if status == "HOLDING":
+            if held and cmd.target_id != held:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Currently holding {held}; cannot {cmd.action} on {cmd.target_id}. "
+                        "Place or hover the held part first."
+                    ),
+                )
+        elif status != "IDLE":
+            raise HTTPException(
+                status_code=409,
+                detail=f"{cmd.action} requires IDLE or HOLDING; current status is {status}.",
+            )
+        return
+
+    if isinstance(cmd, ConfirmHoldingTagBody):
+        if status != "HOLDING":
+            raise HTTPException(
+                status_code=409,
+                detail="CONFIRM_HOLDING_TAG only valid while system_status is HOLDING.",
+            )
+        return
+
+    # Everything else is a "normal" command and must not run while HOLDING.
+    if status == "HOLDING":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot run {getattr(cmd, 'action', type(cmd).__name__)} while HOLDING "
+                f"(held tag: {held or '<unknown>'}). Use PLACE_FROM_HOVER first."
+            ),
+        )
+
+
 @app.post("/api/command")
 async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundTasks):
     print(f"Received Command: {payload}")
@@ -424,6 +540,8 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
         cmd = parse_command_payload(payload)
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=validation_error_detail(e))
+
+    _enforce_holding_rules(cmd, state)
 
     if isinstance(cmd, ObserveMeasurablesBody):
         await execute_validated_command(lab, cmd)
@@ -635,11 +753,22 @@ async def compare_golden_state(recipe_id: str):
             c_comp = current_comps[comp_id]
             g_pose = (g_comp.get("measurables") or {}).get("pose") or {}
             c_pose = (c_comp.get("measurables") or {}).get("pose") or {}
-            
+
             dx = g_pose.get("x", 0) - c_pose.get("x", 0)
             dy = g_pose.get("y", 0) - c_pose.get("y", 0)
-            dist = (dx*dx + dy*dy)**0.5
-            
+            # Include z in the drift when BOTH sides have it -- required by
+            # new_primitives.md Stage 7 (HOVER / PICK produce z-bearing poses).
+            # Older goldens predating the in-air primitives don't store z;
+            # in that case we fall back to 2D drift so historical recipes
+            # keep comparing against current state without spurious DRIFT.
+            if "z" in g_pose and "z" in c_pose:
+                dz = float(g_pose.get("z", 0)) - float(c_pose.get("z", 0))
+                dist = (dx*dx + dy*dy + dz*dz) ** 0.5
+                entry["drift_axes"] = "xyz"
+            else:
+                dist = (dx*dx + dy*dy) ** 0.5
+                entry["drift_axes"] = "xy"
+
             entry["drift_mm"] = round(dist, 4)
             
             if dist > 0.1: # Tolerance 0.1mm
@@ -659,7 +788,42 @@ async def compare_golden_state(recipe_id: str):
                 "drift_mm": 0.0
             })
             report["status"] = "DRIFT"
-            
+
+    # Compare ``holding`` if the golden has it (backwards compat: old goldens
+    # predating the in-air primitives just skip this block).
+    if "holding" in golden:
+        g_hold = golden.get("holding") or {}
+        c_hold = current.get("holding") or {}
+        g_tag = g_hold.get("tag_id")
+        c_tag = c_hold.get("tag_id")
+        if g_tag != c_tag:
+            report["status"] = "DRIFT"
+            report["details"].append({
+                "component_id": "<holding>",
+                "status": "HOLDING_MISMATCH",
+                "golden_tag": g_tag,
+                "current_tag": c_tag,
+                "drift_mm": 0.0,
+            })
+        elif g_tag is not None:
+            # Same tag held -- compare the in-air pose so PICK/HOVER recipes
+            # are reproducible end-to-end.
+            gp = g_hold.get("nominal_pose") or {}
+            cp = c_hold.get("nominal_pose") or {}
+            dx = float(gp.get("x", 0)) - float(cp.get("x", 0))
+            dy = float(gp.get("y", 0)) - float(cp.get("y", 0))
+            dz = float(gp.get("z", 0)) - float(cp.get("z", 0))
+            hold_dist = (dx*dx + dy*dy + dz*dz) ** 0.5
+            if hold_dist > 0.1:
+                report["status"] = "DRIFT"
+                report["details"].append({
+                    "component_id": "<holding>",
+                    "status": "HOLDING_DRIFTED",
+                    "tag": g_tag,
+                    "drift_mm": round(hold_dist, 4),
+                })
+            total_drift += hold_dist
+
     report["total_drift_mm"] = round(total_drift, 4)
     return report
 

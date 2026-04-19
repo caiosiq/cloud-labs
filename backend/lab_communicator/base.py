@@ -1,5 +1,6 @@
+import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from lab_model.component_model import get_measurables, get_tunables
 
@@ -8,6 +9,28 @@ class LabCommunicator:
     """
     Abstract Base Class for Lab Communication.
     """
+
+    #: Absolute path to the component catalog JSON this backend loads from.
+    #: Each concrete implementation is expected to set this in ``__init__``
+    #: (mock and real lab use *different* catalog files -- see README).
+    catalog_file: Optional[str] = None
+
+    def get_catalog(self) -> List[Dict[str, Any]]:
+        """
+        Return the component catalog as a list of dicts (the JSON under
+        :attr:`catalog_file`). Kept as a plain file read so callers always see
+        on-disk edits without restarting the backend.
+        """
+        path = self.catalog_file
+        if not path or not os.path.exists(path):
+            return []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return []
+        return data if isinstance(data, list) else []
+
     def get_lab_state(self) -> Dict[str, Any]:
         raise NotImplementedError
 
@@ -80,6 +103,59 @@ class LabCommunicator:
     async def recenter_stored_in_inventory(self, target_id: str):
         """Move a STORED part to the center of its assigned (or inferred) cell at standard storage rotation (0°)."""
         raise NotImplementedError
+
+    # --- In-air manipulation (see ``new_primitives.md``) ---
+
+    async def pick_component(self, target_id: str, params: Dict[str, Any]):
+        """
+        Approach ``target_id``, close gripper, retract to safe Z. Transitions
+        ``system_status`` IDLE → BUSY → HOLDING and sets ``state["holding"]``.
+        ``params`` reserved for future options (e.g. custom safe Z).
+        """
+        raise NotImplementedError
+
+    async def hover_component(self, target_id: str, target_pose: Dict[str, float]):
+        """
+        Reposition an **already held** part in mid-air to
+        ``(target_x, target_y, rotation, z)``. Does NOT grasp. Requires
+        ``system_status == "HOLDING"`` and ``state["holding"].tag_id == target_id``.
+        """
+        raise NotImplementedError
+
+    async def place_from_hover(self, target_id: str, target_pose: Dict[str, float]):
+        """
+        Place a held part on the breadboard at ``(target_x, target_y, rotation)``.
+        HOLDING → BUSY → IDLE; clears ``state["holding"]``.
+        """
+        raise NotImplementedError
+
+    async def scan_rotate_in_place(self, target_id: str, params: Dict[str, Any]):
+        """
+        Sweep the held part's rotation from ``theta_min`` to ``theta_max`` at
+        ``speed_deg_per_s`` around ``axis`` (default ``"z"``). Used to scan for
+        laser-on-camera alignment. Requires HOLDING; remains HOLDING on success.
+        """
+        raise NotImplementedError
+
+    async def confirm_holding_tag(self, tag_id: str):
+        """
+        Operator confirms which tag is actually in the gripper (used to clear
+        ``requires_operator_confirm`` after a startup gripper-closed reconciliation).
+        """
+        raise NotImplementedError
+
+    def get_gripper_status(self) -> Dict[str, Any]:
+        """
+        Hardware poll: is the gripper physically closed on something?
+        Expected shape::
+
+            {"closed": bool, "confidence": float | None, "source": str}
+
+        Default for lab backends without gripper introspection: ``closed=False``.
+        Real lab overrides this; mock returns ``closed=True`` only when the
+        ``MOCK_GRIPPER_CLOSED_ON_BOOT`` dev flag is set at startup.
+        """
+        return {"closed": False, "confidence": None, "source": "default"}
 
     def get_video_feed_status(self) -> Dict[str, Any]:
         return {"connected": True, "source": "/static/mock_feed.svg"}

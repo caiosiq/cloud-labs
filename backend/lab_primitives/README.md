@@ -71,7 +71,12 @@ Body shape:
 Flow:
 
 1. **`parse_command_payload(dict)`** validates with the discriminated union (Pydantic v2).  
-   - Recipe steps may use **`"action": "PLACE"`**; it is normalized to **`MOVE_COMPONENT`** before validation.
+   - Recipe steps may use shorter aliases (see **`RECIPE_ACTION_ALIASES`** in **`dispatch.py`**) which are normalized to canonical primitive IDs **before** validation:
+     - **`PLACE`** → **`MOVE_COMPONENT`**
+     - **`PICK`** → **`PICK_COMPONENT`**
+     - **`PLACE_HOVER`** → **`PLACE_FROM_HOVER`**
+     - **`SCAN_ROTATE`** → **`SCAN_ROTATE_IN_PLACE`**
+     - **`CONFIRM_HOLDING`** → **`CONFIRM_HOLDING_TAG`**
 2. **`schedule_validated_command(lab, cmd, background_tasks)`** queues **`execute_validated_command`** on Starlette’s background tasks and returns the usual `{"status": "accepted", "message": "..."}` JSON.
 
 **`main.py`** handles lab busy (`409`) before parsing; **`422`/`400`** on validation uses `validation_error_detail`.

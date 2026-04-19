@@ -168,7 +168,7 @@ This roadmap outlines the development stages for the Optical Digital Twin, a sys
 To ensure the Digital Twin matches reality, we will not hardcode the initial state. Instead, we will use the `scan_components` capability of the `OpticalExperiment` manager to discover what is actually on the table.
 
 - [x] **Define the Physical Inventory (Catalog)**
-    - Update `component_catalog.json` to match the *actual* ArUco tags used in the lab (e.g., ND Filter=Tag 9, CAM1=Tag 22).
+    - Update `component_catalog.real.json` to match the *actual* ArUco tags used in the lab (e.g., ND Filter=Tag 9, CAM1=Tag 22). Mock-mode UI demos load from a separate `component_catalog.mock.json`.
     - This ensures that when the user requests "ND Filter", the system knows exactly which physical object to look for.
 
 - [x] **Implement `RealLabCommunicator`**

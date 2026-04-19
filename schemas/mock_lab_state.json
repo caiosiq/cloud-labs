@@ -1,6 +1,6 @@
 {
-  "system_status": "IDLE",
-  "last_updated": "2026-04-11T19:32:12.079269",
+  "system_status": "HOLDING",
+  "last_updated": "2026-04-17T22:36:22.347943",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -41,9 +41,9 @@
       "tunables": {
         "presence": "breadboard",
         "nominal_pose": {
-          "x": -282.8571428571429,
-          "y": 264.2857142857143,
-          "rotation": 680.0
+          "x": -268.3,
+          "y": 204.5,
+          "rotation": 10.0
         },
         "nominal_motor_positions": {},
         "storage": {
@@ -56,9 +56,9 @@
       },
       "measurables": {
         "pose": {
-          "x": -282.6527744223036,
-          "y": 264.59497040802796,
-          "rotation": 680.0
+          "x": -268.7357515178132,
+          "y": 204.28708230528625,
+          "rotation": 10.0
         },
         "last_optimization_score": 0.99,
         "last_optimized_pose": {
@@ -146,44 +146,12 @@
       "id": "tag_2",
       "type": "OPTICAL_BEAMSPLITTER",
       "tunables": {
-        "presence": "storage",
-        "nominal_pose": {
-          "x": -150.0,
-          "y": -450.0,
-          "rotation": 0.0
-        },
-        "nominal_motor_positions": {},
-        "storage": {
-          "in_storage": true,
-          "slot": {
-            "i": 3,
-            "j": 0
-          }
-        },
-        "placement": {
-          "mode": "STORAGE"
-        }
-      },
-      "measurables": {
-        "pose": {
-          "x": -150.0,
-          "y": -450.0,
-          "rotation": 0.0
-        },
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
-        "camera_image": null
-      }
-    },
-    "tag_10": {
-      "id": "tag_10",
-      "type": "OPTICAL_BEAMSPLITTER",
-      "tunables": {
         "presence": "breadboard",
         "nominal_pose": {
-          "x": 256.9047619047618,
-          "y": -48.33333333333323,
-          "rotation": 0.0
+          "x": 276.3,
+          "y": 186.7,
+          "rotation": 0.0,
+          "z": 40.0
         },
         "nominal_motor_positions": {},
         "storage": {
@@ -191,14 +159,15 @@
           "slot": null
         },
         "placement": {
-          "mode": "MANUAL"
+          "mode": "HOVER"
         }
       },
       "measurables": {
         "pose": {
-          "x": 257.16697603071907,
-          "y": -48.12350563999059,
-          "rotation": 0.0
+          "x": 276.5344837374725,
+          "y": 186.67657888463899,
+          "rotation": 0.0,
+          "z": 40.0
         },
         "last_optimization_score": null,
         "last_optimized_pose": null,
@@ -317,19 +286,33 @@
           "slot": null
         },
         "placement": {
-          "mode": "MANUAL"
+          "mode": "NEWTON"
         }
       },
       "measurables": {
         "pose": {
           "x": 239.76412628247976,
           "y": -241.83573311565084,
-          "rotation": 0.0
+          "rotation": -0.33385134947589146
         },
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
+        "last_optimization_score": 0.99,
+        "last_optimized_pose": {
+          "x": 239.76412628247976,
+          "y": -241.83573311565084,
+          "rotation": -0.33385134947589146
+        },
         "camera_image": null
       }
     }
+  },
+  "holding": {
+    "tag_id": "tag_2",
+    "nominal_pose": {
+      "x": 276.3,
+      "y": 186.7,
+      "rotation": 0.0,
+      "z": 40.0
+    },
+    "requires_operator_confirm": false
   }
 }
