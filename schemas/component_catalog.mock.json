@@ -5,6 +5,7 @@
     "name": "ND Filter",
     "tag_id": "tag_9",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "optical_density": 1.0,
       "transmission": 0.1
@@ -16,6 +17,7 @@
     "name": "Gripper Camera 1",
     "tag_id": "tag_22",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "resolution": "1920x1080",
       "fov": 60
@@ -27,6 +29,7 @@
     "name": "Gripper Camera 2",
     "tag_id": "tag_21",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "resolution": "1920x1080",
       "fov": 60
@@ -38,6 +41,7 @@
     "name": "Curved Mirror (OC)",
     "tag_id": "tag_18",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "radius_of_curvature": "100mm",
       "reflectivity": 0.98,
@@ -52,6 +56,7 @@
     "name": "Beam Block",
     "tag_id": "tag_2",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "material": "Anodized Aluminum",
       "damage_threshold": "10J/cm^2"
@@ -63,6 +68,7 @@
     "name": "Beam Splitter (BS)",
     "tag_id": "tag_10",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "split_ratio": "50:50",
       "polarization": "Non-polarizing"
@@ -74,6 +80,7 @@
     "name": "Main Lens",
     "tag_id": "tag_11",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "focal_length": "50mm",
       "material": "BK7",
@@ -88,6 +95,7 @@
     "name": "Planar Mirror (IC)",
     "tag_id": "tag_20",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "radius_of_curvature": "Infinity",
       "reflectivity": 0.99,
@@ -102,6 +110,7 @@
     "name": "Filter",
     "tag_id": "tag_3",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "type": "Longpass",
       "cut_on": "600nm"
@@ -113,6 +122,7 @@
     "name": "Crystal",
     "tag_id": "tag_19",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "material": "KTP",
       "cut_angle": "theta=90, phi=23.5",

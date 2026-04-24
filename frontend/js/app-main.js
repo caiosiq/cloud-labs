@@ -1471,7 +1471,10 @@ function renderInAirControlsForContext(name, comp, placementState) {
         zLabel.style.color = '#94a3b8';
         zLabel.style.display = 'block';
         zLabel.style.marginBottom = '4px';
-        zLabel.textContent = 'Z CLEARANCE (mm)';
+        zLabel.textContent = 'Z CLEARANCE (mm above table)';
+        zLabel.title =
+            'Height of the component\'s base above the breadboard surface. ' +
+            '0 = on the table, 40 = default safe hover height.';
         zRow.appendChild(zLabel);
         const zInp = document.createElement('input');
         zInp.type = 'number';

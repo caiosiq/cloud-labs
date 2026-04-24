@@ -280,9 +280,88 @@ HOLDING --(SCAN_ROTATE_IN_PLACE, held-mode)  --> BUSY|SCANNING --(success)--> HO
 
 ---
 
+## 10.5 Z / coordinate convention (`z_lab` vs. `z_robot`)
+
+Cloud-labs (this repo), the UI, the HTTP API, `lab_model`, and the mock communicator **all** speak a single vertical coordinate we call **`z_lab`**:
+
+- **`z_lab` = height of the component's *base* above the breadboard surface, in millimeters.**
+- `z_lab = 0` ⇔ part is resting on the breadboard (post-`PLACE_FROM_HOVER`).
+- `z_lab = DEFAULT_HOVER_Z_MM` (40) ⇔ default safe clearance after `PICK_COMPONENT`.
+
+All of these fields are `z_lab`: `tunables.nominal_pose.z`, `measurables.pose.z`, `holding.nominal_pose.z`, the `z` in `HOVER` / `PLACE_FROM_HOVER` payloads, every z input in the UI.
+
+The robot controller speaks **`z_robot`** — a raw robot-frame z (flange / gripper-tip, depending on the setup). `RealLabCommunicator` is the **only** component that sees both frames; it converts at every boundary with `lab_automation` (mirrors the existing XY `lab_table_xy_to_robot_xy` transform).
+
+**Forward transform** (outgoing cloud-labs → `lab_automation`):
+
+```
+z_robot = TABLE_Z0_ROBOT_MM + c.height_mm − GRASP_OFFSET_MM + z_lab
+```
+
+**Inverse transform** (incoming `lab_automation` → cloud-labs):
+
+```
+z_lab = z_robot − TABLE_Z0_ROBOT_MM − c.height_mm + GRASP_OFFSET_MM
+```
+
+Three inputs, each owned by exactly one thing so they don't drift out of sync:
+
+| Input | Owner | Meaning | Override |
+|---|---|---|---|
+| `TABLE_Z0_ROBOT_MM` | Per-setup calibration | Robot-frame z reading when the **empty gripper fingers** are just touching the breadboard (one-time touch-off) | Env `TABLE_Z0_ROBOT_MM` in `backend/lab_communicator/real.py` (default `500.0`) |
+| `GRASP_OFFSET_MM` | Gripper design constant | Distance from the **top of the component's housing** DOWN to the point where the gripper fingers close. `0` ⇒ grips at the very top; `10` ⇒ grips 10 mm below the top | Env `GRASP_OFFSET_MM` (default `0.0`) |
+| `c.height_mm` | Per-component catalog | Total physical height of the part, base-to-top, in mm | New top-level field in `schemas/component_catalog.real.json` (distinct from `size.height`, which is the 2D UI footprint). Fallback `DEFAULT_COMPONENT_HEIGHT_MM` (60 mm) with a warning if missing |
+
+Plus one cloud-labs-side safety knob: **`MAX_SAFE_HOVER_Z_LAB_MM`** (default 200 mm). `RealLabCommunicator.hover_component` rejects any payload with `z_lab` outside `[0, MAX_SAFE_HOVER_Z_LAB_MM]` before forward-transforming, catching runaway robot-frame values that leaked into an HTTP payload.
+
+### How `PICK_COMPONENT` populates `z_lab`
+
+Cloud-labs does **not** send a z to `pick_component_cloudlab` — the `lab_manager` chooses its own `safe_z_retract_robot`. To stay consistent with the round-trip invariant, after pick succeeds `RealLabCommunicator` asks `lab_automation` for the intent height via a math-only helper:
+
+```python
+lab_automation.compute_intent_hover_z_lab(component) -> float   # returns z_lab
+```
+
+This is a **pure function** with no hardware I/O: `lab_manager` applies the inverse transform to its own `safe_z_retract_robot`. The result is written straight into `tunables.nominal_pose.z` and `holding.nominal_pose.z`. If `lab_automation` does not yet expose the helper, `RealLabCommunicator` falls back to `DEFAULT_HOVER_Z_MM` (40 mm) and logs a warning.
+
+### Round-trip invariant
+
+If the user picks a part and then clicks **Hover** without editing the z field:
+
+1. Post-pick: `tunables.nominal_pose.z = z_lab_intent` (from `compute_intent_hover_z_lab`).
+2. UI sends `HOVER` with that same `z_lab`.
+3. `RealLabCommunicator._z_lab_to_robot` forward-transforms → `z_robot` = exactly what the robot is already at.
+4. Robot produces **no vertical motion**.
+
+This is robust to calibration error in `TABLE_Z0_ROBOT_MM` because the same constant appears on both sides of the transform. Wrong calibration only makes the displayed `z_lab` physically inaccurate (UI says 40 but the part is actually 35 above the table) — it does **not** cause spurious motion on a no-op HOVER.
+
+### Tunables vs. measurables for the new primitives
+
+Convention: every primitive that commands robot motion writes the commanded pose into **both** `tunables.nominal_pose` (intent) **and** `measurables.pose` (current estimated position). This mirrors `MOVE_COMPONENT`'s long-standing behavior — robot placement accuracy is higher than what the top camera can resolve (especially through the gripper during a HOLDING session), so the commanded pose is the best available estimate of where the part actually is. A downstream vision pipeline can always overwrite `measurables.pose` later when it has a more precise read.
+
+| Primitive | Writes `tunables.nominal_pose` | Writes `measurables.pose` |
+|---|---|---|
+| `MOVE_COMPONENT` | ✅ (x/y/rotation) | ✅ (x/y/rotation) — existing behavior |
+| `PICK_COMPONENT` | ✅ (x/y/rotation carried over from previous measurables, z from `_intent_hover_z_lab`) | ✅ (same x/y/rotation/z as tunables) |
+| `HOVER` | ✅ (x/y/rotation/z from the user-supplied z_lab) | ✅ (same x/y/rotation/z) |
+| `PLACE_FROM_HOVER` | ✅ (x/y/rotation; z stripped, since `z_lab = 0` is implicit on placed parts) | ✅ (same x/y/rotation; z omitted) |
+| `SCAN_ROTATE_IN_PLACE` (held) | ✅ (`rotation` updated; XY/Z locked) | ✅ (`rotation` updated on the held pose) |
+| `SCAN_ROTATE_IN_PLACE` (placed) | ✅ (`rotation` updated) | ✅ (`rotation` updated) |
+
+### Where this is implemented
+
+- **Constants + transforms:** top of `backend/lab_communicator/real.py` (module-level comment; helpers `_component_height_mm`, `_z_lab_to_robot`, `_z_robot_to_lab`, `_intent_hover_z_lab`).
+- **PICK path:** `RealLabCommunicator.pick_component` — no z is sent to `lab_automation`; `_intent_hover_z_lab(target_id)` populates `tunables.nominal_pose.z`, `measurables.pose.z`, and `holding.nominal_pose.z` on success.
+- **HOVER path:** `RealLabCommunicator.hover_component` — bounds-checks `z_lab`, forward-transforms to `z_robot`, passes it to `hover_component_cloudlab`, then commits intent to `tunables`, `measurables.pose`, and `holding` (same convention as `MOVE_COMPONENT`).
+- **Mock reference:** `MockLabCommunicator` speaks `z_lab` natively — no transform, no catalog lookup; `DEFAULT_HOVER_Z_MM` is authoritative.
+- **UI labels:** context panel z input reads "Z CLEARANCE (mm above table)" with a tooltip explaining z_lab = 0 semantics.
+- **Lab-automation contract:** see `labautomation_new_primitives.md` §4 for what `lab_automation` must expose (`compute_intent_hover_z_lab`, robot-frame expectations for `hover_component_cloudlab`, etc.).
+
+---
+
 ## 11. Remaining open questions (for `lab_automation`)
 
-1. **Z convention:** Table surface **z = 0** vs robot base — must match **`RealLabCommunicator`** and **`PICK`** safe clearance.
+1. ~~**Z convention:** Table surface **z = 0** vs robot base — must match **`RealLabCommunicator`** and **`PICK`** safe clearance.~~ **Resolved, see §10.5.** Cloud-labs speaks `z_lab` (height of component base above table); `RealLabCommunicator` transforms to/from `z_robot` using `TABLE_Z0_ROBOT_MM`, per-component `height_mm`, and `GRASP_OFFSET_MM`.
 2. **Safety:** E-stop mid-air — who clears **`holding`** and how does the UI recover (operator confirm only)?
 3. **`SCAN_ROTATE_IN_PLACE`:** Allowed only when **`HOLDING`**, or also when part is **fixed on table**? (Deferred camera sync remains **out of scope** until a later milestone.)
 
@@ -392,3 +471,10 @@ The specification for `lab_automation` — what methods to add on `OpticalExperi
 - **2026-04-17:** Stages 0–5 marked complete (backend primitives, mock implementation, and full Cloud-Labs UI integration all landed; real-hardware stages 6–10 still pending).
 - **2026-04-17 (later):** Stages 6–7 marked complete — `RealLabCommunicator` now carries safe placeholder methods + boot-time gripper reconciliation + `HOVER_PLACEHOLDER_STATE=1` flag, recipe JSON accepts shorter aliases (`PICK`, `PLACE_HOVER`, `SCAN_ROTATE`, `CONFIRM_HOLDING`), and golden-state comparison covers `z` and `holding` with backwards compatibility. Stage 8 (real motion) spec handed off in `labautomation_new_primitives.md`.
 - **2026-04-17 (later still):** `SCAN_ROTATE_IN_PLACE` widened to cover **both** `HOLDING` (held-mode) and `IDLE` + on-breadboard (placed-mode). Still **one** primitive / one UI button. `RealLabCommunicator.scan_rotate_in_place` now dispatches at runtime to `scan_rotate_held_cloudlab` vs. `scan_rotate_placed_cloudlab` (both documented in `labautomation_new_primitives.md` §2.4). Validation in `_enforce_holding_rules` updated; mock + UI mirror the branching.
+- **2026-04-17 (z convention):** Wrote down the `z_lab` / `z_robot` convention explicitly (§10.5) and added the transform to `RealLabCommunicator`: new module-level constants `TABLE_Z0_ROBOT_MM`, `GRASP_OFFSET_MM`, `DEFAULT_COMPONENT_HEIGHT_MM`, `MAX_SAFE_HOVER_Z_LAB_MM` (all env-overridable); per-component `height_mm` field added to `schemas/component_catalog.real.json` + `.mock.json`; helpers `_component_height_mm`, `_z_lab_to_robot`, `_z_robot_to_lab`, `_intent_hover_z_lab` introduced. `PICK_COMPONENT` no longer sends a hardcoded `DEFAULT_HOVER_Z_MM` to `lab_automation` — it asks `compute_intent_hover_z_lab(component)` after pick completes (falls back to `DEFAULT_HOVER_Z_MM` if the helper is absent). `HOVER` forward-transforms the user's `z_lab` to `z_robot` before dispatch and bounds-checks `[0, MAX_SAFE_HOVER_Z_LAB_MM]`. UI z label updated to "Z CLEARANCE (mm above table)". Mock is unchanged — it was already the reference `z_lab` implementation. Open question #1 in §11 marked resolved.
+- **2026-04-17 (measurables parity):** `PICK_COMPONENT` and `HOVER` now also write `measurables.pose` (x/y/rotation/z = commanded intent), matching the long-standing `MOVE_COMPONENT` convention. Rationale: robot placement accuracy is higher than the top camera's read through the gripper, so the commanded pose is the best available estimate of the current pose. A future vision pipeline can still overwrite `measurables.pose` later when it has a more precise reading. Docs in §10.5 updated accordingly.
+- **2026-04-17 (fixing.md audit):** A broader audit (`fixing.md` in the repo root) found that cloud-labs was reaching across the wall into `lab_automation`-owned state in `backend/lab_communicator/real.py` — patching up `inventory_location`, `current_location`, and `is_placed` after scans and picks. Decision: cloud-labs will **ignore `inventory_location`** entirely and treat `current_location` as the single canonical "where is this part now" field; `is_placed` stays pushed by cloud-labs only in `set_lab_state` (load-state is ground truth). The audit also surfaced two latent safety bugs in `set_lab_state`: (a) `z_lab` was being loaded verbatim into `z_robot` for snapshots that captured hover z, and (b) `rotation` was being passed directly as `yaw_robot` even though `move_component` applies a `-rot` transform. See `fixing.md` §§2–3 for the full audit and Stage A/B/C roadmap.
+- **2026-04-17 (Stage A landed):** `fixing.md` Stage A implemented in `backend/lab_communicator/real.py`: `set_lab_state` now routes all three axes through helpers (`lab_table_xy_to_robot_xy`, `_z_lab_to_robot`, new `lab_rotation_to_robot_yaw` / `robot_yaw_to_lab_rotation`); `hover_component` also routes rotation through the new helper. `lab_rotation_to_robot_yaw` is identity today — the one-line fix point for when the lab↔robot rotational offset is measured. `move_component`'s empirically-correct `angle=[-180, 0, -rot]` is left unchanged with a comment pointing at `fixing.md` §3.1 (reconciliation deferred to next physical-robot session). Regression test for the save→load round-trip (A6) deferred: `RealLabCommunicator` isn't importable in the current test env without `lab_automation`, and mocking it for one test is more cost than value right now.
+- **2026-04-17 (Stage B handoff):** `fixing.md` Stage B written up as a `lab_automation`-facing contract in `labautomation_new_primitives.md` §5 (new section). Seven contract items for the `lab_automation` maintainer: `pick_component_cloudlab` must write `current_location`; `scan_components_cloudlab` must write `current_location`; no `_cloudlab` function reads or writes `inventory_location`; per-primitive read/write matrix to be filled in on the automation side; `Pose` frame docs; optional `is_registered(comp)` helper; plus `compute_intent_hover_z_lab` carried over from Stage 8. Q1–Q5 decisions from `fixing.md` §8 inlined so they stay locked. Stage B and Stage 8 can ship independently. Stage C (cloud-labs cleanup — drop all `inventory_location` reads/writes from `real.py`) stays blocked on Stage B landing in `lab_automation`.
+- **2026-04-17 (Stage 8 wiring live):** `lab_automation` shipped all five `*_cloudlab` methods (`pick_component_cloudlab`, `hover_component_cloudlab`, `place_from_hover_cloudlab`, `scan_rotate_held_cloudlab`, `scan_rotate_placed_cloudlab`), plus `compute_intent_hover_z_lab` / `get_intent_hover_z_lab`, `get_gripper_status`, `OpticalComponent.is_registered`, and `height_mm` / `is_held` / `last_hover_pose` fields on `OpticalComponent`. The real paths in `RealLabCommunicator` (`pick_component` / `hover_component` / `place_from_hover` / `scan_rotate_in_place`), which were written as dormant `asyncio.to_thread(...)` calls back in Stages 6–7, now activate automatically because the `getattr(self.experiment, "scan_rotate_*_cloudlab", None)` probes succeed. Signature compatibility confirmed across all four primitives. Polish: (a) `_holding_placeholder_log` now says `DISPATCH:` when the real path is active and `PLACEHOLDER:` only when `HOVER_PLACEHOLDER_STATE=1` is forcing the state-only stub; (b) `scan_rotate_in_place` pre-flight refusals dropped the misleading "PLACEHOLDER:" tag (they're legitimate input-validation errors, not placeholder-mode behavior); (c) `hover_component`, `place_from_hover`, and `scan_rotate_in_place` now emit completion log lines matching the existing `pick_component` pattern. `HOVER_PLACEHOLDER_STATE=1` escape hatch preserved per `labautomation_new_primitives.md` §6 item 3 (still useful for UI testing without a real robot). What remains for Stage 8: item 5 of that §6 — an end-to-end recipe/golden-state test against the live robot (`PICK → HOVER → HOVER → PLACE_FROM_HOVER` plus `SCAN_ROTATE_IN_PLACE` held + placed), which can only be done on the physical setup.
+- **2026-04-17 (Stage C landed):** `fixing.md` Stage C swept `inventory_location` out of `backend/lab_communicator/real.py` in four call sites (`_initialize_state` reads, `set_lab_state` write, `move_component` sentinel, `pick_component` sentinel) and added a CI lint to prevent regressions. `_initialize_state` now reads `comp.current_location` directly (the `comp.current_location = comp.inventory_location` compatibility shim deleted); `set_lab_state` now writes only `current_location` + `is_placed`; both sentinels flipped to `if not comp.current_location:` with matching operator-log updates. `rg "\.inventory_location" backend/lab_communicator/real.py` returns zero matches — the two remaining prose mentions live inside comments explaining *why* cloud-labs stays away from the field (intentional documentation). CI lint: new `StageCInvariantsTests` class in `backend/tests/test_lab_primitives.py` with 3 tests that parse `real.py` into method blocks and fail on any `.inventory_location` attribute access, on `.current_location =` writes outside `set_lab_state`, or on `.is_placed =` writes outside `{set_lab_state, affirm_placed_at_current}`. The `affirm_placed_at_current` exemption is Stage C6's option (a) — that primitive is the manual-place flow and legitimately writes `is_placed = True` without going through a snapshot load. Regex parsing is used instead of `ast` so the test survives without `lab_automation` importable in the test environment. All 9 tests in `test_lab_primitives` pass. No functional change to hover/pick/place/move flows — Stage C is purely a cleanup + a guard rail. This closes the architectural thread started by `fixing.md`; what remains is the physical-robot test described in the Stage 8 entry above.

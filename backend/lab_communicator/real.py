@@ -105,6 +105,102 @@ def robot_table_xy_to_lab_xy(x_robot: float, y_robot: float) -> Tuple[float, flo
     return (c * x_robot + s * y_robot, -s * x_robot + c * y_robot)
 
 
+# --- Lab vs robot yaw / rotation (see fixing.md: "Coordinate convention recap") ---
+# UI / cloud-labs state stores rotation in the lab frame as ``theta_lab`` (deg).
+# lab_automation expects robot-frame yaw as ``yaw_robot`` (deg). In general the
+# two differ by the same calibration that relates the lab and robot table XY
+# frames (plus possibly a sign flip). Today, by convention and empirical
+# evidence, the transform is identity: ``yaw_robot = theta_lab``. These
+# helpers exist so every cross-wall rotation write goes through one place --
+# when the lab calibrates a real offset, it's a one-line fix here, not a
+# hunt across every primitive.
+#
+# Known convention disagreement (tracked in fixing.md §3.1 / Stage A4):
+# ``RealLabCommunicator.move_component`` today dispatches ``angle=[-180, 0, -rot]``
+# -- the ``-rot`` is an inline, ad-hoc negation that has been empirically
+# correct for this hardware setup. We have NOT yet folded that negation into
+# ``lab_rotation_to_robot_yaw`` because we can't physically test whether
+# ``set_lab_state`` and ``hover_component`` should also negate (they use the
+# identity today). Resolving this is deferred until the next time someone is
+# in front of the robot and can verify experimentally. For now:
+#   - ``set_lab_state`` and ``hover_component`` route through this helper
+#     (identity), matching their current behavior.
+#   - ``move_component`` keeps its inline ``-rot`` with a comment pointing
+#     back here. When calibration is done, either the negation moves into
+#     this helper (and ``move_component`` loses the ``-``) or it stays
+#     out for a documented reason.
+def lab_rotation_to_robot_yaw(theta_lab: float) -> float:
+    """
+    Map UI / lab table rotation (deg) to robot-frame yaw (deg).
+
+    Identity today. See module-level comment above for the convention and
+    the known open item (``move_component``'s inline ``-rot``).
+    """
+    return float(theta_lab)
+
+
+def robot_yaw_to_lab_rotation(yaw_robot: float) -> float:
+    """Inverse of :func:`lab_rotation_to_robot_yaw`. Identity today."""
+    return float(yaw_robot)
+
+
+# --- Lab vs robot Z (see new_primitives.md: "Z / coordinate convention") ---
+# Cloud-labs, the UI, the HTTP API, and lab_model all speak ``z_lab``:
+#     Height of a component's *base* above the breadboard surface (mm).
+#     z_lab = 0   -> part is resting on the breadboard.
+#     z_lab = 40  -> part's base is 40 mm above the breadboard (default hover).
+#
+# lab_automation speaks ``z_robot``: the robot-frame z command of whatever
+# reference point the robot controller uses (flange / gripper tip). We absorb
+# the flange-to-gripper-tip offset into TABLE_Z0_ROBOT_MM below so that
+# TABLE_Z0_ROBOT_MM is always the robot z reading when the *gripper fingers*
+# (empty) are touching the breadboard.
+#
+# RealLabCommunicator is the ONLY place these two frames meet. Every outgoing
+# call to lab_automation forward-transforms z_lab -> z_robot; every incoming
+# read inverse-transforms z_robot -> z_lab.
+#
+# Transform (outgoing):
+#     z_robot = TABLE_Z0_ROBOT_MM + c.height_mm - GRASP_OFFSET_MM + z_lab
+# Inverse (incoming):
+#     z_lab   = z_robot - TABLE_Z0_ROBOT_MM - c.height_mm + GRASP_OFFSET_MM
+#
+# The three inputs are each owned by exactly one thing so they don't drift:
+# - ``TABLE_Z0_ROBOT_MM`` (per-setup calibration): robot-frame z reading such
+#   that the empty gripper fingers are just touching the breadboard surface.
+#   One-time touch-off calibration. Override with env ``TABLE_Z0_ROBOT_MM``.
+# - ``GRASP_OFFSET_MM`` (gripper design constant): distance from the *top*
+#   of the component housing DOWN to the point where the gripper fingers
+#   close. 0 means "closes at the very top of the housing"; a positive N
+#   means "closes N mm below the top". Override with env ``GRASP_OFFSET_MM``.
+# - ``c.height_mm`` (per-component catalog): total physical height of the
+#   part, base-to-top, in mm. Lives in ``schemas/component_catalog.real.json``.
+#
+# Plus two cloud-labs-only safety knobs:
+# - ``MAX_SAFE_HOVER_Z_LAB_MM``: hard upper bound on user-requested HOVER z
+#   (z_lab) so a runaway HTTP payload cannot drive the gripper to the ceiling.
+# - ``DEFAULT_COMPONENT_HEIGHT_MM``: fallback when a catalog entry is missing
+#   ``height_mm`` (logs a warning).
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        print(
+            f"[REAL LAB] Warning: env {name}={raw!r} is not a valid float; "
+            f"using default {default}."
+        )
+        return float(default)
+
+
+TABLE_Z0_ROBOT_MM: float = _env_float("TABLE_Z0_ROBOT_MM", 500.0)
+GRASP_OFFSET_MM: float = _env_float("GRASP_OFFSET_MM", 0.0)
+DEFAULT_COMPONENT_HEIGHT_MM: float = _env_float("DEFAULT_COMPONENT_HEIGHT_MM", 60.0)
+MAX_SAFE_HOVER_Z_LAB_MM: float = _env_float("MAX_SAFE_HOVER_Z_LAB_MM", 200.0)
+
+
 def _optional_float(params: Optional[Dict[str, Any]], key: str) -> Optional[float]:
     """Parse an optional numeric field from HTTP params (cloud-labs / lab_primitives)."""
     if not params or params.get(key) is None:
@@ -524,7 +620,14 @@ class RealLabCommunicator(LabCommunicator):
                 print(f"[REAL LAB] Warning: Invalid tag format {tag_id_str}")
                 continue
 
-            comp = OpticalComponent(name=item.get("name", tag_id_str), tag_id=numeric_id)
+            hkw: Dict[str, Any] = {}
+            raw_h = item.get("height_mm")
+            if raw_h is not None:
+                try:
+                    hkw["height_mm"] = float(raw_h)
+                except (TypeError, ValueError):
+                    pass
+            comp = OpticalComponent(name=item.get("name", tag_id_str), tag_id=numeric_id, **hkw)
             components_to_scan.append(comp)
             self.component_map[tag_id_str] = comp
 
@@ -537,38 +640,40 @@ class RealLabCommunicator(LabCommunicator):
         for item in catalog:
             tag_id = item.get("tag_id")
             comp = self.component_map.get(tag_id)
-            inv = getattr(comp, "inventory_location", None) if comp else None
+            # ``current_location`` is the canonical "where is this part now" field
+            # after Stage C (fixing.md §5, §7 item 2). ``scan_components_cloudlab``
+            # populates it directly; we do not fall back to ``inventory_location``.
+            loc = getattr(comp, "current_location", None) if comp else None
 
             # --- Debug: what we have for this component ---
             print(f"[REAL LAB] --- {tag_id} ---")
-            print(f"  comp exists: {comp is not None}, inventory_location exists: {inv is not None}")
-            if inv is not None:
+            print(f"  comp exists: {comp is not None}, current_location exists: {loc is not None}")
+            if loc is not None:
                 attrs = {}
                 for a in ("x", "y", "z", "roll", "pitch", "yaw", "angle", "rx", "ry", "rz"):
-                    if hasattr(inv, a):
-                        attrs[a] = getattr(inv, a)
-                print(f"  inventory_location attrs: {attrs}")
+                    if hasattr(loc, a):
+                        attrs[a] = getattr(loc, a)
+                print(f"  current_location attrs: {attrs}")
             else:
-                print(f"  (no inventory_location)")
+                print(f"  (no current_location)")
 
-            if comp and comp.inventory_location:
-                # Found on table
-                comp.current_location = comp.inventory_location
-                inv = comp.inventory_location
-                calc_rotation = getattr(inv, "yaw", None) or 0
-                print(f"  fallback yaw (deg): {getattr(inv, 'yaw', None)} -> rotation: {calc_rotation:.2f}")
+            if comp and comp.current_location:
+                # Found on table (robot frame, written by scan_components_cloudlab).
+                loc = comp.current_location
+                calc_rotation = getattr(loc, "yaw", None) or 0
+                print(f"  fallback yaw (deg): {getattr(loc, 'yaw', None)} -> rotation: {calc_rotation:.2f}")
 
                 pose = {
-                    "x": inv.x,
-                    "y": inv.y,
+                    "x": loc.x,
+                    "y": loc.y,
                     "rotation": calc_rotation
                 }
                 # Include roll, pitch, yaw so UI can derive display rz (e.g. from yaw for top-down view)
                 for key in ("roll", "pitch", "yaw"):
-                    val = getattr(inv, key, None)
+                    val = getattr(loc, key, None)
                     if val is not None:
                         pose[key] = val
-                in_q3 = is_storage_region(float(inv.x), float(inv.y))
+                in_q3 = is_storage_region(float(loc.x), float(loc.y))
                 stored_slot = self._stored_intent.get(tag_id)
                 if stored_slot is not None:
                     # Intent file says this tag belongs in inventory; do not infer storage from Q3 geometry alone.
@@ -682,27 +787,42 @@ class RealLabCommunicator(LabCommunicator):
             components = dict(self.current_state.get("components", {}) or {})
 
         # Apply to component_map so pick/place uses correct coordinates.
-        # Snapshot poses are lab / UI mm; automation expects robot table mm.
+        # Snapshot poses are lab / UI frame; automation expects robot frame.
+        # All three axes are transformed through the dedicated helpers so the
+        # cross-wall convention stays in one place (fixing.md §3, §3.1, §5).
+        #   XY:       lab_table_xy_to_robot_xy (calibrated rotation)
+        #   Z:        _z_lab_to_robot           (per-tag, uses catalog height_mm)
+        #   rotation: lab_rotation_to_robot_yaw (identity today; see module comment)
+        #
+        # Stage C: we write only ``current_location`` (the canonical "where is
+        # this part now" field) and ``is_placed``. ``inventory_location`` is
+        # owned elsewhere in ``lab_automation`` and we no longer touch it from
+        # here -- see ``fixing.md`` §6.1 / §9 Stage C and
+        # ``labautomation_new_primitives.md`` §5.
         for tag_id, entry in components.items():
             pose = ((entry or {}).get("measurables") or {}).get("pose") or {}
             x_lab = float(pose.get("x", 0.0))
             y_lab = float(pose.get("y", 0.0))
-            x, y = lab_table_xy_to_robot_xy(x_lab, y_lab)
-            z = float(pose.get("z", 500.0))  # z isn't stored in current UI payload; default matches scan
-
-            roll = 180
-            pitch = 0
-            yaw = float(pose.get("rotation"))
+            # Default z_lab = 0.0 means "part resting on the breadboard", which
+            # is almost always what a placed-state snapshot means. Older
+            # snapshots (pre-z-convention) also omit z and fall through here.
+            z_lab = float(pose.get("z", 0.0))
+            theta_lab = float(pose.get("rotation", 0.0))
 
             comp = self.component_map.get(tag_id)
             if not comp:
                 # If missing from map, skip (UI will still render, but robot may not know it).
                 continue
 
-            p = Pose(x=x, y=y, z=z, roll=roll, pitch=pitch, yaw=yaw)
-            comp.inventory_location = p
-            comp.current_location = p
+            x_robot, y_robot = lab_table_xy_to_robot_xy(x_lab, y_lab)
+            z_robot = self._z_lab_to_robot(tag_id, z_lab)
+            yaw_robot = lab_rotation_to_robot_yaw(theta_lab)
 
+            roll = 180
+            pitch = 0
+            comp.current_location = Pose(
+                x=x_robot, y=y_robot, z=z_robot, roll=roll, pitch=pitch, yaw=yaw_robot
+            )
             comp.is_placed = is_on_table(entry) if isinstance(entry, dict) else False
 
         self._rebuild_stored_intent_from_lab_state(components)
@@ -960,6 +1080,83 @@ class RealLabCommunicator(LabCommunicator):
             return v, v
         return 90.0, 90.0
 
+    # --- Z-frame transforms (see module-level comment for the convention) ---
+    def _component_height_mm(self, tag_id: str) -> float:
+        """
+        Physical height of a component (base to top, mm). Read from the
+        catalog entry's top-level ``height_mm`` field.
+
+        Distinct from ``size.height`` (which is the 2D UI footprint). Falls
+        back to ``DEFAULT_COMPONENT_HEIGHT_MM`` with a warning if the field
+        is missing / malformed, so we never silently produce a bogus
+        z_robot just because a catalog row is incomplete.
+        """
+        meta = (self.catalog_map or {}).get(tag_id) or {}
+        raw = meta.get("height_mm")
+        if raw is None:
+            print(
+                f"[REAL LAB] Warning: catalog entry for {tag_id} has no "
+                f"'height_mm'; using default {DEFAULT_COMPONENT_HEIGHT_MM:.1f} mm. "
+                f"Add it to schemas/component_catalog.real.json."
+            )
+            return float(DEFAULT_COMPONENT_HEIGHT_MM)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            print(
+                f"[REAL LAB] Warning: catalog entry for {tag_id} has invalid "
+                f"height_mm={raw!r}; using default {DEFAULT_COMPONENT_HEIGHT_MM:.1f} mm."
+            )
+            return float(DEFAULT_COMPONENT_HEIGHT_MM)
+
+    def _z_lab_to_robot(self, tag_id: str, z_lab: float) -> float:
+        """Forward transform: cloud-labs z_lab -> lab_automation z_robot."""
+        return (
+            TABLE_Z0_ROBOT_MM
+            + self._component_height_mm(tag_id)
+            - GRASP_OFFSET_MM
+            + float(z_lab)
+        )
+
+    def _z_robot_to_lab(self, tag_id: str, z_robot: float) -> float:
+        """Inverse transform: lab_automation z_robot -> cloud-labs z_lab."""
+        return (
+            float(z_robot)
+            - TABLE_Z0_ROBOT_MM
+            - self._component_height_mm(tag_id)
+            + GRASP_OFFSET_MM
+        )
+
+    def _intent_hover_z_lab(self, tag_id: str) -> float:
+        """
+        Return the z_lab the robot *intends* to settle at after a PICK.
+
+        Asks ``lab_automation.compute_intent_hover_z_lab(component)`` when
+        that math-only helper is available (preferred -- it keeps
+        ``safe_z_retract_robot`` fully encapsulated on the lab side). Falls
+        back to ``DEFAULT_HOVER_Z_MM`` (conservative safe clearance) when
+        the helper is missing or raises.
+
+        No motion is ever dispatched here. The returned value is written
+        to ``tunables.nominal_pose.z`` and ``holding.nominal_pose.z`` so
+        the UI round-trips: if the user clicks HOVER without editing the z
+        field, the forward transform produces the same z_robot the robot
+        is already at -- no vertical motion.
+        """
+        comp = self.component_map.get(tag_id)
+        for name in ("compute_intent_hover_z_lab", "get_intent_hover_z_lab"):
+            fn = getattr(self.experiment, name, None)
+            if callable(fn) and comp is not None:
+                try:
+                    return float(fn(comp))
+                except Exception as e:
+                    print(
+                        f"[REAL LAB] {name}({tag_id}) raised {e!r}; "
+                        f"falling back to DEFAULT_HOVER_Z_MM={DEFAULT_HOVER_Z_MM}"
+                    )
+                    break
+        return float(DEFAULT_HOVER_Z_MM)
+
     async def move_component(self, target_id: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Moving {target_id}...")
 
@@ -1006,10 +1203,21 @@ class RealLabCommunicator(LabCommunicator):
                 f"(lab X={tx_lab}, Y={ty_lab})"
             )
             
-            if not comp.inventory_location:
-                print(f"[REAL LAB] Warning: {target_id} inventory location unknown. Assuming it's at previous location or 0,0")
+            if not comp.current_location:
+                print(f"[REAL LAB] Warning: {target_id} current_location unknown. Assuming it's at previous location or 0,0")
             
             # Worker thread: place blocks for a long time; must not block the event loop or lab-state polls stall.
+            #
+            # Known convention disagreement (fixing.md §3.1 / Stage A4):
+            # ``-rot`` is an inline, ad-hoc yaw negation that has been
+            # empirically correct for this hardware setup. Other cross-wall
+            # rotation sites (``set_lab_state``, ``hover_component``) go
+            # through ``lab_rotation_to_robot_yaw`` which is identity today.
+            # Once we can test on the physical robot we'll either fold the
+            # negation into ``lab_rotation_to_robot_yaw`` (and remove the
+            # minus here) or document why it must stay outside. Do NOT
+            # change this expression without a physical test -- the current
+            # form is what actually places parts correctly today.
             await asyncio.to_thread(
                 lambda: self.experiment.place_component_wo_home_specific_xy_cloudlab(
                     component=comp,
@@ -1564,11 +1772,19 @@ class RealLabCommunicator(LabCommunicator):
 
     # --- In-air manipulation (see ``new_primitives.md`` §6 and §8.3) ---
     #
-    # When ``HOVER_PLACEHOLDER_STATE`` is set, pick/hover/place/scan_rotate
-    # mutate ``current_state`` like the mock lab (no hardware). Otherwise,
-    # ``pick_component`` / ``hover_component`` / ``place_from_hover`` call
-    # ``lab_automation`` via ``asyncio.to_thread``; ``scan_rotate_in_place``
-    # dispatches to ``scan_rotate_*_cloudlab`` when those methods exist.
+    # Stage 8 wiring is live: ``lab_automation`` ships
+    # ``pick_component_cloudlab``, ``hover_component_cloudlab``,
+    # ``place_from_hover_cloudlab``, ``scan_rotate_held_cloudlab``,
+    # ``scan_rotate_placed_cloudlab`` (see
+    # ``labautomation_new_primitives.md`` §2). Each primitive below dispatches
+    # to the corresponding method via ``asyncio.to_thread`` and updates
+    # ``current_state`` on success.
+    #
+    # ``HOVER_PLACEHOLDER_STATE=1`` keeps a debug escape hatch that bypasses
+    # the real call and only mutates ``current_state`` (matches the
+    # mock-lab behavior for UI testing without moving the robot). Left in
+    # place intentionally per ``labautomation_new_primitives.md`` §6
+    # item 3 ("remove or keep as debug escape hatch").
 
     def _reconcile_holding_on_boot(self) -> None:
         """
@@ -1681,11 +1897,17 @@ class RealLabCommunicator(LabCommunicator):
     def _holding_placeholder_log(
         self, action: str, target_id: Optional[str], extra: Optional[Dict[str, Any]] = None
     ) -> None:
+        # "DISPATCH" when the real ``lab_automation`` path is active;
+        # "PLACEHOLDER" only when ``HOVER_PLACEHOLDER_STATE=1`` is forcing
+        # the state-mutation-only stub. Historically this always said
+        # "PLACEHOLDER" because the real paths were dormant until
+        # lab_automation shipped the ``*_cloudlab`` methods (Stage 8).
         bits = [f"action={action}", f"target_id={target_id or '<none>'}"]
         if extra:
             for k, v in extra.items():
                 bits.append(f"{k}={v}")
-        print(f"[REAL LAB] PLACEHOLDER: {' '.join(bits)} "
+        tag = "PLACEHOLDER" if self._hover_placeholder_state else "DISPATCH"
+        print(f"[REAL LAB] {tag}: {' '.join(bits)} "
               f"(HOVER_PLACEHOLDER_STATE={'on' if self._hover_placeholder_state else 'off'})")
 
     async def pick_component(self, target_id: str, params: Dict[str, Any]):
@@ -1706,29 +1928,38 @@ class RealLabCommunicator(LabCommunicator):
         prot = float(pose.get("rotation", 0.0))
 
         if self._hover_placeholder_state:
+            # Placeholder path: no lab_automation available -> assume the
+            # retract will settle at DEFAULT_HOVER_Z_MM. Update measurables
+            # to the intent pose, matching the convention used by
+            # MOVE_COMPONENT (robot placement precision beats top-camera
+            # reads, so the commanded pose is the best estimate of the
+            # current pose until vision says otherwise).
+            z_lab_intent = float(DEFAULT_HOVER_Z_MM)
             with self._state_lock:
                 self.current_state["system_status"] = SYSTEM_STATUS_BUSY
             await asyncio.sleep(0.25)
             with self._state_lock:
                 ce = self.current_state["components"][target_id]
                 tun = ce.setdefault("tunables", default_tunables())
-                tun["nominal_pose"] = {"x": px, "y": py, "rotation": prot, "z": DEFAULT_HOVER_Z_MM}
+                meas = ce.setdefault("measurables", default_measurables())
+                tun["nominal_pose"] = {"x": px, "y": py, "rotation": prot, "z": z_lab_intent}
                 tun["placement"] = {"mode": PLACEMENT_MODE_PICK}
+                meas["pose"] = {"x": px, "y": py, "rotation": prot, "z": z_lab_intent}
                 set_holding(
                     self.current_state,
                     tag_id=target_id,
                     x=px,
                     y=py,
                     rotation=prot,
-                    z=DEFAULT_HOVER_Z_MM,
+                    z=z_lab_intent,
                 )
                 self.current_state["last_updated"] = datetime.now().isoformat()
-            print(f"[REAL LAB] PLACEHOLDER: HOLDING {target_id} @ z={DEFAULT_HOVER_Z_MM:.1f} mm (no motion)")
+            print(f"[REAL LAB] PLACEHOLDER: HOLDING {target_id} @ z_lab={z_lab_intent:.1f} mm (no motion)")
             return
 
         comp = self.component_map.get(target_id)
-        if not comp or not comp.inventory_location:
-            print(f"[REAL LAB] PICK: no robot inventory_location for {target_id}; rescan or check catalog.")
+        if not comp or not comp.current_location:
+            print(f"[REAL LAB] PICK: no robot current_location for {target_id}; rescan or check catalog.")
             return
 
         safe_z = _optional_float(params, "safe_z")
@@ -1746,21 +1977,33 @@ class RealLabCommunicator(LabCommunicator):
                 self.current_state["system_status"] = SYSTEM_STATUS_IDLE
             raise
 
+        # Post-pick: ask lab_automation (math-only, no motion) which z_lab
+        # it intends to hold the part at. Falls back to DEFAULT_HOVER_Z_MM
+        # if the helper is missing (see _intent_hover_z_lab docstring).
+        # Measurables are updated to the intent pose -- same convention as
+        # MOVE_COMPONENT. Robot placement precision is higher than top-
+        # camera reads, so the commanded pose is the best available
+        # estimate of where the part actually is; if/when a higher-
+        # precision vision pipeline contradicts it, it can overwrite.
+        z_lab_intent = self._intent_hover_z_lab(target_id)
+
         with self._state_lock:
             ce = self.current_state["components"][target_id]
             tun = ce.setdefault("tunables", default_tunables())
-            tun["nominal_pose"] = {"x": px, "y": py, "rotation": prot, "z": DEFAULT_HOVER_Z_MM}
+            meas = ce.setdefault("measurables", default_measurables())
+            tun["nominal_pose"] = {"x": px, "y": py, "rotation": prot, "z": z_lab_intent}
             tun["placement"] = {"mode": PLACEMENT_MODE_PICK}
+            meas["pose"] = {"x": px, "y": py, "rotation": prot, "z": z_lab_intent}
             set_holding(
                 self.current_state,
                 tag_id=target_id,
                 x=px,
                 y=py,
                 rotation=prot,
-                z=DEFAULT_HOVER_Z_MM,
+                z=z_lab_intent,
             )
             self.current_state["last_updated"] = datetime.now().isoformat()
-        print(f"[REAL LAB] PICK complete: HOLDING {target_id}")
+        print(f"[REAL LAB] PICK complete: HOLDING {target_id} @ z_lab={z_lab_intent:.1f} mm")
 
     async def hover_component(self, target_id: str, target_pose: Dict[str, float]):
         self._holding_placeholder_log("HOVER", target_id, {"target_pose": dict(target_pose or {})})
@@ -1783,7 +2026,21 @@ class RealLabCommunicator(LabCommunicator):
         except (TypeError, ValueError):
             speed = 100
 
+        # Bounds check in the lab frame (z_lab). This catches runaway HTTP
+        # payloads (e.g. someone accidentally sending a robot-frame z=600)
+        # before we forward-transform and hand it to the robot.
+        if not (0.0 <= tz <= MAX_SAFE_HOVER_Z_LAB_MM):
+            print(
+                f"[REAL LAB] refusing HOVER; z_lab={tz:.1f} mm outside safe "
+                f"range [0, {MAX_SAFE_HOVER_Z_LAB_MM:.1f}]. Interpret z as "
+                f"height of the component base above the table."
+            )
+            return
+
         if self._hover_placeholder_state:
+            # Placeholder path: commit intent to tunables, holding, AND
+            # measurables (same convention as MOVE_COMPONENT -- the robot's
+            # commanded pose is the best estimate of the actual pose).
             with self._state_lock:
                 self.current_state["system_status"] = SYSTEM_STATUS_BUSY
             await asyncio.sleep(0.25)
@@ -1804,7 +2061,14 @@ class RealLabCommunicator(LabCommunicator):
             print(f"[REAL LAB] HOVER: {target_id} not in component_map.")
             return
 
+        # Forward-transform XY (lab -> robot table rotation) and Z
+        # (z_lab -> z_robot). lab_automation only ever sees robot-frame
+        # coordinates; cloud-labs state stays in z_lab. Rotation also goes
+        # through the dedicated helper for parity with set_lab_state, even
+        # though lab_rotation_to_robot_yaw is identity today (fixing.md §3.1).
         tx_robot, ty_robot = lab_table_xy_to_robot_xy(tx, ty)
+        tz_robot = self._z_lab_to_robot(target_id, tz)
+        tyaw_robot = lab_rotation_to_robot_yaw(trot)
         with self._state_lock:
             self.current_state["system_status"] = SYSTEM_STATUS_BUSY
         try:
@@ -1813,8 +2077,8 @@ class RealLabCommunicator(LabCommunicator):
                 comp,
                 tx_robot,
                 ty_robot,
-                tz,
-                trot,
+                tz_robot,
+                tyaw_robot,
                 speed=speed,
             )
         except Exception as e:
@@ -1823,6 +2087,11 @@ class RealLabCommunicator(LabCommunicator):
                 self.current_state["system_status"] = SYSTEM_STATUS_HOLDING
             raise
 
+        # Commit intent to tunables, holding, and measurables. We write
+        # measurables.pose here (same as MOVE_COMPONENT) because robot
+        # placement accuracy is higher than what the top camera can
+        # measure through the gripper -- so the commanded pose is the
+        # best available estimate of where the part actually is.
         with self._state_lock:
             ce = (self.current_state.get("components") or {}).get(target_id)
             if isinstance(ce, dict):
@@ -1833,6 +2102,10 @@ class RealLabCommunicator(LabCommunicator):
                 meas["pose"] = {"x": tx, "y": ty, "rotation": trot, "z": tz}
             set_holding(self.current_state, tag_id=target_id, x=tx, y=ty, rotation=trot, z=tz)
             self.current_state["last_updated"] = datetime.now().isoformat()
+        print(
+            f"[REAL LAB] HOVER complete: HOLDING {target_id} @ "
+            f"x={tx:.1f} y={ty:.1f} rot={trot:.1f} z_lab={tz:.1f} mm"
+        )
 
     async def place_from_hover(self, target_id: str, target_pose: Dict[str, float]):
         self._holding_placeholder_log(
@@ -1908,6 +2181,10 @@ class RealLabCommunicator(LabCommunicator):
                 set_presence_and_storage(ce, PRESENCE_BREADBOARD, in_storage=False, slot=None)
             clear_holding(self.current_state)
             self.current_state["last_updated"] = datetime.now().isoformat()
+        print(
+            f"[REAL LAB] PLACE_FROM_HOVER complete: IDLE, placed {target_id} @ "
+            f"x={tx:.1f} y={ty:.1f} rot={trot:.1f}"
+        )
 
     async def scan_rotate_in_place(self, target_id: str, params: Dict[str, Any]):
         """
@@ -1944,10 +2221,13 @@ class RealLabCommunicator(LabCommunicator):
             comp_snapshot = (self.current_state.get("components") or {}).get(target_id)
 
         # --- Decide which branch (held vs placed) ---------------------------
+        # These refusals are real input-validation errors -- they fire
+        # regardless of ``HOVER_PLACEHOLDER_STATE``, so the log lines don't
+        # carry the PLACEHOLDER tag.
         if holding_now:
             if held and held != target_id:
                 print(
-                    f"[REAL LAB] PLACEHOLDER: refusing SCAN_ROTATE_IN_PLACE; "
+                    f"[REAL LAB] refusing SCAN_ROTATE_IN_PLACE; "
                     f"currently holding {held}, not {target_id}."
                 )
                 return
@@ -1955,17 +2235,17 @@ class RealLabCommunicator(LabCommunicator):
         else:
             if status != SYSTEM_STATUS_IDLE:
                 print(
-                    f"[REAL LAB] PLACEHOLDER: refusing SCAN_ROTATE_IN_PLACE; "
+                    f"[REAL LAB] refusing SCAN_ROTATE_IN_PLACE; "
                     f"system_status={status}, need IDLE or HOLDING."
                 )
                 return
             if not comp_snapshot:
-                print(f"[REAL LAB] PLACEHOLDER: SCAN_ROTATE_IN_PLACE: {target_id} not in state.")
+                print(f"[REAL LAB] SCAN_ROTATE_IN_PLACE: {target_id} not in state.")
                 return
             presence = ((comp_snapshot.get("tunables") or {}).get("presence"))
             if presence != PRESENCE_BREADBOARD:
                 print(
-                    f"[REAL LAB] PLACEHOLDER: refusing SCAN_ROTATE_IN_PLACE; "
+                    f"[REAL LAB] refusing SCAN_ROTATE_IN_PLACE; "
                     f"{target_id} presence={presence} (need on breadboard)."
                 )
                 return
@@ -1977,10 +2257,10 @@ class RealLabCommunicator(LabCommunicator):
             theta_max = float(params.get("theta_max", 0.0))
             speed = float(params.get("speed_deg_per_s", 1.0))
         except (TypeError, ValueError):
-            print("[REAL LAB] PLACEHOLDER: SCAN_ROTATE_IN_PLACE: non-numeric params.")
+            print("[REAL LAB] SCAN_ROTATE_IN_PLACE: non-numeric params.")
             return
         if speed <= 0:
-            print("[REAL LAB] PLACEHOLDER: SCAN_ROTATE_IN_PLACE: speed must be > 0.")
+            print("[REAL LAB] SCAN_ROTATE_IN_PLACE: speed must be > 0.")
             return
         axis = str(params.get("axis", "z"))
         print(
@@ -2053,6 +2333,12 @@ class RealLabCommunicator(LabCommunicator):
                             hld["nominal_pose"] = hnp
                             self.current_state["holding"] = hld
                         self.current_state["last_updated"] = datetime.now().isoformat()
+            if scan_ok:
+                final_status = "HOLDING" if mode == "held" else "IDLE"
+                print(
+                    f"[REAL LAB] SCAN_ROTATE_IN_PLACE complete ({mode}): "
+                    f"{final_status}, {target_id} @ rotation={theta_max:.2f}"
+                )
             return
 
         # --- Placeholder-only path (no lab_automation hook yet) -------------

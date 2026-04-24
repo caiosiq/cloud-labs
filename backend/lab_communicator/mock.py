@@ -57,6 +57,17 @@ class MockLabCommunicator(LabCommunicator):
     """
     Mock implementation that simulates a physical lab.
     Uses a local JSON file to persist state.
+
+    **Z convention** (see ``new_primitives.md`` "Z / coordinate convention"):
+    every z in mock -- command payloads, ``tunables.nominal_pose.z``,
+    ``measurables.pose.z``, ``holding.nominal_pose.z`` -- is **z_lab**:
+    the height of a component's *base* above the breadboard surface, in
+    millimeters. ``z_lab = 0`` means the part is on the table;
+    ``z_lab = DEFAULT_HOVER_Z_MM`` (40) is the default safe hover clearance
+    used after a PICK. Mock never talks to a real robot, so there is no
+    z_robot here and no z transform happens -- mock *is* the reference
+    implementation of the lab-frame convention that ``RealLabCommunicator``
+    must round-trip to and from the robot frame.
     """
     def __init__(self):
         self.state_file = LAB_STATE_FILE

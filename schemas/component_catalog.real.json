@@ -5,17 +5,19 @@
     "name": "Gripper Camera 1",
     "tag_id": "tag_22",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "resolution": "1920x1080",
       "fov": 60
     }
-  },  
+  },
   {
     "id": "lens_main",
     "type": "OPTICAL_LENS",
     "name": "Main Lens",
     "tag_id": "tag_11",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "focal_length": "50mm",
       "material": "BK7",
@@ -28,11 +30,11 @@
     "name": "Main Lens 2",
     "tag_id": "tag_9",
     "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
     "properties": {
       "focal_length": "50mm",
       "material": "BK7",
       "coating": "AR 400-700nm"
     }
   }
-
 ]
