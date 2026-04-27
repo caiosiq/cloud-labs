@@ -2150,7 +2150,7 @@ class RealLabCommunicator(LabCommunicator):
             return
 
         tx_robot, ty_robot = lab_table_xy_to_robot_xy(tx, ty)
-        place_angle = find_angle([180.0, 0.0, trot])
+        place_angle = find_angle([180.0, 0.0, -trot])
         safe_z = _optional_float(target_pose, "safe_z")
 
         with self._state_lock:
