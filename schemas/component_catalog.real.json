@@ -36,5 +36,20 @@
       "material": "BK7",
       "coating": "AR 400-700nm"
     }
+  },
+  {
+    "id": "mirror_curved",
+    "type": "OPTICAL_MIRROR",
+    "name": "Curved Mirror (OC)",
+    "tag_id": "tag_18",
+    "size": { "width": 62, "height": 62 },
+    "height_mm": 60,
+    "properties": {
+      "radius_of_curvature": "100mm",
+      "reflectivity": 0.98,
+      "coating": "HR 1064nm"
+    },
+    "motor_ids": [1, 2],
+    "motor_controller": "wifi_stepper1"
   }
 ]
