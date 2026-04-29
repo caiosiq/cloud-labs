@@ -41,11 +41,15 @@ from lab_model.storage_region import (
     random_placed_position,
 )
 
-from .base import LabCommunicator
+from lab_communicator.base import LabCommunicator
+from lab_communicator.shared.snapshot import LabPose
 
 # Constants
+# File now at ``backend/lab_communicator/mock/communicator.py``; the
+# project ``schemas/`` directory is three levels up. (Was two levels
+# up when the class lived in ``backend/lab_communicator/mock.py``.)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SCHEMAS_DIR = os.path.join(BASE_DIR, "..", "..", "schemas")
+SCHEMAS_DIR = os.path.join(BASE_DIR, "..", "..", "..", "schemas")
 LAB_STATE_FILE = os.path.abspath(os.path.join(SCHEMAS_DIR, "mock_lab_state.json"))
 # Mock mode has its own, richer catalog distinct from the real lab's physical
 # inventory (``component_catalog.real.json``). Keep them separate so mock
@@ -69,12 +73,39 @@ class MockLabCommunicator(LabCommunicator):
     implementation of the lab-frame convention that ``RealLabCommunicator``
     must round-trip to and from the robot frame.
     """
+
+    log_prefix = "[MOCK LAB]"
+
     def __init__(self):
+        # Phase 2A made base the owner of ``current_state``,
+        # ``catalog_map``, and the state lock. Mock additionally
+        # mirrors the in-memory state to a JSON file (so a backend
+        # restart resumes the previous session, and so test harnesses
+        # can seed a known starting state by editing the file).
+        super().__init__()
+
         self.state_file = LAB_STATE_FILE
         self.catalog_file = CATALOG_FILE
         print(f"[MOCK LAB] Using state file: {self.state_file}")
         self._ensure_state()
         self._load_catalog()
+        # Build the catalog dict-by-tag mirror that ``base.py`` uses for
+        # O(1) catalog lookups. Mock historically scanned the list at
+        # every call site; Phase 2A unified both backends on the dict
+        # shape (the list ``self.catalog`` is preserved for legacy
+        # call sites that iterate it).
+        self.catalog_map = {
+            item["tag_id"]: item
+            for item in (self.catalog or [])
+            if isinstance(item, dict) and item.get("tag_id")
+        }
+        # Initial in-memory load from disk. Subsequent mutations go
+        # through ``_persist_state`` (migrated primitives) or
+        # ``_write_state`` (still-file-backed primitives, both of
+        # which keep the in-memory copy in sync).
+        from lab_communicator.mock.persistence import read_state
+        self.current_state = read_state(self.state_file)
+
         self._cobyla_reference_bgr = None  # optional BGR ndarray for UI / parity with real
         # Dev flag: simulate boot-time gripper-closed reconciliation (see new_primitives.md #6.3).
         self._mock_gripper_closed_on_boot = (
@@ -139,27 +170,20 @@ class MockLabCommunicator(LabCommunicator):
         self._write_state(state)
 
     def _ensure_state(self):
-        if not os.path.exists(self.state_file):
-            raise FileNotFoundError(f"CRITICAL: Lab State file not found at: {self.state_file}")
+        """Validate that the mock-lab JSON exists and is well-formed.
 
-        try:
-            with open(self.state_file, "r") as f:
-                data = json.load(f)
-                if "components" not in data:
-                    raise ValueError("Lab State file is missing 'components' key")
-        except json.JSONDecodeError:
-            raise ValueError(f"CRITICAL: Invalid JSON in Lab State file: {self.state_file}")
-        except Exception as e:
-            raise RuntimeError(f"CRITICAL: Failed to load Lab State: {str(e)}")
+        Thin wrapper -- body in :func:`lab_communicator.mock.persistence.ensure_state_file`.
+        """
+        from lab_communicator.mock.persistence import ensure_state_file
+        ensure_state_file(self.state_file)
 
     def _load_catalog(self):
-        self.catalog = []
-        if os.path.exists(self.catalog_file):
-            try:
-                with open(self.catalog_file, "r") as f:
-                    self.catalog = json.load(f)
-            except Exception as e:
-                print(f"[MOCK LAB] Failed to load catalog: {e}")
+        """Load the mock component catalog from disk into ``self.catalog``.
+
+        Thin wrapper -- body in :func:`lab_communicator.mock.persistence.load_catalog`.
+        """
+        from lab_communicator.mock.persistence import load_catalog
+        self.catalog = load_catalog(self.catalog_file)
 
     def _get_component_size(self, tag_id: str) -> float:
         size = 90.0
@@ -185,47 +209,54 @@ class MockLabCommunicator(LabCommunicator):
         return 90.0, 90.0
 
     def _read_state(self) -> Dict[str, Any]:
-        with open(self.state_file, "r") as f:
-            return json.load(f)
+        """Read and parse the current snapshot from disk.
+
+        Used by primitives that have not yet been migrated to the
+        Phase 2 template-method pattern (in-air, heavy-state,
+        optimization). Migrated primitives use the in-memory
+        ``self.current_state`` directly.
+
+        Thin wrapper -- body in :func:`lab_communicator.mock.persistence.read_state`.
+        """
+        from lab_communicator.mock.persistence import read_state
+        return read_state(self.state_file)
 
     def _write_state(self, state: Dict[str, Any]):
-        with open(self.state_file, "w") as f:
-            json.dump(state, f, indent=2)
+        """Persist a snapshot to disk **and** mirror it into ``self.current_state``.
 
-    def _catalog_meta_for_tag(self, tag_id: str) -> Optional[Dict[str, Any]]:
-        for item in self.catalog:
-            if item.get("tag_id") == tag_id:
-                return item
-        return None
+        Phase 2A made base the owner of ``self.current_state``; mock
+        keeps the disk file as a persistence sink. Both writer entry
+        points (this method, used by un-migrated primitives, and
+        :meth:`_persist_state`, used by migrated primitives via the
+        base orchestrator) maintain the invariant that disk and memory
+        agree -- so :meth:`get_lab_state` can read from
+        ``self.current_state`` without first hitting disk.
 
-    def _inject_motor_rotations_into_state(self, state: Dict[str, Any]) -> None:
-        components = state.get("components") or {}
-        if not isinstance(components, dict):
-            return
-        for tag_id, comp in components.items():
-            if not isinstance(comp, dict):
-                continue
-            meta = self._catalog_meta_for_tag(tag_id)
-            mids = (meta or {}).get("motor_ids") or []
-            if not mids:
-                continue
-            mr = motor_rot.get_rotations_for_motor_ids(tag_id, list(mids))
-            meas = comp.setdefault("measurables", default_measurables())
-            pose = meas.setdefault("pose", {})
-            if isinstance(pose, dict):
-                pose["motor_rotations"] = dict(mr)
-            tun = comp.setdefault("tunables", default_tunables())
-            nm = tun.setdefault("nominal_motor_positions", {})
-            for k, v in mr.items():
-                nm[str(k)] = float(v)
+        Thin wrapper -- body in :func:`lab_communicator.mock.persistence.write_state`.
+        """
+        from lab_communicator.mock.persistence import write_state
+        write_state(self.state_file, state)
+        with self._state_lock:
+            self.current_state = state
 
-    def get_lab_state(self) -> Dict[str, Any]:
-        state = self._read_state()
-        self._inject_motor_rotations_into_state(state)
-        # Ensure top-level ``holding`` key is always present so the UI can read
-        # it unconditionally without falling back to legacy shape.
-        get_holding(state)
-        return state
+    def _persist_state(self) -> None:
+        """Write ``self.current_state`` to the on-disk JSON file.
+
+        Override of :meth:`LabCommunicator._persist_state`. Called by
+        the base orchestrator after every state mutation in a migrated
+        primitive (:meth:`_set_status`, :meth:`_set_holding`,
+        :meth:`_clear_holding`, :meth:`set_lab_state`). Real keeps the
+        default no-op.
+        """
+        from lab_communicator.mock.persistence import write_state
+        with self._state_lock:
+            snapshot = json.loads(json.dumps(self.current_state))
+        write_state(self.state_file, snapshot)
+
+    # ``get_lab_state`` lives on the base template class (Phase 2A);
+    # mock's in-memory ``self.current_state`` is kept in sync with the
+    # disk file by :meth:`_write_state` and :meth:`_persist_state`, so
+    # the inherited implementation reads from memory and is correct.
 
     def get_gripper_status(self) -> Dict[str, Any]:
         """
@@ -276,32 +307,10 @@ class MockLabCommunicator(LabCommunicator):
         """Deprecated name; use :meth:`refresh_pose_from_camera`."""
         self.refresh_pose_from_camera()
 
-    def set_lab_state(self, state: Dict[str, Any]):
-        """
-        Apply snapshot to mock state file. Catalog tags missing from the snapshot keep their
-        current mock entries (parity with real lab merge load).
-        """
-        if not isinstance(state, dict):
-            raise ValueError("Loaded state must be a JSON object/dict")
-        prev = self._read_state()
-        prev_comps = dict(prev.get("components") or {})
-        loaded_comps = dict(state.get("components") or {})
-        catalog_ids = {item.get("tag_id") for item in (self.catalog or []) if item.get("tag_id")}
-        merged: Dict[str, Any] = {}
-        for tid, entry in prev_comps.items():
-            if tid in catalog_ids and tid not in loaded_comps:
-                merged[tid] = json.loads(json.dumps(entry))
-        for tid, entry in loaded_comps.items():
-            merged[tid] = entry
-        out = dict(state)
-        out["components"] = merged
-        out["system_status"] = "IDLE"
-        # Loading a snapshot always clears any HOLDING -- the user explicitly
-        # asked for a known-good state; ambiguous "in gripper" status would be
-        # unsafe to restore silently.
-        out["holding"] = empty_holding()
-        out["last_updated"] = datetime.now().isoformat()
-        self._write_state(out)
+    # ``set_lab_state`` lives on the base template class (Phase 2A).
+    # Mock has no robot, so :meth:`_apply_loaded_pose_to_hardware`
+    # inherits the no-op default. ``_post_apply_snapshot`` also inherits
+    # the no-op default (mock has no separate stored-intent file).
 
     async def move_component(self, target_id: str, target_pose: Dict[str, float]):
         print(f"[MOCK LAB] Moving {target_id}...")
@@ -351,51 +360,17 @@ class MockLabCommunicator(LabCommunicator):
         self._write_state(state)
         print(f"[MOCK LAB] Moved {target_id} to ({meas['pose']['x']:.2f}, {meas['pose']['y']:.2f})")
 
-    async def move_motor(self, target_id: str, motor_id: int, distance: float):
-        print(f"[MOCK LAB] Moving motor {motor_id} of {target_id} by {distance}...")
-        state = self._read_state()
-        comp = (state.get("components") or {}).get(target_id)
-        if comp and is_stored(comp):
-            print(f"[MOCK LAB] Refusing motor move: {target_id} is STORED.")
-            return
-        meta = self._catalog_meta_for_tag(target_id)
-        mids = (meta or {}).get("motor_ids") or []
-        if not meta or motor_id not in mids:
-            print(f"[MOCK LAB] Error: motor_id {motor_id} invalid for {target_id} (motor_ids={mids}).")
-            return
+    async def _do_move_motor(
+        self, target_id: str, motor_id: int, distance: float
+    ) -> None:
+        """Mock hardware step for :meth:`LabCommunicator.move_motor`.
 
-        state = self._read_state()
-        state["system_status"] = "BUSY"
-        self._write_state(state)
-
+        Refusal logic, catalog gate, BUSY/IDLE flip, and the
+        ``motor_rotation_store`` bookkeeping are all owned by the base
+        orchestrator. Mock just simulates the hardware delay so the UI
+        can observe the BUSY transition.
+        """
         await asyncio.sleep(1)
-
-        motor_rot.add_delta(target_id, motor_id, float(distance))
-
-        state = self._read_state()
-        state["system_status"] = "IDLE"
-        self._write_state(state)
-        print(f"[MOCK LAB] Motor move complete.")
-
-    async def motor_send_home(self, target_id: str, motor_id: int):
-        meta = self._catalog_meta_for_tag(target_id)
-        mids = (meta or {}).get("motor_ids") or []
-        if not meta or motor_id not in mids:
-            print(f"[MOCK LAB] motor_send_home: invalid tag or motor_id for {target_id} m{motor_id}")
-            return
-        cur = motor_rot.get_angle(target_id, motor_id)
-        if abs(cur) < 1e-12:
-            return
-        await self.move_motor(target_id, motor_id, -cur)
-
-    async def motor_set_zero(self, target_id: str, motor_id: int):
-        meta = self._catalog_meta_for_tag(target_id)
-        mids = (meta or {}).get("motor_ids") or []
-        if not meta or motor_id not in mids:
-            print(f"[MOCK LAB] motor_set_zero: invalid tag or motor_id for {target_id} m{motor_id}")
-            return
-        motor_rot.set_zero(target_id, motor_id)
-        print(f"[MOCK LAB] Motor {motor_id} on {target_id}: zero reference set (software).")
 
     async def optimize_component(self, target_id: str, strategy: str, params: Dict[str, Any]):
         print(f"[MOCK LAB] Optimizing {target_id} with {strategy}...")

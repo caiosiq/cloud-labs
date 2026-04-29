@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-04-22T13:17:08.690125",
+  "last_updated": "2026-04-29T02:13:52.567589",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -119,7 +119,10 @@
           "y": -450.0,
           "rotation": 0.0
         },
-        "nominal_motor_positions": {},
+        "nominal_motor_positions": {
+          "1": 0.0,
+          "2": 0.0
+        },
         "storage": {
           "in_storage": true,
           "slot": {
@@ -135,7 +138,11 @@
         "pose": {
           "x": -350.0,
           "y": -450.0,
-          "rotation": 0.0
+          "rotation": 0.0,
+          "motor_rotations": {
+            "1": 0.0,
+            "2": 0.0
+          }
         },
         "last_optimization_score": null,
         "last_optimized_pose": null,
@@ -182,7 +189,10 @@
           "y": -450.0,
           "rotation": 0.0
         },
-        "nominal_motor_positions": {},
+        "nominal_motor_positions": {
+          "1": 0.0,
+          "3": 0.0
+        },
         "storage": {
           "in_storage": true,
           "slot": {
@@ -198,7 +208,11 @@
         "pose": {
           "x": -250.0,
           "y": -450.0,
-          "rotation": 0.0
+          "rotation": 0.0,
+          "motor_rotations": {
+            "1": 0.0,
+            "3": 0.0
+          }
         },
         "last_optimization_score": null,
         "last_optimized_pose": null,
@@ -215,7 +229,10 @@
           "y": 200,
           "rotation": 0
         },
-        "nominal_motor_positions": {},
+        "nominal_motor_positions": {
+          "1": 0.0,
+          "3": 0.0
+        },
         "storage": {
           "in_storage": false,
           "slot": null
@@ -228,7 +245,11 @@
         "pose": {
           "x": 835.1626506753031,
           "y": 199.98637547968232,
-          "rotation": 0
+          "rotation": 0,
+          "motor_rotations": {
+            "1": 0.0,
+            "3": 0.0
+          }
         },
         "last_optimization_score": null,
         "last_optimized_pose": null,
@@ -307,5 +328,7 @@
     "tag_id": null,
     "nominal_pose": null,
     "requires_operator_confirm": false
-  }
+  },
+  "optimization_step": 0,
+  "optimization_run_dir": null
 }

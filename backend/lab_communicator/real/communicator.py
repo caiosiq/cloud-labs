@@ -50,7 +50,8 @@ from lab_model.storage_region import (
     nominal_center_pose_for_stored_entry,
 )
 
-from .base import LabCommunicator
+from lab_communicator.base import LabCommunicator
+from lab_communicator.shared.snapshot import LabPose
 
 # Configuration for External Lab Automation Library
 # LAB_AUTOMATION_PATH = path to the lab_automation package folder (repo root).
@@ -82,166 +83,71 @@ except ImportError:
     activate_cam_and_capture = None
     RECORDER_CAPTURE_AVAILABLE = False
 
-# --- Lab vs robot table XY (see coordinate_rotation.md in repo root) ---
-# UI and overhead-camera geometry use "lab" axes. The robot table frame is rotated by a small angle.
-# Calibrated: motion that is a straight line in the lab (e.g. +100 mm along lab Y) decomposes in robot
-# coordinates as approximately Δx_robot = +2.5 mm and Δy_robot = +100 mm (same sign convention as your
-# robot axes). That implies sin(θ) ≈ −2.5/100 for the lab→robot rotation below → θ = atan2(-2.5, 100).
-# Refine by changing this constant after re-measurement.
-LAB_ROBOT_TABLE_ROTATION_RAD: float = math.atan2(-2.66, 100.0)
-
-
-def lab_table_xy_to_robot_xy(x_lab: float, y_lab: float) -> Tuple[float, float]:
-    """Map UI / lab table mm to robot controller table mm before place/move calls."""
-    t = LAB_ROBOT_TABLE_ROTATION_RAD
-    c, s = math.cos(t), math.sin(t)
-    return (c * x_lab - s * y_lab, s * x_lab + c * y_lab)
-
-
-def robot_table_xy_to_lab_xy(x_robot: float, y_robot: float) -> Tuple[float, float]:
-    """Map robot-reported table mm to lab / UI mm (inverse of lab_table_xy_to_robot_xy)."""
-    t = LAB_ROBOT_TABLE_ROTATION_RAD
-    c, s = math.cos(t), math.sin(t)
-    return (c * x_robot + s * y_robot, -s * x_robot + c * y_robot)
-
-
-# --- Lab vs robot yaw / rotation (see fixing.md: "Coordinate convention recap") ---
-# UI / cloud-labs state stores rotation in the lab frame as ``theta_lab`` (deg).
-# lab_automation expects robot-frame yaw as ``yaw_robot`` (deg). In general the
-# two differ by the same calibration that relates the lab and robot table XY
-# frames (plus possibly a sign flip). Today, by convention and empirical
-# evidence, the transform is identity: ``yaw_robot = theta_lab``. These
-# helpers exist so every cross-wall rotation write goes through one place --
-# when the lab calibrates a real offset, it's a one-line fix here, not a
-# hunt across every primitive.
+# --- Coordinate frames + utility helpers (Phase 1 of the communicator
+# refactor; see ``communicator_refactor.md`` §10) ---
 #
-# Known convention disagreement (tracked in fixing.md §3.1 / Stage A4):
-# ``RealLabCommunicator.move_component`` today dispatches ``angle=[-180, 0, -rot]``
-# -- the ``-rot`` is an inline, ad-hoc negation that has been empirically
-# correct for this hardware setup. We have NOT yet folded that negation into
-# ``lab_rotation_to_robot_yaw`` because we can't physically test whether
-# ``set_lab_state`` and ``hover_component`` should also negate (they use the
-# identity today). Resolving this is deferred until the next time someone is
-# in front of the robot and can verify experimentally. For now:
-#   - ``set_lab_state`` and ``hover_component`` route through this helper
-#     (identity), matching their current behavior.
-#   - ``move_component`` keeps its inline ``-rot`` with a comment pointing
-#     back here. When calibration is done, either the negation moves into
-#     this helper (and ``move_component`` loses the ``-``) or it stays
-#     out for a documented reason.
-def lab_rotation_to_robot_yaw(theta_lab: float) -> float:
-    """
-    Map UI / lab table rotation (deg) to robot-frame yaw (deg).
-
-    Identity today. See module-level comment above for the convention and
-    the known open item (``move_component``'s inline ``-rot``).
-    """
-    return float(theta_lab)
-
-
-def robot_yaw_to_lab_rotation(yaw_robot: float) -> float:
-    """Inverse of :func:`lab_rotation_to_robot_yaw`. Identity today."""
-    return float(yaw_robot)
+# All cross-wall coordinate-frame logic now lives in
+# ``real/coordinate_frames.py``: XY rotation, Z transforms, yaw
+# transforms, calibration constants, and the safety bounds. The two
+# generic utilities (env-float parsing, optional-float HTTP-param
+# parsing) live in ``shared/util.py``. We re-export the public names
+# here so existing references inside this file keep working unchanged.
+from lab_communicator.real.coordinate_frames import (  # noqa: F401  re-exports
+    DEFAULT_COMPONENT_HEIGHT_MM,
+    GRASP_OFFSET_MM,
+    LAB_ROBOT_TABLE_ROTATION_RAD,
+    MAX_SAFE_HOVER_Z_LAB_MM,
+    TABLE_Z0_ROBOT_MM,
+    lab_rotation_to_robot_yaw,
+    lab_table_xy_to_robot_xy,
+    robot_table_xy_to_lab_xy,
+    robot_yaw_to_lab_rotation,
+    z_lab_to_robot as _z_lab_to_robot_pure,
+    z_robot_to_lab as _z_robot_to_lab_pure,
+)
+from lab_communicator.shared.util import (  # noqa: F401
+    env_float as _env_float_shared,
+    optional_float as _optional_float,
+)
 
 
-# --- Lab vs robot Z (see new_primitives.md: "Z / coordinate convention") ---
-# Cloud-labs, the UI, the HTTP API, and lab_model all speak ``z_lab``:
-#     Height of a component's *base* above the breadboard surface (mm).
-#     z_lab = 0   -> part is resting on the breadboard.
-#     z_lab = 40  -> part's base is 40 mm above the breadboard (default hover).
-#
-# lab_automation speaks ``z_robot``: the robot-frame z command of whatever
-# reference point the robot controller uses (flange / gripper tip). We absorb
-# the flange-to-gripper-tip offset into TABLE_Z0_ROBOT_MM below so that
-# TABLE_Z0_ROBOT_MM is always the robot z reading when the *gripper fingers*
-# (empty) are touching the breadboard.
-#
-# RealLabCommunicator is the ONLY place these two frames meet. Every outgoing
-# call to lab_automation forward-transforms z_lab -> z_robot; every incoming
-# read inverse-transforms z_robot -> z_lab.
-#
-# Transform (outgoing):
-#     z_robot = TABLE_Z0_ROBOT_MM + c.height_mm - GRASP_OFFSET_MM + z_lab
-# Inverse (incoming):
-#     z_lab   = z_robot - TABLE_Z0_ROBOT_MM - c.height_mm + GRASP_OFFSET_MM
-#
-# The three inputs are each owned by exactly one thing so they don't drift:
-# - ``TABLE_Z0_ROBOT_MM`` (per-setup calibration): robot-frame z reading such
-#   that the empty gripper fingers are just touching the breadboard surface.
-#   One-time touch-off calibration. Override with env ``TABLE_Z0_ROBOT_MM``.
-# - ``GRASP_OFFSET_MM`` (gripper design constant): distance from the *top*
-#   of the component housing DOWN to the point where the gripper fingers
-#   close. 0 means "closes at the very top of the housing"; a positive N
-#   means "closes N mm below the top". Override with env ``GRASP_OFFSET_MM``.
-# - ``c.height_mm`` (per-component catalog): total physical height of the
-#   part, base-to-top, in mm. Lives in ``schemas/component_catalog.real.json``.
-#
-# Plus two cloud-labs-only safety knobs:
-# - ``MAX_SAFE_HOVER_Z_LAB_MM``: hard upper bound on user-requested HOVER z
-#   (z_lab) so a runaway HTTP payload cannot drive the gripper to the ceiling.
-# - ``DEFAULT_COMPONENT_HEIGHT_MM``: fallback when a catalog entry is missing
-#   ``height_mm`` (logs a warning).
+# Back-compat alias preserving the old ``[REAL LAB]`` log prefix on
+# stale-env-var warnings without forcing every call site to pass it.
 def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None or raw.strip() == "":
-        return float(default)
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        print(
-            f"[REAL LAB] Warning: env {name}={raw!r} is not a valid float; "
-            f"using default {default}."
-        )
-        return float(default)
-
-
-TABLE_Z0_ROBOT_MM: float = _env_float("TABLE_Z0_ROBOT_MM", 500.0)
-GRASP_OFFSET_MM: float = _env_float("GRASP_OFFSET_MM", 0.0)
-DEFAULT_COMPONENT_HEIGHT_MM: float = _env_float("DEFAULT_COMPONENT_HEIGHT_MM", 60.0)
-MAX_SAFE_HOVER_Z_LAB_MM: float = _env_float("MAX_SAFE_HOVER_Z_LAB_MM", 200.0)
-
-
-def _optional_float(params: Optional[Dict[str, Any]], key: str) -> Optional[float]:
-    """Parse an optional numeric field from HTTP params (cloud-labs / lab_primitives)."""
-    if not params or params.get(key) is None:
-        return None
-    try:
-        return float(params[key])
-    except (TypeError, ValueError):
-        return None
+    return _env_float_shared(name, default, log_prefix="[REAL LAB]")
 
 
 class RealLabCommunicator(LabCommunicator):
+    log_prefix = "[REAL LAB]"
+
     def __init__(self):
         if not LAB_LIB_AVAILABLE:
             raise RuntimeError("lab_automation library not available. Cannot start RealLabCommunicator.")
+
+        # Base seeds ``current_state`` (with empty components / IDLE),
+        # ``catalog_map``, and the state lock. Phase 2A made base the
+        # owner of all three -- see ``communicator_refactor.md`` §5.2.
+        super().__init__()
 
         print("[REAL LAB] Initializing OpticalExperiment...")
         # Initialize the experiment manager
         self.experiment = OpticalExperiment(mock=False)
         self.experiment.initialize_robot()
-        
+
         # Cache of OpticalComponent objects: { "tag_22": OpticalComponent(...) }
         self.component_map: Dict[str, OpticalComponent] = {}
 
         # Catalog path (real physical inventory). Mock mode uses a different
         # file -- see ``schemas/component_catalog.mock.json`` and README.
+        # File now at ``backend/lab_communicator/real/communicator.py``;
+        # ``schemas/`` is three levels up. (Was two levels up when the
+        # class lived in ``backend/lab_communicator/real.py``.)
         self.catalog_file = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "schemas", "component_catalog.real.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "..", "schemas",
+                "component_catalog.real.json",
+            )
         )
-        
-        # Initialize State
-        self.current_state = {
-            "system_status": "IDLE",
-            "last_updated": datetime.now().isoformat(),
-            "components": {},
-            "optimization_step": 0,
-            # Basename of per-run folder under Camera_Images/ while OPTIMIZING (real lab).
-            "optimization_run_dir": None,
-            # Top-level HOLDING bookkeeping (see backend/lab_model/holding.py + new_primitives.md #6).
-            "holding": empty_holding(),
-        }
-        self._state_lock = threading.RLock()
 
         # Stage 6 feature flag: when set (HOVER_PLACEHOLDER_STATE=1), the
         # placeholder implementations of pick/hover/place_from_hover/
@@ -285,277 +191,136 @@ class RealLabCommunicator(LabCommunicator):
         self._opt_monitor_thread.start()
 
     def _camera_images_base_dir(self) -> str:
-        """Canonical Camera_Images root for new optimization run folders."""
-        lab_path = os.getenv("LAB_AUTOMATION_PATH")
-        if lab_path:
-            base = os.path.join(os.path.abspath(lab_path), "Camera_Images")
-        else:
-            base = os.path.abspath("Camera_Images")
-        os.makedirs(base, exist_ok=True)
-        return base
+        """Canonical Camera_Images root for new optimization run folders.
+
+        Thin wrapper -- body in :func:`lab_communicator.real.video.camera_images_base_dir`.
+        """
+        from lab_communicator.real.video import camera_images_base_dir
+        return camera_images_base_dir()
 
     def _make_optimization_run_dir(self, strategy_name: str) -> str:
+        """Create a per-run ``Camera_Images`` subdirectory.
+
+        Thin wrapper -- body in :func:`lab_communicator.real.optimization.make_optimization_run_dir`.
         """
-        Create a per-run subdirectory so successive optimizations do not overwrite PNGs.
-        Name: opt_<YYYYMMDD_HHMMSS>_<STRATEGY>
-        """
-        safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", (strategy_name or "OPT").strip())
-        safe = safe.strip("_")[:48] or "OPT"
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        folder = f"opt_{ts}_{safe}"
-        path = os.path.join(self._camera_images_base_dir(), folder)
-        os.makedirs(path, exist_ok=True)
-        print(f"[REAL LAB] Optimization run image directory: {path}")
-        return path
+        from lab_communicator.real.optimization import make_optimization_run_dir
+        return make_optimization_run_dir(self, strategy_name)
 
     @staticmethod
-    def _apply_optimization_output_dir_kw(strategy_cls: Any, kw: Dict[str, Any], run_dir: str) -> None:
-        """Pass run_dir into the strategy if it declares a supported parameter (lab_automation)."""
-        try:
-            sig = inspect.signature(strategy_cls.__init__)
-        except (TypeError, ValueError):
-            return
-        for param_name in ("output_dir", "camera_images_dir", "save_dir", "image_output_dir"):
-            if param_name in sig.parameters:
-                kw[param_name] = run_dir
-                print(f"[REAL LAB] {strategy_cls.__name__}: {param_name}={run_dir}")
-                return
-        print(
-            f"[REAL LAB] Warning: {getattr(strategy_cls, '__name__', strategy_cls)} has no "
-            f"output_dir-like parameter; images may still write to the flat Camera_Images folder. "
-            f"See update_lab.md in optics-digital-twin repo."
+    def _apply_optimization_output_dir_kw(
+        strategy_cls: Any, kw: Dict[str, Any], run_dir: str,
+    ) -> None:
+        """Inject ``run_dir`` into the strategy kwargs under whatever name it accepts.
+
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.apply_optimization_output_dir_kw`.
+        """
+        from lab_communicator.real.optimization import (
+            apply_optimization_output_dir_kw,
         )
+        apply_optimization_output_dir_kw(strategy_cls, kw, run_dir)
 
     def _get_optimization_watch_dirs(self) -> List[str]:
+        """Directories the file watcher / video stream should poll for new PNGs.
+
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.get_optimization_watch_dirs`.
         """
-        While an optimization run is active, watch only that run's subdirectory so step counts
-        and the MJPEG feed track the current run. Otherwise watch legacy flat Camera_Images dirs.
-        """
-        active = getattr(self, "_active_optimization_image_dir", None)
-        if active and os.path.isdir(active):
-            return [active]
-        candidates = {os.path.abspath("Camera_Images")}
-        lab_path = os.getenv("LAB_AUTOMATION_PATH")
-        if lab_path:
-            candidates.add(os.path.join(os.path.abspath(lab_path), "Camera_Images"))
-        return sorted(candidates)
+        from lab_communicator.real.optimization import get_optimization_watch_dirs
+        return get_optimization_watch_dirs(self)
 
     def _get_latest_optimization_png(self) -> Tuple[Optional[str], int]:
+        """Find the most recently modified image under the watch dirs.
+
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.get_latest_optimization_png`.
         """
-        Returns (latest_image_path, latest_mtime_ns). latest_mtime_ns is 0 when none found.
-        """
-        import glob
-
-        latest_file: Optional[str] = None
-        latest_ns: int = 0
-
-        for d in self._get_optimization_watch_dirs():
-            if not os.path.exists(d):
-                continue
-            try:
-                # Newton/vision paths have been used with both png/jpg historically.
-                files = []
-                files.extend(glob.glob(os.path.join(d, "*.png")))
-                files.extend(glob.glob(os.path.join(d, "*.jpg")))
-                files.extend(glob.glob(os.path.join(d, "*.jpeg")))
-
-                for f in files:
-                    try:
-                        ns = os.stat(f).st_mtime_ns
-                    except Exception:
-                        continue
-                    if ns > latest_ns:
-                        latest_ns = ns
-                        latest_file = f
-            except Exception:
-                continue
-
-        return latest_file, latest_ns
+        from lab_communicator.real.optimization import get_latest_optimization_png
+        return get_latest_optimization_png(self)
 
     @staticmethod
     def _optimization_step_from_image_path(path: str) -> Optional[int]:
-        """If basename contains step<digits> (e.g. test_step00.png), return that index; else None."""
-        m = re.search(r"(?i)step(\d+)", os.path.basename(path))
-        if not m:
-            return None
-        return int(m.group(1), 10)
+        """Parse ``stepNN`` from a PNG basename. Returns ``None`` when absent.
+
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.optimization_step_from_image_path`.
+        """
+        from lab_communicator.real.optimization import (
+            optimization_step_from_image_path,
+        )
+        return optimization_step_from_image_path(path)
 
     def _monitor_optimization_dir(self):
-        """Background task to watch optimization PNGs and increment optimization_step when files change."""
-        import time
+        """Background task -- watches the latest PNG and bumps ``optimization_step``.
 
-        latest_file, last_mtime_ns = self._get_latest_optimization_png()
-        last_size = -1
-        last_path = latest_file
-        try:
-            if latest_file:
-                last_size = os.path.getsize(latest_file)
-        except Exception:
-            last_size = -1
-
-        while True:
-            time.sleep(0.5)
-            if self.current_state.get("system_status") == "OPTIMIZING":
-                try:
-                    current_file, current_ns = self._get_latest_optimization_png()
-                    if not current_file:
-                        continue
-
-                    try:
-                        current_size = os.path.getsize(current_file)
-                    except Exception:
-                        current_size = -1
-
-                    # Prefer step index from filename (e.g. test_step02.png -> 2). Writers often touch the same
-                    # file twice (mtime + size), which previously doubled increments (0->2->4...).
-                    parsed = self._optimization_step_from_image_path(current_file)
-                    if parsed is not None:
-                        with self._state_lock:
-                            if self.current_state.get("system_status") != "OPTIMIZING":
-                                pass
-                            else:
-                                prev = self.current_state.get("optimization_step")
-                                if parsed != prev:
-                                    self.current_state["optimization_step"] = parsed
-                                    print(
-                                        f"[REAL LAB] optimization_step={parsed} "
-                                        f"(from file={os.path.basename(current_file)})"
-                                    )
-                    else:
-                        basename = os.path.basename(current_file)
-                        with self._state_lock:
-                            if self.current_state.get("system_status") != "OPTIMIZING":
-                                pass
-                            elif basename != self._last_optimization_image_basename:
-                                self._last_optimization_image_basename = basename
-                                current_step = self.current_state.get("optimization_step", 0)
-                                self.current_state["optimization_step"] = current_step + 1
-                                print(
-                                    f"[REAL LAB] optimization_step={current_step + 1} "
-                                    f"(new image basename={basename} ns={current_ns} size={current_size})"
-                                )
-
-                    last_mtime_ns = current_ns
-                    last_size = current_size
-                    last_path = current_file
-                except Exception:
-                    pass
-            else:
-                # Keep last_mtime updated even when not optimizing to avoid a jump when it starts
-                try:
-                    current_file, current_ns = self._get_latest_optimization_png()
-                    if current_file:
-                        try:
-                            current_size = os.path.getsize(current_file)
-                        except Exception:
-                            current_size = -1
-                        if current_ns > last_mtime_ns or current_size != last_size or current_file != last_path:
-                            last_mtime_ns = current_ns
-                            last_size = current_size
-                            last_path = current_file
-                except Exception:
-                    pass
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.monitor_optimization_dir`.
+        Used as the ``threading.Thread.target`` in ``__init__``; the
+        wrapper layer is transparent to the thread.
+        """
+        from lab_communicator.real.optimization import monitor_optimization_dir
+        monitor_optimization_dir(self)
 
     def _send_recorder_cmd(self, port: int, cmd: str) -> None:
-        """Send a command to a recorder process on the given port (9999 or 10000)."""
-        try:
-            import socket
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.5)
-            s.connect(("localhost", port))
-            s.sendall((cmd.strip() + "\n").encode())
-            s.close()
-        except Exception as e:
-            print(f"[REAL LAB] Recorder cmd (port {port}): {e}")
+        """Send a one-line command to a recorder process on the given port.
+
+        Thin wrapper -- body in :func:`lab_communicator.real.video.send_recorder_cmd`.
+        """
+        from lab_communicator.real.video import send_recorder_cmd
+        send_recorder_cmd(port, cmd)
 
     def _start_recorder_processes(self) -> None:
-        """Start the two recorder subprocesses (cam1=9999, cam2=10000) to warm up table cameras."""
-        lab_path = os.getenv("LAB_AUTOMATION_PATH")
-        if not lab_path or not os.path.isdir(lab_path):
-            print("[REAL LAB] LAB_AUTOMATION_PATH not set or invalid; skipping recorder warm-up.")
-            return
-        recorder_script = os.path.join(lab_path, "recorder_cam_laser_align_simplified.py")
-        if not os.path.isfile(recorder_script):
-            recorder_script = os.path.join(lab_path, "scripts", "recorder_cam_laser_align_simplified.py")
-        if not os.path.isfile(recorder_script):
-            print("[REAL LAB] Recorder script not found; table cam capture may fail (ports 9999/10000).")
-            return
-        use_real_camera = os.getenv("TABLE_CAM_USE_MOCK", "").strip().lower() not in ("1", "true", "yes")
-        extra = ["--real-camera"] if use_real_camera else []
-        try:
-            p1 = subprocess.Popen(
-                [sys.executable, recorder_script, "--cam", "0", "--port", "9999", "--prefix", "cam1"] + extra,
-                cwd=lab_path,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            p2 = subprocess.Popen(
-                [sys.executable, recorder_script, "--cam", "1", "--port", "10000", "--prefix", "cam2"] + extra,
-                cwd=lab_path,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            self._recorder_procs = [p1, p2]
-            time.sleep(1.2)
-            print("[REAL LAB] Recorder processes started (cam1=9999, cam2=10000). Table cam capture ready.")
-            atexit.register(self._shutdown_recorders)
-        except Exception as e:
-            print(f"[REAL LAB] Failed to start recorders: {e}")
-            self._recorder_procs = []
+        """Start the two recorder subprocesses to warm up table cameras.
+
+        Thin wrapper -- body in :func:`lab_communicator.real.video.start_recorder_processes`.
+        """
+        from lab_communicator.real.video import start_recorder_processes
+        start_recorder_processes(self)
 
     def _shutdown_recorders(self) -> None:
-        """Send EXIT to recorder ports and wait for processes. Called on backend exit."""
-        if not self._recorder_procs:
-            return
-        for port in (9999, 10000):
-            self._send_recorder_cmd(port, "REC_OFF")
-            self._send_recorder_cmd(port, "EXIT")
-        for p in self._recorder_procs:
-            try:
-                p.wait(timeout=2.0)
-            except Exception:
-                try:
-                    p.terminate()
-                except Exception:
-                    pass
-        self._recorder_procs = []
+        """Send EXIT to recorder ports and wait for processes. Called on backend exit.
+
+        Thin wrapper -- body in :func:`lab_communicator.real.video.shutdown_recorders`.
+        """
+        from lab_communicator.real.video import shutdown_recorders
+        shutdown_recorders(self)
 
     def _stored_intent_path(self) -> str:
         """Persisted map of which catalog tags are in inventory storage and at which grid cell."""
+        # File now at ``backend/lab_communicator/real/communicator.py``;
+        # ``states/`` is three levels up. (Was two levels up before the
+        # Phase 1 folder restructure.)
         return os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "states", "real_lab_stored_intent.json")
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "..", "states",
+                "real_lab_stored_intent.json",
+            )
         )
 
     def _load_stored_intent_from_disk(self) -> None:
-        path = self._stored_intent_path()
-        self._stored_intent = {}
-        if not os.path.isfile(path):
-            return
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            raw = data.get("stored") or {}
-            for tid, slot in raw.items():
-                if not isinstance(tid, str) or not isinstance(slot, dict):
-                    continue
-                if "i" in slot and "j" in slot:
-                    self._stored_intent[tid] = {"i": int(slot["i"]), "j": int(slot["j"])}
-        except Exception as e:
-            print(f"[REAL LAB] Warning: could not load {path}: {e}")
+        """Hydrate ``self._stored_intent`` from
+        ``states/real_lab_stored_intent.json``.
+
+        Thin wrapper -- file I/O lives in
+        :func:`lab_communicator.shared.storage_intent.load_stored_intent`.
+        """
+        from lab_communicator.shared.storage_intent import load_stored_intent
+        self._stored_intent = load_stored_intent(
+            self._stored_intent_path(), log_prefix="[REAL LAB]"
+        )
 
     def _save_stored_intent_to_disk(self) -> None:
-        path = self._stored_intent_path()
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            payload = {
-                "version": 1,
-                "updated_at": datetime.now().isoformat(),
-                "stored": {k: {"i": int(v["i"]), "j": int(v["j"])} for k, v in sorted(self._stored_intent.items())},
-            }
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
-        except Exception as e:
-            print(f"[REAL LAB] Warning: could not save stored intent: {e}")
+        """Persist ``self._stored_intent`` to disk.
+
+        Thin wrapper -- serialization lives in
+        :func:`lab_communicator.shared.storage_intent.save_stored_intent`.
+        """
+        from lab_communicator.shared.storage_intent import save_stored_intent
+        save_stored_intent(
+            self._stored_intent_path(),
+            self._stored_intent,
+            log_prefix="[REAL LAB]",
+        )
 
     def _stored_intent_set_slot(self, tag_id: str, i: int, j: int) -> None:
         with self._state_lock:
@@ -568,16 +333,17 @@ class RealLabCommunicator(LabCommunicator):
         self._save_stored_intent_to_disk()
 
     def _rebuild_stored_intent_from_lab_state(self, components: Dict[str, Any]) -> None:
-        """After loading a snapshot, align the manifest with STORED entries in state."""
-        new_m: Dict[str, Dict[str, int]] = {}
-        for tid, ent in (components or {}).items():
-            if not isinstance(ent, dict):
-                continue
-            if not is_stored(ent):
-                continue
-            sl = storage_slot(ent)
-            if sl is not None:
-                new_m[str(tid)] = {"i": int(sl["i"]), "j": int(sl["j"])}
+        """After loading a snapshot, align the manifest with STORED entries in state.
+
+        Derivation lives in
+        :func:`lab_communicator.shared.storage_intent.rebuild_intent_from_components`.
+        We acquire the state lock here (around the swap) and persist
+        outside the lock to keep the disk write off the hot path.
+        """
+        from lab_communicator.shared.storage_intent import (
+            rebuild_intent_from_components,
+        )
+        new_m = rebuild_intent_from_components(components)
         with self._state_lock:
             self._stored_intent = new_m
         self._save_stored_intent_to_disk()
@@ -588,460 +354,187 @@ class RealLabCommunicator(LabCommunicator):
             return {k: dict(v) for k, v in self._stored_intent.items()}
 
     def _initialize_state(self):
-        """Scans the table based on the catalog and populates the component map."""
-        print("[REAL LAB] Scanning components...")
-        self._load_stored_intent_from_disk()
+        """Scan the table based on the catalog and populate the component map.
 
-        # 1. Load Catalog to know what to look for
-        # Real lab uses ``component_catalog.real.json`` -- the physical
-        # inventory on the table. Mock mode has its own, richer catalog at
-        # ``component_catalog.mock.json`` (see ``README.md`` / schemas).
-        catalog_path = self.catalog_file
-        if not catalog_path or not os.path.exists(catalog_path):
-             print(f"[REAL LAB] Error: Catalog not found at {catalog_path}. Cannot scan.")
-             return
-
-        with open(catalog_path, "r") as f:
-            catalog = json.load(f)
-
-        # Store catalog map for metadata lookup (e.g. motor_controller)
-        self.catalog_map = {item.get("tag_id"): item for item in catalog if item.get("tag_id")}
-
-        # 2. Create OpticalComponent objects for everything in catalog
-        components_to_scan = []
-        for item in catalog:
-            tag_id_str = item.get("tag_id") # e.g. "tag_22"
-            if not tag_id_str: continue
-            
-            # Extract numeric ID from "tag_22" -> 22
-            try:
-                numeric_id = int(tag_id_str.replace("tag_", ""))
-            except ValueError:
-                print(f"[REAL LAB] Warning: Invalid tag format {tag_id_str}")
-                continue
-
-            hkw: Dict[str, Any] = {}
-            raw_h = item.get("height_mm")
-            if raw_h is not None:
-                try:
-                    hkw["height_mm"] = float(raw_h)
-                except (TypeError, ValueError):
-                    pass
-            comp = OpticalComponent(name=item.get("name", tag_id_str), tag_id=numeric_id, **hkw)
-            components_to_scan.append(comp)
-            self.component_map[tag_id_str] = comp
-
-        # 3. Perform Physical Scan
-        self.experiment.scan_components_cloudlab(components_to_scan, force_rescan=True)
-        
-        # 4. Populate Lab State (build off lock, then swap)
-        new_components: Dict[str, Any] = {}
-
-        for item in catalog:
-            tag_id = item.get("tag_id")
-            comp = self.component_map.get(tag_id)
-            # ``current_location`` is the canonical "where is this part now" field
-            # after Stage C (fixing.md §5, §7 item 2). ``scan_components_cloudlab``
-            # populates it directly; we do not fall back to ``inventory_location``.
-            loc = getattr(comp, "current_location", None) if comp else None
-
-            # --- Debug: what we have for this component ---
-            print(f"[REAL LAB] --- {tag_id} ---")
-            print(f"  comp exists: {comp is not None}, current_location exists: {loc is not None}")
-            if loc is not None:
-                attrs = {}
-                for a in ("x", "y", "z", "roll", "pitch", "yaw", "angle", "rx", "ry", "rz"):
-                    if hasattr(loc, a):
-                        attrs[a] = getattr(loc, a)
-                print(f"  current_location attrs: {attrs}")
-            else:
-                print(f"  (no current_location)")
-
-            if comp and comp.current_location:
-                # Found on table (robot frame, written by scan_components_cloudlab).
-                loc = comp.current_location
-                calc_rotation = getattr(loc, "yaw", None) or 0
-                print(f"  fallback yaw (deg): {getattr(loc, 'yaw', None)} -> rotation: {calc_rotation:.2f}")
-
-                pose = {
-                    "x": loc.x,
-                    "y": loc.y,
-                    "rotation": calc_rotation
-                }
-                # Include roll, pitch, yaw so UI can derive display rz (e.g. from yaw for top-down view)
-                for key in ("roll", "pitch", "yaw"):
-                    val = getattr(loc, key, None)
-                    if val is not None:
-                        pose[key] = val
-                in_q3 = is_storage_region(float(loc.x), float(loc.y))
-                stored_slot = self._stored_intent.get(tag_id)
-                if stored_slot is not None:
-                    # Intent file says this tag belongs in inventory; do not infer storage from Q3 geometry alone.
-                    presence = PRESENCE_STORAGE
-                    placement_mode = "STORAGE"
-                    slot = {"i": int(stored_slot["i"]), "j": int(stored_slot["j"])}
-                else:
-                    presence = PRESENCE_BREADBOARD
-                    placement_mode = "MANUAL"
-                    slot = None
-                print(f"  pose written: {pose} in_q3={in_q3} -> presence={presence} slot={slot}")
-            else:
-                pose = {"x": 0, "y": 0, "rotation": 0}
-                presence = PRESENCE_OFF_TABLE
-                placement_mode = "MANUAL"
-                slot = None
-                print(f"  presence: off_table (pose {pose})")
-
-            tun = default_tunables()
-            tun["presence"] = presence
-            tun["nominal_pose"] = dict(pose) if presence != PRESENCE_OFF_TABLE else {"x": 0.0, "y": 0.0, "rotation": 0.0}
-            tun["storage"] = {
-                "in_storage": presence == PRESENCE_STORAGE,
-                "slot": slot,
-            }
-            tun["placement"] = {"mode": placement_mode}
-            meas = default_measurables()
-            meas["pose"] = dict(pose)
-
-            entry = {
-                "id": tag_id,
-                "type": item.get("type", "OPTICAL_MIRROR"),
-                "tunables": tun,
-                "measurables": meas,
-            }
-            new_components[tag_id] = entry
-            print(f"  entry keys: {list(entry.keys())}, tunables.nominal_pose: {tun.get('nominal_pose')}")
-
-        with self._state_lock:
-            self.current_state["components"] = new_components
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        n_bb = len([c for c in new_components.values() if (c.get("tunables") or {}).get("presence") == PRESENCE_BREADBOARD])
-        n_st = len([c for c in new_components.values() if (c.get("tunables") or {}).get("presence") == PRESENCE_STORAGE])
-        print(f"[REAL LAB] Scan complete. breadboard={n_bb}, storage={n_st}.")
+        Thin wrapper -- the body lives in
+        :func:`lab_communicator.real.scan.initialize_state`.
+        """
+        from lab_communicator.real.scan import initialize_state
+        initialize_state(self)
 
     def refresh_pose_from_camera(self):
+        """Re-scan the table (camera-driven) and rebuild measurables.pose for each component.
+
+        Thin wrapper -- the body lives in
+        :func:`lab_communicator.real.scan.refresh_pose_from_camera`.
         """
-        Re-scan the table with the experiment manager (overhead / table camera) and rebuild
-        **measurables.pose** for each catalog component — same path as initial startup scan.
-        """
-        with self._state_lock:
-            self.current_state["system_status"] = "BUSY"
-        try:
-            self._initialize_state()
-        finally:
-            with self._state_lock:
-                self.current_state["system_status"] = "IDLE"
-                self.current_state["optimization_step"] = 0
-                self.current_state["optimization_run_dir"] = None
-                self.current_state["last_updated"] = datetime.now().isoformat()
+        from lab_communicator.real.scan import refresh_pose_from_camera
+        refresh_pose_from_camera(self)
 
     def refresh_state(self):
         """Deprecated name; use :meth:`refresh_pose_from_camera`."""
         self.refresh_pose_from_camera()
 
-    def set_lab_state(self, state: Dict[str, Any]):
+    # ``set_lab_state`` and ``get_lab_state`` now live on the base
+    # template class (Phase 2A of the communicator refactor). Real
+    # provides the ``_apply_loaded_pose_to_hardware`` /
+    # ``_post_apply_snapshot`` hooks below; everything else (merge
+    # logic, holding reset, status normalization, lock acquisition,
+    # motor-rotation injection on read) is shared in
+    # ``lab_communicator.base`` + ``lab_communicator.shared.snapshot``.
+
+    def _apply_loaded_pose_to_hardware(
+        self, tag_id: str, lab_pose: LabPose, *, is_placed: bool
+    ) -> None:
+        """Push a loaded snapshot pose into the ``lab_automation`` component.
+
+        This is the **marquee Stage C exemption** -- the only method
+        allowed to write ``OpticalComponent.current_location``. The
+        architectural lint in
+        :class:`backend.tests.test_lab_primitives.StageCInvariantsTests`
+        enforces this. Snapshot poses are lab / UI frame; the
+        ``lab_automation`` library expects robot frame. All three axes
+        are transformed through the dedicated helpers so the cross-wall
+        convention stays in one place (``fixing.md`` §3, §3.1, §5):
+
+        - **XY**       :func:`lab_table_xy_to_robot_xy` (calibrated rotation)
+        - **Z**        :meth:`_z_lab_to_robot`            (per-tag; uses catalog ``height_mm``)
+        - **rotation** :func:`lab_rotation_to_robot_yaw`  (identity today; see module comment)
+
+        We write only ``current_location`` and ``is_placed``;
+        ``inventory_location`` is owned elsewhere in ``lab_automation``
+        (see ``labautomation_new_primitives.md`` §5).
         """
-        Load a previously saved lab state snapshot and apply it to both:
-        1) `self.current_state` (what the UI reads)
-        2) `self.component_map` (what the robot uses)
+        comp = self.component_map.get(tag_id)
+        if not comp:
+            # Missing from map, skip; UI will still render but the
+            # robot won't know about this part.
+            return
 
-        **Merge:** catalog tags that exist in the current lab state but are **missing** from the
-        snapshot file keep their previous entries (e.g. camera-estimated poses for parts added
-        after the save). Snapshot entries overwrite matching tags.
+        x_robot, y_robot = lab_table_xy_to_robot_xy(lab_pose.x, lab_pose.y)
+        z_robot = self._z_lab_to_robot(tag_id, lab_pose.z)
+        yaw_robot = lab_rotation_to_robot_yaw(lab_pose.rotation)
+
+        comp.current_location = Pose(
+            x=x_robot, y=y_robot, z=z_robot, roll=180, pitch=0, yaw=yaw_robot
+        )
+        comp.is_placed = bool(is_placed)
+
+    def _post_apply_snapshot(self, components: Dict[str, Any]) -> None:
+        """Real backend re-syncs the persistent stored-intent file.
+
+        Mock has no separate stored-intent file (its storage tracking
+        lives in the in-memory ``components`` dict directly); this hook
+        is the no-op default on base.
         """
-        if not isinstance(state, dict):
-            raise ValueError("Loaded state must be a JSON object/dict")
-
-        catalog_ids = set(self.catalog_map.keys())
-
-        with self._state_lock:
-            prev_components = dict((self.current_state.get("components") or {}))
-
-        loaded_components = dict(state.get("components") or {})
-        merged_components: Dict[str, Any] = {}
-        kept: List[str] = []
-        for tag_id, prev_entry in prev_components.items():
-            if tag_id in catalog_ids and tag_id not in loaded_components:
-                merged_components[tag_id] = json.loads(json.dumps(prev_entry))
-                kept.append(tag_id)
-        for tag_id, loaded_entry in loaded_components.items():
-            merged_components[tag_id] = loaded_entry
-
-        if kept:
-            print(f"[REAL LAB] Load state merge: kept {len(kept)} catalog component(s) not in snapshot: {kept}")
-
-        merged_state = dict(state)
-        merged_state["components"] = merged_components
-        merged_state["system_status"] = "IDLE"
-        merged_state["optimization_step"] = int(merged_state.get("optimization_step", 0) or 0)
-        if "optimization_run_dir" not in merged_state:
-            merged_state["optimization_run_dir"] = None
-        # Loaded snapshots must never inherit a HOLDING claim: the real
-        # gripper reconciliation on boot (see ``_reconcile_holding_on_boot``)
-        # is the single source of truth for "is something in the gripper?".
-        merged_state["holding"] = empty_holding()
-        merged_state["last_updated"] = datetime.now().isoformat()
-
-        with self._state_lock:
-            self.current_state = merged_state
-            components = dict(self.current_state.get("components", {}) or {})
-
-        # Apply to component_map so pick/place uses correct coordinates.
-        # Snapshot poses are lab / UI frame; automation expects robot frame.
-        # All three axes are transformed through the dedicated helpers so the
-        # cross-wall convention stays in one place (fixing.md §3, §3.1, §5).
-        #   XY:       lab_table_xy_to_robot_xy (calibrated rotation)
-        #   Z:        _z_lab_to_robot           (per-tag, uses catalog height_mm)
-        #   rotation: lab_rotation_to_robot_yaw (identity today; see module comment)
-        #
-        # Stage C: we write only ``current_location`` (the canonical "where is
-        # this part now" field) and ``is_placed``. ``inventory_location`` is
-        # owned elsewhere in ``lab_automation`` and we no longer touch it from
-        # here -- see ``fixing.md`` §6.1 / §9 Stage C and
-        # ``labautomation_new_primitives.md`` §5.
-        for tag_id, entry in components.items():
-            pose = ((entry or {}).get("measurables") or {}).get("pose") or {}
-            x_lab = float(pose.get("x", 0.0))
-            y_lab = float(pose.get("y", 0.0))
-            # Default z_lab = 0.0 means "part resting on the breadboard", which
-            # is almost always what a placed-state snapshot means. Older
-            # snapshots (pre-z-convention) also omit z and fall through here.
-            z_lab = float(pose.get("z", 0.0))
-            theta_lab = float(pose.get("rotation", 0.0))
-
-            comp = self.component_map.get(tag_id)
-            if not comp:
-                # If missing from map, skip (UI will still render, but robot may not know it).
-                continue
-
-            x_robot, y_robot = lab_table_xy_to_robot_xy(x_lab, y_lab)
-            z_robot = self._z_lab_to_robot(tag_id, z_lab)
-            yaw_robot = lab_rotation_to_robot_yaw(theta_lab)
-
-            roll = 180
-            pitch = 0
-            comp.current_location = Pose(
-                x=x_robot, y=y_robot, z=z_robot, roll=roll, pitch=pitch, yaw=yaw_robot
-            )
-            comp.is_placed = is_on_table(entry) if isinstance(entry, dict) else False
-
         self._rebuild_stored_intent_from_lab_state(components)
 
-    def _inject_motor_rotations_into_state(self, state: Dict[str, Any]) -> None:
-        """Merge software motor angle tracker into measurables.pose and tunables.nominal_motor_positions."""
-        components = state.get("components") or {}
-        if not isinstance(components, dict):
-            return
-        for tag_id, comp in components.items():
-            if not isinstance(comp, dict):
-                continue
-            meta = self.catalog_map.get(tag_id)
-            mids = (meta or {}).get("motor_ids") or []
-            if not mids:
-                continue
-            mr = motor_rot.get_rotations_for_motor_ids(tag_id, list(mids))
-            meas = comp.setdefault("measurables", default_measurables())
-            pose = meas.setdefault("pose", {})
-            if isinstance(pose, dict):
-                pose["motor_rotations"] = dict(mr)
-            tun = comp.setdefault("tunables", default_tunables())
-            nm = tun.setdefault("nominal_motor_positions", {})
-            for k, v in mr.items():
-                nm[str(k)] = float(v)
-
-    def _motor_catalog_ok(self, target_id: str, motor_id: int) -> bool:
-        meta = self.catalog_map.get(target_id)
-        if not meta:
-            return False
-        mids = meta.get("motor_ids") or []
-        return motor_id in mids
-
-    def get_lab_state(self) -> Dict[str, Any]:
-        with self._state_lock:
-            state = json.loads(json.dumps(self.current_state))
-        self._inject_motor_rotations_into_state(state)
-        # Normalize ``holding`` so the Cloud-Labs UI never sees ``undefined``
-        # for held tag / requires_operator_confirm (mirrors mock behavior).
-        get_holding(state)
-        return state
-
     def set_cobyla_reference_from_png_bytes(self, data: bytes) -> Tuple[bool, str]:
-        """Decode PNG bytes to BGR (OpenCV) and store for the next COBYLA optimize run."""
-        if not data or len(data) < 8:
-            return False, "empty body"
-        try:
-            import cv2
-        except ImportError:
-            return False, "cv2 not installed"
-        arr = np.frombuffer(data, dtype=np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
-        if img is None:
-            return False, "could not decode PNG"
-        if img.ndim == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        elif img.ndim == 3 and img.shape[2] == 4:
-            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        if img.ndim != 3 or img.shape[2] != 3:
-            return False, "decoded image must be BGR with 3 channels"
-        with self._cobyla_ref_lock:
-            self._cobyla_reference_bgr = img.copy()
-        h, w = img.shape[:2]
-        print(f"[REAL LAB] Cobyla reference image set ({w}x{h} BGR)")
-        return True, f"stored {w}x{h} BGR reference"
+        """Decode PNG bytes to BGR and store for the next COBYLA optimize run.
+
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.set_cobyla_reference_from_png_bytes`.
+        """
+        from lab_communicator.real.optimization import (
+            set_cobyla_reference_from_png_bytes,
+        )
+        return set_cobyla_reference_from_png_bytes(self, data)
 
     def clear_cobyla_reference(self) -> None:
-        with self._cobyla_ref_lock:
-            self._cobyla_reference_bgr = None
-        print("[REAL LAB] Cobyla reference image cleared")
+        """Drop any stored cobyla reference image.
+
+        Thin wrapper -- body in :func:`lab_communicator.real.optimization.clear_cobyla_reference`.
+        """
+        from lab_communicator.real.optimization import clear_cobyla_reference
+        clear_cobyla_reference(self)
 
     def get_cobyla_reference_status(self) -> Dict[str, Any]:
-        with self._cobyla_ref_lock:
-            ref = self._cobyla_reference_bgr
-        if ref is None:
-            return {"available": True, "set": False}
-        h, w = ref.shape[:2]
-        return {
-            "available": True,
-            "set": True,
-            "width": int(w),
-            "height": int(h),
-            "channels": int(ref.shape[2]),
-        }
+        """Status dict for the UI's cobyla-reference badge.
+
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.get_cobyla_reference_status`.
+        """
+        from lab_communicator.real.optimization import get_cobyla_reference_status
+        return get_cobyla_reference_status(self)
 
     def get_cobyla_reference_png_bytes(self) -> Optional[bytes]:
-        import cv2
+        """Re-encode the stored reference back to PNG bytes (download).
 
-        with self._cobyla_ref_lock:
-            ref = self._cobyla_reference_bgr
-            if ref is None:
-                return None
-            ok, buf = cv2.imencode(".png", ref)
-        if not ok:
-            return None
-        return buf.tobytes()
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.get_cobyla_reference_png_bytes`.
+        """
+        from lab_communicator.real.optimization import get_cobyla_reference_png_bytes
+        return get_cobyla_reference_png_bytes(self)
 
     def _tag_id_for_component(self, comp: Any) -> Optional[str]:
-        for tid, c in self.component_map.items():
-            if c is comp:
-                return tid
-        return None
+        """Reverse-lookup ``OpticalComponent`` -> tag id.
+
+        Thin wrapper around
+        :func:`lab_communicator.shared.util.tag_id_for_component`.
+        """
+        from lab_communicator.shared.util import tag_id_for_component
+        return tag_id_for_component(self.component_map, comp)
 
     def _ui_pose_for_placement_tick(
         self, tag_id: str, target_x: Optional[float], target_y: Optional[float]
     ) -> Dict[str, float]:
-        """
-        Newton sub-moves: take table X/Y from the place call, keep canvas rotation from current lab state.
-        Robot `angle` / rotvec is not the same as the UI's top-down `rotation` (e.g. 270 vs ~29); parsing it
-        misaligns ghost and solid.
-        When target_x/target_y are set, they are robot-frame mm from the strategy; convert to lab for UI state.
-        """
-        with self._state_lock:
-            comp_entry = (self.current_state.get("components") or {}).get(tag_id)
-            pose = dict(((comp_entry or {}).get("measurables") or {}).get("pose") or {})
-        if target_x is not None and target_y is not None:
-            nx, ny = robot_table_xy_to_lab_xy(float(target_x), float(target_y))
-        else:
-            nx = float(pose.get("x", 0.0))
-            ny = float(pose.get("y", 0.0))
-        rot = float(pose.get("rotation", 0.0) or 0.0)
-        out: Dict[str, float] = {"x": nx, "y": ny, "rotation": rot}
-        for key in ("roll", "pitch", "yaw"):
-            if key in pose and pose[key] is not None:
-                try:
-                    out[key] = float(pose[key])
-                except (TypeError, ValueError):
-                    pass
-        return out
+        """Build the lab-frame pose dict for one Newton sub-move.
 
-    def _apply_placement_ui_phase(self, tag_id: str, phase: str, pose: Dict[str, float]) -> None:
+        Thin wrapper -- body in
+        :func:`lab_communicator.shared.placement_ui.ui_pose_for_placement_tick`.
+        Real passes :func:`lab_communicator.real.coordinate_frames.robot_table_xy_to_lab_xy`
+        as the XY transform; mock passes the identity transform from
+        ``mock/coordinate_frames.py``.
         """
-        phase='ghost' -> update tunables.nominal_pose only (planned target before/at start of move).
-        phase='physical' -> update measurables.pose + tunables to match (after successful place).
+        from lab_communicator.shared.placement_ui import ui_pose_for_placement_tick
+        return ui_pose_for_placement_tick(
+            self.current_state,
+            self._state_lock,
+            tag_id,
+            target_x,
+            target_y,
+            xy_robot_to_lab=robot_table_xy_to_lab_xy,
+        )
+
+    def _apply_placement_ui_phase(
+        self, tag_id: str, phase: str, pose: Dict[str, float]
+    ) -> None:
+        """Mutate ``current_state`` for one phase of a Newton sub-move.
+
+        Thin wrapper -- body in
+        :func:`lab_communicator.shared.placement_ui.apply_placement_ui_phase`.
         """
-        if phase not in ("ghost", "physical"):
-            return
-        with self._state_lock:
-            comp_entry = (self.current_state.get("components") or {}).get(tag_id)
-            if not comp_entry:
-                return
-            tun = comp_entry.setdefault("tunables", default_tunables())
-            meas = comp_entry.setdefault("measurables", default_measurables())
-            if phase == "ghost":
-                tun["nominal_pose"] = dict(pose)
-                tun["placement"] = {"mode": "NEWTON"}
-            else:
-                meas["pose"] = dict(pose)
-                set_presence_and_storage(comp_entry, PRESENCE_BREADBOARD, in_storage=False, slot=None)
-                tun["nominal_pose"] = dict(pose)
-                tun["placement"] = {"mode": "NEWTON"}
-            self.current_state["last_updated"] = datetime.now().isoformat()
+        from lab_communicator.shared.placement_ui import apply_placement_ui_phase
+        apply_placement_ui_phase(
+            self.current_state, self._state_lock, tag_id, phase, pose
+        )
 
     def _cloudlab_progress_callback(self, target_tag_id: str):
-        """
-        Optional callback for NewtonPlacementStrategy_cloudlab(progress_callback=...).
-        Signature: (phase, component, target_x, target_y, angle=None, step=None)
-        phase in ('ghost', 'physical').
-        """
+        """Build the ``progress_callback`` for ``NewtonPlacementStrategy_cloudlab``.
 
-        def _cb(phase: str, component: Any, target_x: float, target_y: float, angle: Any = None, step: Any = None):
-            tid = self._tag_id_for_component(component)
-            if tid != target_tag_id:
-                return
-            pose = self._ui_pose_for_placement_tick(tid, target_x, target_y)
-            self._apply_placement_ui_phase(tid, phase, pose)
-
-        return _cb
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.cloudlab_progress_callback`.
+        """
+        from lab_communicator.real.optimization import cloudlab_progress_callback
+        return cloudlab_progress_callback(self, target_tag_id)
 
     def _install_cloudlab_place_ui_hook(self, target_tag_id: str) -> None:
-        """Wrap place_component_wo_home_specific_xy_cloudlab so UI gets ghost then physical updates."""
-        exp = self.experiment
-        if not hasattr(exp, "place_component_wo_home_specific_xy_cloudlab"):
-            print("[REAL LAB] No place_component_wo_home_specific_xy_cloudlab on experiment; UI hook skipped.")
-            return
-        if self._place_cloudlab_orig is not None:
-            return
-        orig = exp.place_component_wo_home_specific_xy_cloudlab
-        self._place_cloudlab_orig = orig
-        comm = self
+        """Wrap ``place_component_wo_home_specific_xy_cloudlab`` for UI updates.
 
-        try:
-            sig = inspect.signature(orig)
-        except (TypeError, ValueError):
-            sig = None
-
-        def wrapped(*args, **kwargs):
-            component = target_x = target_y = None
-            if sig is not None:
-                try:
-                    ba = sig.bind_partial(*args, **kwargs)
-                    ba.apply_defaults()
-                    component = ba.arguments.get("component")
-                    target_x = ba.arguments.get("target_x")
-                    target_y = ba.arguments.get("target_y")
-                except TypeError:
-                    pass
-            tid = comm._tag_id_for_component(component) if component is not None else None
-            pose = None
-            if tid == target_tag_id and target_x is not None and target_y is not None:
-                pose = comm._ui_pose_for_placement_tick(tid, target_x, target_y)
-                comm._apply_placement_ui_phase(tid, "ghost", pose)
-            try:
-                return orig(*args, **kwargs)
-            except Exception:
-                raise
-            else:
-                if pose is not None and tid == target_tag_id:
-                    comm._apply_placement_ui_phase(tid, "physical", pose)
-
-        exp.place_component_wo_home_specific_xy_cloudlab = wrapped  # type: ignore[method-assign]
-        print("[REAL LAB] Installed place_component_wo_home_specific_xy_cloudlab UI hook for Newton.")
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.install_cloudlab_place_ui_hook`.
+        """
+        from lab_communicator.real.optimization import install_cloudlab_place_ui_hook
+        install_cloudlab_place_ui_hook(self, target_tag_id)
 
     def _remove_cloudlab_place_ui_hook(self) -> None:
-        if self._place_cloudlab_orig is None:
-            return
-        if hasattr(self.experiment, "place_component_wo_home_specific_xy_cloudlab"):
-            self.experiment.place_component_wo_home_specific_xy_cloudlab = self._place_cloudlab_orig
-        self._place_cloudlab_orig = None
+        """Restore the original ``place_component_wo_home_specific_xy_cloudlab``.
+
+        Thin wrapper -- body in
+        :func:`lab_communicator.real.optimization.remove_cloudlab_place_ui_hook`.
+        """
+        from lab_communicator.real.optimization import remove_cloudlab_place_ui_hook
+        remove_cloudlab_place_ui_hook(self)
 
     def get_rotation_from_angle(self, robot_angle: List[float]) -> float:
         """
@@ -1071,60 +564,49 @@ class RealLabCommunicator(LabCommunicator):
             return 0.0
 
     def _catalog_wh(self, tag_id: str) -> Tuple[float, float]:
-        meta = self.catalog_map.get(tag_id) or {}
-        s = meta.get("size")
-        if isinstance(s, dict):
-            return float(s.get("width", 62)), float(s.get("height", 62))
-        if isinstance(s, (int, float)):
-            v = float(s)
-            return v, v
-        return 90.0, 90.0
+        """Thin wrapper around
+        :func:`lab_communicator.shared.catalog_lookup.catalog_wh`."""
+        from lab_communicator.shared.catalog_lookup import catalog_wh
+        return catalog_wh(self.catalog_map.get, tag_id)
 
     # --- Z-frame transforms (see module-level comment for the convention) ---
     def _component_height_mm(self, tag_id: str) -> float:
-        """
-        Physical height of a component (base to top, mm). Read from the
-        catalog entry's top-level ``height_mm`` field.
+        """Physical height of a component (base to top, mm).
 
-        Distinct from ``size.height`` (which is the 2D UI footprint). Falls
-        back to ``DEFAULT_COMPONENT_HEIGHT_MM`` with a warning if the field
-        is missing / malformed, so we never silently produce a bogus
-        z_robot just because a catalog row is incomplete.
+        Thin wrapper around
+        :func:`lab_communicator.shared.catalog_lookup.component_height_mm`.
+        Defaults to ``DEFAULT_COMPONENT_HEIGHT_MM`` (env-tunable) on a
+        missing/malformed catalog entry.
         """
-        meta = (self.catalog_map or {}).get(tag_id) or {}
-        raw = meta.get("height_mm")
-        if raw is None:
-            print(
-                f"[REAL LAB] Warning: catalog entry for {tag_id} has no "
-                f"'height_mm'; using default {DEFAULT_COMPONENT_HEIGHT_MM:.1f} mm. "
-                f"Add it to schemas/component_catalog.real.json."
-            )
-            return float(DEFAULT_COMPONENT_HEIGHT_MM)
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            print(
-                f"[REAL LAB] Warning: catalog entry for {tag_id} has invalid "
-                f"height_mm={raw!r}; using default {DEFAULT_COMPONENT_HEIGHT_MM:.1f} mm."
-            )
-            return float(DEFAULT_COMPONENT_HEIGHT_MM)
+        from lab_communicator.shared.catalog_lookup import component_height_mm
+        return component_height_mm(
+            (self.catalog_map or {}).get,
+            tag_id,
+            default_mm=DEFAULT_COMPONENT_HEIGHT_MM,
+            log_prefix="[REAL LAB]",
+        )
 
     def _z_lab_to_robot(self, tag_id: str, z_lab: float) -> float:
-        """Forward transform: cloud-labs z_lab -> lab_automation z_robot."""
-        return (
-            TABLE_Z0_ROBOT_MM
-            + self._component_height_mm(tag_id)
-            - GRASP_OFFSET_MM
-            + float(z_lab)
+        """Forward transform: cloud-labs z_lab -> lab_automation z_robot.
+
+        Thin wrapper -- the actual math lives in
+        :func:`lab_communicator.real.coordinate_frames.z_lab_to_robot`.
+        We look up ``height_mm`` from the catalog here (per-component
+        data) and pass it through; the pure transform owns the
+        per-setup constants.
+        """
+        return _z_lab_to_robot_pure(
+            float(z_lab), self._component_height_mm(tag_id)
         )
 
     def _z_robot_to_lab(self, tag_id: str, z_robot: float) -> float:
-        """Inverse transform: lab_automation z_robot -> cloud-labs z_lab."""
-        return (
-            float(z_robot)
-            - TABLE_Z0_ROBOT_MM
-            - self._component_height_mm(tag_id)
-            + GRASP_OFFSET_MM
+        """Inverse transform: lab_automation z_robot -> cloud-labs z_lab.
+
+        Thin wrapper -- see :meth:`_z_lab_to_robot` and
+        :func:`lab_communicator.real.coordinate_frames.z_robot_to_lab`.
+        """
+        return _z_robot_to_lab_pure(
+            float(z_robot), self._component_height_mm(tag_id)
         )
 
     def _intent_hover_z_lab(self, tag_id: str) -> float:
@@ -1273,64 +755,39 @@ class RealLabCommunicator(LabCommunicator):
                 self.current_state["last_updated"] = datetime.now().isoformat()
                 self._store_pending_slot = None
 
-    async def move_motor(self, target_id: str, motor_id: int, distance: float):
-        print(f"[REAL LAB] Moving motor {motor_id} of {target_id} by {distance} (RELATIVE)...")
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-        if entry and is_stored(entry):
-            print(f"[REAL LAB] Refusing motor move: {target_id} is STORED.")
-            return
+    async def _do_move_motor(
+        self, target_id: str, motor_id: int, distance: float
+    ) -> None:
+        """Cross-wall hook for :meth:`LabCommunicator.move_motor`.
 
-        # Determine controller from catalog metadata
-        meta = self.catalog_map.get(target_id)
-        if not meta:
-            print(f"[REAL LAB] Error: {target_id} not in component_catalog.")
-            return
-        mids = meta.get("motor_ids") or []
-        if motor_id not in mids:
-            print(f"[REAL LAB] Error: motor_id {motor_id} not in motor_ids {mids} for {target_id}.")
-            return
+        The orchestrator handled refusals (STORED gate), the catalog
+        gate (``motor_ids`` membership), the BUSY/IDLE status flip, and
+        the post-move ``motor_rotation_store`` bookkeeping. This hook
+        just dispatches the concrete ``experiment.<motor_controller>.move_motor``
+        call -- exceptions propagate up so the orchestrator's
+        ``finally`` can roll status back to IDLE.
+        """
+        meta = self.catalog_map.get(target_id) or {}
         controller_name = meta.get("motor_controller")
         if not controller_name:
-            print(f"[REAL LAB] Error: catalog entry for {target_id} has no 'motor_controller'.")
-            return
-
-        controller = getattr(self.experiment, controller_name, None)
-        
-        if not controller:
-            print(f"[REAL LAB] Error: Controller '{controller_name}' not found on experiment.")
-            return
-
-        try:
-            # Worker thread: same event-loop issue as optimize / place.
-            await asyncio.to_thread(
-                controller.move_motor,
-                motor_id,
-                distance,
-                wait_completion=True,
+            # Catalog is missing ``motor_controller`` despite passing
+            # the orchestrator's ``motor_ids`` gate -- this is a
+            # catalog data error, not a runtime UX bug.
+            raise RuntimeError(
+                f"[REAL LAB] Catalog entry for {target_id} has no 'motor_controller'."
             )
-            motor_rot.add_delta(target_id, motor_id, float(distance))
-            print(f"[REAL LAB] Motor moved.")
-        except Exception as e:
-            print(f"[REAL LAB] Motor move failed: {e}")
-
-    async def motor_send_home(self, target_id: str, motor_id: int):
-        """Hardware move by -tracked angle; tracker ends at 0 via move_motor delta."""
-        if not self._motor_catalog_ok(target_id, motor_id):
-            print(f"[REAL LAB] motor_send_home: invalid tag or motor_id for {target_id} m{motor_id}")
-            return
-        cur = motor_rot.get_angle(target_id, motor_id)
-        if abs(cur) < 1e-12:
-            return
-        await self.move_motor(target_id, motor_id, -cur)
-
-    async def motor_set_zero(self, target_id: str, motor_id: int):
-        """Software-only: define current position as angle 0."""
-        if not self._motor_catalog_ok(target_id, motor_id):
-            print(f"[REAL LAB] motor_set_zero: invalid tag or motor_id for {target_id} m{motor_id}")
-            return
-        motor_rot.set_zero(target_id, motor_id)
-        print(f"[REAL LAB] Motor {motor_id} on {target_id}: zero reference set (software).")
+        controller = getattr(self.experiment, controller_name, None)
+        if not controller:
+            raise RuntimeError(
+                f"[REAL LAB] Controller '{controller_name}' not found on experiment."
+            )
+        # Worker thread: same event-loop issue as optimize / place.
+        await asyncio.to_thread(
+            controller.move_motor,
+            motor_id,
+            distance,
+            wait_completion=True,
+        )
 
     async def optimize_component(self, target_id: str, strategy_name: str, params: Dict[str, Any]):
         print(f"[REAL LAB] Optimizing {target_id} with {strategy_name}...")
@@ -1477,149 +934,32 @@ class RealLabCommunicator(LabCommunicator):
         return {"connected": True, "source": "/api/video-feed/stream"} 
 
     def get_video_stream(self, fps: int = 10):
-        """
-        Yields MJPEG frames from the camera.
-        Uses CameraDriver if available, or a fallback generator.
-        """
-        print(f"[REAL LAB] Starting Video Stream Generator at {fps} FPS...")
-        
-        # We need to import cv2 here inside the method or at module level if not already
-        import cv2
-        import numpy as np
+        """Yield MJPEG frames from the ceiling camera.
 
-        camera = None
-        # Try to get the ceiling camera (Port 0)
-        if self.experiment and hasattr(self.experiment, 'ceiling_cam1'):
-            camera = self.experiment.ceiling_cam1
-            
-        sleep_duration = 1.0 / max(1, min(fps, 60)) # Clamp between 1 and 60 FPS
-            
-        while True:
-            frame = None
-            if camera:
-                try:
-                    # Use the CameraDriver's get_frame method instead of accessing cap directly
-                    frame = camera.get_frame()
-                except Exception as e:
-                    print(f"[REAL LAB] Camera stream error: {e}")
-                    frame = None
-            
-            if frame is None:
-                # Generate a dummy frame
-                frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                cv2.putText(frame, "NO SIGNAL", (200, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-
-            ret, buffer = cv2.imencode('.jpg', frame)
-            if ret:
-                frame_bytes = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            
-            # Use time.sleep instead of asyncio.sleep in a synchronous generator
-            import time
-            time.sleep(sleep_duration)
+        Thin wrapper around the synchronous generator
+        :func:`lab_communicator.real.video.get_video_stream`. The
+        delegation uses ``yield from`` so the generator semantics
+        (lazy iteration, caller-driven termination) are preserved.
+        """
+        from lab_communicator.real.video import get_video_stream
+        yield from get_video_stream(self, fps)
 
     def get_optimization_stream(self, fps: int = 5):
-        """Yields MJPEG frames by watching the Camera_Images directory."""
-        import cv2
-        import time
+        """Yield MJPEG frames by watching the Camera_Images directory.
 
-        # Ensure the most likely directory exists so strategies that rely on CWD won't fail silently.
-        try:
-            os.makedirs(os.path.abspath("Camera_Images"), exist_ok=True)
-        except Exception:
-            pass
-
-        watch_dirs = self._get_optimization_watch_dirs()
-        print(f"[REAL LAB] Starting Optimization Feed watching: {watch_dirs}")
-        
-        sleep_duration = 1.0 / max(1, min(fps, 30))
-        last_mtime_ns = 0
-        last_size = -1
-        last_frame_bytes = None
-        
-        while True:
-            try:
-                latest_file, current_ns = self._get_latest_optimization_png()
-                if latest_file:
-                    try:
-                        current_size = os.path.getsize(latest_file)
-                    except Exception:
-                        current_size = -1
-
-                    # Try to refresh if file version changed (mtime/size/file identity)
-                    if current_ns > last_mtime_ns or current_size != last_size:
-                        # Retry decode a few times to avoid libpng "Read Error" from partially-written files.
-                        img = None
-                        for attempt in range(6):
-                            try:
-                                time.sleep(0.05)
-                                img = cv2.imread(latest_file)
-                            except Exception:
-                                img = None
-                            if img is not None:
-                                break
-
-                        if img is not None:
-                            ret, buffer = cv2.imencode('.jpg', img)
-                            if ret:
-                                last_frame_bytes = buffer.tobytes()
-                                last_mtime_ns = current_ns
-                                last_size = current_size
-                                print(
-                                    f"[REAL LAB] optimization-stream updated "
-                                    f"(file={os.path.basename(latest_file)} ns={current_ns} size={current_size})"
-                                )
-            except Exception as e:
-                print(f"[REAL LAB] Error in optimization stream: {e}")
-            
-            # Yield the last known frame
-            if last_frame_bytes:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + last_frame_bytes + b'\r\n')
-            else:
-                # Dummy frame
-                import numpy as np
-                frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                cv2.putText(frame, "WAITING FOR OPTIMIZATION", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-                ret, buffer = cv2.imencode('.jpg', frame)
-                if ret:
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-                       
-            time.sleep(sleep_duration)
+        Thin wrapper around
+        :func:`lab_communicator.real.video.get_optimization_stream`.
+        """
+        from lab_communicator.real.video import get_optimization_stream
+        yield from get_optimization_stream(self, fps)
 
     def capture_table_cam(self, cam_id: int, exposure: float = 0.2):
-        """Capture one image from table recorder camera (1 or 2). Returns PNG bytes or None."""
-        if not RECORDER_CAPTURE_AVAILABLE or activate_cam_and_capture is None:
-            return None
-        if cam_id not in (1, 2):
-            return None
-        import cv2
-        import tempfile
-        import os as _os
-        exp = float(exposure)
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            tmp_path = f.name
-        try:
-            img = activate_cam_and_capture(
-                cam_id=cam_id,
-                video_exposure=exp,
-                capture_exposure=exp,
-                filename=tmp_path,
-                settle_s=0.5,
-                output_dir=None,
-            )
-            if img is None:
-                return None
-            _, buf = cv2.imencode(".png", img)
-            return buf.tobytes()
-        finally:
-            if _os.path.exists(tmp_path):
-                try:
-                    _os.remove(tmp_path)
-                except Exception:
-                    pass
+        """Capture one image from a table recorder camera (1 or 2). Returns PNG bytes or ``None``.
+
+        Thin wrapper -- body in :func:`lab_communicator.real.video.capture_table_cam`.
+        """
+        from lab_communicator.real.video import capture_table_cam
+        return capture_table_cam(self, cam_id, exposure)
 
     async def observe_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
         with self._state_lock:
@@ -1787,112 +1127,22 @@ class RealLabCommunicator(LabCommunicator):
     # item 3 ("remove or keep as debug escape hatch").
 
     def _reconcile_holding_on_boot(self) -> None:
+        """Boot-time HOLDING reconciliation (see ``new_primitives.md`` §6.3).
+
+        Thin wrapper -- the body lives in
+        :func:`lab_communicator.real.gripper.reconcile_holding_on_boot`.
         """
-        Boot-time reconciliation (see new_primitives.md #6.3).
-
-        Poll the real gripper via :meth:`get_gripper_status`. If it reports
-        ``closed=True`` and the in-memory snapshot is NOT already a confirmed
-        HOLDING, force ``system_status = "HOLDING"`` with
-        ``holding.requires_operator_confirm = true`` and a best-effort pose.
-        The UI must then block cross-part commands until the operator sends
-        ``CONFIRM_HOLDING_TAG`` (see :meth:`confirm_holding_tag`).
-
-        ``get_gripper_status`` defaults to ``closed=False`` when the real
-        ``lab_automation`` API does not expose a gripper introspection hook
-        yet -- in that case this method is a no-op, which is the safe
-        pre-Stage-8 behavior.
-        """
-        try:
-            gripper = self.get_gripper_status()
-        except Exception as e:
-            print(f"[REAL LAB] get_gripper_status raised {e!r}; skipping holding reconcile")
-            return
-        gripper_closed = bool((gripper or {}).get("closed"))
-        if not gripper_closed:
-            return
-
-        with self._state_lock:
-            status = self.current_state.get("system_status")
-            if status == SYSTEM_STATUS_HOLDING and held_tag(self.current_state):
-                # Already a confirmed HOLDING in the snapshot -- trust it.
-                return
-
-            # Best-effort held pose: center of the table at default safe Z.
-            # We do NOT try to infer the held tag here; that requires an
-            # operator (CONFIRM_HOLDING_TAG). Vision-based guessing is
-            # deferred to Stage 8.
-            print(
-                "[REAL LAB] Gripper reports CLOSED on boot but no confirmed "
-                "HOLDING in snapshot -> forcing HOLDING_UNCONFIRMED. "
-                "UI must prompt operator to confirm which tag is held."
-            )
-            set_holding(
-                self.current_state,
-                tag_id=None,
-                x=0.0,
-                y=0.0,
-                rotation=0.0,
-                z=DEFAULT_HOVER_Z_MM,
-                requires_operator_confirm_flag=True,
-            )
-            self.current_state["last_updated"] = datetime.now().isoformat()
+        from lab_communicator.real.gripper import reconcile_holding_on_boot
+        reconcile_holding_on_boot(self)
 
     def get_gripper_status(self) -> Dict[str, Any]:
+        """Real-lab override of :meth:`LabCommunicator.get_gripper_status`.
+
+        Thin wrapper -- the probe-priority logic lives in
+        :func:`lab_communicator.real.gripper.get_gripper_status`.
         """
-        Real-lab override of :meth:`LabCommunicator.get_gripper_status`.
-
-        Probes ``OpticalExperiment`` / ``robot`` for a gripper-closed signal
-        (see probe order below). When ``lab_automation`` exposes
-        ``get_gripper_status``, boot reconcile can force **HOLDING_UNCONFIRMED**.
-
-        Expected shape::
-
-            {"closed": bool, "confidence": float | None, "source": str}
-
-        ``source`` tags where the signal came from so debugging logs can
-        tell "we never had a sensor" from "we had one and it said open".
-        """
-        # Probe order (cheap + side-effect-free calls preferred):
-        # 1. experiment.get_gripper_status()     -- preferred when available
-        # 2. experiment.robot.get_gripper_status()
-        # 3. experiment.is_gripper_closed()      -- bool accessor
-        # 4. experiment.robot.gripper_closed      -- plain attribute
-        probes = [
-            ("experiment.get_gripper_status", getattr(self.experiment, "get_gripper_status", None)),
-            (
-                "experiment.robot.get_gripper_status",
-                getattr(getattr(self.experiment, "robot", None), "get_gripper_status", None),
-            ),
-            ("experiment.is_gripper_closed", getattr(self.experiment, "is_gripper_closed", None)),
-        ]
-        for source, fn in probes:
-            if callable(fn):
-                try:
-                    res = fn()
-                except Exception as e:
-                    print(f"[REAL LAB] {source}() raised {e!r}; skipping")
-                    continue
-                if isinstance(res, dict):
-                    out = {
-                        "closed": bool(res.get("closed", False)),
-                        "confidence": res.get("confidence"),
-                        "source": source,
-                    }
-                    return out
-                if isinstance(res, bool):
-                    return {"closed": res, "confidence": None, "source": source}
-
-        # Plain attribute fallback.
-        robot = getattr(self.experiment, "robot", None)
-        attr_val = getattr(robot, "gripper_closed", None) if robot is not None else None
-        if isinstance(attr_val, bool):
-            return {"closed": attr_val, "confidence": None, "source": "experiment.robot.gripper_closed"}
-
-        return {
-            "closed": False,
-            "confidence": None,
-            "source": "unavailable (no probe returned a value; check OpticalExperiment.get_gripper_status / robot)",
-        }
+        from lab_communicator.real.gripper import get_gripper_status
+        return get_gripper_status(self)
 
     def _holding_placeholder_log(
         self, action: str, target_id: Optional[str], extra: Optional[Dict[str, Any]] = None
