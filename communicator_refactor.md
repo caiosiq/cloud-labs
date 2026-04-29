@@ -1,8 +1,10 @@
 # Communicator refactor — folder-per-backend with shared template
 
-> Status: design doc, no code yet. When this lands and the user signs off, we
-> execute Phase 1 mechanically and then Phase 2 in stages with the same
-> discipline used for `new_primitives.md` / `fixing.md`.
+> Status: **shipped.** Phases 1, 2A, 2B, 2C, 2D, and 3 (docs sweep + final
+> lint consolidation) are all complete. Phase 4 (the
+> `primitives.py`-per-backend split + `_do_*` → `_primitive_*` rename
+> requested after Phase 3) shipped on top — see §11 below for the
+> post-roadmap status note.
 >
 > Sibling docs: `new_primitives.md` (in-air primitives), `fixing.md`
 > (cloud-labs ↔ `lab_automation` ownership), `bugs.md` (active
@@ -944,6 +946,12 @@ To keep the scope honest:
 
 ## 10. Roadmap
 
+> **Status (2026-04-29):** Phase 1, Phase 2A, Phase 2B, Phase 2C, and
+> Phase 2D have all shipped. The template-method migration is
+> complete: every primitive lives on `LabCommunicator` with a tiny
+> `_do_*` hook on each backend. Phase 3 (docs sweep + final
+> consolidated lint) is the remaining work.
+
 ### Phase 0 — prerequisites *(blocked on `bugs.md` resolution)*
 
 Land the three bug fixes from `bugs.md`:
@@ -955,7 +963,7 @@ These are upstream `lab_automation` fixes (and one cloud-labs follow-up
 in `real.py`). Refactoring before they land means we're moving moving
 targets. Once they're stable, Phase 1 can begin.
 
-### Phase 1 — folder restructure, no behavior change *(1 PR, ~1 day)*
+### Phase 1 — folder restructure, no behavior change *(SHIPPED)*
 
 Mechanical code-move. No primitive logic touched.
 
@@ -1019,12 +1027,12 @@ Mechanical code-move. No primitive logic touched.
 - [ ] `from lab_communicator.real import RealLabCommunicator` still
   works (and any other existing imports outside the package).
 
-### Phase 2 — template-method migration *(4 PRs, ~1 week)*
+### Phase 2 — template-method migration *(SHIPPED)*
 
-Each PR refactors one group of primitives. After each PR, mock + real
+Each PR refactored one group of primitives. After each PR, mock + real
 both work and tests pass.
 
-#### Phase 2A — Base infrastructure + motor primitives
+#### Phase 2A — Base infrastructure + motor primitives *(SHIPPED)*
 *Foundation. Smallest hardware footprint.*
 
 - Promote `LabCommunicator` to a concrete template class:
@@ -1052,7 +1060,7 @@ both work and tests pass.
 rejects synthetic violations; existing motor-related primitives work
 end-to-end.
 
-#### Phase 2B — In-air primitives (recently stabilized)
+#### Phase 2B — In-air primitives *(SHIPPED)*
 *Highest-value cleanup; recently shipped so well-tested.*
 
 - Refactor `pick_component`, `hover_component`, `place_from_hover`,
@@ -1071,7 +1079,7 @@ transitions, holding field, tunables/measurables writes, golden state
 snapshots); the placeholder mode is gone; new tests cover each
 primitive's hook contract.
 
-#### Phase 2C — Heavy state primitives
+#### Phase 2C — Heavy state primitives *(SHIPPED)*
 *Most code volume; lowest novelty.*
 
 - Refactor `move_component`, `place_from_storage`, `store_component`,
@@ -1089,54 +1097,78 @@ primitive's hook contract.
 storage-intent JSON file format unchanged; stored-intent rebuild on
 snapshot load still works.
 
-#### Phase 2D — Optimization
+#### Phase 2D — Optimization *(SHIPPED)*
 *Most complex hook; saved for last so the pattern is well-established.*
 
-- Add `shared/progress.py` with `ProgressEvent` (tagged-union
-  dataclass: `Step`, `Image`, `PartialScore`, `Cancel`) and the
-  `ProgressCallback = Callable[[ProgressEvent], None]` alias.
-- Refactor `optimize_component` into template method + `_do_optimize`
-  hook with signature `(target_id, strategy_name, params,
-  progress_callback) -> None`. The shared part is small (status flip,
-  post-success commit, `progress_callback` construction); the hook in
-  real is ~150 lines (stays in `real/optimization.py`) and the hook
-  itself never touches `current_state` directly — it only invokes
-  `progress_callback` to publish step counts and image basenames.
-- Mock's `_do_optimize` also calls `progress_callback` to drive the UI
-  the same way real does, so the two backends produce indistinguishable
-  poll output during a run.
-- Verify `Newton` and `Cobyla` strategies still work end-to-end.
-- Verify cancellation still works (run optimize, kill mid-run, observe
-  status flips back to IDLE and `_active_optimization_image_dir`
-  clears). Optionally route cancellation through a `Cancel`
-  `ProgressEvent` instead of the dir-sentinel (cleaner; not required
-  for Phase 2D acceptance).
+Implemented with a deliberately simpler progress-callback shape than
+the original `ProgressEvent` tagged-union sketch -- the only stepwise
+update primitive `_do_optimize` actually publishes is "iteration N
+landed", so `progress_callback(*, step: int)` was sufficient. Image-
+basename updates continue to flow through `monitor_optimization_dir`
+(real's PNG file watcher), and per-component pose updates during a
+Newton run continue to flow through `cloudlab_progress_callback` /
+`apply_placement_ui_phase` (already shared, lock-aware). Cancellation
+remains tied to the dir-sentinel; routing it through a `Cancel` event
+stayed deferred because the existing path works.
 
-**Acceptance:** Newton placement and Cobyla alignment both work
-end-to-end in real mode; mock optimize still produces a synthetic
-score; cancellation paths verified; UI sees `optimization_step` ticks
-and image-basename updates during a real run, mediated entirely by
-`progress_callback` (never by the hook touching state directly); the
-new lint forbidding `self.current_state` access inside any `_do_*` body
-passes.
+What shipped:
 
-### Phase 3 — Cleanup and documentation *(1 PR, half a day)*
+- `LabCommunicator.optimize_component` orchestrator on `base.py`:
+  catalog gate, STORED refusal, BUSY-equivalent OPTIMIZING flip,
+  `optimization_step` reset, `optimization_run_dir` write, hook
+  dispatch, post-run commit via `commit_optimization_complete`,
+  status reset in `finally`.
+- New virtual hooks: `_prepare_optimization_run(target_id,
+  strategy_name) -> Optional[str]` (real builds the per-run images
+  subdir; mock returns `None`) and `_finalize_optimization_run()`
+  (real removes the Newton place-UI hook and clears
+  `_active_optimization_image_dir`; mock no-op).
+- `_do_optimize(*, target_id, strategy_name, params,
+  progress_callback) -> Optional[Dict]`. Real builds the strategy
+  (NEWTON or COBYLA), wires `cloudlab_progress_callback`, dispatches
+  `experiment.optimize_component` on a worker thread, returns
+  `{"score": 1.0, "final_pose": None}` so the orchestrator copies
+  the live `measurables.pose` into `last_optimized_pose`. Mock loops
+  six step ticks via `progress_callback(step=k)` and returns
+  `{"score": 0.99, "final_pose": ...}` with a small Gaussian
+  rotation drift.
+- `commit_optimization_complete` in `shared/commits.py` writes
+  `tunables.placement.mode`, `measurables.last_optimization_score`,
+  and `measurables.last_optimized_pose` (and updates
+  `measurables.pose` when the hook returned an explicit final pose).
+- Three regression tests under
+  `OptimizePrimitiveMockRoundTripTests`: round-trip commit, refusal
+  on STORED parts, refusal on unknown tags.
+
+### Phase 3 — Cleanup and documentation *(remaining)*
+
+The architectural lints from this phase already shipped alongside
+Phase 2A (`CommunicatorArchitectureLints` in
+`backend/tests/test_lab_primitives.py` -- 4 lints) and Phase 2C
+(`StageCInvariantsTests::test_is_placed_writes_only_in_allowed_sites`
+re-pointed to `_apply_is_placed_flag`). What's left is a docs pass:
 
 - Update `new_primitives.md`, `fixing.md`, `bugs.md`,
   `labautomation_new_primitives.md` to reference the new file
-  structure.
+  structure (replace any remaining `real.py` / `mock.py` mentions
+  with `lab_communicator/{real,mock}/communicator.py`).
 - Add a short `lab_communicator/README.md` describing the package
   layout and how to add a new backend.
-- Add a regression test for the architectural rules (consolidates the
-  staged lints from Phase 2A and Phase 2D into one file):
-  - `shared/` files don't import `lab_automation`, `real`, `mock`, or
-    `lab_communicator.base` (the four cross-cutting bans).
-  - `real/` and `mock/` don't import each other.
-  - `base.py` doesn't import `real/` or `mock/`.
-  - No `_do_*` method body in `real/` or `mock/` reads or writes
-    `self.current_state` (use orchestrator inputs and `progress_callback`).
-  - The Stage C lint moves from "writes only in `set_lab_state`" to
-    "writes only in `_apply_loaded_pose_to_hardware`".
+- Sweep for any straggler `affirm_placed_at_current` /
+  `set_lab_state` lint references in older notes (the canonical
+  `is_placed` write site is now `_apply_is_placed_flag`).
+
+Architectural lints already in place:
+
+- `shared/` files don't import `lab_automation`, `real`, `mock`, or
+  `lab_communicator.base` (the four cross-cutting bans).
+- `real/` and `mock/` don't import each other.
+- `base.py` doesn't import `real/` or `mock/`.
+- No `_do_*` method body in `real/` or `mock/` reads or writes
+  `self.current_state` (use orchestrator inputs and `progress_callback`).
+- `current_location` writes only inside `_apply_loaded_pose_to_hardware`.
+- `is_placed` writes only inside `_apply_loaded_pose_to_hardware`
+  and `_apply_is_placed_flag`.
 
 ---
 
@@ -1234,3 +1266,145 @@ A list of "we'll learn this during implementation":
   - Q1, Q3, Q4, Q5, Q6, Q7, Q8, Q10, Q13 marked **Resolved 2026-04-28**
     in the §8 table with reviewer rationale inline. Q2 flipped and
     locked. Q9, Q11, Q12 still defaults (not yet locked).
+
+---
+
+## 11. Phase 4 — `primitives.py`-per-backend split *(SHIPPED 2026-04-29)*
+
+After Phase 3, a reader looking for "what does the real backend
+actually call when the UI asks for `pick_component`?" still had to
+scroll through ~1200 lines of `real/communicator.py` because the
+`_do_pick` body sat in the middle of the file alongside `__init__`,
+state-side virtual hooks, helper methods, and the video / cobyla
+extras. The hook was tightly written but the file structure still
+mixed three audiences: "what's a backend's checklist?", "what state
+glue does this backend need?", and "what's the API call for each
+primitive?".
+
+Phase 4 extracts the third audience into a dedicated file:
+
+```text
+backend/lab_communicator/
+├── base.py                    # template-method LabCommunicator (orchestrators)
+├── shared/                    # cross-lab building blocks
+├── real/
+│   ├── communicator.py        # __init__ + state-side hooks + 1-line _primitive_* delegations
+│   ├── primitives.py          # NEW: primitive_<name>(communicator, ...) free functions
+│   ├── coordinate_frames.py
+│   ├── gripper.py
+│   ├── optimization.py
+│   ├── scan.py
+│   └── video.py
+└── mock/
+    ├── communicator.py        # NEW shape: __init__ + state-side hooks + delegations
+    ├── primitives.py          # NEW: simulated hardware steps
+    ├── persistence.py
+    └── ...
+```
+
+### 11.1 The class hook → free function split
+
+Two parallel naming conventions, with one-for-one mapping:
+
+| Class hook (in `communicator.py`)         | Free function (in `primitives.py`)     |
+|-------------------------------------------|----------------------------------------|
+| `_primitive_move_motor`                   | `primitive_move_motor`                 |
+| `_primitive_motor_set_zero`               | *(base default no-op)*                 |
+| `_primitive_move_component`               | `primitive_move_component`             |
+| `_primitive_pick_component`               | `primitive_pick_component`             |
+| `_primitive_hover_component`              | `primitive_hover_component`            |
+| `_primitive_place_from_hover`             | `primitive_place_from_hover`           |
+| `_primitive_scan_rotate_in_place`         | `primitive_scan_rotate_in_place`       |
+| `_primitive_observe_measurables`          | `primitive_observe_measurables`        |
+| `_primitive_prepare_optimization_run`     | `primitive_prepare_optimization_run`   |
+| `_primitive_optimize_component`           | `primitive_optimize_component`         |
+| `_primitive_finalize_optimization_run`    | `primitive_finalize_optimization_run`  |
+| `_primitive_add_component_to_state`       | `primitive_add_component_to_state`     |
+
+The renames are mechanical (`_do_X` → `_primitive_<descriptive>`); the
+semantic change is the body of each `_primitive_*` method becoming a
+single-line delegation:
+
+```python
+async def _primitive_pick_component(
+    self, target_id: str, commanded: LabPose, params: Dict[str, Any]
+) -> float:
+    from lab_communicator.real.primitives import primitive_pick_component
+    return await primitive_pick_component(self, target_id, commanded, params)
+```
+
+`primitives.py` then carries the actual `lab_automation` call:
+
+```python
+async def primitive_pick_component(
+    communicator: "RealLabCommunicator",
+    target_id: str,
+    commanded: LabPose,
+    params: Dict[str, Any],
+) -> float:
+    """Hardware step: pick_component_cloudlab + intent hover-z lookup."""
+    comp = communicator.component_map.get(target_id)
+    if not comp or not comp.current_location:
+        raise RuntimeError(...)
+    safe_z = optional_float(params, "safe_z")
+    await asyncio.to_thread(
+        communicator.experiment.pick_component_cloudlab,
+        comp,
+        safe_z=safe_z,
+    )
+    return communicator._intent_hover_z_lab(target_id)
+```
+
+### 11.2 Two audiences, two files
+
+- **`communicator.py` answers "what does this backend implement?"**
+  Reading it top-to-bottom is the new-backend checklist: `__init__`,
+  the state-side virtual hooks (`_apply_loaded_pose_to_hardware`,
+  `_post_apply_snapshot`, `_persist_state`, `_after_move_to_storage`,
+  `_after_move_out_of_storage`, `_apply_is_placed_flag`), the full
+  list of `_primitive_*` hook delegations, and any backend-specific
+  UI methods (`get_video_stream`, `capture_table_cam`,
+  `get_cobyla_reference_status`, ...).
+- **`primitives.py` answers "what's the API call for each primitive?"**
+  Reading it top-to-bottom is the cross-wall contract: each
+  `primitive_<name>` function shows the exact `lab_automation`
+  function it calls (or, for mock, the simulated step it performs),
+  the kwargs it builds, the worker-thread dispatch (`asyncio.to_thread`),
+  and the return-shape the orchestrator is expecting.
+
+### 11.3 Architectural lint update
+
+`backend/tests/test_lab_primitives.py` gains a second invariant on
+top of the one from §7.2 abstraction 2.5:
+
+- The original lint (`test_primitive_hooks_do_not_touch_current_state`)
+  scans `_primitive_*` *class methods* in `real/communicator.py` and
+  `mock/communicator.py` for `self.current_state` access. Post-Phase-4
+  these are all 1-line delegations, so the lint is now a regression
+  guard against future inlining.
+- The new lint (`test_primitive_free_functions_do_not_touch_current_state`)
+  scans `primitive_*` *free functions* in `real/primitives.py` and
+  `mock/primitives.py` for `communicator.current_state` (the new
+  through-arg form) and `self.current_state`. This is the
+  architecturally meaningful one going forward — the hook bodies live
+  in `primitives.py`, so that's where the state-purity invariant has
+  to be enforced.
+
+### 11.4 Delivered impact
+
+```text
+                       pre-P4    post-P4   Δ
+real/communicator.py   52.2 KB   36.2 KB   −16 KB (−31%)
+mock/communicator.py   33.4 KB   21.0 KB   −12 KB (−37%)
+real/primitives.py        —      21.6 KB   (new, 11 functions)
+mock/primitives.py        —      13.5 KB   (new,  9 functions)
+```
+
+Plus a latent-bug cleanup: `mock/communicator.py` carried a stale
+`scan_rotate_in_place` override (Phase 2B residue using the old
+`_read_state` / `_write_state` pattern) that shadowed the base
+orchestrator. Deleted as part of P4 — mock now goes through the
+template-method path like every other primitive.
+
+The full test suite (31 tests, including round-trip regressions for
+every primitive) still passes after the rename.

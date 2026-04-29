@@ -1,5 +1,4 @@
 import atexit
-import inspect
 import json
 import math
 import os
@@ -10,7 +9,7 @@ import threading
 import time
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
@@ -67,9 +66,13 @@ else:
 
 # Import Real Lab Automation
 try:
-    from lab_automation.managers.experiment_manager import OpticalExperiment, find_angle
+    from lab_automation.managers.experiment_manager import OpticalExperiment
     from lab_automation.objects.base import OpticalComponent, Pose
-    from lab_automation.objects.strategies import NewtonPlacementStrategy_cloudlab, CobylaAlignmentStrategy_cloudlab
+    # ``find_angle``, ``NewtonPlacementStrategy_cloudlab``, and
+    # ``CobylaAlignmentStrategy_cloudlab`` are imported lazily inside
+    # the matching ``primitive_*`` functions in
+    # :mod:`lab_communicator.real.primitives`; communicator.py no
+    # longer needs them at module scope.
 
     LAB_LIB_AVAILABLE = True
 except ImportError as e:
@@ -107,7 +110,6 @@ from lab_communicator.real.coordinate_frames import (  # noqa: F401  re-exports
 )
 from lab_communicator.shared.util import (  # noqa: F401
     env_float as _env_float_shared,
-    optional_float as _optional_float,
 )
 
 
@@ -119,6 +121,11 @@ def _env_float(name: str, default: float) -> float:
 
 class RealLabCommunicator(LabCommunicator):
     log_prefix = "[REAL LAB]"
+    # Calibrated safe-hover bound (lab frame), forwarded from
+    # ``real/coordinate_frames.py``. The base orchestrator uses it to
+    # refuse runaway HTTP payloads in :meth:`hover_component` before
+    # they hit the forward transform.
+    max_safe_hover_z_lab_mm = MAX_SAFE_HOVER_Z_LAB_MM
 
     def __init__(self):
         if not LAB_LIB_AVAILABLE:
@@ -149,20 +156,19 @@ class RealLabCommunicator(LabCommunicator):
             )
         )
 
-        # Stage 6 feature flag: when set (HOVER_PLACEHOLDER_STATE=1), the
-        # placeholder implementations of pick/hover/place_from_hover/
-        # scan_rotate_in_place MUTATE current_state so the Cloud-Labs UI can
-        # exercise the HOLDING workflow without moving real hardware. When
-        # unset, the methods only LOG "[REAL LAB] PLACEHOLDER: ..." and
-        # return -- safer default for a live table.
-        self._hover_placeholder_state = (
-            os.getenv("HOVER_PLACEHOLDER_STATE", "").strip().lower()
-            in ("1", "true", "yes", "on")
-        )
+        # ``HOVER_PLACEHOLDER_STATE`` was deleted in Phase 2B of the
+        # communicator refactor: MockLabCommunicator now serves the
+        # "exercise the UI without moving the table" use case. Real
+        # always dispatches to ``lab_automation`` -- no placeholder
+        # state-mutation branch exists. (The env var is silently
+        # ignored if still set; consider it deprecated.)
         self._place_cloudlab_orig: Any = None
-        self._place_from_storage_tag: Optional[str] = None
-        self._store_component_tag: Optional[str] = None
-        self._store_pending_slot: Optional[Tuple[int, int]] = None
+        # The flag-based dispatch (``_place_from_storage_tag``,
+        # ``_store_component_tag``, ``_store_pending_slot``) used in the
+        # pre-Phase-2C ``move_component`` was retired: the orchestrator
+        # now picks the commit shape (BREADBOARD vs STORAGE) directly,
+        # so ``_primitive_move_component`` does not need to peek at any side-channel
+        # state to know what to do.
 
         # CobylaAlignmentStrategy_cloudlab.reference_image (BGR ndarray, same family as table-cam / capture_image)
         self._cobyla_ref_lock = threading.Lock()
@@ -639,295 +645,79 @@ class RealLabCommunicator(LabCommunicator):
                     break
         return float(DEFAULT_HOVER_Z_MM)
 
-    async def move_component(self, target_id: str, params: Dict[str, Any]):
-        print(f"[REAL LAB] Moving {target_id}...")
+    # ---------------------------------------------------------------
+    # Primitive hooks
+    # ---------------------------------------------------------------
+    #
+    # The methods below are the complete list of ``_primitive_*``
+    # hooks the base orchestrator dispatches for the real backend.
+    # Each one is a single-line delegation to the matching
+    # ``primitive_<name>`` free function in
+    # :mod:`lab_communicator.real.primitives`, where the actual
+    # ``lab_automation`` API call lives. Reading this section answers
+    # "what primitives does the real communicator implement?"; reading
+    # ``primitives.py`` answers "what API call does each primitive
+    # make?".
 
-        tx = params.get("target_x")
-        ty = params.get("target_y")
-        rot = params.get("rotation", 0)
-        tx_lab = float(tx)
-        ty_lab = float(ty)
-        rot = float(rot)
+    async def _primitive_move_component(
+        self, target_id: str, commanded: LabPose
+    ) -> Optional[LabPose]:
+        from lab_communicator.real.primitives import primitive_move_component
+        return await primitive_move_component(self, target_id, commanded)
 
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-        if entry and is_stored(entry) and self._place_from_storage_tag != target_id:
-            print(f"[REAL LAB] Refusing move: {target_id} is STORED (use place from storage).")
-            return
-        if (
-            entry
-            and (entry.get("tunables") or {}).get("presence") == PRESENCE_BREADBOARD
-            and is_storage_region(tx_lab, ty_lab)
-            and self._store_component_tag != target_id
-        ):
-            print(f"[REAL LAB] Refusing move into storage quadrant (use Store).")
-            return
-
-        # 1. Update Status
-        with self._state_lock:
-            self.current_state["system_status"] = "BUSY"
-
-        # 2. Get Component
-        if target_id not in self.component_map:
-            print(f"[REAL LAB] Error: Component {target_id} not found in map.")
-            with self._state_lock:
-                self.current_state["system_status"] = "IDLE"
-            return
-
-        comp = self.component_map[target_id]
-
-        tx_robot, ty_robot = lab_table_xy_to_robot_xy(tx_lab, ty_lab)
-        
-        # 4. Execute Move
-        try:
-            print(
-                f"[REAL LAB] Dispatching robot to X={tx_robot}, Y={ty_robot}, Rot={rot} "
-                f"(lab X={tx_lab}, Y={ty_lab})"
-            )
-            
-            if not comp.current_location:
-                print(f"[REAL LAB] Warning: {target_id} current_location unknown. Assuming it's at previous location or 0,0")
-            
-            # Worker thread: place blocks for a long time; must not block the event loop or lab-state polls stall.
-            #
-            # Known convention disagreement (fixing.md §3.1 / Stage A4):
-            # ``-rot`` is an inline, ad-hoc yaw negation that has been
-            # empirically correct for this hardware setup. Other cross-wall
-            # rotation sites (``set_lab_state``, ``hover_component``) go
-            # through ``lab_rotation_to_robot_yaw`` which is identity today.
-            # Once we can test on the physical robot we'll either fold the
-            # negation into ``lab_rotation_to_robot_yaw`` (and remove the
-            # minus here) or document why it must stay outside. Do NOT
-            # change this expression without a physical test -- the current
-            # form is what actually places parts correctly today.
-            await asyncio.to_thread(
-                lambda: self.experiment.place_component_wo_home_specific_xy_cloudlab(
-                    component=comp,
-                    target_x=tx_robot,
-                    target_y=ty_robot,
-                    angle=[-180, 0, -rot],
-                )
-            )
-            
-            # 5. Update State
-            #UPDATE TO GET REFORCE-SCAM
-            place_from = self._place_from_storage_tag
-            with self._state_lock:
-                if target_id in self.current_state["components"]:
-                    ce = self.current_state["components"][target_id]
-                    meas = ce.setdefault("measurables", default_measurables())
-                    tun = ce.setdefault("tunables", default_tunables())
-                    meas["pose"] = {
-                        "x": tx_lab,
-                        "y": ty_lab,
-                        "rotation": rot
-                    }
-                    if self._store_component_tag == target_id:
-                        if self._store_pending_slot is not None:
-                            si, sj = self._store_pending_slot
-                            set_presence_and_storage(
-                                ce, PRESENCE_STORAGE, in_storage=True, slot={"i": int(si), "j": int(sj)}
-                            )
-                            self._stored_intent_set_slot(target_id, si, sj)
-                        else:
-                            set_presence_and_storage(ce, PRESENCE_STORAGE, in_storage=True, slot=None)
-                        tun["placement"] = {"mode": "STORAGE"}
-                    else:
-                        set_presence_and_storage(ce, PRESENCE_BREADBOARD, in_storage=False, slot=None)
-                        tun["placement"] = {"mode": "MANUAL"}
-                        if place_from == target_id:
-                            self._stored_intent_remove(target_id)
-
-                    tun["nominal_pose"] = {
-                        "x": tx_lab, "y": ty_lab, "rotation": rot
-                    }
-                    self.current_state["last_updated"] = datetime.now().isoformat()
-                    self._store_pending_slot = None
-            print(comp)
-        except Exception as e:
-            print(f"[REAL LAB] Move Failed: {e}")
-
-        finally:
-            with self._state_lock:
-                self.current_state["system_status"] = "IDLE"
-                self.current_state["optimization_step"] = 0
-                self.current_state["optimization_run_dir"] = None
-                self.current_state["last_updated"] = datetime.now().isoformat()
-                self._store_pending_slot = None
-
-    async def _do_move_motor(
+    async def _primitive_move_motor(
         self, target_id: str, motor_id: int, distance: float
     ) -> None:
-        """Cross-wall hook for :meth:`LabCommunicator.move_motor`.
+        from lab_communicator.real.primitives import primitive_move_motor
+        await primitive_move_motor(self, target_id, motor_id, distance)
 
-        The orchestrator handled refusals (STORED gate), the catalog
-        gate (``motor_ids`` membership), the BUSY/IDLE status flip, and
-        the post-move ``motor_rotation_store`` bookkeeping. This hook
-        just dispatches the concrete ``experiment.<motor_controller>.move_motor``
-        call -- exceptions propagate up so the orchestrator's
-        ``finally`` can roll status back to IDLE.
-        """
-        meta = self.catalog_map.get(target_id) or {}
-        controller_name = meta.get("motor_controller")
-        if not controller_name:
-            # Catalog is missing ``motor_controller`` despite passing
-            # the orchestrator's ``motor_ids`` gate -- this is a
-            # catalog data error, not a runtime UX bug.
-            raise RuntimeError(
-                f"[REAL LAB] Catalog entry for {target_id} has no 'motor_controller'."
-            )
-        controller = getattr(self.experiment, controller_name, None)
-        if not controller:
-            raise RuntimeError(
-                f"[REAL LAB] Controller '{controller_name}' not found on experiment."
-            )
-        # Worker thread: same event-loop issue as optimize / place.
-        await asyncio.to_thread(
-            controller.move_motor,
-            motor_id,
-            distance,
-            wait_completion=True,
+    def _primitive_prepare_optimization_run(
+        self, target_id: str, strategy_name: str
+    ) -> Optional[str]:
+        from lab_communicator.real.primitives import primitive_prepare_optimization_run
+        return primitive_prepare_optimization_run(self, target_id, strategy_name)
+
+    async def _primitive_optimize_component(
+        self,
+        *,
+        target_id: str,
+        strategy_name: str,
+        params: Dict[str, Any],
+        progress_callback: "Callable[..., None]",
+    ) -> Optional[Dict[str, Any]]:
+        from lab_communicator.real.primitives import primitive_optimize_component
+        return await primitive_optimize_component(
+            self,
+            target_id=target_id,
+            strategy_name=strategy_name,
+            params=params,
+            progress_callback=progress_callback,
         )
 
-    async def optimize_component(self, target_id: str, strategy_name: str, params: Dict[str, Any]):
-        print(f"[REAL LAB] Optimizing {target_id} with {strategy_name}...")
-
-        if target_id not in self.component_map:
-            return
-        with self._state_lock:
-            ent = (self.current_state.get("components") or {}).get(target_id)
-        if ent and is_stored(ent):
-            print(f"[REAL LAB] Refusing optimize: {target_id} is STORED.")
-            return
-
-        run_dir = self._make_optimization_run_dir(strategy_name)
-        self._active_optimization_image_dir = run_dir
-        self._last_optimization_image_basename = None
-
-        comp = self.component_map[target_id]
-        newton_place_hook_installed = False
-
-        try:
-            with self._state_lock:
-                self.current_state["system_status"] = "OPTIMIZING"
-                self.current_state["optimization_step"] = 0
-                self.current_state["optimization_run_dir"] = os.path.basename(run_dir)
-
-            # 1. Select Strategy
-            strategy = None
-            if strategy_name == "NEWTON":
-                # Live UI: ghost follows planned targets; solid follows completed places (see _cloudlab hooks).
-                self._install_cloudlab_place_ui_hook(target_id)
-                newton_place_hook_installed = True
-
-                try:
-                    _nexp = float(params.get("exposure", 0.2))
-                except (TypeError, ValueError):
-                    _nexp = 0.2
-                _nexp = max(0.001, min(30.0, _nexp))
-
-                newton_kw: Dict[str, Any] = dict(
-                    camera_number=params["camera_number"],
-                    target_x_pixel=params["target_x_pixel"],
-                    tolerance_ratio=params["tolerance_ratio"],
-                    axis=params["axis"],
-                    initial_move=-0.2,
-                    do_repositioning=False,
-                    video_exposure=_nexp,
-                    capture_exposure=_nexp,
-                )
-                try:
-                    init_sig = inspect.signature(NewtonPlacementStrategy_cloudlab.__init__)
-                    if "progress_callback" in init_sig.parameters:
-                        newton_kw["progress_callback"] = self._cloudlab_progress_callback(target_id)
-                except (TypeError, ValueError):
-                    pass
-
-                self._apply_optimization_output_dir_kw(NewtonPlacementStrategy_cloudlab, newton_kw, run_dir)
-                strategy = NewtonPlacementStrategy_cloudlab(**newton_kw)
-                print("DOING NEWTON STRATEGY")
-            elif strategy_name == "COBYLA":
-                motor_ids = params.get("motor_ids")
-                if target_id in self.current_state["components"]:
-                    pass
-
-                if not motor_ids:
-                    raise ValueError("COBYLA strategy requires 'motor_ids' parameter.")
-
-                meta = self.catalog_map.get(target_id)
-                if not meta or not meta.get("motor_controller"):
-                    raise ValueError(
-                        f"COBYLA requires 'motor_controller' in component_catalog for {target_id} "
-                        '(e.g. "wifi_stepper1").'
-                    )
-                motor_controller = meta["motor_controller"]
-
-                try:
-                    _exp = float(params.get("exposure", 0.2))
-                except (TypeError, ValueError):
-                    _exp = 0.2
-                _exp = max(0.001, min(30.0, _exp))
-
-                cobyla_kw: Dict[str, Any] = {
-                    "motor_controller": motor_controller,
-                    "camera_number": params.get("camera_number", 1),
-                    "motor_ids": motor_ids,
-                    "objective_threshold": params.get("objective_threshold", 100.0),
-                    "video_exposure": _exp,
-                    "capture_exposure": _exp,
-                }
-                with self._cobyla_ref_lock:
-                    ref_copy = None if self._cobyla_reference_bgr is None else self._cobyla_reference_bgr.copy()
-                if ref_copy is not None:
-                    try:
-                        sig = inspect.signature(CobylaAlignmentStrategy_cloudlab.__init__)
-                        if "reference_image" in sig.parameters:
-                            cobyla_kw["reference_image"] = ref_copy
-                    except (TypeError, ValueError):
-                        cobyla_kw["reference_image"] = ref_copy
-                else:
-                    print("[REAL LAB] COBYLA: no reference image set via UI; strategy will use its own fallback if any.")
-
-                self._apply_optimization_output_dir_kw(CobylaAlignmentStrategy_cloudlab, cobyla_kw, run_dir)
-                strategy = CobylaAlignmentStrategy_cloudlab(**cobyla_kw)
-
-            if strategy:
-                # 2. Execute off the event loop. optimize_component() in lab_automation is synchronous and
-                # can run for minutes; if we block here, GET /api/lab-state never runs and the UI never
-                # sees system_status=OPTIMIZING or optimization_step updates (mock works because it awaits sleep).
-                await asyncio.to_thread(self.experiment.optimize_component, comp, strategy)
-
-                # 3. Update State
-                with self._state_lock:
-                    if target_id in self.current_state["components"]:
-                        ce = self.current_state["components"][target_id]
-                        tun = ce.setdefault("tunables", default_tunables())
-                        meas = ce.setdefault("measurables", default_measurables())
-                        tun["placement"] = {"mode": strategy_name.upper()}
-                        meas["last_optimization_score"] = 1.0
-                        mp = (meas.get("pose") or {}).copy()
-                        if mp:
-                            meas["last_optimized_pose"] = {
-                                k: mp[k] for k in ("x", "y", "rotation") if k in mp
-                            }
-                        self.current_state["last_updated"] = datetime.now().isoformat()
-
-        except Exception as e:
-            print(f"[REAL LAB] Optimization Failed: {e}")
-
-        finally:
-            if newton_place_hook_installed:
-                self._remove_cloudlab_place_ui_hook()
-            self._active_optimization_image_dir = None
-            with self._state_lock:
-                self.current_state["system_status"] = "IDLE"
-                self.current_state["optimization_step"] = 0
-                self.current_state["optimization_run_dir"] = None
-                self.current_state["last_updated"] = datetime.now().isoformat()
+    def _primitive_finalize_optimization_run(self) -> None:
+        from lab_communicator.real.primitives import primitive_finalize_optimization_run
+        primitive_finalize_optimization_run(self)
 
     async def remove_component(self, target_id: str):
-         print(f"[REAL LAB] Remove requested for {target_id} (Not implemented)")
-         pass
+        """Real backend: removal happens via physical-scan delta.
+
+        Override of the base orchestrator that would mutate state.
+        Real's component inventory is rebuilt from physical scans
+        (see ``_initialize_state``), so an API-level ``remove`` would
+        be immediately overwritten on the next rescan and is therefore
+        intentionally a no-op.
+        """
+        print(f"[REAL LAB] Remove requested for {target_id} (Not implemented)")
+
+    async def _primitive_add_component_to_state(
+        self,
+        component_data: Dict[str, Any],
+        existing_components: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        from lab_communicator.real.primitives import primitive_add_component_to_state
+        return await primitive_add_component_to_state(
+            self, component_data, existing_components
+        )
 
     def get_video_feed_status(self):
         # TODO: Check actual camera connection
@@ -961,154 +751,32 @@ class RealLabCommunicator(LabCommunicator):
         from lab_communicator.real.video import capture_table_cam
         return capture_table_cam(self, cam_id, exposure)
 
-    async def observe_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(tag_id)
-        if not isinstance(entry, dict):
-            return {}
-        meta = (self.catalog_map or {}).get(tag_id) or {}
-        ctype = meta.get("type") or ""
-        if ctype != "OPTICAL_CAMERA":
-            return self.return_measurables_for_tag(tag_id)
-        png = self.capture_table_cam(1, exposure=0.2)
-        if not png:
-            return self.return_measurables_for_tag(tag_id)
-        base = self._camera_images_base_dir()
-        os.makedirs(base, exist_ok=True)
-        path = os.path.join(base, f"{tag_id}_observe.png")
-        with open(path, "wb") as f:
-            f.write(png)
-        with self._state_lock:
-            comps = self.current_state.setdefault("components", {})
-            comp = comps.setdefault(tag_id, {})
-            meas = comp.setdefault("measurables", default_measurables())
-            meas["camera_image"] = {
-                "path": path,
-                "source": "real_table_cam",
-                "cam_id": 1,
-                "format": "png",
-            }
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        return self.return_measurables_for_tag(tag_id)
+    async def _primitive_observe_measurables(
+        self, tag_id: str, catalog_meta: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        from lab_communicator.real.primitives import primitive_observe_measurables
+        return await primitive_observe_measurables(self, tag_id, catalog_meta)
 
-    async def store_component(self, target_id: str):
-        print(f"[REAL LAB] store_component {target_id}...")
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-        if not entry or (entry.get("tunables") or {}).get("presence") != PRESENCE_BREADBOARD:
-            print(f"[REAL LAB] store_component: {target_id} must be on breadboard intent.")
-            return
-        w, h = self._catalog_wh(target_id)
-        with self._state_lock:
-            comps = dict(self.current_state.get("components") or {})
-        slot = find_storage_slot_and_center(comps, target_id, w, h, lambda tid: self._catalog_wh(tid))
-        if not slot:
-            print("[REAL LAB] No free storage slot in Q3.")
-            return
-        sx, sy, si, sj = slot
-        rot = STORAGE_NOMINAL_ROTATION_DEG
-        self._store_pending_slot = (si, sj)
-        self._store_component_tag = target_id
-        try:
-            await self.move_component(
-                target_id,
-                {"target_x": sx, "target_y": sy, "rotation": rot},
-            )
-        finally:
-            self._store_component_tag = None
+    # --- Storage-intent + is_placed virtual hooks (Phase 2C) ---
+    #
+    # The base orchestrators (``store_component``, ``place_from_storage``,
+    # ``move_component``, ``affirm_placed_at_current``) call these
+    # hooks after a successful state commit. Mock leaves them as
+    # no-ops; real persists the storage-intent file and propagates
+    # ``is_placed`` to :class:`OpticalComponent`.
 
-    async def affirm_placed_at_current(self, target_id: str):
-        print(f"[REAL LAB] affirm_placed_at_current {target_id}...")
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-            if not entry or not is_stored(entry):
-                print(f"[REAL LAB] affirm: {target_id} must be STORED.")
-                return
-            comp = self.current_state["components"][target_id]
-            meas = comp.setdefault("measurables", default_measurables())
-            pose = meas.get("pose") or {}
-            tun = comp.setdefault("tunables", default_tunables())
-            set_presence_and_storage(comp, PRESENCE_BREADBOARD, in_storage=False, slot=None)
-            tun["nominal_pose"] = {
-                "x": float(pose.get("x", 0)),
-                "y": float(pose.get("y", 0)),
-                "rotation": float(pose.get("rotation", 0)),
-            }
-            tun["placement"] = {"mode": "MANUAL"}
-            self.current_state["last_updated"] = datetime.now().isoformat()
+    def _after_move_to_storage(
+        self, target_id: str, slot_i: int, slot_j: int
+    ) -> None:
+        self._stored_intent_set_slot(target_id, int(slot_i), int(slot_j))
+
+    def _after_move_out_of_storage(self, target_id: str) -> None:
         self._stored_intent_remove(target_id)
+
+    def _apply_is_placed_flag(self, target_id: str, value: bool) -> None:
         cobj = self.component_map.get(target_id)
         if cobj is not None:
-            cobj.is_placed = True
-
-    async def repack_storage_slot(self, target_id: str):
-        print(f"[REAL LAB] repack_storage_slot {target_id}...")
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-        if not entry or not is_stored(entry):
-            print(f"[REAL LAB] repack: {target_id} must be STORED.")
-            return
-        w, h = self._catalog_wh(target_id)
-        with self._state_lock:
-            comps = dict(self.current_state.get("components") or {})
-        slot = find_storage_slot_and_center(comps, target_id, w, h, lambda tid: self._catalog_wh(tid))
-        if not slot:
-            print("[REAL LAB] repack: no free storage slot.")
-            return
-        sx, sy, si, sj = slot
-        rot = STORAGE_NOMINAL_ROTATION_DEG
-        self._store_pending_slot = (si, sj)
-        self._store_component_tag = target_id
-        try:
-            await self.move_component(
-                target_id,
-                {"target_x": sx, "target_y": sy, "rotation": rot},
-            )
-        finally:
-            self._store_component_tag = None
-
-    async def recenter_stored_in_inventory(self, target_id: str):
-        print(f"[REAL LAB] recenter_stored_in_inventory {target_id}...")
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-        if not entry or not is_stored(entry):
-            print(f"[REAL LAB] recenter: {target_id} must be STORED.")
-            return
-        nom = nominal_center_pose_for_stored_entry(entry)
-        if nom is None:
-            print("[REAL LAB] recenter: could not resolve storage cell (need slot metadata or pose in Q3).")
-            return
-        sx, sy, si, sj = nom
-        self._store_pending_slot = (si, sj)
-        self._store_component_tag = target_id
-        try:
-            await self.move_component(
-                target_id,
-                {"target_x": sx, "target_y": sy, "rotation": STORAGE_NOMINAL_ROTATION_DEG},
-            )
-        finally:
-            self._store_component_tag = None
-
-    async def place_from_storage(self, target_id: str, params: Dict[str, Any]):
-        print(f"[REAL LAB] place_from_storage {target_id}...")
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-        if not entry or not is_stored(entry):
-            print(f"[REAL LAB] place_from_storage: {target_id} not STORED.")
-            return
-        tx = float(params.get("target_x", params.get("x", 0)))
-        ty = float(params.get("target_y", params.get("y", 0)))
-        if not is_placed_region(tx, ty):
-            print("[REAL LAB] Target must be outside storage quadrant (Q3).")
-            return
-        self._place_from_storage_tag = target_id
-        try:
-            await self.move_component(target_id, params)
-        finally:
-            self._place_from_storage_tag = None
-
-    async def add_component_to_state(self, component_data: Dict[str, Any]):
-        print(f"[REAL LAB] User requested to add {component_data.get('tag_id')}. Please place it on the table and Rescan.")
+            cobj.is_placed = bool(value)
 
     # --- In-air manipulation (see ``new_primitives.md`` §6 and §8.3) ---
     #
@@ -1144,504 +812,60 @@ class RealLabCommunicator(LabCommunicator):
         from lab_communicator.real.gripper import get_gripper_status
         return get_gripper_status(self)
 
-    def _holding_placeholder_log(
-        self, action: str, target_id: Optional[str], extra: Optional[Dict[str, Any]] = None
+    # ``_holding_placeholder_log`` and the ``HOVER_PLACEHOLDER_STATE``
+    # branch were deleted in Phase 2B of the communicator refactor:
+    # ``MockLabCommunicator`` is now the canonical UI-exercise backend
+    # (matched to real's contract via shared orchestrator + commits).
+    # Nothing references the helper anymore -- the dispatch tag in
+    # logs has been replaced by the per-orchestrator ``log_prefix``.
+
+    # --- In-air manipulation hooks (Phase 2B; see new_primitives.md) ---
+
+    async def _primitive_pick_component(
+        self, target_id: str, commanded: LabPose, params: Dict[str, Any]
+    ) -> float:
+        from lab_communicator.real.primitives import primitive_pick_component
+        return await primitive_pick_component(self, target_id, commanded, params)
+
+    async def _primitive_hover_component(
+        self, target_id: str, commanded: LabPose, speed: int
+    ) -> Optional[LabPose]:
+        from lab_communicator.real.primitives import primitive_hover_component
+        return await primitive_hover_component(self, target_id, commanded, speed)
+
+    async def _primitive_place_from_hover(
+        self, target_id: str, commanded: LabPose, params: Dict[str, Any]
     ) -> None:
-        # "DISPATCH" when the real ``lab_automation`` path is active;
-        # "PLACEHOLDER" only when ``HOVER_PLACEHOLDER_STATE=1`` is forcing
-        # the state-mutation-only stub. Historically this always said
-        # "PLACEHOLDER" because the real paths were dormant until
-        # lab_automation shipped the ``*_cloudlab`` methods (Stage 8).
-        bits = [f"action={action}", f"target_id={target_id or '<none>'}"]
-        if extra:
-            for k, v in extra.items():
-                bits.append(f"{k}={v}")
-        tag = "PLACEHOLDER" if self._hover_placeholder_state else "DISPATCH"
-        print(f"[REAL LAB] {tag}: {' '.join(bits)} "
-              f"(HOVER_PLACEHOLDER_STATE={'on' if self._hover_placeholder_state else 'off'})")
+        from lab_communicator.real.primitives import primitive_place_from_hover
+        await primitive_place_from_hover(self, target_id, commanded, params)
 
-    async def pick_component(self, target_id: str, params: Dict[str, Any]):
-        self._holding_placeholder_log("PICK_COMPONENT", target_id, {"params": dict(params or {})})
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-            already_holding = is_holding(self.current_state)
-        if already_holding:
-            print(f"[REAL LAB] refusing PICK; already HOLDING {held_tag(self.current_state)}.")
-            return
-        if not entry:
-            print(f"[REAL LAB] PICK: {target_id} not in state.")
-            return
-
-        pose = ((entry.get("measurables") or {}).get("pose") or {})
-        px = float(pose.get("x", 0.0))
-        py = float(pose.get("y", 0.0))
-        prot = float(pose.get("rotation", 0.0))
-
-        if self._hover_placeholder_state:
-            # Placeholder path: no lab_automation available -> assume the
-            # retract will settle at DEFAULT_HOVER_Z_MM. Update measurables
-            # to the intent pose, matching the convention used by
-            # MOVE_COMPONENT (robot placement precision beats top-camera
-            # reads, so the commanded pose is the best estimate of the
-            # current pose until vision says otherwise).
-            z_lab_intent = float(DEFAULT_HOVER_Z_MM)
-            with self._state_lock:
-                self.current_state["system_status"] = SYSTEM_STATUS_BUSY
-            await asyncio.sleep(0.25)
-            with self._state_lock:
-                ce = self.current_state["components"][target_id]
-                tun = ce.setdefault("tunables", default_tunables())
-                meas = ce.setdefault("measurables", default_measurables())
-                tun["nominal_pose"] = {"x": px, "y": py, "rotation": prot, "z": z_lab_intent}
-                tun["placement"] = {"mode": PLACEMENT_MODE_PICK}
-                meas["pose"] = {"x": px, "y": py, "rotation": prot, "z": z_lab_intent}
-                set_holding(
-                    self.current_state,
-                    tag_id=target_id,
-                    x=px,
-                    y=py,
-                    rotation=prot,
-                    z=z_lab_intent,
-                )
-                self.current_state["last_updated"] = datetime.now().isoformat()
-            print(f"[REAL LAB] PLACEHOLDER: HOLDING {target_id} @ z_lab={z_lab_intent:.1f} mm (no motion)")
-            return
-
-        comp = self.component_map.get(target_id)
-        if not comp or not comp.current_location:
-            print(f"[REAL LAB] PICK: no robot current_location for {target_id}; rescan or check catalog.")
-            return
-
-        safe_z = _optional_float(params, "safe_z")
-        with self._state_lock:
-            self.current_state["system_status"] = SYSTEM_STATUS_BUSY
-        try:
-            await asyncio.to_thread(
-                self.experiment.pick_component_cloudlab,
-                comp,
-                safe_z=safe_z,
-            )
-        except Exception as e:
-            print(f"[REAL LAB] pick_component: lab_automation failed: {e!r}")
-            with self._state_lock:
-                self.current_state["system_status"] = SYSTEM_STATUS_IDLE
-            raise
-
-        # Post-pick: ask lab_automation (math-only, no motion) which z_lab
-        # it intends to hold the part at. Falls back to DEFAULT_HOVER_Z_MM
-        # if the helper is missing (see _intent_hover_z_lab docstring).
-        # Measurables are updated to the intent pose -- same convention as
-        # MOVE_COMPONENT. Robot placement precision is higher than top-
-        # camera reads, so the commanded pose is the best available
-        # estimate of where the part actually is; if/when a higher-
-        # precision vision pipeline contradicts it, it can overwrite.
-        z_lab_intent = self._intent_hover_z_lab(target_id)
-
-        with self._state_lock:
-            ce = self.current_state["components"][target_id]
-            tun = ce.setdefault("tunables", default_tunables())
-            meas = ce.setdefault("measurables", default_measurables())
-            tun["nominal_pose"] = {"x": px, "y": py, "rotation": prot, "z": z_lab_intent}
-            tun["placement"] = {"mode": PLACEMENT_MODE_PICK}
-            meas["pose"] = {"x": px, "y": py, "rotation": prot, "z": z_lab_intent}
-            set_holding(
-                self.current_state,
-                tag_id=target_id,
-                x=px,
-                y=py,
-                rotation=prot,
-                z=z_lab_intent,
-            )
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        print(f"[REAL LAB] PICK complete: HOLDING {target_id} @ z_lab={z_lab_intent:.1f} mm")
-
-    async def hover_component(self, target_id: str, target_pose: Dict[str, float]):
-        self._holding_placeholder_log("HOVER", target_id, {"target_pose": dict(target_pose or {})})
-        with self._state_lock:
-            holding_now = is_holding(self.current_state)
-            held = held_tag(self.current_state)
-        if not holding_now:
-            print("[REAL LAB] refusing HOVER; not HOLDING.")
-            return
-        if held and held != target_id:
-            print(f"[REAL LAB] refusing HOVER; currently holding {held}.")
-            return
-
-        tx = float(target_pose.get("target_x", target_pose.get("x", 0.0)))
-        ty = float(target_pose.get("target_y", target_pose.get("y", 0.0)))
-        trot = float(target_pose.get("rotation", 0.0))
-        tz = float(target_pose.get("z", DEFAULT_HOVER_Z_MM))
-        try:
-            speed = int(target_pose.get("speed", 100))
-        except (TypeError, ValueError):
-            speed = 100
-
-        # Bounds check in the lab frame (z_lab). This catches runaway HTTP
-        # payloads (e.g. someone accidentally sending a robot-frame z=600)
-        # before we forward-transform and hand it to the robot.
-        if not (0.0 <= tz <= MAX_SAFE_HOVER_Z_LAB_MM):
-            print(
-                f"[REAL LAB] refusing HOVER; z_lab={tz:.1f} mm outside safe "
-                f"range [0, {MAX_SAFE_HOVER_Z_LAB_MM:.1f}]. Interpret z as "
-                f"height of the component base above the table."
-            )
-            return
-
-        if self._hover_placeholder_state:
-            # Placeholder path: commit intent to tunables, holding, AND
-            # measurables (same convention as MOVE_COMPONENT -- the robot's
-            # commanded pose is the best estimate of the actual pose).
-            with self._state_lock:
-                self.current_state["system_status"] = SYSTEM_STATUS_BUSY
-            await asyncio.sleep(0.25)
-            with self._state_lock:
-                comp = (self.current_state.get("components") or {}).get(target_id)
-                if isinstance(comp, dict):
-                    tun = comp.setdefault("tunables", default_tunables())
-                    meas = comp.setdefault("measurables", default_measurables())
-                    tun["nominal_pose"] = {"x": tx, "y": ty, "rotation": trot, "z": tz}
-                    tun["placement"] = {"mode": PLACEMENT_MODE_HOVER}
-                    meas["pose"] = {"x": tx, "y": ty, "rotation": trot, "z": tz}
-                set_holding(self.current_state, tag_id=target_id, x=tx, y=ty, rotation=trot, z=tz)
-                self.current_state["last_updated"] = datetime.now().isoformat()
-            return
-
-        comp = self.component_map.get(target_id)
-        if not comp:
-            print(f"[REAL LAB] HOVER: {target_id} not in component_map.")
-            return
-
-        # Forward-transform XY (lab -> robot table rotation) and Z
-        # (z_lab -> z_robot). lab_automation only ever sees robot-frame
-        # coordinates; cloud-labs state stays in z_lab. Rotation also goes
-        # through the dedicated helper for parity with set_lab_state, even
-        # though lab_rotation_to_robot_yaw is identity today (fixing.md §3.1).
-        tx_robot, ty_robot = lab_table_xy_to_robot_xy(tx, ty)
-        tz_robot = self._z_lab_to_robot(target_id, tz)
-        tyaw_robot = lab_rotation_to_robot_yaw(trot)
-        with self._state_lock:
-            self.current_state["system_status"] = SYSTEM_STATUS_BUSY
-        try:
-            await asyncio.to_thread(
-                self.experiment.hover_component_cloudlab,
-                comp,
-                tx_robot,
-                ty_robot,
-                tz_robot,
-                tyaw_robot,
-                speed=speed,
-            )
-        except Exception as e:
-            print(f"[REAL LAB] hover_component: lab_automation failed: {e!r}")
-            with self._state_lock:
-                self.current_state["system_status"] = SYSTEM_STATUS_HOLDING
-            raise
-
-        # Commit intent to tunables, holding, and measurables. We write
-        # measurables.pose here (same as MOVE_COMPONENT) because robot
-        # placement accuracy is higher than what the top camera can
-        # measure through the gripper -- so the commanded pose is the
-        # best available estimate of where the part actually is.
-        with self._state_lock:
-            ce = (self.current_state.get("components") or {}).get(target_id)
-            if isinstance(ce, dict):
-                tun = ce.setdefault("tunables", default_tunables())
-                meas = ce.setdefault("measurables", default_measurables())
-                tun["nominal_pose"] = {"x": tx, "y": ty, "rotation": trot, "z": tz}
-                tun["placement"] = {"mode": PLACEMENT_MODE_HOVER}
-                meas["pose"] = {"x": tx, "y": ty, "rotation": trot, "z": tz}
-            set_holding(self.current_state, tag_id=target_id, x=tx, y=ty, rotation=trot, z=tz)
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        print(
-            f"[REAL LAB] HOVER complete: HOLDING {target_id} @ "
-            f"x={tx:.1f} y={ty:.1f} rot={trot:.1f} z_lab={tz:.1f} mm"
+    async def _primitive_scan_rotate_in_place(
+        self,
+        *,
+        target_id: str,
+        mode: str,
+        theta_min: float,
+        theta_max: float,
+        speed: float,
+        axis: str,
+        base_x: float,
+        base_y: float,
+        base_z: Optional[float],
+        params: Dict[str, Any],
+        on_rotation_update: Callable[[float], None],
+    ) -> None:
+        from lab_communicator.real.primitives import primitive_scan_rotate_in_place
+        await primitive_scan_rotate_in_place(
+            self,
+            target_id=target_id,
+            mode=mode,
+            theta_min=theta_min,
+            theta_max=theta_max,
+            speed=speed,
+            axis=axis,
+            base_x=base_x,
+            base_y=base_y,
+            base_z=base_z,
+            params=params,
+            on_rotation_update=on_rotation_update,
         )
-
-    async def place_from_hover(self, target_id: str, target_pose: Dict[str, float]):
-        self._holding_placeholder_log(
-            "PLACE_FROM_HOVER", target_id, {"target_pose": dict(target_pose or {})}
-        )
-        with self._state_lock:
-            holding_now = is_holding(self.current_state)
-            held = held_tag(self.current_state)
-        if not holding_now:
-            print("[REAL LAB] refusing PLACE_FROM_HOVER; not HOLDING.")
-            return
-        if held and held != target_id:
-            print(f"[REAL LAB] refusing PLACE_FROM_HOVER; currently holding {held}.")
-            return
-        tx = float(target_pose.get("target_x", target_pose.get("x", 0.0)))
-        ty = float(target_pose.get("target_y", target_pose.get("y", 0.0)))
-        trot = float(target_pose.get("rotation", 0.0))
-        if is_storage_region(tx, ty):
-            print("[REAL LAB] refusing PLACE_FROM_HOVER into storage quadrant.")
-            return
-
-        if self._hover_placeholder_state:
-            with self._state_lock:
-                self.current_state["system_status"] = SYSTEM_STATUS_BUSY
-            await asyncio.sleep(0.25)
-            with self._state_lock:
-                comp = (self.current_state.get("components") or {}).get(target_id)
-                if isinstance(comp, dict):
-                    tun = comp.setdefault("tunables", default_tunables())
-                    meas = comp.setdefault("measurables", default_measurables())
-                    tun["nominal_pose"] = {"x": tx, "y": ty, "rotation": trot}
-                    tun["placement"] = {"mode": PLACEMENT_MODE_MANUAL}
-                    meas["pose"] = {"x": tx, "y": ty, "rotation": trot}
-                    set_presence_and_storage(comp, PRESENCE_BREADBOARD, in_storage=False, slot=None)
-                clear_holding(self.current_state)
-                self.current_state["last_updated"] = datetime.now().isoformat()
-            return
-
-        comp = self.component_map.get(target_id)
-        if not comp:
-            print(f"[REAL LAB] PLACE_FROM_HOVER: {target_id} not in component_map.")
-            return
-
-        tx_robot, ty_robot = lab_table_xy_to_robot_xy(tx, ty)
-        place_angle = find_angle([180.0, 0.0, -trot])
-        safe_z = _optional_float(target_pose, "safe_z")
-
-        with self._state_lock:
-            self.current_state["system_status"] = SYSTEM_STATUS_BUSY
-        try:
-            await asyncio.to_thread(
-                self.experiment.place_from_hover_cloudlab,
-                comp,
-                tx_robot,
-                ty_robot,
-                place_angle,
-                safe_z=safe_z,
-            )
-        except Exception as e:
-            print(f"[REAL LAB] place_from_hover: lab_automation failed: {e!r}")
-            with self._state_lock:
-                self.current_state["system_status"] = SYSTEM_STATUS_HOLDING
-            raise
-
-        with self._state_lock:
-            ce = (self.current_state.get("components") or {}).get(target_id)
-            if isinstance(ce, dict):
-                tun = ce.setdefault("tunables", default_tunables())
-                meas = ce.setdefault("measurables", default_measurables())
-                tun["nominal_pose"] = {"x": tx, "y": ty, "rotation": trot}
-                tun["placement"] = {"mode": PLACEMENT_MODE_MANUAL}
-                meas["pose"] = {"x": tx, "y": ty, "rotation": trot}
-                set_presence_and_storage(ce, PRESENCE_BREADBOARD, in_storage=False, slot=None)
-            clear_holding(self.current_state)
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        print(
-            f"[REAL LAB] PLACE_FROM_HOVER complete: IDLE, placed {target_id} @ "
-            f"x={tx:.1f} y={ty:.1f} rot={trot:.1f}"
-        )
-
-    async def scan_rotate_in_place(self, target_id: str, params: Dict[str, Any]):
-        """
-        Constant-rate theta sweep. User-facing intent is identical in both
-        branches (rotate ``target_id`` from ``theta_min`` to ``theta_max`` at
-        ``speed_deg_per_s``), but the underlying ``lab_automation`` call
-        depends on whether the part is currently held or sitting on the
-        table:
-
-        - ``system_status == "HOLDING"`` and held tag matches ``target_id``
-          -> ``scan_rotate_held_cloudlab`` (rotate the part that is already
-          gripped by the arm, XY + Z locked; system stays HOLDING).
-        - ``system_status == "IDLE"`` and the part is on the breadboard
-          -> ``scan_rotate_placed_cloudlab`` (arm transiently grips the
-          placed part, rotates the wrist/end-effector through the sweep,
-          then releases and retracts -- the part stays on the table at
-          the new rotation; system returns to IDLE). The arm-grip path is
-          used instead of a per-part motor because the arm's rotation
-          range is much larger, and because it works for any component in
-          the catalog regardless of whether it has a motorized mount.
-          From cloud-labs' point of view this primitive is atomic: we do
-          NOT set ``HOLDING`` or populate ``holding`` during the sweep.
-
-        When methods are missing on ``OpticalExperiment``, falls back to
-        placeholder timing (if ``HOVER_PLACEHOLDER_STATE=1``) or no-op.
-        """
-        self._holding_placeholder_log(
-            "SCAN_ROTATE_IN_PLACE", target_id, {"params": dict(params or {})}
-        )
-        with self._state_lock:
-            holding_now = is_holding(self.current_state)
-            held = held_tag(self.current_state)
-            status = self.current_state.get("system_status")
-            comp_snapshot = (self.current_state.get("components") or {}).get(target_id)
-
-        # --- Decide which branch (held vs placed) ---------------------------
-        # These refusals are real input-validation errors -- they fire
-        # regardless of ``HOVER_PLACEHOLDER_STATE``, so the log lines don't
-        # carry the PLACEHOLDER tag.
-        if holding_now:
-            if held and held != target_id:
-                print(
-                    f"[REAL LAB] refusing SCAN_ROTATE_IN_PLACE; "
-                    f"currently holding {held}, not {target_id}."
-                )
-                return
-            mode = "held"
-        else:
-            if status != SYSTEM_STATUS_IDLE:
-                print(
-                    f"[REAL LAB] refusing SCAN_ROTATE_IN_PLACE; "
-                    f"system_status={status}, need IDLE or HOLDING."
-                )
-                return
-            if not comp_snapshot:
-                print(f"[REAL LAB] SCAN_ROTATE_IN_PLACE: {target_id} not in state.")
-                return
-            presence = ((comp_snapshot.get("tunables") or {}).get("presence"))
-            if presence != PRESENCE_BREADBOARD:
-                print(
-                    f"[REAL LAB] refusing SCAN_ROTATE_IN_PLACE; "
-                    f"{target_id} presence={presence} (need on breadboard)."
-                )
-                return
-            mode = "placed"
-
-        # --- Parse params ---------------------------------------------------
-        try:
-            theta_min = float(params.get("theta_min", 0.0))
-            theta_max = float(params.get("theta_max", 0.0))
-            speed = float(params.get("speed_deg_per_s", 1.0))
-        except (TypeError, ValueError):
-            print("[REAL LAB] SCAN_ROTATE_IN_PLACE: non-numeric params.")
-            return
-        if speed <= 0:
-            print("[REAL LAB] SCAN_ROTATE_IN_PLACE: speed must be > 0.")
-            return
-        axis = str(params.get("axis", "z"))
-        print(
-            f"[REAL LAB] SCAN_ROTATE_IN_PLACE mode={mode} target={target_id} "
-            f"theta_min={theta_min:.2f} theta_max={theta_max:.2f} speed={speed:g} axis={axis}"
-        )
-
-        # --- lab_automation dispatch -----------------------------------------
-        if mode == "held":
-            real_fn = (
-                getattr(self.experiment, "scan_rotate_held_cloudlab", None)
-                or getattr(self.experiment, "scan_rotate_in_place_held_cloudlab", None)
-            )
-        else:
-            real_fn = (
-                getattr(self.experiment, "scan_rotate_placed_cloudlab", None)
-                or getattr(self.experiment, "scan_rotate_in_place_placed_cloudlab", None)
-            )
-        if callable(real_fn):
-            comp = self.component_map.get(target_id)
-            with self._state_lock:
-                self.current_state["system_status"] = SYSTEM_STATUS_BUSY
-            scan_ok = False
-            try:
-                kwargs = dict(
-                    component=comp,
-                    theta_min=theta_min,
-                    theta_max=theta_max,
-                    speed_deg_per_s=speed,
-                    axis=axis,
-                )
-                if mode == "placed":
-                    sz = _optional_float(params, "safe_z")
-                    if sz is not None:
-                        kwargs["safe_z"] = sz
-
-                def _invoke_scan():
-                    return real_fn(**kwargs)
-
-                await asyncio.to_thread(_invoke_scan)
-                scan_ok = True
-            except Exception as e:
-                print(f"[REAL LAB] scan_rotate_in_place ({mode}) raised {e!r}")
-                with self._state_lock:
-                    self.current_state["system_status"] = (
-                        SYSTEM_STATUS_HOLDING if mode == "held" else SYSTEM_STATUS_IDLE
-                    )
-                    self.current_state["last_updated"] = datetime.now().isoformat()
-                raise
-            finally:
-                if scan_ok:
-                    with self._state_lock:
-                        self.current_state["system_status"] = (
-                            SYSTEM_STATUS_HOLDING if mode == "held" else SYSTEM_STATUS_IDLE
-                        )
-                        comp_state = (self.current_state.get("components") or {}).get(target_id)
-                        if isinstance(comp_state, dict):
-                            tun = comp_state.setdefault("tunables", default_tunables())
-                            meas = comp_state.setdefault("measurables", default_measurables())
-                            np_ = dict(tun.get("nominal_pose") or {})
-                            np_["rotation"] = float(theta_max)
-                            tun["nominal_pose"] = np_
-                            mp_ = dict(meas.get("pose") or {})
-                            mp_["rotation"] = float(theta_max)
-                            meas["pose"] = mp_
-                        if mode == "held":
-                            hld = get_holding(self.current_state)
-                            hnp = dict(hld.get("nominal_pose") or {})
-                            hnp["rotation"] = float(theta_max)
-                            hld["nominal_pose"] = hnp
-                            self.current_state["holding"] = hld
-                        self.current_state["last_updated"] = datetime.now().isoformat()
-            if scan_ok:
-                final_status = "HOLDING" if mode == "held" else "IDLE"
-                print(
-                    f"[REAL LAB] SCAN_ROTATE_IN_PLACE complete ({mode}): "
-                    f"{final_status}, {target_id} @ rotation={theta_max:.2f}"
-                )
-            return
-
-        # --- Placeholder-only path (no lab_automation hook yet) -------------
-        if not self._hover_placeholder_state:
-            # Safe default: no state mutation. Live table: no motion either.
-            return
-
-        total = abs(theta_max - theta_min)
-        duration = max(0.1, total / speed)
-        steps = max(1, int(duration / 0.1))
-        with self._state_lock:
-            self.current_state["system_status"] = SYSTEM_STATUS_BUSY
-        for i in range(steps + 1):
-            theta = theta_min + (theta_max - theta_min) * (i / steps if steps else 1.0)
-            with self._state_lock:
-                comp_state = (self.current_state.get("components") or {}).get(target_id)
-                if isinstance(comp_state, dict):
-                    tun = comp_state.setdefault("tunables", default_tunables())
-                    meas = comp_state.setdefault("measurables", default_measurables())
-                    np_ = dict(tun.get("nominal_pose") or {})
-                    np_["rotation"] = float(theta)
-                    tun["nominal_pose"] = np_
-                    mp_ = dict(meas.get("pose") or {})
-                    mp_["rotation"] = float(theta)
-                    meas["pose"] = mp_
-                if mode == "held":
-                    hld = get_holding(self.current_state)
-                    hnp = dict(hld.get("nominal_pose") or {})
-                    hnp["rotation"] = float(theta)
-                    hld["nominal_pose"] = hnp
-                    self.current_state["holding"] = hld
-                self.current_state["last_updated"] = datetime.now().isoformat()
-            await asyncio.sleep(duration / max(1, steps))
-        with self._state_lock:
-            self.current_state["system_status"] = (
-                SYSTEM_STATUS_HOLDING if mode == "held" else SYSTEM_STATUS_IDLE
-            )
-            self.current_state["last_updated"] = datetime.now().isoformat()
-
-    async def confirm_holding_tag(self, tag_id: str):
-        """
-        Operator confirms which tag is physically in the gripper after a
-        boot-time HOLDING_UNCONFIRMED reconciliation (see §6.3). Clears the
-        ``requires_operator_confirm`` flag and stamps ``holding.tag_id`` so
-        the UI unblocks cross-part commands.
-
-        Note: this method mutates state regardless of the placeholder flag
-        (it never moves the robot; it only records what the operator says).
-        """
-        print(f"[REAL LAB] CONFIRM_HOLDING_TAG {tag_id}")
-        with self._state_lock:
-            if not is_holding(self.current_state):
-                print("[REAL LAB] confirm_holding_tag: system not HOLDING; nothing to confirm.")
-                return
-            _confirm_holding_tag(self.current_state, tag_id)
-            self.current_state["last_updated"] = datetime.now().isoformat()

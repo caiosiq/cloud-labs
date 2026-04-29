@@ -1,44 +1,23 @@
-import os
 import json
-import asyncio
+import os
 import random
 from datetime import datetime
 from io import BytesIO
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
-from lab_model import motor_rotation_store as motor_rot
 from lab_model.component_model import (
-    PLACEMENT_MODE_HOVER,
-    PLACEMENT_MODE_MANUAL,
-    PLACEMENT_MODE_PICK,
     PRESENCE_BREADBOARD,
     PRESENCE_STORAGE,
     default_measurables,
-    default_tunables,
-    is_stored,
-    new_component_entry,
-    set_presence_and_storage,
 )
 from lab_model.holding import (
     DEFAULT_HOVER_Z_MM,
     SYSTEM_STATUS_BUSY,
     SYSTEM_STATUS_HOLDING,
     SYSTEM_STATUS_IDLE,
-    clear_holding,
-    confirm_holding_tag as _confirm_holding_tag,
     empty_holding,
     get_holding,
-    held_tag,
-    is_holding,
     set_holding,
-)
-from lab_model.storage_region import (
-    STORAGE_NOMINAL_ROTATION_DEG,
-    find_storage_slot_and_center,
-    is_placed_region,
-    is_storage_region,
-    nominal_center_pose_for_stored_entry,
-    random_placed_position,
 )
 
 from lab_communicator.base import LabCommunicator
@@ -312,629 +291,113 @@ class MockLabCommunicator(LabCommunicator):
     # inherits the no-op default. ``_post_apply_snapshot`` also inherits
     # the no-op default (mock has no separate stored-intent file).
 
-    async def move_component(self, target_id: str, target_pose: Dict[str, float]):
-        print(f"[MOCK LAB] Moving {target_id}...")
-        state = self._read_state()
-        if "components" not in state or target_id not in state["components"]:
-            print(f"[MOCK LAB] Error: Cannot move component {target_id} - Not found in Lab State.")
-            return
+    # ---------------------------------------------------------------
+    # Primitive hooks
+    # ---------------------------------------------------------------
+    #
+    # The methods below are the complete list of ``_primitive_*``
+    # hooks the base orchestrator dispatches for the mock backend.
+    # Each one is a single-line delegation to the matching
+    # ``primitive_<name>`` free function in
+    # :mod:`lab_communicator.mock.primitives`, where the simulated
+    # hardware step lives. Reading this section answers "what
+    # primitives does the mock communicator implement?"; reading
+    # ``primitives.py`` answers "what does each primitive simulate?".
 
-        comp = state["components"][target_id]
-        if is_stored(comp):
-            print(f"[MOCK LAB] Refusing move: {target_id} is STORED (use Place from storage).")
-            return
+    async def _primitive_move_component(
+        self, target_id: str, commanded: LabPose
+    ) -> Optional[LabPose]:
+        from lab_communicator.mock.primitives import primitive_move_component
+        return await primitive_move_component(self, target_id, commanded)
 
-        tx = float(target_pose.get("target_x", target_pose.get("x", 0)))
-        ty = float(target_pose.get("target_y", target_pose.get("y", 0)))
-        trot = float(target_pose.get("rotation", 0))
-
-        if comp.get("tunables", {}).get("presence") == PRESENCE_BREADBOARD and is_storage_region(tx, ty):
-            print(f"[MOCK LAB] Refusing move: target ({tx},{ty}) is in storage quadrant (use Store).")
-            return
-
-        state["system_status"] = "BUSY"
-        self._write_state(state)
-
-        await asyncio.sleep(2)
-
-        state = self._read_state()
-        comp = state["components"][target_id]
-
-        noise_x = random.uniform(-0.5, 0.5)
-        noise_y = random.uniform(-0.5, 0.5)
-
-        tun = comp.setdefault("tunables", default_tunables())
-        meas = comp.setdefault("measurables", default_measurables())
-
-        set_presence_and_storage(comp, PRESENCE_BREADBOARD, in_storage=False, slot=None)
-        tun["nominal_pose"] = {"x": tx, "y": ty, "rotation": trot}
-        tun["placement"] = {"mode": "MANUAL"}
-        meas["pose"] = {
-            "x": tx + noise_x,
-            "y": ty + noise_y,
-            "rotation": trot,
-        }
-
-        state["last_updated"] = datetime.now().isoformat()
-        state["system_status"] = "IDLE"
-        self._write_state(state)
-        print(f"[MOCK LAB] Moved {target_id} to ({meas['pose']['x']:.2f}, {meas['pose']['y']:.2f})")
-
-    async def _do_move_motor(
+    async def _primitive_move_motor(
         self, target_id: str, motor_id: int, distance: float
     ) -> None:
-        """Mock hardware step for :meth:`LabCommunicator.move_motor`.
+        from lab_communicator.mock.primitives import primitive_move_motor
+        await primitive_move_motor(self, target_id, motor_id, distance)
 
-        Refusal logic, catalog gate, BUSY/IDLE flip, and the
-        ``motor_rotation_store`` bookkeeping are all owned by the base
-        orchestrator. Mock just simulates the hardware delay so the UI
-        can observe the BUSY transition.
-        """
-        await asyncio.sleep(1)
-
-    async def optimize_component(self, target_id: str, strategy: str, params: Dict[str, Any]):
-        print(f"[MOCK LAB] Optimizing {target_id} with {strategy}...")
-        state = self._read_state()
-        comp = (state.get("components") or {}).get(target_id)
-        if comp and is_stored(comp):
-            print(f"[MOCK LAB] Refusing optimize: {target_id} is STORED.")
-            return
-
-        state = self._read_state()
-        state["system_status"] = "OPTIMIZING"
-        self._write_state(state)
-
-        await asyncio.sleep(3)
-
-        state = self._read_state()
-        if "components" in state and target_id in state["components"]:
-            comp = state["components"][target_id]
-            meas = comp.setdefault("measurables", default_measurables())
-            pose = meas.setdefault("pose", {})
-            tun = comp.setdefault("tunables", default_tunables())
-
-            optimized_rotation = pose.get("rotation", 0) + random.uniform(-1, 1)
-            pose["rotation"] = optimized_rotation
-            meas["last_optimization_score"] = 0.99
-            meas["last_optimized_pose"] = {k: pose[k] for k in ("x", "y", "rotation") if k in pose}
-            tun["placement"] = {"mode": strategy.upper()}
-
-        state["system_status"] = "IDLE"
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        print(f"[MOCK LAB] Optimization complete.")
-
-    async def remove_component(self, target_id: str):
-        print(f"[MOCK LAB] Removing {target_id}...")
-        state = self._read_state()
-        if "components" in state and target_id in state["components"]:
-            del state["components"][target_id]
-            state["last_updated"] = datetime.now().isoformat()
-            self._write_state(state)
-        await asyncio.sleep(1)
-
-    async def store_component(self, target_id: str):
-        print(f"[MOCK LAB] Storing {target_id}...")
-        state = self._read_state()
-        comp = (state.get("components") or {}).get(target_id)
-        if not comp:
-            print(f"[MOCK LAB] store: {target_id} not in state")
-            return
-        if comp.get("tunables", {}).get("presence") != PRESENCE_BREADBOARD:
-            print(f"[MOCK LAB] store: {target_id} must be on breadboard (got {comp.get('tunables', {}).get('presence')})")
-            return
-        w, h = self._get_component_wh(target_id)
-        slot = find_storage_slot_and_center(
-            state.get("components") or {},
-            target_id,
-            w,
-            h,
-            lambda tid: self._get_component_wh(tid),
-        )
-        if not slot:
-            print("[MOCK LAB] No free storage slot in Q3.")
-            return
-        x, y, si, sj = slot
-        rot = STORAGE_NOMINAL_ROTATION_DEG
-        state["system_status"] = "BUSY"
-        self._write_state(state)
-        await asyncio.sleep(1.5)
-        state = self._read_state()
-        comp = state["components"][target_id]
-        tun = comp.setdefault("tunables", default_tunables())
-        meas = comp.setdefault("measurables", default_measurables())
-        set_presence_and_storage(comp, PRESENCE_STORAGE, in_storage=True, slot={"i": si, "j": sj})
-        tun["nominal_pose"] = {"x": x, "y": y, "rotation": rot}
-        tun["placement"] = {"mode": "STORAGE"}
-        meas["pose"] = {"x": x, "y": y, "rotation": rot}
-        state["system_status"] = "IDLE"
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        print(f"[MOCK LAB] Stored {target_id} at ({x:.1f}, {y:.1f}) slot=({si},{sj})")
-
-    async def place_from_storage(self, target_id: str, target_pose: Dict[str, float]):
-        print(f"[MOCK LAB] Place from storage {target_id}...")
-        state = self._read_state()
-        comp = (state.get("components") or {}).get(target_id)
-        if not comp or not is_stored(comp):
-            print(f"[MOCK LAB] place_from_storage: {target_id} not STORED")
-            return
-        tx = float(target_pose.get("target_x", target_pose.get("x", 0)))
-        ty = float(target_pose.get("target_y", target_pose.get("y", 0)))
-        trot = float(target_pose.get("rotation", 0))
-        if not is_placed_region(tx, ty):
-            print("[MOCK LAB] Target must be outside storage quadrant (x<0 and y<0).")
-            return
-        state["system_status"] = "BUSY"
-        self._write_state(state)
-        await asyncio.sleep(2)
-        state = self._read_state()
-        comp = state["components"][target_id]
-        noise_x = random.uniform(-0.5, 0.5)
-        noise_y = random.uniform(-0.5, 0.5)
-        tun = comp.setdefault("tunables", default_tunables())
-        meas = comp.setdefault("measurables", default_measurables())
-        set_presence_and_storage(comp, PRESENCE_BREADBOARD, in_storage=False, slot=None)
-        tun["nominal_pose"] = {"x": tx, "y": ty, "rotation": trot}
-        tun["placement"] = {"mode": "MANUAL"}
-        meas["pose"] = {"x": tx + noise_x, "y": ty + noise_y, "rotation": trot}
-        state["system_status"] = "IDLE"
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        print(f"[MOCK LAB] Placed from storage {target_id}")
-
-    async def add_component_to_state(self, component_data: Dict[str, Any]):
-        print(f"[MOCK LAB] Adding component: {component_data}")
-        state = self._read_state()
-
-        comp_type = component_data.get("type", "OPTICAL_MIRROR")
-        tag_id = component_data.get("tag_id")
-
-        if not tag_id:
-            print("[MOCK LAB] Error: No tag_id provided for add_component")
-            return
-
-        if "components" not in state:
-            state["components"] = {}
-
-        if tag_id in state["components"]:
-            print(f"[MOCK LAB] Component {tag_id} already exists. Skipping placement.")
-            return
-
-        placement_mode = (component_data.get("placement_mode") or "breadboard").lower()
-        w, h = self._get_component_wh(tag_id)
-
-        if placement_mode == "storage":
-            slot = find_storage_slot_and_center(
-                state.get("components") or {},
-                tag_id,
-                w,
-                h,
-                lambda tid: self._get_component_wh(tid),
-            )
-            if not slot:
-                print("[MOCK LAB] FAILED to find free storage slot.")
-                return
-            x, y, si, sj = slot
-            state["components"][tag_id] = new_component_entry(
-                tag_id,
-                comp_type,
-                presence=PRESENCE_STORAGE,
-                nominal_pose={"x": x, "y": y, "rotation": 0.0},
-                meas_pose={"x": x, "y": y, "rotation": 0.0},
-                placement_mode="STORAGE",
-                in_storage=True,
-                slot={"i": si, "j": sj},
-            )
-        else:
-            pos = random_placed_position(
-                state.get("components") or {},
-                tag_id,
-                w,
-                h,
-                lambda tid: self._get_component_wh(tid),
-            )
-            if not pos:
-                print("[MOCK LAB] FAILED to find free pose for component.")
-                return
-            x, y = pos
-            state["components"][tag_id] = new_component_entry(
-                tag_id,
-                comp_type,
-                presence=PRESENCE_BREADBOARD,
-                nominal_pose={"x": x, "y": y, "rotation": 0.0},
-                meas_pose={"x": x, "y": y, "rotation": 0.0},
-                placement_mode="MANUAL",
-                in_storage=False,
-                slot=None,
-            )
-
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        pres = state["components"][tag_id]["tunables"]["presence"]
-        print(f"[MOCK LAB] Added {tag_id} presence={pres}")
-
-    async def affirm_placed_at_current(self, target_id: str):
-        print(f"[MOCK LAB] affirm_placed_at_current {target_id}...")
-        state = self._read_state()
-        comp = (state.get("components") or {}).get(target_id)
-        if not comp or not is_stored(comp):
-            print(f"[MOCK LAB] affirm: {target_id} must be STORED")
-            return
-        state["system_status"] = "BUSY"
-        self._write_state(state)
-        await asyncio.sleep(0.3)
-        state = self._read_state()
-        comp = state["components"][target_id]
-        meas = comp.setdefault("measurables", default_measurables())
-        pose = meas.get("pose") or {}
-        tun = comp.setdefault("tunables", default_tunables())
-        set_presence_and_storage(comp, PRESENCE_BREADBOARD, in_storage=False, slot=None)
-        tun["nominal_pose"] = {
-            "x": float(pose.get("x", 0)),
-            "y": float(pose.get("y", 0)),
-            "rotation": float(pose.get("rotation", 0)),
-        }
-        tun["placement"] = {"mode": "MANUAL"}
-        state["system_status"] = "IDLE"
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        print(f"[MOCK LAB] {target_id} marked PLACED at current pose")
-
-    async def repack_storage_slot(self, target_id: str):
-        print(f"[MOCK LAB] repack_storage_slot {target_id}...")
-        state = self._read_state()
-        comp = (state.get("components") or {}).get(target_id)
-        if not comp or not is_stored(comp):
-            print(f"[MOCK LAB] repack: {target_id} must be STORED")
-            return
-        w, h = self._get_component_wh(target_id)
-        slot = find_storage_slot_and_center(
-            state.get("components") or {},
-            target_id,
-            w,
-            h,
-            lambda tid: self._get_component_wh(tid),
-        )
-        if not slot:
-            print("[MOCK LAB] repack: no free storage slot")
-            return
-        x, y, si, sj = slot
-        rot = STORAGE_NOMINAL_ROTATION_DEG
-        state["system_status"] = "BUSY"
-        self._write_state(state)
-        await asyncio.sleep(1.0)
-        state = self._read_state()
-        comp = state["components"][target_id]
-        tun = comp.setdefault("tunables", default_tunables())
-        meas = comp.setdefault("measurables", default_measurables())
-        set_presence_and_storage(comp, PRESENCE_STORAGE, in_storage=True, slot={"i": si, "j": sj})
-        tun["nominal_pose"] = {"x": x, "y": y, "rotation": rot}
-        tun["placement"] = {"mode": "STORAGE"}
-        meas["pose"] = {"x": x, "y": y, "rotation": rot}
-        state["system_status"] = "IDLE"
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        print(f"[MOCK LAB] Repacked {target_id} to ({x:.1f},{y:.1f}) slot=({si},{sj})")
-
-    async def recenter_stored_in_inventory(self, target_id: str):
-        print(f"[MOCK LAB] recenter_stored_in_inventory {target_id}...")
-        state = self._read_state()
-        comp = (state.get("components") or {}).get(target_id)
-        if not comp or not is_stored(comp):
-            print(f"[MOCK LAB] recenter: {target_id} must be STORED")
-            return
-        nom = nominal_center_pose_for_stored_entry(comp)
-        if nom is None:
-            print("[MOCK LAB] recenter: could not resolve storage cell (need slot metadata or pose in Q3).")
-            return
-        x, y, si, sj = nom
-        rot = STORAGE_NOMINAL_ROTATION_DEG
-        state["system_status"] = "BUSY"
-        self._write_state(state)
-        await asyncio.sleep(1.0)
-        state = self._read_state()
-        comp = state["components"][target_id]
-        tun = comp.setdefault("tunables", default_tunables())
-        meas = comp.setdefault("measurables", default_measurables())
-        set_presence_and_storage(comp, PRESENCE_STORAGE, in_storage=True, slot={"i": si, "j": sj})
-        tun["nominal_pose"] = {"x": x, "y": y, "rotation": rot}
-        tun["placement"] = {"mode": "STORAGE"}
-        meas["pose"] = {"x": x, "y": y, "rotation": rot}
-        state["system_status"] = "IDLE"
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        print(f"[MOCK LAB] Recentered {target_id} at ({x:.1f},{y:.1f}) slot=({si},{sj}) rot=0 deg")
-
-    # --- In-air manipulation (see ``new_primitives.md``) ---
-
-    async def pick_component(self, target_id: str, params: Dict[str, Any]):
-        print(f"[MOCK LAB] Pick {target_id}...")
-        state = self._read_state()
-        if is_holding(state):
-            print(
-                f"[MOCK LAB] Refusing pick: already HOLDING (held={held_tag(state)}). "
-                "PLACE_FROM_HOVER first."
-            )
-            return
-        comp = (state.get("components") or {}).get(target_id)
-        if not comp:
-            print(f"[MOCK LAB] pick: {target_id} not in state")
-            return
-        if is_stored(comp):
-            print(
-                f"[MOCK LAB] Refusing pick: {target_id} is STORED. "
-                "Use PLACE_FROM_STORAGE or recenter first."
-            )
-            return
-        meas = comp.setdefault("measurables", default_measurables())
-        pose = dict(meas.get("pose") or {})
-        px = float(pose.get("x", 0.0))
-        py = float(pose.get("y", 0.0))
-        prot = float(pose.get("rotation", 0.0))
-
-        state["system_status"] = SYSTEM_STATUS_BUSY
-        self._write_state(state)
-
-        await asyncio.sleep(1.2)
-
-        state = self._read_state()
-        comp = state["components"][target_id]
-        tun = comp.setdefault("tunables", default_tunables())
-        # Part is now in the gripper -- presence conceptually "in-air"; we keep
-        # it as BREADBOARD (not STORAGE) so sidebar/context rules treat it as
-        # a normal on-table part being manipulated. The top-level HOLDING
-        # field is the authoritative source-of-truth for "in gripper".
-        tun["nominal_pose"] = {"x": px, "y": py, "rotation": prot, "z": DEFAULT_HOVER_Z_MM}
-        tun["placement"] = {"mode": PLACEMENT_MODE_PICK}
-
-        set_holding(
-            state,
-            tag_id=target_id,
-            x=px,
-            y=py,
-            rotation=prot,
-            z=DEFAULT_HOVER_Z_MM,
-        )
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        print(
-            f"[MOCK LAB] Picked {target_id} at ({px:.1f},{py:.1f},rot={prot:.1f}) "
-            f"-> HOLDING @ z={DEFAULT_HOVER_Z_MM:.1f}mm"
+    async def _primitive_optimize_component(
+        self,
+        *,
+        target_id: str,
+        strategy_name: str,
+        params: Dict[str, Any],
+        progress_callback: Callable[..., None],
+    ) -> Optional[Dict[str, Any]]:
+        from lab_communicator.mock.primitives import primitive_optimize_component
+        return await primitive_optimize_component(
+            self,
+            target_id=target_id,
+            strategy_name=strategy_name,
+            params=params,
+            progress_callback=progress_callback,
         )
 
-    async def hover_component(self, target_id: str, target_pose: Dict[str, float]):
-        print(f"[MOCK LAB] Hover {target_id} -> {target_pose}")
-        state = self._read_state()
-        if not is_holding(state):
-            print("[MOCK LAB] Refusing hover: not HOLDING. PICK_COMPONENT first.")
-            return
-        held = held_tag(state)
-        if held and held != target_id:
-            print(
-                f"[MOCK LAB] Refusing hover: currently holding {held}, "
-                f"cannot hover {target_id}."
-            )
-            return
-
-        tx = float(target_pose.get("target_x", target_pose.get("x", 0.0)))
-        ty = float(target_pose.get("target_y", target_pose.get("y", 0.0)))
-        trot = float(target_pose.get("rotation", 0.0))
-        tz = float(target_pose.get("z", DEFAULT_HOVER_Z_MM))
-
-        state["system_status"] = SYSTEM_STATUS_BUSY
-        self._write_state(state)
-
-        await asyncio.sleep(1.2)
-
-        state = self._read_state()
-        comp = (state.get("components") or {}).get(target_id)
-        if isinstance(comp, dict):
-            tun = comp.setdefault("tunables", default_tunables())
-            meas = comp.setdefault("measurables", default_measurables())
-            tun["nominal_pose"] = {"x": tx, "y": ty, "rotation": trot, "z": tz}
-            tun["placement"] = {"mode": PLACEMENT_MODE_HOVER}
-            noise_x = random.uniform(-0.3, 0.3)
-            noise_y = random.uniform(-0.3, 0.3)
-            meas["pose"] = {
-                "x": tx + noise_x,
-                "y": ty + noise_y,
-                "rotation": trot,
-                "z": tz,
-            }
-
-        set_holding(state, tag_id=target_id, x=tx, y=ty, rotation=trot, z=tz)
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        print(
-            f"[MOCK LAB] Hovered {target_id} -> ({tx:.1f},{ty:.1f},rot={trot:.1f},z={tz:.1f})"
+    async def _primitive_add_component_to_state(
+        self,
+        component_data: Dict[str, Any],
+        existing_components: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        from lab_communicator.mock.primitives import primitive_add_component_to_state
+        return await primitive_add_component_to_state(
+            self, component_data, existing_components
         )
 
-    async def place_from_hover(self, target_id: str, target_pose: Dict[str, float]):
-        print(f"[MOCK LAB] PlaceFromHover {target_id} -> {target_pose}")
-        state = self._read_state()
-        if not is_holding(state):
-            print("[MOCK LAB] Refusing place_from_hover: not HOLDING.")
-            return
-        held = held_tag(state)
-        if held and held != target_id:
-            print(
-                f"[MOCK LAB] Refusing place_from_hover: currently holding {held}, "
-                f"cannot place {target_id}."
-            )
-            return
-        tx = float(target_pose.get("target_x", target_pose.get("x", 0.0)))
-        ty = float(target_pose.get("target_y", target_pose.get("y", 0.0)))
-        trot = float(target_pose.get("rotation", 0.0))
-        if is_storage_region(tx, ty):
-            print(
-                f"[MOCK LAB] Refusing place_from_hover: target ({tx},{ty}) is in "
-                "storage quadrant (use STORE_COMPONENT instead)."
-            )
-            return
+    async def _primitive_pick_component(
+        self, target_id: str, commanded: LabPose, params: Dict[str, Any]
+    ) -> float:
+        from lab_communicator.mock.primitives import primitive_pick_component
+        return await primitive_pick_component(self, target_id, commanded, params)
 
-        state["system_status"] = SYSTEM_STATUS_BUSY
-        self._write_state(state)
+    async def _primitive_hover_component(
+        self, target_id: str, commanded: LabPose, speed: int
+    ) -> Optional[LabPose]:
+        from lab_communicator.mock.primitives import primitive_hover_component
+        return await primitive_hover_component(self, target_id, commanded, speed)
 
-        await asyncio.sleep(1.5)
+    async def _primitive_place_from_hover(
+        self, target_id: str, commanded: LabPose, params: Dict[str, Any]
+    ) -> None:
+        from lab_communicator.mock.primitives import primitive_place_from_hover
+        await primitive_place_from_hover(self, target_id, commanded, params)
 
-        state = self._read_state()
-        comp = state["components"].get(target_id)
-        if isinstance(comp, dict):
-            noise_x = random.uniform(-0.5, 0.5)
-            noise_y = random.uniform(-0.5, 0.5)
-            tun = comp.setdefault("tunables", default_tunables())
-            meas = comp.setdefault("measurables", default_measurables())
-            set_presence_and_storage(comp, PRESENCE_BREADBOARD, in_storage=False, slot=None)
-            # z is no longer meaningful once placed -- strip it from the nominal pose.
-            tun["nominal_pose"] = {"x": tx, "y": ty, "rotation": trot}
-            tun["placement"] = {"mode": PLACEMENT_MODE_MANUAL}
-            meas["pose"] = {
-                "x": tx + noise_x,
-                "y": ty + noise_y,
-                "rotation": trot,
-            }
-
-        clear_holding(state)
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        print(f"[MOCK LAB] Placed {target_id} from hover at ({tx:.1f},{ty:.1f},rot={trot:.1f})")
-
-    async def scan_rotate_in_place(self, target_id: str, params: Dict[str, Any]):
-        """
-        Constant-rate theta sweep. Two dispatch branches share this primitive:
-
-        - **Held** (``system_status == HOLDING`` and held tag matches): sweep
-          the in-air part's rotation while XY + Z stay locked at the current
-          hover pose. System remains ``HOLDING`` on completion.
-        - **Placed** (``system_status == IDLE`` and target on breadboard):
-          rotate the placed part in situ on the table (XY locked at the
-          measured pose). System returns to ``IDLE`` on completion.
-
-        See ``new_primitives.md`` §7 and ``labautomation_new_primitives.md``
-        §2.4 for the corresponding real-lab dispatch.
-        """
-        theta_min = float(params.get("theta_min", 0.0))
-        theta_max = float(params.get("theta_max", 0.0))
-        speed = float(params.get("speed_deg_per_s", 0.0))
-        axis = str(params.get("axis", "z"))
-        if speed <= 0.0:
-            print("[MOCK LAB] scan_rotate: speed_deg_per_s must be > 0")
-            return
-
-        state = self._read_state()
-        holding_now = is_holding(state)
-        held = held_tag(state) if holding_now else None
-
-        # Decide dispatch branch.
-        if holding_now:
-            if held and held != target_id:
-                print(
-                    f"[MOCK LAB] Refusing scan_rotate: currently holding {held}, "
-                    f"cannot rotate {target_id}."
-                )
-                return
-            mode = "held"
-            holding = get_holding(state)
-            base_pose = dict(holding.get("nominal_pose") or {})
-            base_x = float(base_pose.get("x", 0.0))
-            base_y = float(base_pose.get("y", 0.0))
-            base_z: Optional[float] = float(base_pose.get("z", DEFAULT_HOVER_Z_MM))
-        else:
-            status = state.get("system_status") or SYSTEM_STATUS_IDLE
-            if status != SYSTEM_STATUS_IDLE:
-                print(
-                    f"[MOCK LAB] Refusing scan_rotate: system_status={status}, "
-                    "need IDLE or HOLDING."
-                )
-                return
-            comp = (state.get("components") or {}).get(target_id)
-            if not isinstance(comp, dict):
-                print(f"[MOCK LAB] scan_rotate: {target_id} not in state.")
-                return
-            presence = (comp.get("tunables") or {}).get("presence")
-            if presence != PRESENCE_BREADBOARD:
-                print(
-                    f"[MOCK LAB] Refusing scan_rotate: {target_id} presence={presence} "
-                    "(need on breadboard for placed-mode scan)."
-                )
-                return
-            mode = "placed"
-            cur_pose = dict((comp.get("measurables") or {}).get("pose") or {})
-            base_x = float(cur_pose.get("x", 0.0))
-            base_y = float(cur_pose.get("y", 0.0))
-            base_z = None  # Placed parts: z is implicit / not stored on nominal_pose.
-
-        print(
-            f"[MOCK LAB] ScanRotate mode={mode} {target_id}: {theta_min} deg->{theta_max} deg "
-            f"@ {speed} deg/s axis={axis}"
+    async def _primitive_scan_rotate_in_place(
+        self,
+        *,
+        target_id: str,
+        mode: str,
+        theta_min: float,
+        theta_max: float,
+        speed: float,
+        axis: str,
+        base_x: float,
+        base_y: float,
+        base_z: Optional[float],
+        params: Dict[str, Any],
+        on_rotation_update: Callable[[float], None],
+    ) -> None:
+        from lab_communicator.mock.primitives import primitive_scan_rotate_in_place
+        await primitive_scan_rotate_in_place(
+            self,
+            target_id=target_id,
+            mode=mode,
+            theta_min=theta_min,
+            theta_max=theta_max,
+            speed=speed,
+            axis=axis,
+            base_x=base_x,
+            base_y=base_y,
+            base_z=base_z,
+            params=params,
+            on_rotation_update=on_rotation_update,
         )
 
-        total_deg = abs(theta_max - theta_min)
-        duration_s = total_deg / speed if speed > 0 else 0.0
-        duration_s = min(duration_s, 10.0)  # cap mock sleep for UI responsiveness
-        steps = max(1, min(20, int(duration_s * 4)))
-        step_sleep = duration_s / steps if steps > 0 else 0.0
-
-        # Placed-mode: transition to BUSY during the sweep so the UI shows
-        # motion progress, then back to IDLE. Held-mode: stay HOLDING.
-        if mode == "placed":
-            state = self._read_state()
-            state["system_status"] = SYSTEM_STATUS_BUSY
-            state["last_updated"] = datetime.now().isoformat()
-            self._write_state(state)
-
-        for i in range(1, steps + 1):
-            frac = i / steps
-            cur_rot = theta_min + (theta_max - theta_min) * frac
-            state = self._read_state()
-            comp = (state.get("components") or {}).get(target_id)
-            if isinstance(comp, dict):
-                tun = comp.setdefault("tunables", default_tunables())
-                meas = comp.setdefault("measurables", default_measurables())
-                if mode == "held":
-                    tun["nominal_pose"] = {
-                        "x": base_x, "y": base_y, "rotation": cur_rot, "z": base_z,
-                    }
-                    meas["pose"] = {
-                        "x": base_x, "y": base_y, "rotation": cur_rot, "z": base_z,
-                    }
-                else:
-                    # Placed: keep pose shape z-less (matches MOVE_COMPONENT
-                    # / PLACE_FROM_HOVER semantics once the part is on-table).
-                    tun["nominal_pose"] = {"x": base_x, "y": base_y, "rotation": cur_rot}
-                    meas["pose"] = {"x": base_x, "y": base_y, "rotation": cur_rot}
-            if mode == "held":
-                set_holding(state, tag_id=target_id, x=base_x, y=base_y, rotation=cur_rot, z=base_z)
-            state["last_updated"] = datetime.now().isoformat()
-            self._write_state(state)
-            await asyncio.sleep(step_sleep)
-
-        if mode == "placed":
-            state = self._read_state()
-            state["system_status"] = SYSTEM_STATUS_IDLE
-            state["last_updated"] = datetime.now().isoformat()
-            self._write_state(state)
-            print(
-                f"[MOCK LAB] ScanRotate (placed) done {target_id}: swept {total_deg:.1f} deg in "
-                f"{duration_s:.2f}s (final rot={theta_max:.1f} deg) -- back to IDLE"
-            )
-        else:
-            print(
-                f"[MOCK LAB] ScanRotate (held) done {target_id}: swept {total_deg:.1f} deg in "
-                f"{duration_s:.2f}s (final rot={theta_max:.1f} deg) -- remaining HOLDING"
-            )
-
-    async def confirm_holding_tag(self, tag_id: str):
-        print(f"[MOCK LAB] ConfirmHoldingTag {tag_id}")
-        state = self._read_state()
-        if not is_holding(state):
-            print("[MOCK LAB] confirm_holding_tag: system not HOLDING; nothing to confirm.")
-            return
-        _confirm_holding_tag(state, tag_id)
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        print(f"[MOCK LAB] Confirmed held tag: {tag_id}")
+    # ``scan_rotate_in_place`` lives on the base template class
+    # (Phase 2B); mock relies on the inherited orchestrator plus the
+    # :meth:`_primitive_scan_rotate_in_place` hook above to drive the
+    # stepwise sweep and the per-step + final state commits through
+    # ``commit_scan_rotation``. ``confirm_holding_tag`` and the
+    # holding-state housekeeping it runs are inherited the same way.
 
     def set_cobyla_reference_from_png_bytes(self, data: bytes) -> Tuple[bool, str]:
         """Same API as real lab; mock optimize does not use it, but UI can test the flow."""
@@ -994,33 +457,21 @@ class MockLabCommunicator(LabCommunicator):
     def get_video_feed_status(self) -> Dict[str, Any]:
         return {"connected": True, "source": "/api/video-feed/stream"}
 
-    async def observe_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
-        meta = self._catalog_meta_for_tag(tag_id)
-        ctype = (meta or {}).get("type") or ""
-        state = self._read_state()
-        comp = (state.get("components") or {}).get(tag_id)
-        if not isinstance(comp, dict):
-            return {}
-        if ctype != "OPTICAL_CAMERA":
-            return self.return_measurables_for_tag(tag_id)
-        png = self.capture_table_cam(1, exposure=0.2)
-        meas = comp.setdefault("measurables", default_measurables())
-        if png:
-            cap_dir = os.path.abspath(os.path.join(SCHEMAS_DIR, "mock_camera_captures"))
-            os.makedirs(cap_dir, exist_ok=True)
-            rel_name = f"{tag_id}_last.png"
-            out_path = os.path.join(cap_dir, rel_name)
-            with open(out_path, "wb") as f:
-                f.write(png)
-            meas["camera_image"] = {
-                "path": out_path,
-                "source": "mock_table_cam",
-                "cam_id": 1,
-                "format": "png",
-            }
-        state["last_updated"] = datetime.now().isoformat()
-        self._write_state(state)
-        return self.return_measurables_for_tag(tag_id)
+    def _camera_captures_dir(self) -> str:
+        """Directory mock writes synthetic capture PNGs into.
+
+        Lives next to the mock state JSON so the directory layout
+        matches the rest of the schemas folder. Used by
+        :func:`lab_communicator.mock.primitives.primitive_observe_measurables`
+        to land ``<tag>_last.png`` for the UI to pick up.
+        """
+        return os.path.abspath(os.path.join(SCHEMAS_DIR, "mock_camera_captures"))
+
+    async def _primitive_observe_measurables(
+        self, tag_id: str, catalog_meta: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        from lab_communicator.mock.primitives import primitive_observe_measurables
+        return await primitive_observe_measurables(self, tag_id, catalog_meta)
 
     def capture_table_cam(self, cam_id: int, exposure: float = 0.2) -> bytes:
         try:

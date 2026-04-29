@@ -35,7 +35,7 @@ class keeps thin ``def`` wrappers so external call sites
 reference image, the video stream's ``_get_latest_optimization_png``
 caller) keep their existing API. Phase 2 (see
 ``communicator_refactor.md`` §6) will fold the optimization run logic
-into a ``_do_optimize`` hook driven by a ``progress_callback``
+into a ``_primitive_optimize_component`` hook driven by a ``progress_callback``
 constructed by the base orchestrator.
 
 Architectural rule (``communicator_refactor.md`` §5.1): real-only --

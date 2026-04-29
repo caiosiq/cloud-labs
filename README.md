@@ -29,7 +29,7 @@ If tomorrow you replace the xArm6 with a UR10, **reimplement or reconfigure the 
 
 Historically, this repository began as **“cloud-labs”** in the sense of **a remote-facing UI** for the lab. The direction now is broader: treat the stack as a **durable language for running experiments**—commands, sequences, and eventually richer scripting—while keeping the **robot and vision specifics** fenced behind the communicator. That separation is what lets you iterate on **how people and tools ask for work** without constantly revisiting **how the arm moves**.
 
-In **real** mode, **`RealLabCommunicator`** maps **lab-frame** intent (what the UI sends) onto **robot-frame** and experiment-manager calls inside **`lab_automation`**—details live in **`lab_communicator/real.py`**.
+In **real** mode, **`RealLabCommunicator`** maps **lab-frame** intent (what the UI sends) onto **robot-frame** and experiment-manager calls inside **`lab_automation`**—details live in **`lab_communicator/real/`** (the `communicator.py` checklist + the `primitives.py` API-call list; full architectural rationale in **`lab_communicator/README.md`**).
 
 ---
 
@@ -106,7 +106,7 @@ Larger slices of logic (dedicated API client, separate render module) can be pee
 |---------|------|
 | **`lab_model`** | **Domain model** shared by mock and real: **tunables vs measurables** helpers (`component_model.py`), **storage quadrant Q3** geometry and layout checks (`storage_region.py`), **software-tracked motor angles** on disk (`motor_rotation_store` → `schemas/mock_motor_rotations.json` / `real_motor_rotations.json`). Does **not** talk to hardware. See **`backend/lab_model/README.md`**. |
 | **`lab_primitives`** | **HTTP-facing command contract**: `PrimitiveId`, **Pydantic** bodies for `POST /api/command`, **`PRIMITIVE_REGISTRY`**, **`dispatch`** (`parse_command_payload`, `execute_validated_command`, `schedule_validated_command`), **read primitives** for **`GET /api/components/{tag}/tunables`** and **`.../measurables`**, and **macros** that compose atomic steps (today: `MOTOR_SEND_HOME` → tracked angle + `MOVE_MOTOR`). Design narrative: **`primitives.md`**. Package overview + roadmap: **`backend/lab_primitives/README.md`**, **`backend/lab_primitives/ROADMAP.md`**. |
-| **`lab_communicator`** | **`LabCommunicator`** interface and **mock** / **real** implementations: lab state JSON, robot/vision/`lab_automation` integration. |
+| **`lab_communicator`** | **`LabCommunicator`** template class plus folder-per-backend implementations (**`mock`**, **`real`**): lab state JSON, robot/vision/`lab_automation` integration. **If you want to add a new backend** (different robot, simulator, etc.), the file-by-file recipe lives in **`backend/lab_communicator/README.md`**. |
 
 **`main.py`** delegates command validation and scheduling to **`lab_primitives`** (same path for the recipe executor). Tunables/measurables per tag use **`fetch_read_primitive`** so reads stay aligned with the primitive vocabulary.
 
@@ -165,9 +165,7 @@ If the constructor of **`NewtonPlacementStrategy_cloudlab`** accepts an optional
 
 where **`phase`** is **`"ghost"`** or **`"physical"`**, matching the semantics above. **`angle`** may still be passed for your own logging; **cloud-labs ignores it for pose** and only uses **`target_x` / `target_y`** plus the stored UI rotation. Implement this **only** on the `_cloudlab` class so shared non-cloudlab strategies stay unchanged.
 
-Copy/paste guidance and call-site examples live in:
-
-**`backend/lab_communicator/newton_cloudlab_progress_example.py`**
+Copy/paste guidance and the call-site logic live in **`backend/lab_communicator/real/optimization.py`** and **`backend/lab_communicator/real/primitives.py`** (`primitive_optimize_component` is where the strategy is built and `_cloudlab_progress_callback` is wired in).
 
 ### Optimization step counter and table-cam label
 
@@ -201,10 +199,17 @@ cloud-labs/                   # repository root (historically also called optics
 │   │   ├── registry.py       # PRIMITIVE_REGISTRY (metadata + handler names)
 │   │   └── dispatch.py       # parse_command_payload, execute_validated_command, schedule_validated_command, fetch_read_primitive
 │   ├── lab_communicator/
-│   │   ├── base.py           # LabCommunicator interface
-│   │   ├── mock.py           # Simulated lab (delays, noise, local JSON state)
-│   │   ├── real.py           # Adapter for external lab_automation package
-│   │   └── newton_cloudlab_progress_example.py  # Paste guide for optional Newton UI callback in lab_automation
+│   │   ├── README.md         # Architecture + recipe for adding a new backend
+│   │   ├── base.py           # LabCommunicator template class (state machine + orchestrators)
+│   │   ├── shared/           # Cross-lab building blocks (refusals, commits, snapshot helpers, …)
+│   │   ├── mock/             # Simulated lab (delays, noise, local JSON state)
+│   │   │   ├── communicator.py   # Class checklist: __init__, hooks, 1-line primitive delegations
+│   │   │   └── primitives.py     # API-call list: primitive_<name> functions (sleep + noise)
+│   │   └── real/             # Adapter for external lab_automation package
+│   │       ├── communicator.py   # Same checklist shape as mock
+│   │       ├── primitives.py     # API-call list: each primitive_<name> shows the lab_automation call
+│   │       ├── coordinate_frames.py  # XY/Z/yaw transforms + calibration constants
+│   │       └── video.py / gripper.py / scan.py / optimization.py  # Backend-specific helpers
 ├── frontend/
 │   ├── index.html            # layout + inline styles; script: js/main.js then command-console.js
 │   ├── debug.html
