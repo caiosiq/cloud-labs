@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Query
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Query, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -94,6 +94,103 @@ if not os.path.exists(RECIPES_DIR):
 # Ensure states directory exists
 if not os.path.exists(STATES_DIR):
     os.makedirs(STATES_DIR)
+
+# --- Laser line overlays (per LAB_MODE JSON under schemas/) ---
+_LASER_LINES_FILES = {"REAL": "laser_lines.real.json", "MOCK": "laser_lines.mock.json"}
+_LINE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def _laser_lines_json_path() -> str:
+    fn = _LASER_LINES_FILES.get(LAB_MODE, _LASER_LINES_FILES["MOCK"])
+    return os.path.join(SCHEMAS_DIR, fn)
+
+
+def _load_laser_lines_doc() -> Dict[str, Any]:
+    path = _laser_lines_json_path()
+    if not os.path.exists(path):
+        return {"version": 1, "snap_line_id": None, "lines": []}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _atomic_write_json(path: str, data: Any) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, path)
+
+
+def _two_points_to_ab(
+    p1: Dict[str, Any], p2: Dict[str, Any]
+) -> Optional[Tuple[float, float]]:
+    """Return (a, b) for x = a*y + b in lab mm, or vertical (0, x0). None if degenerate."""
+    try:
+        x1 = float(p1["x"])
+        y1 = float(p1["y"])
+        x2 = float(p2["x"])
+        y2 = float(p2["y"])
+    except (TypeError, KeyError, ValueError):
+        return None
+    if abs(x2 - x1) < 1e-9 and abs(y2 - y1) < 1e-9:
+        return None
+    if abs(x2 - x1) < 1e-9:
+        return 0.0, x1
+    if abs(y2 - y1) < 1e-9:
+        return None
+    a = (x2 - x1) / (y2 - y1)
+    b = x1 - a * y1
+    return float(a), float(b)
+
+
+def _laser_line_coeffs_from_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Legacy single-line coefficients for GET /api/laser-line (snap reference)."""
+    lines = doc.get("lines") or []
+    snap_id = doc.get("snap_line_id")
+    by_id = {
+        ln["id"]: ln
+        for ln in lines
+        if isinstance(ln, dict) and isinstance(ln.get("id"), str)
+    }
+    chosen = None
+    if snap_id and snap_id in by_id:
+        cand = by_id[snap_id]
+        if cand.get("enabled", True):
+            chosen = cand
+    if chosen is None:
+        for ln in lines:
+            if not isinstance(ln, dict):
+                continue
+            if ln.get("enabled", True) and ln.get("p1") and ln.get("p2"):
+                chosen = ln
+                break
+    if chosen is None:
+        return {
+            "a": 0.0,
+            "b": 0.0,
+            "source": "schema",
+            "loaded": False,
+            "lab_mode": LAB_MODE,
+        }
+    ab = _two_points_to_ab(chosen["p1"], chosen["p2"])
+    if ab is None:
+        return {
+            "a": 0.0,
+            "b": 0.0,
+            "source": "schema",
+            "loaded": False,
+            "lab_mode": LAB_MODE,
+            "snap_line_id": chosen.get("id"),
+        }
+    a, b = ab
+    return {
+        "a": a,
+        "b": b,
+        "source": "schema",
+        "loaded": True,
+        "lab_mode": LAB_MODE,
+        "snap_line_id": chosen.get("id"),
+    }
+
 
 # --- Models ---
 class RecipeStep(BaseModel):
@@ -418,20 +515,84 @@ async def get_storage_grid():
 
 @app.get("/api/laser-line")
 async def get_laser_line():
-    """Laser path in lab coords: x = a*y + b (mm). Mock: fixed params; Real: from laser_line_fit.npy."""
-    if LAB_MODE != "REAL" or lab is None:
-        return {"a": 0.0, "b": 0.0, "source": "mock"}
-    path = os.path.join(_project_root, "laser_line_fit.npy")
-    if not os.path.exists(path):
-        return {"a": 0.0, "b": 0.0, "source": "real", "loaded": False}
-    try:
-        import numpy as np
-        data = np.load(path)
-        a, b = float(data[0]), float(data[1])
-        return {"a": a, "b": b, "source": "real", "loaded": True}
-    except Exception as e:
-        print(f"[CONFIG] Failed to load laser_line_fit.npy: {e}")
-        return {"a": 0.0, "b": 0.0, "source": "real", "loaded": False}
+    """Single-line legacy coefficients (x = a*y + b, mm) from schemas laser_lines.*.json snap line."""
+    doc = _load_laser_lines_doc()
+    return _laser_line_coeffs_from_doc(doc)
+
+
+@app.get("/api/laser-lines")
+async def get_laser_lines():
+    """All laser overlays for the current LAB_MODE (schemas/laser_lines.{real|mock}.json)."""
+    doc = _load_laser_lines_doc()
+    out = dict(doc)
+    out["lab_mode"] = LAB_MODE
+    out["schema_file"] = os.path.basename(_laser_lines_json_path())
+    return out
+
+
+@app.patch("/api/laser-lines/{line_id}")
+async def patch_laser_line(line_id: str, payload: Dict[str, Any] = Body(...)):
+    """Update one line: ``enabled`` anytime; ``p1``/``p2`` only with ``confirm: true``."""
+    if not _LINE_ID_RE.match(line_id or ""):
+        raise HTTPException(status_code=400, detail="Invalid line id")
+    doc = _load_laser_lines_doc()
+    lines = doc.get("lines")
+    if not isinstance(lines, list):
+        lines = []
+        doc["lines"] = lines
+    idx = next(
+        (i for i, ln in enumerate(lines) if isinstance(ln, dict) and ln.get("id") == line_id),
+        None,
+    )
+    if idx is None:
+        raise HTTPException(status_code=404, detail=f"Unknown laser line: {line_id}")
+
+    wants_geo = any(k in payload for k in ("p1", "p2"))
+    if wants_geo:
+        if payload.get("confirm") is not True:
+            raise HTTPException(
+                status_code=400,
+                detail="Set confirm: true to apply p1/p2 geometry changes.",
+            )
+        p1 = payload.get("p1")
+        p2 = payload.get("p2")
+        if not isinstance(p1, dict) or not isinstance(p2, dict):
+            raise HTTPException(status_code=400, detail="p1 and p2 must be objects with numeric x, y")
+        try:
+            p1f = {"x": float(p1["x"]), "y": float(p1["y"])}
+            p2f = {"x": float(p2["x"]), "y": float(p2["y"])}
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="p1 and p2 require numeric x and y")
+        if _two_points_to_ab(p1f, p2f) is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid geometry: coincident points or unsupported horizontal line.",
+            )
+        lines[idx]["p1"] = p1f
+        lines[idx]["p2"] = p2f
+
+    if "enabled" in payload:
+        en = payload["enabled"]
+        if not isinstance(en, bool):
+            raise HTTPException(status_code=400, detail="enabled must be a boolean")
+        lines[idx]["enabled"] = en
+
+    if "name" in payload and isinstance(payload["name"], str) and payload["name"].strip():
+        lines[idx]["name"] = payload["name"].strip()[:120]
+
+    if "color" in payload and isinstance(payload["color"], str) and payload["color"].strip():
+        col = payload["color"].strip()
+        if len(col) > 32:
+            raise HTTPException(status_code=400, detail="color string too long")
+        lines[idx]["color"] = col
+
+    doc["version"] = max(1, int(doc.get("version") or 1))
+    _atomic_write_json(_laser_lines_json_path(), doc)
+    out = dict(_load_laser_lines_doc())
+    out["lab_mode"] = LAB_MODE
+    out["schema_file"] = os.path.basename(_laser_lines_json_path())
+    return out
+
 
 def _enforce_holding_rules(cmd, state: Dict[str, Any]) -> None:
     """

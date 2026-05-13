@@ -142,7 +142,7 @@ async function fetchCatalogMap() {
 
 // Call this early
 fetchCatalogMap();
-fetchLaserLine();
+fetchLaserLines();
 
 async function fetchStrategies() {
     store.availableStrategies = {
@@ -194,15 +194,117 @@ async function fetchLayoutConflicts() {
     }
 }
 
-async function fetchLaserLine() {
+// --- Laser line geometry (two-point definition; clip + snap) ---
+
+function twoPointsToLineModel(p1, p2) {
+    const x1 = +p1.x;
+    const y1 = +p1.y;
+    const x2 = +p2.x;
+    const y2 = +p2.y;
+    if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+    if (Math.hypot(x2 - x1, y2 - y1) < 1e-6) return null;
+    if (Math.abs(x2 - x1) < 1e-6) return { kind: 'vertical', x0: x1 };
+    if (Math.abs(y2 - y1) < 1e-6) return { kind: 'horizontal', y0: y1 };
+    const a = (x2 - x1) / (y2 - y1);
+    const b = x1 - a * y1;
+    return { kind: 'ab', a, b };
+}
+
+function clipTwoPointLineToLabBounds(p1, p2) {
+    const m = twoPointsToLineModel(p1, p2);
+    if (!m) return null;
+    if (m.kind === 'ab') return clipLaserLineToBounds(m.a, m.b);
+    if (m.kind === 'vertical') {
+        const x = m.x0;
+        if (x < LAB_X_MIN || x > LAB_X_MAX) return null;
+        return [{ x, y: LAB_Y_MIN }, { x, y: LAB_Y_MAX }];
+    }
+    const y0 = m.y0;
+    if (y0 < LAB_Y_MIN || y0 > LAB_Y_MAX) return null;
+    return [{ x: LAB_X_MIN, y: y0 }, { x: LAB_X_MAX, y: y0 }];
+}
+
+function distancePointToLineModel(x, y, m) {
+    if (!m) return Infinity;
+    if (m.kind === 'vertical') return Math.abs(x - m.x0);
+    if (m.kind === 'horizontal') return Math.abs(y - m.y0);
+    const val = x - m.a * y - m.b;
+    return Math.abs(val) / Math.sqrt(1 + m.a * m.a);
+}
+
+function projectPointToLineModel(x, y, m) {
+    if (!m) return { x, y };
+    if (m.kind === 'vertical') return { x: m.x0, y };
+    if (m.kind === 'horizontal') return { x, y: m.y0 };
+    const val = x - m.a * y - m.b;
+    const denom = 1 + m.a * m.a;
+    const k = val / denom;
+    return { x: x - k, y: y + m.a * k };
+}
+
+function coeffsFromLaserLinesDoc(doc) {
+    if (!doc || !Array.isArray(doc.lines)) {
+        return { a: 0, b: 0, source: 'none', loaded: false };
+    }
+    const snapId = doc.snap_line_id;
+    const byId = {};
+    doc.lines.forEach((ln) => {
+        if (ln && ln.id) byId[ln.id] = ln;
+    });
+    let chosen = null;
+    if (snapId && byId[snapId] && byId[snapId].enabled !== false) {
+        chosen = byId[snapId];
+    }
+    if (!chosen) {
+        chosen = doc.lines.find((l) => l && l.enabled !== false && l.p1 && l.p2) || null;
+    }
+    if (!chosen || !chosen.p1 || !chosen.p2) {
+        return { a: 0, b: 0, source: 'schema', loaded: false, lab_mode: doc.lab_mode };
+    }
+    const m = twoPointsToLineModel(chosen.p1, chosen.p2);
+    if (!m) {
+        return { a: 0, b: 0, source: 'schema', loaded: false, lab_mode: doc.lab_mode };
+    }
+    if (m.kind === 'ab') {
+        return {
+            a: m.a,
+            b: m.b,
+            source: 'schema',
+            loaded: true,
+            snap_line_id: chosen.id,
+            lab_mode: doc.lab_mode,
+        };
+    }
+    if (m.kind === 'vertical') {
+        return {
+            a: 0,
+            b: m.x0,
+            source: 'schema',
+            loaded: true,
+            snap_line_id: chosen.id,
+            lab_mode: doc.lab_mode,
+        };
+    }
+    return { a: 0, b: 0, source: 'schema', loaded: false, lab_mode: doc.lab_mode };
+}
+
+async function fetchLaserLines() {
     try {
-        const response = await fetch('/api/laser-line');
+        const response = await fetch('/api/laser-lines');
         if (response.ok) {
-            store.laserLineCoeffs = await response.json();
-            console.log("Laser line:", store.laserLineCoeffs.source, store.laserLineCoeffs.loaded !== false ? "a=" + store.laserLineCoeffs.a + " b=" + store.laserLineCoeffs.b : "(defaults)");
+            store.laserLinesDoc = await response.json();
+            store.laserLineCoeffs = coeffsFromLaserLinesDoc(store.laserLinesDoc);
+            renderLaserLinesPanel();
+            const n = (store.laserLinesDoc.lines || []).length;
+            console.log(
+                `Laser lines (${store.laserLinesDoc.lab_mode || '?'}, ${n}):`,
+                store.laserLineCoeffs.loaded !== false
+                    ? `snap a=${store.laserLineCoeffs.a} b=${store.laserLineCoeffs.b}`
+                    : 'no snap line',
+            );
         }
     } catch (e) {
-        console.error("Laser line fetch failed", e);
+        console.error('Laser lines fetch failed', e);
     }
 }
 
@@ -1766,30 +1868,29 @@ canvas.addEventListener('mousemove', (e) => {
     const mouseY = e.clientY - rect.top;
 
     const lab = pxToMm(mouseX - store.dragOffset.x, mouseY - store.dragOffset.y);
-    
-    // Snapping Logic (Snap to Laser Line)
+
     let finalX = lab.x;
     let finalY = lab.y;
 
-    if (store.laserLineCoeffs && typeof store.laserLineCoeffs.a === 'number') {
-        const a = store.laserLineCoeffs.a;
-        const b = store.laserLineCoeffs.b;
-        const SNAP_THRESHOLD_MM = 10; // Snap if within 10mm
-
-        // Line eq: x - ay - b = 0  => A=1, B=-a, C=-b
-        // Distance d = |Ax + By + C| / sqrt(A^2 + B^2)
-        const val = finalX - a * finalY - b;
-        const dist = Math.abs(val) / Math.sqrt(1 + a * a);
-
-        if (dist < SNAP_THRESHOLD_MM) {
-            // Project point onto line
-            // (x, y) - k * (A, B) where k = val / (A^2 + B^2)
-            const k = val / (1 + a * a);
-            finalX = finalX - k;
-            finalY = finalY + a * k; // y - (-a)*k
-            
-            // Optional: Snap Rotation? 
-            // For now, we just snap position as requested.
+    // Snapping: nearest enabled laser line (schemas/laser_lines.*.json)
+    const doc = store.laserLinesDoc;
+    if (doc && Array.isArray(doc.lines)) {
+        const SNAP_THRESHOLD_MM = 10;
+        let bestDist = SNAP_THRESHOLD_MM;
+        let bestPt = { x: finalX, y: finalY };
+        doc.lines.forEach((line) => {
+            if (!line || line.enabled === false || !line.p1 || !line.p2) return;
+            const m = twoPointsToLineModel(line.p1, line.p2);
+            if (!m) return;
+            const d = distancePointToLineModel(finalX, finalY, m);
+            if (d < bestDist) {
+                bestDist = d;
+                bestPt = projectPointToLineModel(finalX, finalY, m);
+            }
+        });
+        if (bestDist < SNAP_THRESHOLD_MM) {
+            finalX = bestPt.x;
+            finalY = bestPt.y;
         }
     }
 
@@ -2237,23 +2338,27 @@ function clipLaserLineToBounds(a, b) {
 }
 
 function drawLaserPath() {
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#ff3b3b';
-    ctx.strokeStyle = '#ff3b3b';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([10, 10]);
-    const coef = store.laserLineCoeffs || { a: 0, b: 0 };
-    const seg = clipLaserLineToBounds(coef.a, coef.b);
-    if (seg) {
+    const doc = store.laserLinesDoc;
+    if (!doc || !Array.isArray(doc.lines)) return;
+    doc.lines.forEach((line) => {
+        if (!line || line.enabled === false || !line.p1 || !line.p2) return;
+        const col = line.color || '#ff3b3b';
+        const seg = clipTwoPointLineToLabBounds(line.p1, line.p2);
+        if (!seg) return;
         const p1 = mmToPx(seg[0].x, seg[0].y);
         const p2 = mmToPx(seg[1].x, seg[1].y);
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = col;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([10, 10]);
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
         ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    ctx.shadowBlur = 0;
+        ctx.setLineDash([]);
+        ctx.shadowBlur = 0;
+    });
 }
 
 /**
@@ -3284,6 +3389,167 @@ function ensureGhostForConsole(tagId) {
     return true;
 }
 
+function _laserLineAttrEscape(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
+}
+
+function renderLaserLinesPanel() {
+    const root = document.getElementById('laser-lines-list');
+    if (!root) return;
+    const doc = store.laserLinesDoc;
+    if (!doc || !Array.isArray(doc.lines) || doc.lines.length === 0) {
+        root.innerHTML =
+            '<div style="padding:10px 12px;font-size:11px;color:var(--text-muted);line-height:1.4;">No lines defined. Add entries in <code>schemas/laser_lines.*.json</code> for this lab mode.</div>';
+        return;
+    }
+    const snap = doc.snap_line_id;
+    root.innerHTML = doc.lines
+        .map((line) => {
+            const id = line.id || '';
+            const name = (line.name || id).replace(/</g, '\u003c');
+            const en = line.enabled !== false;
+            const rawC = (line.color && String(line.color).trim()) || '#ff3b3b';
+            const c = /^#[0-9A-Fa-f]{3,8}$/i.test(rawC) ? rawC : '#ff3b3b';
+            const idA = _laserLineAttrEscape(id);
+            const snapTag =
+                id === snap
+                    ? ' <span style="font-size:9px;color:var(--text-muted);">(snap)</span>'
+                    : '';
+            return (
+                `<div class="laser-line-row" data-line-id="${idA}" title="Double-click to edit reference points">` +
+                `<input type="checkbox" class="laser-line-enabled" data-line-id="${idA}" ${en ? 'checked' : ''} title="Show on canvas">` +
+                `<span class="laser-line-swatch" style="background:${c}"></span>` +
+                `<span class="laser-line-name">${name}</span>${snapTag}` +
+                `</div>`
+            );
+        })
+        .join('');
+}
+
+function closeLaserLineEditModal() {
+    const m = document.getElementById('laser-line-edit-modal');
+    if (m) {
+        m.style.display = 'none';
+        m.setAttribute('aria-hidden', 'true');
+    }
+    const ch = document.getElementById('laser-line-edit-confirm');
+    if (ch) ch.checked = false;
+}
+
+function openLaserLineEditModal(lineId) {
+    const doc = store.laserLinesDoc;
+    if (!doc || !Array.isArray(doc.lines)) return;
+    const line = doc.lines.find((l) => l && l.id === lineId);
+    if (!line || !line.p1 || !line.p2) return;
+    const modal = document.getElementById('laser-line-edit-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+    modal.dataset.lineId = lineId;
+    const title = document.getElementById('laser-line-edit-title');
+    if (title) title.textContent = `Edit line: ${line.name || lineId}`;
+    const setNum = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) el.value = Number(v);
+    };
+    setNum('laser-edit-p1x', line.p1.x);
+    setNum('laser-edit-p1y', line.p1.y);
+    setNum('laser-edit-p2x', line.p2.x);
+    setNum('laser-edit-p2y', line.p2.y);
+    const ch = document.getElementById('laser-line-edit-confirm');
+    if (ch) ch.checked = false;
+}
+
+async function applyLaserLineGeometryEdit() {
+    const modal = document.getElementById('laser-line-edit-modal');
+    const confirmEl = document.getElementById('laser-line-edit-confirm');
+    const lineId = modal && modal.dataset.lineId;
+    if (!lineId) return;
+    if (!confirmEl || !confirmEl.checked) {
+        log('Check "I confirm" to apply reference point changes.', 'warn');
+        return;
+    }
+    const read = (id) => {
+        const el = document.getElementById(id);
+        return el ? parseFloat(el.value) : NaN;
+    };
+    const p1 = { x: read('laser-edit-p1x'), y: read('laser-edit-p1y') };
+    const p2 = { x: read('laser-edit-p2x'), y: read('laser-edit-p2y') };
+    if (![p1.x, p1.y, p2.x, p2.y].every(Number.isFinite)) {
+        log('Enter valid numbers for all coordinates.', 'error');
+        return;
+    }
+    try {
+        const res = await fetch(`/api/laser-lines/${encodeURIComponent(lineId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ p1, p2, confirm: true }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        closeLaserLineEditModal();
+        await fetchLaserLines();
+        render();
+        log(`Laser line "${lineId}" geometry updated.`, 'info');
+    } catch (e) {
+        console.error(e);
+        log(`Laser line update failed: ${e.message || e}`, 'error');
+    }
+}
+
+function initLaserLinesPanel() {
+    const list = document.getElementById('laser-lines-list');
+    if (!list) return;
+
+    list.addEventListener('change', async (e) => {
+        const t = e.target;
+        if (!t.classList.contains('laser-line-enabled')) return;
+        const id = t.getAttribute('data-line-id');
+        if (!id) return;
+        try {
+            const res = await fetch(`/api/laser-lines/${encodeURIComponent(id)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: !!t.checked }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || res.statusText);
+            store.laserLinesDoc = data;
+            store.laserLineCoeffs = coeffsFromLaserLinesDoc(store.laserLinesDoc);
+            renderLaserLinesPanel();
+            render();
+            log(`Laser line "${id}" ${t.checked ? 'shown' : 'hidden'}.`, 'info');
+        } catch (err) {
+            console.error(err);
+            t.checked = !t.checked;
+            log(`Toggle failed: ${err.message || err}`, 'error');
+        }
+    });
+
+    list.addEventListener('dblclick', (e) => {
+        if (e.target.classList.contains('laser-line-enabled')) return;
+        const row = e.target.closest('.laser-line-row');
+        if (!row) return;
+        const id = row.getAttribute('data-line-id');
+        if (id) openLaserLineEditModal(id);
+    });
+
+    const cancel = document.getElementById('laser-line-edit-cancel');
+    const apply = document.getElementById('laser-line-edit-apply');
+    const modal = document.getElementById('laser-line-edit-modal');
+    if (cancel) cancel.addEventListener('click', () => closeLaserLineEditModal());
+    if (apply) apply.addEventListener('click', () => applyLaserLineGeometryEdit());
+    if (modal) {
+        modal.addEventListener('click', (ev) => {
+            if (ev.target === modal) closeLaserLineEditModal();
+        });
+    }
+    renderLaserLinesPanel();
+}
+
 /** Same behavior as the Refresh Pose button (shared with Command Console): camera pose pass → measurables.pose. */
 async function runLabPoseRefresh() {
     log("Refreshing poses from camera (re-localize)...", "warn");
@@ -3302,7 +3568,7 @@ async function runLabPoseRefresh() {
     }
 
     store.forceGhostSync = true;
-    await fetchLaserLine();
+    await fetchLaserLines();
     await fetchLabState();
     checkVideoStatus();
 }
@@ -3381,6 +3647,7 @@ function init() {
         });
     }
     
+    initLaserLinesPanel();
     initVideoFeed();
     initUnifiedPanel();
 }

@@ -634,6 +634,13 @@
         </div>
 
         <div id="sidebar-right-scroll">
+        <div id="laser-lines-section" style="flex-shrink: 0; border-bottom: 1px solid var(--border-color);">
+            <div class="section-header">Laser lines</div>
+            <p style="margin: 0 12px 8px; font-size: 10px; color: var(--text-muted); line-height: 1.45;">
+                Per lab mode (<code>schemas/laser_lines.*.json</code>). Toggle visibility (saved). <strong>Double-click</strong> a row to edit P1/P2 — apply only after confirm.
+            </p>
+            <div id="laser-lines-list" class="laser-lines-list" role="list" aria-label="Laser line visibility"></div>
+        </div>
         <!-- Table cam capture: real = hardware; mock = synthetic PNG from /api/table-cam/capture -->
         <div id="table-cam-section" style="border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
             <div class="section-header">Table cam capture</div>
@@ -796,7 +803,66 @@
         .step-desc { flex-grow: 1; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .step-del { color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; font-size: 14px; }
         .step-del:hover { background: rgba(239, 68, 68, 0.1); }
+
+        .laser-lines-list { padding: 0 0 8px; }
+        .laser-line-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: default;
+            user-select: none;
+        }
+        .laser-line-row:hover { background: rgba(255, 255, 255, 0.04); }
+        .laser-line-swatch {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            flex-shrink: 0;
+            box-shadow: 0 0 4px rgba(0, 0, 0, 0.35);
+        }
+        .laser-line-name { flex: 1; font-size: 12px; min-width: 0; }
+        .laser-line-enabled { flex-shrink: 0; cursor: pointer; }
+        #laser-line-edit-modal .laser-edit-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        #laser-line-edit-modal .laser-edit-grid label {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        #laser-line-edit-modal .laser-edit-grid input {
+            width: 100%;
+            margin-top: 4px;
+            padding: 6px;
+            background: #0f1115;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 12px;
+        }
     </style>
+    <div id="laser-line-edit-modal" style="display: none; position: fixed; inset: 0; z-index: 300; background: rgba(0, 0, 0, 0.55); align-items: center; justify-content: center; padding: 16px;" aria-hidden="true" role="dialog" aria-labelledby="laser-line-edit-title">
+        <div style="background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 12px; max-width: 440px; width: 100%; padding: 16px; box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);">
+            <h3 id="laser-line-edit-title" style="margin: 0 0 12px; font-size: 14px;">Edit laser line</h3>
+            <p style="font-size: 11px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.45;">P1 and P2 are two lab-frame points (mm, table center origin) that define the infinite line drawn on the canvas.</p>
+            <div class="laser-edit-grid">
+                <label>P1 x<input id="laser-edit-p1x" type="number" step="0.1"></label>
+                <label>P1 y<input id="laser-edit-p1y" type="number" step="0.1"></label>
+                <label>P2 x<input id="laser-edit-p2x" type="number" step="0.1"></label>
+                <label>P2 y<input id="laser-edit-p2y" type="number" step="0.1"></label>
+            </div>
+            <label style="display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 11px; cursor: pointer;">
+                <input type="checkbox" id="laser-line-edit-confirm"> I confirm updating these reference points
+            </label>
+            <div style="display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end;">
+                <button type="button" id="laser-line-edit-cancel" class="btn btn-secondary" style="width: auto; margin: 0;">Cancel</button>
+                <button type="button" id="laser-line-edit-apply" class="btn btn-primary" style="width: auto; margin: 0;">Apply</button>
+            </div>
+        </div>
+    </div>
     <script type="module" src="/static/js/main.js?v=10"></script>
     <script type="module" src="/static/js/command-console.js?v=5"></script>
 </body>

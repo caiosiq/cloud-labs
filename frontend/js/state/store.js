@@ -18,6 +18,9 @@ export const store = {
     selectedComponent: null,
     availableStrategies: null,
     availableRecipes: [],
+    /** From GET /api/laser-lines (per LAB_MODE schema). */
+    laserLinesDoc: null,
+    /** Legacy single-line coeffs for snap fallback / logging (derived from doc). */
     laserLineCoeffs: null,
     previousSystemStatus: 'IDLE',
     forceGhostSync: false,

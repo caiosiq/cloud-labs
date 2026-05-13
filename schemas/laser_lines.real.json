@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "snap_line_id": "diode",
+  "lines": [
+    {
+      "id": "diode",
+      "name": "Laser diode",
+      "color": "#ff3b3b",
+      "enabled": false,
+      "p1": {
+        "x": 392.6,
+        "y": -500
+      },
+      "p2": {
+        "x": 392.6,
+        "y": 500
+      }
+    },
+    {
+      "id": "ne_he",
+      "name": "Ne\u2013He",
+      "color": "#ff5c33",
+      "enabled": true,
+      "p1": {
+        "x": 360,
+        "y": -193.3
+      },
+      "p2": {
+        "x": 360.4,
+        "y": 206.7
+      }
+    }
+  ]
+}

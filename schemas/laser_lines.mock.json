@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "snap_line_id": "demo_beam",
+  "lines": [
+    {
+      "id": "demo_beam",
+      "name": "Mock table beam",
+      "color": "#ff3b3b",
+      "enabled": true,
+      "p1": { "x": 0, "y": -450 },
+      "p2": { "x": 0, "y": 450 }
+    },
+    {
+      "id": "demo_secondary",
+      "name": "Mock secondary (angled)",
+      "color": "#ff8c42",
+      "enabled": false,
+      "p1": { "x": -200, "y": -200 },
+      "p2": { "x": 200, "y": 200 }
+    }
+  ]
+}
