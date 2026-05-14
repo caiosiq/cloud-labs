@@ -3,6 +3,8 @@ export const store = {
     labState: null,
     ghostState: {},
     draggingComponent: null,
+    /** Lab mm pose of the dragged component at mousedown (for Shift = H/V axis lock). */
+    dragComponentStartLab: null,
     isDragging: false,
     dragOffset: { x: 0, y: 0 },
     pendingCommands: new Set(),
@@ -54,4 +56,13 @@ export const store = {
     dragFromStorageTag: null,
     /** Ghost pose snapshot at mousedown when starting a drag-from-storage move (for cancel/revert). */
     dragFromStorageStartPose: null,
+    /**
+     * User-drawn alignment guides (client-side segments in lab mm). Persisted
+     * to localStorage — same snap rules as laser line segments.
+     */
+    guideLines: [],
+    /** While drawing a new guide: `{ startLab, currentLab }` in mm (Shift = H/V). */
+    guideDraw: null,
+    /** Pencil tool: draw guides on empty canvas; does not block selecting parts. */
+    pencilToolActive: false,
 };

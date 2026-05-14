@@ -38,6 +38,11 @@ import {
 /** Degrees per wheel tick while dragging a component (was 5°). */
 const ROTATION_WHEEL_STEP_DEG = 2.5;
 
+/** Snap to alignment segments (enabled laser lines + user guides) while dragging/dropping. */
+const ALIGNMENT_SNAP_THRESHOLD_MM = 10;
+const GUIDE_LINES_STORAGE_KEY = 'optics_alignment_guides_v1';
+const GUIDE_MIN_LENGTH_MM = 2;
+
 /**
  * One wheel tick: move toward current ± ROTATION_WHEEL_STEP_DEG. If that segment crosses a
  * cardinal angle (any multiple of 90°, i.e. … -180, -90, 0, 90, 180, 270, 360 …), land on that
@@ -240,6 +245,291 @@ function projectPointToLineModel(x, y, m) {
     const denom = 1 + m.a * m.a;
     const k = val / denom;
     return { x: x - k, y: y + m.a * k };
+}
+
+// --- Alignment guides: segment math, unified snap (lasers + user lines) ---
+
+/**
+ * Closest point on finite segment A–B to P; returns point + distance.
+ */
+function closestPointOnSegment(px, py, x1, y1, x2, y2) {
+    const vx = x2 - x1;
+    const vy = y2 - y1;
+    const wx = px - x1;
+    const wy = py - y1;
+    const c1 = wx * vx + wy * vy;
+    if (c1 <= 0) {
+        const d = Math.hypot(px - x1, py - y1);
+        return { x: x1, y: y1, dist: d };
+    }
+    const c2 = vx * vx + vy * vy;
+    if (c2 <= c1) {
+        const d = Math.hypot(px - x2, py - y2);
+        return { x: x2, y: y2, dist: d };
+    }
+    const t = c1 / c2;
+    const x = x1 + t * vx;
+    const y = y1 + t * vy;
+    return { x, y, dist: Math.hypot(px - x, py - y) };
+}
+
+/**
+ * Intersection of two finite segments (inclusive). Null if parallel or no crossing.
+ */
+function segmentSegmentIntersection(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2) {
+    const rx = ax2 - ax1;
+    const ry = ay2 - ay1;
+    const sx = bx2 - bx1;
+    const sy = by2 - by1;
+    const denom = rx * sy - ry * sx;
+    if (Math.abs(denom) < 1e-10) return null;
+    const qpx = ax1 - bx1;
+    const qpy = ay1 - by1;
+    const t = (qpx * sy - qpy * sx) / denom;
+    const u = (qpx * ry - qpy * rx) / denom;
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        return { x: ax1 + t * rx, y: ay1 + t * ry };
+    }
+    return null;
+}
+
+function collectAlignmentSegments() {
+    const segments = [];
+    const doc = store.laserLinesDoc;
+    if (doc && Array.isArray(doc.lines)) {
+        doc.lines.forEach((line) => {
+            if (!line || line.enabled === false || !line.p1 || !line.p2) return;
+            const seg = clipTwoPointLineToLabBounds(line.p1, line.p2);
+            if (!seg) return;
+            segments.push({ p1: seg[0], p2: seg[1], source: 'laser' });
+        });
+    }
+    (store.guideLines || []).forEach((g) => {
+        if (g && g.p1 && g.p2 && [g.p1.x, g.p1.y, g.p2.x, g.p2.y].every(Number.isFinite)) {
+            segments.push({ p1: { x: g.p1.x, y: g.p1.y }, p2: { x: g.p2.x, y: g.p2.y }, source: 'guide' });
+        }
+    });
+    return segments;
+}
+
+/**
+ * Snap (x,y) to the nearest snap point on enabled laser segments and user guides.
+ * Candidates: pairwise segment intersections + perpendicular feet on each segment.
+ * Picks the candidate within `threshold` with minimum distance to (x,y).
+ */
+function snapLabPointToAlignmentGuides(x, y, threshold = ALIGNMENT_SNAP_THRESHOLD_MM) {
+    const segments = collectAlignmentSegments();
+    if (segments.length === 0) return { x, y };
+
+    let bestDist = threshold;
+    let bestX = x;
+    let bestY = y;
+
+    for (let i = 0; i < segments.length; i++) {
+        for (let j = i + 1; j < segments.length; j++) {
+            const A = segments[i];
+            const B = segments[j];
+            const I = segmentSegmentIntersection(
+                A.p1.x,
+                A.p1.y,
+                A.p2.x,
+                A.p2.y,
+                B.p1.x,
+                B.p1.y,
+                B.p2.x,
+                B.p2.y,
+            );
+            if (!I) continue;
+            const d = Math.hypot(x - I.x, y - I.y);
+            if (d < bestDist) {
+                bestDist = d;
+                bestX = I.x;
+                bestY = I.y;
+            }
+        }
+    }
+
+    segments.forEach((s) => {
+        const c = closestPointOnSegment(x, y, s.p1.x, s.p1.y, s.p2.x, s.p2.y);
+        if (c.dist < bestDist) {
+            bestDist = c.dist;
+            bestX = c.x;
+            bestY = c.y;
+        }
+    });
+
+    return { x: bestX, y: bestY };
+}
+
+/**
+ * Pointer lab position during a component drag: optional Shift locks motion to
+ * horizontal or vertical through (sx,sy), same rule as `constrainGuideEndWithShift`.
+ * Then alignment snap; if Shift is on, project back onto that axis so the ghost
+ * stays glued to the line.
+ */
+function snapLabPointWithOptionalShiftAxis(sx, sy, cx, cy, shiftKey) {
+    let x = cx;
+    let y = cy;
+    let horizontal = true;
+    if (shiftKey) {
+        const dx = cx - sx;
+        const dy = cy - sy;
+        horizontal = Math.abs(dx) >= Math.abs(dy);
+        const c = constrainGuideEndWithShift(sx, sy, cx, cy, true);
+        x = c.x;
+        y = c.y;
+    }
+    const snapped = snapLabPointToAlignmentGuides(x, y, ALIGNMENT_SNAP_THRESHOLD_MM);
+    if (!shiftKey) return snapped;
+    if (horizontal) {
+        return { x: snapped.x, y: sy };
+    }
+    return { x: sx, y: snapped.y };
+}
+
+function loadGuideLinesFromStorage() {
+    try {
+        const raw = localStorage.getItem(GUIDE_LINES_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return;
+        store.guideLines = parsed.filter(
+            (g) =>
+                g &&
+                g.p1 &&
+                g.p2 &&
+                [g.p1.x, g.p1.y, g.p2.x, g.p2.y].every((v) => Number.isFinite(Number(v))),
+        );
+    } catch (e) {
+        console.warn('Alignment guides load failed', e);
+        store.guideLines = [];
+    }
+}
+
+function saveGuideLinesToStorage() {
+    try {
+        localStorage.setItem(GUIDE_LINES_STORAGE_KEY, JSON.stringify(store.guideLines || []));
+    } catch (e) {
+        console.warn('Alignment guides save failed', e);
+    }
+}
+
+function drawAlignmentGuides() {
+    const guides = store.guideLines || [];
+    guides.forEach((g) => {
+        if (!g || !g.p1 || !g.p2) return;
+        const a = mmToPx(g.p1.x, g.p1.y);
+        const b = mmToPx(g.p2.x, g.p2.y);
+        ctx.strokeStyle = 'rgba(34, 211, 238, 0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 6]);
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = 'rgba(34, 211, 238, 0.45)';
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.shadowBlur = 0;
+    });
+
+    const gd = store.guideDraw;
+    if (gd && gd.startLab && gd.currentLab) {
+        const a = mmToPx(gd.startLab.x, gd.startLab.y);
+        const b = mmToPx(gd.currentLab.x, gd.currentLab.y);
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.95)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+}
+
+/**
+ * With Shift: lock second endpoint to horizontal or vertical through start.
+ */
+function constrainGuideEndWithShift(sx, sy, cx, cy, shiftKey) {
+    if (!shiftKey) return { x: cx, y: cy };
+    const dx = cx - sx;
+    const dy = cy - sy;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+        return { x: cx, y: sy };
+    }
+    return { x: sx, y: cy };
+}
+
+function updatePencilToolButtonUi() {
+    const btn = document.getElementById('pencil-tool-btn');
+    if (!btn) return;
+    const on = !!store.pencilToolActive;
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (canvas) {
+        canvas.style.cursor = on ? 'crosshair' : '';
+    }
+}
+
+function bindGuideDrawListeners() {
+    const onMove = (ev) => {
+        if (!store.guideDraw) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = ev.clientX - rect.left;
+        const my = ev.clientY - rect.top;
+        const lab = pxToMm(mx, my);
+        const con = constrainGuideEndWithShift(
+            store.guideDraw.startLab.x,
+            store.guideDraw.startLab.y,
+            lab.x,
+            lab.y,
+            ev.shiftKey,
+        );
+        store.guideDraw.currentLab = con;
+        render();
+    };
+    const onKey = (ev) => {
+        if (ev.key !== 'Escape') return;
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('keydown', onKey);
+        store.guideDraw = null;
+        log('Guide draw cancelled.', 'info');
+        render();
+    };
+    const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('keydown', onKey);
+        finishGuideDraw();
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('keydown', onKey, { passive: true });
+}
+
+function finishGuideDraw() {
+    const gd = store.guideDraw;
+    store.guideDraw = null;
+    if (!gd || !gd.startLab || !gd.currentLab) {
+        render();
+        return;
+    }
+    const dx = gd.currentLab.x - gd.startLab.x;
+    const dy = gd.currentLab.y - gd.startLab.y;
+    if (Math.hypot(dx, dy) < GUIDE_MIN_LENGTH_MM) {
+        render();
+        return;
+    }
+    if (!Array.isArray(store.guideLines)) store.guideLines = [];
+    store.guideLines.push({
+        id: `g_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        p1: { x: gd.startLab.x, y: gd.startLab.y },
+        p2: { x: gd.currentLab.x, y: gd.currentLab.y },
+    });
+    saveGuideLinesToStorage();
+    log('Alignment guide added. Drag components near it to snap (with laser lines).', 'info');
+    render();
 }
 
 function coeffsFromLaserLinesDoc(doc) {
@@ -966,7 +1256,7 @@ canvas.addEventListener('mousedown', (e) => {
     const mouseY = e.clientY - rect.top;
 
     const hit = getComponentAtPosition(mouseX, mouseY);
-    
+
     if (hit) {
         if (store.dragFromStorageTag && hit.name !== store.dragFromStorageTag) {
             store.dragFromStorageTag = null;
@@ -980,7 +1270,7 @@ canvas.addEventListener('mousedown', (e) => {
         if (store.selectedComponent !== hit.name) {
             store.selectedComponent = hit.name;
             updateContextPanel(hit.name);
-            render(); 
+            render();
             log(`Selected ${hit.name}`, "info");
         } else {
             const stComp = store.labState.components[hit.name];
@@ -994,6 +1284,7 @@ canvas.addEventListener('mousedown', (e) => {
                         y: g.y,
                         rotation: typeof g.rotation === 'number' ? g.rotation : 0,
                     };
+                    store.dragComponentStartLab = { x: g.x, y: g.y };
                     const p = mmToPx(g.x, g.y);
                     store.dragOffset = { x: mouseX - p.x, y: mouseY - p.y };
                     return;
@@ -1003,10 +1294,22 @@ canvas.addEventListener('mousedown', (e) => {
             }
             store.isDragging = true;
             store.draggingComponent = hit.name;
+            const g0 = store.ghostState[hit.name];
+            store.dragComponentStartLab = { x: g0.x, y: g0.y };
             const p = mmToPx(store.ghostState[hit.name].x, store.ghostState[hit.name].y);
             store.dragOffset = { x: mouseX - p.x, y: mouseY - p.y };
         }
     } else {
+        if (store.pencilToolActive) {
+            const lab = pxToMm(mouseX, mouseY);
+            store.guideDraw = {
+                startLab: { x: lab.x, y: lab.y },
+                currentLab: { x: lab.x, y: lab.y },
+            };
+            bindGuideDrawListeners();
+            render();
+            return;
+        }
         clearSelectionAndHideContextPanel();
     }
 });
@@ -1869,30 +2172,17 @@ canvas.addEventListener('mousemove', (e) => {
 
     const lab = pxToMm(mouseX - store.dragOffset.x, mouseY - store.dragOffset.y);
 
-    let finalX = lab.x;
-    let finalY = lab.y;
-
-    // Snapping: nearest enabled laser line (schemas/laser_lines.*.json)
-    const doc = store.laserLinesDoc;
-    if (doc && Array.isArray(doc.lines)) {
-        const SNAP_THRESHOLD_MM = 10;
-        let bestDist = SNAP_THRESHOLD_MM;
-        let bestPt = { x: finalX, y: finalY };
-        doc.lines.forEach((line) => {
-            if (!line || line.enabled === false || !line.p1 || !line.p2) return;
-            const m = twoPointsToLineModel(line.p1, line.p2);
-            if (!m) return;
-            const d = distancePointToLineModel(finalX, finalY, m);
-            if (d < bestDist) {
-                bestDist = d;
-                bestPt = projectPointToLineModel(finalX, finalY, m);
-            }
-        });
-        if (bestDist < SNAP_THRESHOLD_MM) {
-            finalX = bestPt.x;
-            finalY = bestPt.y;
-        }
-    }
+    const o = store.dragComponentStartLab;
+    const useShiftAxis = e.shiftKey && o;
+    const snapped = snapLabPointWithOptionalShiftAxis(
+        useShiftAxis ? o.x : lab.x,
+        useShiftAxis ? o.y : lab.y,
+        lab.x,
+        lab.y,
+        useShiftAxis,
+    );
+    const finalX = snapped.x;
+    const finalY = snapped.y;
 
     store.ghostState[store.draggingComponent].x = finalX;
     store.ghostState[store.draggingComponent].y = finalY;
@@ -1954,6 +2244,7 @@ canvas.addEventListener('mouseup', async (e) => {
             }
             render();
             store.draggingComponent = null;
+            store.dragComponentStartLab = null;
             return;
         }
 
@@ -1977,6 +2268,7 @@ canvas.addEventListener('mouseup', async (e) => {
         }
 
         store.draggingComponent = null;
+        store.dragComponentStartLab = null;
     }
 });
 
@@ -2000,10 +2292,11 @@ canvas.addEventListener('drop', (e) => {
             
             const type = e.dataTransfer.getData("application/type") || "OPTICAL_MIRROR";
             const lab = pxToMm(mouseX, mouseY);
+            const snapped = snapLabPointToAlignmentGuides(lab.x, lab.y, ALIGNMENT_SNAP_THRESHOLD_MM);
             // Initialize ghost state for new component immediately
             store.ghostState[componentName] = {
-                x: lab.x,
-                y: lab.y,
+                x: snapped.x,
+                y: snapped.y,
                 rotation: 0
             };
 
@@ -2686,6 +2979,7 @@ function render() {
     clearCanvas();
     drawStorageZone();
     drawLaserPath();
+    drawAlignmentGuides();
 
     if (!store.labState) return;
 
@@ -3398,11 +3692,12 @@ function _laserLineAttrEscape(s) {
 
 function renderLaserLinesPanel() {
     const root = document.getElementById('laser-lines-list');
+    const dock = document.getElementById('laser-lines-dock');
     if (!root) return;
     const doc = store.laserLinesDoc;
+    if (dock) dock.style.display = '';
     if (!doc || !Array.isArray(doc.lines) || doc.lines.length === 0) {
-        root.innerHTML =
-            '<div style="padding:10px 12px;font-size:11px;color:var(--text-muted);line-height:1.4;">No lines defined. Add entries in <code>schemas/laser_lines.*.json</code> for this lab mode.</div>';
+        root.innerHTML = '';
         return;
     }
     const snap = doc.snap_line_id;
@@ -3414,16 +3709,20 @@ function renderLaserLinesPanel() {
             const rawC = (line.color && String(line.color).trim()) || '#ff3b3b';
             const c = /^#[0-9A-Fa-f]{3,8}$/i.test(rawC) ? rawC : '#ff3b3b';
             const idA = _laserLineAttrEscape(id);
-            const snapTag =
-                id === snap
-                    ? ' <span style="font-size:9px;color:var(--text-muted);">(snap)</span>'
-                    : '';
+            const isSnap = id === snap;
+            // Tooltip carries name + behavior hint + snap marker (no on-screen label
+            // because the dock is icons-only; hover surfaces the label cheaply).
+            const tip =
+                `${name}${isSnap ? ' (snap)' : ''} — click to ${en ? 'hide' : 'show'}, double-click to edit`;
             return (
-                `<div class="laser-line-row" data-line-id="${idA}" title="Double-click to edit reference points">` +
-                `<input type="checkbox" class="laser-line-enabled" data-line-id="${idA}" ${en ? 'checked' : ''} title="Show on canvas">` +
-                `<span class="laser-line-swatch" style="background:${c}"></span>` +
-                `<span class="laser-line-name">${name}</span>${snapTag}` +
-                `</div>`
+                `<button type="button" class="laser-line-icon${en ? ' is-enabled' : ''}${isSnap ? ' is-snap' : ''}" ` +
+                `data-line-id="${idA}" ` +
+                `style="--laser-line-color:${c}" ` +
+                `title="${tip}" ` +
+                `aria-pressed="${en ? 'true' : 'false'}" ` +
+                `aria-label="${name}${isSnap ? ' (snap line)' : ''}">` +
+                `<span class="material-icons-round" aria-hidden="true">my_location</span>` +
+                `</button>`
             );
         })
         .join('');
@@ -3500,40 +3799,89 @@ async function applyLaserLineGeometryEdit() {
     }
 }
 
+async function toggleLaserLineEnabled(id, nextEnabled) {
+    try {
+        const res = await fetch(`/api/laser-lines/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: !!nextEnabled }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        store.laserLinesDoc = data;
+        store.laserLineCoeffs = coeffsFromLaserLinesDoc(store.laserLinesDoc);
+        renderLaserLinesPanel();
+        render();
+        log(`Laser line "${id}" ${nextEnabled ? 'shown' : 'hidden'}.`, 'info');
+    } catch (err) {
+        console.error(err);
+        log(`Toggle failed: ${err.message || err}`, 'error');
+    }
+}
+
+function initAlignmentDockTools() {
+    loadGuideLinesFromStorage();
+    const pencil = document.getElementById('pencil-tool-btn');
+    const clearBtn = document.getElementById('clear-guides-btn');
+    if (pencil) {
+        pencil.addEventListener('click', () => {
+            store.pencilToolActive = !store.pencilToolActive;
+            updatePencilToolButtonUi();
+            log(
+                store.pencilToolActive
+                    ? 'Pencil on: drag on empty table to draw a guide (Shift = horizontal / vertical).'
+                    : 'Pencil off.',
+                'info',
+            );
+        });
+    }
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            store.guideLines = [];
+            saveGuideLinesToStorage();
+            log('Cleared drawn alignment guides.', 'info');
+            render();
+        });
+    }
+    updatePencilToolButtonUi();
+}
+
 function initLaserLinesPanel() {
     const list = document.getElementById('laser-lines-list');
     if (!list) return;
 
-    list.addEventListener('change', async (e) => {
-        const t = e.target;
-        if (!t.classList.contains('laser-line-enabled')) return;
-        const id = t.getAttribute('data-line-id');
+    // Click on icon = toggle visibility; double-click = open edit modal.
+    // Browsers fire two `click` events before a `dblclick`, so we defer the
+    // single-click toggle behind a short timer and cancel it if `dblclick`
+    // arrives -- otherwise every edit-open would also flip the visibility.
+    let pendingClickTimer = null;
+    const DOUBLE_CLICK_GUARD_MS = 220;
+
+    list.addEventListener('click', (e) => {
+        const icon = e.target.closest('.laser-line-icon');
+        if (!icon) return;
+        const id = icon.getAttribute('data-line-id');
         if (!id) return;
-        try {
-            const res = await fetch(`/api/laser-lines/${encodeURIComponent(id)}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled: !!t.checked }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.detail || res.statusText);
-            store.laserLinesDoc = data;
-            store.laserLineCoeffs = coeffsFromLaserLinesDoc(store.laserLinesDoc);
-            renderLaserLinesPanel();
-            render();
-            log(`Laser line "${id}" ${t.checked ? 'shown' : 'hidden'}.`, 'info');
-        } catch (err) {
-            console.error(err);
-            t.checked = !t.checked;
-            log(`Toggle failed: ${err.message || err}`, 'error');
+        const wasEnabled = icon.classList.contains('is-enabled');
+        if (pendingClickTimer) {
+            clearTimeout(pendingClickTimer);
+            pendingClickTimer = null;
+            return;
         }
+        pendingClickTimer = setTimeout(() => {
+            pendingClickTimer = null;
+            toggleLaserLineEnabled(id, !wasEnabled);
+        }, DOUBLE_CLICK_GUARD_MS);
     });
 
     list.addEventListener('dblclick', (e) => {
-        if (e.target.classList.contains('laser-line-enabled')) return;
-        const row = e.target.closest('.laser-line-row');
-        if (!row) return;
-        const id = row.getAttribute('data-line-id');
+        const icon = e.target.closest('.laser-line-icon');
+        if (!icon) return;
+        if (pendingClickTimer) {
+            clearTimeout(pendingClickTimer);
+            pendingClickTimer = null;
+        }
+        const id = icon.getAttribute('data-line-id');
         if (id) openLaserLineEditModal(id);
     });
 
@@ -3647,6 +3995,7 @@ function init() {
         });
     }
     
+    initAlignmentDockTools();
     initLaserLinesPanel();
     initVideoFeed();
     initUnifiedPanel();

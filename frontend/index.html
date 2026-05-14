@@ -547,6 +547,25 @@
             <canvas id="optical-table" width="1000" height="700"></canvas>
         </div>
 
+        <!--
+            Alignment dock (left of table): pencil + clear drawn guides, then
+            laser-line toggles. Pencil: drag on empty canvas to draw guides
+            (Shift = lock horizontal / vertical). Snapping uses laser segments
+            + drawn guides (intersection priority = nearest snap point). Laser
+            icons: click = visibility, double-click = edit P1/P2.
+        -->
+        <div id="laser-lines-dock" role="toolbar" aria-label="Alignment and laser lines">
+            <div id="alignment-dock-tools" class="alignment-dock-tools">
+                <button type="button" id="pencil-tool-btn" class="laser-dock-tool-btn" title="Pencil: draw alignment guides on the table. Drag on empty canvas. Hold Shift for horizontal or vertical. Snapping applies to laser lines and guides." aria-pressed="false">
+                    <span class="material-icons-round" aria-hidden="true">edit</span>
+                </button>
+                <button type="button" id="clear-guides-btn" class="laser-dock-tool-btn" title="Clear all drawn guides">
+                    <span class="material-icons-round" aria-hidden="true">delete_sweep</span>
+                </button>
+            </div>
+            <div id="laser-lines-list"></div>
+        </div>
+
         <!-- Component controls: floats over table (selection, pose, move, optimize, motors, observe) -->
         <div id="context-panel" role="region" aria-label="Component controls">
             <div class="context-panel__header" style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 0 0 12px 0; border-bottom: 1px solid var(--border-color);">
@@ -634,13 +653,6 @@
         </div>
 
         <div id="sidebar-right-scroll">
-        <div id="laser-lines-section" style="flex-shrink: 0; border-bottom: 1px solid var(--border-color);">
-            <div class="section-header">Laser lines</div>
-            <p style="margin: 0 12px 8px; font-size: 10px; color: var(--text-muted); line-height: 1.45;">
-                Per lab mode (<code>schemas/laser_lines.*.json</code>). Toggle visibility (saved). <strong>Double-click</strong> a row to edit P1/P2 — apply only after confirm.
-            </p>
-            <div id="laser-lines-list" class="laser-lines-list" role="list" aria-label="Laser line visibility"></div>
-        </div>
         <!-- Table cam capture: real = hardware; mock = synthetic PNG from /api/table-cam/capture -->
         <div id="table-cam-section" style="border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
             <div class="section-header">Table cam capture</div>
@@ -804,26 +816,130 @@
         .step-del { color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; font-size: 14px; }
         .step-del:hover { background: rgba(239, 68, 68, 0.1); }
 
-        .laser-lines-list { padding: 0 0 8px; }
-        .laser-line-row {
+        /* --- Laser-lines floating dock (left of canvas-wrapper, over #main-content) ---
+           Vertical strip of color-coded toggle icons. Mirrors the absolute-
+           positioning pattern used by #context-panel on the opposite side. */
+        #laser-lines-dock {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 5;
+            pointer-events: none; /* let canvas-wrapper own clicks outside controls */
+        }
+        #laser-lines-dock > * { pointer-events: auto; }
+        .alignment-dock-tools {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .laser-dock-tool-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 2px solid rgba(148, 163, 184, 0.65);
+            background: rgba(15, 17, 21, 0.92);
+            color: var(--text-secondary);
+            padding: 0;
+            cursor: pointer;
             display: flex;
             align-items: center;
+            justify-content: center;
+            transition:
+                background-color 140ms ease,
+                border-color 140ms ease,
+                box-shadow 140ms ease,
+                transform 80ms ease,
+                color 140ms ease;
+        }
+        .laser-dock-tool-btn:hover {
+            transform: scale(1.06);
+            border-color: rgba(226, 232, 240, 0.55);
+            color: var(--text-primary);
+        }
+        .laser-dock-tool-btn:focus-visible {
+            outline: 2px solid var(--primary-accent);
+            outline-offset: 2px;
+        }
+        .laser-dock-tool-btn .material-icons-round {
+            font-size: 20px;
+            line-height: 1;
+            pointer-events: none;
+        }
+        #pencil-tool-btn[aria-pressed="true"] {
+            border-color: #38bdf8;
+            color: #38bdf8;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+            background: rgba(56, 189, 248, 0.1);
+        }
+        #laser-lines-list {
+            display: flex;
+            flex-direction: column;
             gap: 8px;
-            padding: 8px 12px;
-            border-bottom: 1px solid var(--border-color);
-            cursor: default;
+        }
+        .laser-line-icon {
+            --laser-line-color: #ff3b3b;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 2px solid var(--laser-line-color);
+            background: transparent;
+            padding: 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--laser-line-color);
+            transition:
+                background-color 140ms ease,
+                box-shadow 140ms ease,
+                transform 80ms ease,
+                color 140ms ease,
+                opacity 140ms ease;
+            position: relative;
             user-select: none;
+            -webkit-user-select: none;
         }
-        .laser-line-row:hover { background: rgba(255, 255, 255, 0.04); }
-        .laser-line-swatch {
-            width: 10px;
-            height: 10px;
-            border-radius: 2px;
-            flex-shrink: 0;
-            box-shadow: 0 0 4px rgba(0, 0, 0, 0.35);
+        .laser-line-icon:hover {
+            transform: scale(1.06);
+            box-shadow: 0 0 12px color-mix(in srgb, var(--laser-line-color) 55%, transparent);
         }
-        .laser-line-name { flex: 1; font-size: 12px; min-width: 0; }
-        .laser-line-enabled { flex-shrink: 0; cursor: pointer; }
+        .laser-line-icon:focus-visible {
+            outline: 2px solid var(--primary-accent);
+            outline-offset: 2px;
+        }
+        .laser-line-icon .material-icons-round {
+            font-size: 20px;
+            line-height: 1;
+            pointer-events: none;
+        }
+        /* Enabled = filled / lit; takes the line color as background, white icon */
+        .laser-line-icon.is-enabled {
+            background: var(--laser-line-color);
+            color: #ffffff;
+            box-shadow: 0 0 14px color-mix(in srgb, var(--laser-line-color) 65%, transparent);
+        }
+        .laser-line-icon.is-enabled:hover {
+            box-shadow: 0 0 18px color-mix(in srgb, var(--laser-line-color) 80%, transparent);
+        }
+        /* Disabled = outlined / dim */
+        .laser-line-icon:not(.is-enabled) {
+            opacity: 0.62;
+        }
+        .laser-line-icon:not(.is-enabled):hover {
+            opacity: 0.92;
+        }
+        /* Snap-line indicator: thin contrasting outer ring */
+        .laser-line-icon.is-snap::after {
+            content: '';
+            position: absolute;
+            inset: -5px;
+            border-radius: 50%;
+            border: 1.5px dashed var(--text-secondary);
+            pointer-events: none;
+        }
         #laser-line-edit-modal .laser-edit-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;

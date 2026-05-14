@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-04-29T02:27:56.258451",
+  "last_updated": "2026-05-14T00:53:40.321615",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -155,8 +155,8 @@
       "tunables": {
         "presence": "breadboard",
         "nominal_pose": {
-          "x": 296.9,
-          "y": 185.9,
+          "x": 296.8,
+          "y": 339.9,
           "rotation": 45.0
         },
         "nominal_motor_positions": {},
@@ -170,8 +170,8 @@
       },
       "measurables": {
         "pose": {
-          "x": 296.4480552659953,
-          "y": 185.73405358492874,
+          "x": 296.8,
+          "y": 339.9,
           "rotation": 45.0
         },
         "last_optimization_score": null,
