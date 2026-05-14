@@ -8,7 +8,12 @@ import {
     LAB_Y_MAX,
     LAB_SCALE,
     LAB_CENTER_PX,
+    DANGER_RADIUS_MM,
     BREADBOARD_GRID_OFFSET_X_MM,
+    BREADBOARD_GRID_OFFSET_Y_MM,
+    BREADBOARD_GRID_SPACING_MM,
+    STORAGE_RECT_X_MIN,
+    STORAGE_RECT_Y_MIN,
     POLLING_INTERVAL,
 } from './config.js';
 import { mmToPx, pxToMm } from './canvas/coordinates.js';
@@ -1189,7 +1194,7 @@ function checkCollision(targetId, x, y, opts = {}) {
         if (!isPlacedRegion(x, y)) {
             return {
                 detected: true,
-                other: 'BREADBOARD AREA (release outside storage: not both x<0 and y<0)',
+                other: 'BREADBOARD AREA (release outside the shaded storage region)',
             };
         }
     } else {
@@ -1220,7 +1225,7 @@ function checkCollision(targetId, x, y, opts = {}) {
 
     // Check Danger Zone (R=126/2mm)
     const distOrigin = Math.sqrt(x*x + y*y);
-    if (distOrigin < 90 + r1) {
+    if (distOrigin < DANGER_RADIUS_MM + r1) {
         return { detected: true, other: "DANGER ZONE (Robot Base)" };
     }
 
@@ -1583,7 +1588,7 @@ function updateContextPanel(name) {
                 return;
             }
             if (isStorageRegion(tx, ty)) {
-                log('Target must be outside the storage quadrant (not both x<0 and y<0).', 'error');
+                log('Target must be outside the configured storage (inventory) rectangle.', 'error');
                 return;
             }
             await sendCommand({
@@ -2496,7 +2501,7 @@ function clearCanvas() {
     
     // Draw Danger Zone (R=10cm around origin)
     ctx.beginPath();
-    ctx.arc(LAB_CENTER_PX.x, LAB_CENTER_PX.y, 90 * LAB_SCALE, 0, Math.PI * 2); // 90mm
+    ctx.arc(LAB_CENTER_PX.x, LAB_CENTER_PX.y, DANGER_RADIUS_MM * LAB_SCALE, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(239, 68, 68, 0.1)'; // Reddish transparent
     ctx.fill();
     ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
@@ -2540,13 +2545,13 @@ function clearCanvas() {
 
     // Draw Breadboard Grid (25mm spacing), shifted in X to match physical hole columns (see BREADBOARD_GRID_OFFSET_X_MM).
     ctx.fillStyle = '#2a2e36';
-    const gridSpacingMm = 25;
-    
+    const gridSpacingMm = BREADBOARD_GRID_SPACING_MM;
+
     // Calculate start/end based on lab coordinates
     // We iterate in mm and convert to px to ensure accuracy
     for (let xMm = LAB_X_MIN; xMm <= LAB_X_MAX; xMm += gridSpacingMm) {
         for (let yMm = LAB_Y_MIN; yMm <= LAB_Y_MAX; yMm += gridSpacingMm) {
-            const p = mmToPx(xMm + BREADBOARD_GRID_OFFSET_X_MM, yMm);
+            const p = mmToPx(xMm + BREADBOARD_GRID_OFFSET_X_MM, yMm + BREADBOARD_GRID_OFFSET_Y_MM);
             // Only draw if within canvas bounds (though mmToPx should handle mapping)
             if (p.x >= 0 && p.x <= CANVAS_WIDTH && p.y >= 0 && p.y <= CANVAS_HEIGHT) {
                 ctx.beginPath(); 
@@ -2557,12 +2562,14 @@ function clearCanvas() {
     }
 }
 
-/** Visual for third quadrant (x<0, y<0): storage / inventory area. */
+/** Visual inventory region: rectangle toward table center (from layout storage_grid.q3). */
 function drawStorageZone() {
-    const pSw = mmToPx(LAB_X_MIN, LAB_Y_MIN);
-    const pSe = mmToPx(0, LAB_Y_MIN);
+    const sx = STORAGE_RECT_X_MIN;
+    const sy = STORAGE_RECT_Y_MIN;
+    const pSw = mmToPx(sx, sy);
+    const pSe = mmToPx(0, sy);
     const pNe = mmToPx(0, 0);
-    const pNw = mmToPx(LAB_X_MIN, 0);
+    const pNw = mmToPx(sx, 0);
     ctx.beginPath();
     ctx.moveTo(pSw.x, pSw.y);
     ctx.lineTo(pSe.x, pSe.y);
@@ -2578,7 +2585,7 @@ function drawStorageZone() {
     ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(148, 163, 184, 0.95)';
     ctx.font = '11px Inter, sans-serif';
-    ctx.fillText('Storage (Q3)', pSw.x + 10, pSw.y - 10);
+    ctx.fillText('Storage', pSw.x + 10, pSw.y - 10);
 
     const spec = store.storageGridSpec;
     if (!spec || !spec.nx || !spec.ny) return;
@@ -3287,7 +3294,7 @@ function updateLayoutConflictModal() {
         const ty = parseFloat(document.getElementById('lconf-ty')?.value || '0');
         const tr = parseFloat(document.getElementById('lconf-tr')?.value || '0');
         if (isStorageRegion(tx, ty)) {
-            log('Target must not be in storage quadrant (not both x<0 and y<0).', 'error');
+            log('Target must not lie in the storage (inventory) rectangle.', 'error');
             return;
         }
         dismissedLayoutIssueKeys.add(key);

@@ -136,11 +136,6 @@ class LabCommunicator:
     #: Backend tag used in log lines. Subclasses override.
     log_prefix: str = "[LAB]"
 
-    #: Absolute path to the component catalog JSON this backend loads from.
-    #: Each concrete implementation is expected to set this in ``__init__``
-    #: (mock and real lab use *different* catalog files -- see README).
-    catalog_file: Optional[str] = None
-
     #: Safety bound for ``z_lab`` (mm) accepted by ``hover_component``.
     #: Subclasses with a calibrated robot frame override (real uses
     #: ``MAX_SAFE_HOVER_Z_LAB_MM`` from ``coordinate_frames.py``); mock
@@ -173,21 +168,19 @@ class LabCommunicator:
     # ---------------------------------------------------------------
 
     def get_catalog(self) -> List[Dict[str, Any]]:
-        """Return the component catalog as a list of dicts.
+        """Return merged catalog rows (``component_library`` ∩ ``active_catalog``).
 
-        Always reads from disk so callers see on-disk edits without a
-        backend restart. Backends that maintain an in-memory
-        :attr:`catalog_map` mirror should keep it in sync separately.
+        Reloads from disk on every call so edits to ``lab_view`` JSON are visible
+        without a restart. In-memory :attr:`catalog_map` is refreshed by mock
+        via :meth:`~lab_communicator.mock.communicator.MockLabCommunicator._load_catalog`
+        when primitives need a fresh mirror.
         """
-        path = self.catalog_file
-        if not path or not os.path.exists(path):
-            return []
+        from lab_communicator.shared.catalog_bundle import merged_catalog_rows
+
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            return merged_catalog_rows()
         except Exception:
             return []
-        return data if isinstance(data, list) else []
 
     def _catalog_meta_for_tag(self, tag_id: str) -> Optional[Dict[str, Any]]:
         """Catalog metadata for ``tag_id`` (or ``None`` if unknown).

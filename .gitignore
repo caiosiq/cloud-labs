@@ -1,4 +1,4 @@
 .env
 
 # Mock lab table-cam snapshots written by observe (paths stored in measurables)
-schemas/mock_camera_captures/
+backend/lab_communicator/mock/lab_view/camera_captures/

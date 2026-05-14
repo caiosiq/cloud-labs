@@ -6,7 +6,7 @@ This repository is a **digital twin** for an autonomous optics lab: a browser-ba
 
 The UI separates **what you intend** (ghost / nominal poses on the canvas) from **what the lab reports** (solid geometry from polled state), including recipe replay and **golden** snapshots for drift checks.
 
-**Design reference:** **`model.md`** explains **return vs observe** for tunables/measurables; **`primitives.md`** lists HTTP primitives and routes. Implementation detail: **`backend/lab_primitives/README.md`**.
+**Design reference:** **`backend/lab_model/README.md`** (tunables vs measurables), **`backend/lab_primitives/README.md`** (HTTP command contract and dispatch). Lab backends and the on-disk **`LAB_VIEW_PATH`** bundle: **`backend/lab_communicator/README.md`**.
 
 ---
 
@@ -36,11 +36,11 @@ In **real** mode, **`RealLabCommunicator`** maps **lab-frame** intent (what the 
 ## What you see in the app
 
 - **Dark, lab-style UI** (Inter typography, Material Icons): main table in the center, **left** sidebar for placed components and selection, **right** sidebar for live/overhead-style video, table-camera capture, recipes, and activity log.
-- **2D breadboard canvas** (HTML5 Canvas): metric coordinates (~±500 mm), grid, robot-base **danger zone**, and a **laser path** overlay (mock coefficients by default; in real mode from `laser_line_fit.npy` at the repo root when present).
+- **2D breadboard canvas** (HTML5 Canvas): metric coordinates (~±500 mm by default), grid, robot-base **danger zone**, and **laser overlays** from **`laser_lines.json`** inside **`LAB_VIEW_PATH`** (`GET /api/laser-line`, `GET /api/laser-lines`). Geometry is aligned with the backend via **`GET /api/lab-layout`** before **`app-main.js`** loads.
 - **Solid vs ghost**: placed components draw twice—opaque **physical** pose and semi-transparent **intent** pose with a dashed “drift” segment when they differ.
 - **Interaction**: select a part; **move**, **optimize**, **motors**, and **observe** live in a **floating panel** docked to the **top-right of the table** (over the canvas). The **left sidebar** lists components plus **Refresh Pose** and **Save / Load state**. Drag on canvas with optional **snap toward the laser line**; wheel to rotate while dragging. **Motor jog** appears for catalog entries that declare `motor_ids`.
-- **Recipes**: record MOVE/OPTIMIZE steps, save under `recipes/`, play back via the API; successful runs can emit a `{recipe_id}_golden.json` reference.
-- **Saved layouts**: **Save / Load lab state** writes JSON under `states/` (mock-friendly; useful for repeatable demos).
+- **Recipes**: record MOVE/OPTIMIZE steps; files live under **`{LAB_VIEW_PATH}/recipes/`** (see **`LAB_VIEW_PATH`** in `.env`). Successful runs can emit a **`{recipe_id}_golden.json`** reference beside the recipe JSON.
+- **Saved layouts**: **Save / Load lab state** writes JSON under **`{LAB_VIEW_PATH}/states/`** (same bundle as layout and catalog — distinct per deployment).
 - **Command Console** (bottom of the main page): typed shorthand for moves, optimize, and related actions; backed by ES modules (`command-parse.js`, `command-api.js`, `command-complete.js`, …) and wired through **`window.__commandConsoleDeps`** (see **Frontend code layout** below).
 - **Debug page** at `/debug` for deeper inspection (ghost derivation, golden listing, etc.).
 
@@ -54,8 +54,10 @@ There is **no bundler or SPA framework**: the browser loads **native ES modules*
 
 `index.html` registers two module scripts **in this order**:
 
-1. **`/static/js/main.js`** — runs the lab UI and defines **`window.__commandConsoleDeps`** before the console needs it.
-2. **`/static/js/command-console.js`** — shell, history, tab completion; reads **`__commandConsoleDeps`** for `sendCommand`, `log`, `render`, lab state, ghost state, and collision checks.
+1. **`/static/js/main.js`** — thin entry that imports **`bootstrap.js`** only.
+2. **`/static/js/command-console.js`** — shell, history, tab completion; reads **`__commandConsoleDeps`** (assigned later by **`app-main.js`**) for `sendCommand`, `log`, `render`, lab state, ghost state, and collision checks.
+
+**`bootstrap.js`** (imported by **`main.js`**) fetches **`GET /api/lab-layout`**, applies it to **`config.js`**, then dynamically imports **`app-main.js`** so the canvas matches **`layout.json`** before any drawing runs.
 
 The root route rewrites **`js/main.js?v=…`** in the served HTML with a startup timestamp so refreshes pick up changes while **`NoCacheMiddleware`** still applies **`no-store`** on `/static` in development.
 
@@ -63,10 +65,10 @@ The root route rewrites **`js/main.js?v=…`** in the served HTML with a startup
 
 | File | Role |
 |------|------|
-| **`js/main.js`** | Entry: imports **`bootstrap.js`**. |
-| **`js/bootstrap.js`** | Side-effect import of **`app-main.js`** (starts the app). |
+| **`js/main.js`** | Entry: **`import './bootstrap.js'`** only. |
+| **`js/bootstrap.js`** | **`fetch('/api/lab-layout')`** → **`applyLabLayoutFromApiDoc`** → dynamic **`import('./app-main.js')`**; shows an error banner if layout load fails (check **`LAB_VIEW_PATH`**). |
 | **`js/app-main.js`** | Main UI: DOM hooks, **`fetch`** polling, canvas draw/interaction, sidebars (components, context, recipes, library), modals, video / table-cam / Cobyla UI, **`init()`**, and assignment of **`window.__commandConsoleDeps`**. |
-| **`js/config.js`** | Canvas size, lab bounds (mm), derived scale, breadboard grid offset, **`POLLING_INTERVAL`**. |
+| **`js/config.js`** | Canvas size; mutable lab bounds, danger radius, and breadboard grid fields set from **`/api/lab-layout`** (reasonable defaults until applied); **`POLLING_INTERVAL`**. |
 | **`js/state/store.js`** | Single mutable **`store`** object: `labState`, `ghostState`, `catalogMap`, selection, optimization flags, recipe recording buffers, table-cam selection, etc. |
 | **`js/canvas/coordinates.js`** | **`mmToPx`** / **`pxToMm`** for the lab frame (origin at table center, +Y up on screen). |
 | **`js/command-console.js`** | Console UI loop; depends on **`command-parse.js`**, **`command-api.js`**, **`command-complete.js`**. |
@@ -86,16 +88,16 @@ Larger slices of logic (dedicated API client, separate render module) can be pee
    Client-side **ghost** poses track targets; the backend stores commanded values under **`tunables`** (`nominal_pose`, `placement.mode`, `storage`, `presence`). Debug: `GET /api/debug/ghost-state` exposes tunables-derived intent. **`GET /api/components/{tag_id}/tunables`** and **`/measurables`** return slices for one tag.
 
 3. **Tier 3 — Recipe (procedure)**  
-   JSON sequences of steps (`MOVE_COMPONENT`, `OPTIMIZE`, `PLACE`, `REMOVE`, …) stored in `recipes/{id}.json`, played asynchronously by the server.
+   JSON sequences of steps (`MOVE_COMPONENT`, `OPTIMIZE`, `PLACE`, `REMOVE`, …) stored under **`{LAB_VIEW_PATH}/recipes/{id}.json`**, played asynchronously by the server.
 
 4. **Tier 4 — Golden state (reference)**  
-   After a successful recipe run, a snapshot may be saved as `recipes/{id}_golden.json` for drift comparison via `GET /api/recipes/{id}/compare`.
+   After a successful recipe run, a snapshot may be saved as **`{LAB_VIEW_PATH}/recipes/{id}_golden.json`** for drift comparison via `GET /api/recipes/{id}/compare`.
 
 ### Runtime stack
 
 | Layer | Technology |
 |--------|------------|
-| **Frontend** | Static HTML/CSS; **ES modules** (`js/main.js` → `app-main.js`); canvas; `fetch` polling; Command Console modules |
+| **Frontend** | Static HTML/CSS; **ES modules** (`js/main.js` → **`bootstrap.js`** → **`app-main.js`**); canvas; `fetch` polling; Command Console modules |
 | **Backend** | FastAPI (`backend/main.py`), serves `/` and `/debug` with no-cache headers and version-busted `js/main.js` |
 | **Static assets** | Mounted at `/static` → `frontend/` |
 | **Hardware** | **LabCommunicator** abstraction: `MockLabCommunicator` \| `RealLabCommunicator` |
@@ -104,16 +106,28 @@ Larger slices of logic (dedicated API client, separate render module) can be pee
 
 | Package | Role |
 |---------|------|
-| **`lab_model`** | **Domain model** shared by mock and real: **tunables vs measurables** helpers (`component_model.py`), **storage quadrant Q3** geometry and layout checks (`storage_region.py`), **software-tracked motor angles** on disk (`motor_rotation_store` → `schemas/mock_motor_rotations.json` / `real_motor_rotations.json`). Does **not** talk to hardware. See **`backend/lab_model/README.md`**. |
-| **`lab_primitives`** | **HTTP-facing command contract**: `PrimitiveId`, **Pydantic** bodies for `POST /api/command`, **`PRIMITIVE_REGISTRY`**, **`dispatch`** (`parse_command_payload`, `execute_validated_command`, `schedule_validated_command`), **read primitives** for **`GET /api/components/{tag}/tunables`** and **`.../measurables`**, and **macros** that compose atomic steps (today: `MOTOR_SEND_HOME` → tracked angle + `MOVE_MOTOR`). Design narrative: **`primitives.md`**. Package overview + roadmap: **`backend/lab_primitives/README.md`**, **`backend/lab_primitives/ROADMAP.md`**. |
-| **`lab_communicator`** | **`LabCommunicator`** template class plus folder-per-backend implementations (**`mock`**, **`real`**): lab state JSON, robot/vision/`lab_automation` integration. **If you want to add a new backend** (different robot, simulator, etc.), the file-by-file recipe lives in **`backend/lab_communicator/README.md`**. |
+| **`lab_model`** | **Domain model** shared by mock and real: **tunables vs measurables** helpers (`component_model.py`), **storage quadrant Q3** geometry and layout checks (`storage_region.py`, fed by `lab_view/layout.json`), **software-tracked motor angles** (`motor_rotation_store` → `motor_rotations.json` under `LAB_VIEW_PATH`). Does **not** talk to hardware. See **`backend/lab_model/README.md`**. |
+| **`lab_primitives`** | **HTTP-facing command contract**: `PrimitiveId`, **Pydantic** bodies for `POST /api/command`, **`PRIMITIVE_REGISTRY`**, **`dispatch`** (`parse_command_payload`, `execute_validated_command`, `schedule_validated_command`), **read primitives** for **`GET /api/components/{tag}/tunables`** and **`.../measurables`**, and **macros** that compose atomic steps (today: `MOTOR_SEND_HOME` → tracked angle + `MOVE_MOTOR`). Package overview + roadmap: **`backend/lab_primitives/README.md`**, **`backend/lab_primitives/ROADMAP.md`**. |
+| **`lab_communicator`** | **`LabCommunicator`** template (`base.py`) and one folder per backend (**`mock/`**, **`real/`**, or a package you add). All runtime file paths for layout, catalogs, lasers, recipes, saved states, motor JSON, etc. come from **`LAB_VIEW_PATH`** (`lab_communicator/shared/lab_view_config.py`). **How to add a backend:** run `python scripts/create_lab_communicator.py <name> --with-lab-view` then follow **`backend/lab_communicator/README.md`**. |
 
 **`main.py`** delegates command validation and scheduling to **`lab_primitives`** (same path for the recipe executor). Tunables/measurables per tag use **`fetch_read_primitive`** so reads stay aligned with the primitive vocabulary.
+
+### Lab deployment bundle (`LAB_VIEW_PATH`)
+
+Startup **requires** **`LAB_VIEW_PATH`**: a directory whose JSON drives geometry (`layout.json`), lasers (`laser_lines.json`), merged catalog (`component_library.json` + `active_catalog.json`), motor bookkeeping (`motor_rotations.json`), and directories for recipes, UI snapshots, and camera captures. **`bootstrap_lab_view()`** runs in `main.py` **before** the communicator is constructed so mock and real share the same configuration story—swap benches by swapping **`LAB_VIEW_PATH`**, not Python imports.
+
+Mandatory files and scaffolding instructions are spelled out in **`backend/lab_communicator/README.md`** (section 0). Quick path to a new backend package **and** a starter bundle:
+
+```bash
+python scripts/create_lab_communicator.py my_backend --with-lab-view
+```
+
+Then add a matching **`LAB_MODE`** branch in **`backend/main.py`** and point **`LAB_VIEW_PATH`** at the generated `lab_view/` tree (or copy **`backend/lab_communicator/real/lab_view/default/`** elsewhere for production).
 
 ### Command–query style
 
 - **Query**: browser polls **`GET /api/lab-state`** (~every 500 ms) to refresh solids, status, and **`lab_mode`**. Ghost sync: after commands finish (or while **`OPTIMIZING`** in real mode—see **Newton optimization in real mode** below); **`tunables.nominal_pose`** drives the ghost overlay when present. Per-tag slices: **`GET /api/components/{tag_id}/tunables`** and **`.../measurables`** (saved state only; **`lab_primitives`** **return** primitives).
-- **Observe**: **`POST /api/components/{tag_id}/measurables/observe`** (or **`POST /api/command`** with **`OBSERVE_MEASURABLES`**) refreshes that tag’s measurables (e.g. camera capture → **`camera_image`**). Same **`409`** guard as commands when the system is **`BUSY`** / **`OPTIMIZING`**. See **`model.md`**.
+- **Observe**: **`POST /api/components/{tag_id}/measurables/observe`** (or **`POST /api/command`** with **`OBSERVE_MEASURABLES`**) refreshes that tag’s measurables (e.g. camera capture → **`camera_image`**). Same **`409`** guard as commands when the system is **`BUSY`** / **`OPTIMIZING`**. Conceptual notes: **`backend/lab_model/README.md`**.
 - **Command**: **`POST /api/command`** with JSON `{ "action", "target_id", "parameters" }`. Bodies are **validated** by **`lab_primitives`** (Pydantic); actions include `MOVE_COMPONENT`, `MOVE_MOTOR`, `OPTIMIZE`, `STORE_COMPONENT`, …. Successful accepts return **HTTP 200** with `"status": "accepted"`; **`409`** if the lab reports `BUSY` / `OPTIMIZING`; **`400`/`422`** on invalid payloads.
 - **Placement request**: **`POST /api/components`** queues `add_component_to_state` (mock vs real behavior lives in the communicator).
 
@@ -181,66 +195,62 @@ The canvas plot labeled **Optimization Metric (Beam Intensity)** is **synthetic*
 
 ```
 cloud-labs/                   # repository root (historically also called optics-digital-twin in docs)
-├── .env                      # Optional: LAB_MODE, LAB_AUTOMATION_PATH (loaded from repo root)
-├── primitives.md             # Primitive vocabulary, tunables/measurables context, macro design notes
-├── model.md                  # Observation vs saved state; get vs return measurables (design; see lab_model/)
+├── .env                      # LAB_MODE, LAB_VIEW_PATH (required), LAB_AUTOMATION_PATH (real lab), …
 ├── backend/
-│   ├── main.py               # FastAPI app; delegates /api/command + recipe steps to lab_primitives
+│   ├── main.py               # FastAPI app; bootstrap_lab_view → communicator; delegates /api/command to lab_primitives
 │   ├── lab_model/            # Domain: tunables/measurables, storage Q3 geometry, motor rotation JSON
-│   │   ├── README.md         # Conceptual overview (tunables vs measurables)
+│   │   ├── README.md
 │   │   ├── component_model.py
 │   │   ├── storage_region.py
 │   │   └── motor_rotation_store.py
 │   ├── lab_primitives/       # PrimitiveId, Pydantic schemas, registry, dispatch, read primitives, macros
-│   │   ├── README.md         # Package overview (what runs on each HTTP path)
-│   │   ├── ROADMAP.md        # Next steps (tests, more macros, Protocol, …)
-│   │   ├── ids.py            # PrimitiveId, PrimitiveKind, READ_/MACRO_ primitive id sets
-│   │   ├── schemas.py        # Validated POST /api/command bodies (discriminated by action)
-│   │   ├── registry.py       # PRIMITIVE_REGISTRY (metadata + handler names)
-│   │   └── dispatch.py       # parse_command_payload, execute_validated_command, schedule_validated_command, fetch_read_primitive
+│   │   ├── README.md
+│   │   ├── ROADMAP.md
+│   │   ├── ids.py
+│   │   ├── schemas.py
+│   │   ├── registry.py
+│   │   └── dispatch.py
 │   ├── lab_communicator/
-│   │   ├── README.md         # Architecture + recipe for adding a new backend
-│   │   ├── base.py           # LabCommunicator template class (state machine + orchestrators)
-│   │   ├── shared/           # Cross-lab building blocks (refusals, commits, snapshot helpers, …)
-│   │   ├── mock/             # Simulated lab (delays, noise, local JSON state)
-│   │   │   ├── communicator.py   # Class checklist: __init__, hooks, 1-line primitive delegations
-│   │   │   └── primitives.py     # API-call list: primitive_<name> functions (sleep + noise)
-│   │   └── real/             # Adapter for external lab_automation package
-│   │       ├── communicator.py   # Same checklist shape as mock
-│   │       ├── primitives.py     # API-call list: each primitive_<name> shows the lab_automation call
-│   │       ├── coordinate_frames.py  # XY/Z/yaw transforms + calibration constants
-│   │       └── video.py / gripper.py / scan.py / optimization.py  # Backend-specific helpers
+│   │   ├── README.md         # LAB_VIEW_PATH rules + how to add a backend (see scripts/create_lab_communicator.py)
+│   │   ├── base.py
+│   │   ├── shared/           # lab_view_config.py, catalog_bundle.py, commits, snapshot, …
+│   │   ├── mock/
+│   │   │   ├── communicator.py
+│   │   │   ├── primitives.py
+│   │   │   ├── persistence.py
+│   │   │   └── lab_view/    # Default MOCK bundle when LAB_VIEW_PATH points here
+│   │   └── real/
+│   │       ├── communicator.py
+│   │       ├── primitives.py
+│   │       ├── coordinate_frames.py
+│   │       ├── video.py / gripper.py / scan.py / optimization.py
+│   │       └── lab_view/default/   # REAL starter bundle (+ optional states/, …)
 ├── frontend/
-│   ├── index.html            # layout + inline styles; script: js/main.js then command-console.js
+│   ├── index.html
 │   ├── debug.html
-│   ├── mock_feed.svg         # mock video placeholder when no live stream
+│   ├── mock_feed.svg
 │   └── js/
-│       ├── main.js           # entry (imports bootstrap)
-│       ├── bootstrap.js      # loads app-main
-│       ├── app-main.js       # lab UI, canvas, init, __commandConsoleDeps
-│       ├── config.js         # geometry + POLLING_INTERVAL
-│       ├── state/store.js    # client-side mutable store
+│       ├── main.js
+│       ├── bootstrap.js
+│       ├── app-main.js
+│       ├── config.js
+│       ├── state/store.js
 │       ├── canvas/coordinates.js
 │       ├── command-console.js
 │       ├── command-parse.js
 │       ├── command-api.js
 │       └── command-complete.js
-├── schemas/                  # JSON contracts & reference data
-│   ├── component_catalog.real.json  # Real lab inventory (physical parts on the table)
-│   ├── component_catalog.mock.json  # Mock-only catalog (richer, for UI demos)
-│   ├── mock_lab_state.json   # Seed / reference for mock
-│   └── …                     # e.g. client_payload, strategies examples
-├── recipes/                  # Saved recipes + optional *_golden.json
-├── states/                   # User-saved lab state snapshots (API)
-├── requirements.txt          # Python dependencies (install from repo root)
+├── schemas/                  # Reference / example JSON only; authoritative lab data lives under LAB_VIEW_PATH
+│   └── …                     # e.g. client_payload.json, strategies.json, recipe_example.json
+├── requirements.txt
 ├── ROADMAP.md
-├── laser_line_fit.npy        # Real-mode laser overlay: coefficients x = a*y + b (mm); see below
 ├── scripts/
-│   └── generate_laser_line_fit.py  # Regenerate laser_line_fit.npy after retuning the physical laser
-└── Camera_Images/            # Optimization frames may be read/watched here (real workflows)
+│   ├── create_lab_communicator.py  # Scaffold a new lab_communicator backend (+ optional lab_view)
+│   └── generate_laser_line_fit.py  # Legacy npy helper (not used by FastAPI laser routes)
+└── Camera_Images/            # Optimization frames (real workflows)
 ```
 
-**Laser line (`laser_line_fit.npy`):** In **`LAB_MODE=REAL`**, `GET /api/laser-line` loads **`[a, b]`** from this file so the UI draws the red dashed path and snap-to-line behavior. Coordinates are **lab mm** with **origin at table center**; the breadboard grid in the UI is **25 mm** between holes. The **grid dots** use **`BREADBOARD_GRID_OFFSET_X_MM`** in **`frontend/js/config.js`**: a **−¼ inch** base plus an extra fine-tune (e.g. **−7.4 mm** total when the arm-measured vertical beam is at **`b ≈ 392.6`**) so dots track the real hole columns—**component poses** are unchanged. Set **`b`** to the arm-measured **x** of the beam for a vertical line (**`a = 0`**). After editing **`laser_line_fit.npy`**, use **Refresh Pose** (or reload) to refetch coefficients.
+**Laser overlays:** `GET /api/laser-line` (single-line **`a`,`b`** snapshot) and `GET /api/laser-lines` read **`laser_lines.json`** inside **`LAB_VIEW_PATH`**. Update with **`PATCH /api/laser-lines/{line_id}`** or by editing that file; reload the UI to refetch. Coordinates are **lab mm** with **origin at table center**. Breadboard spacing and offsets are driven by **`layout.json`** / **`GET /api/lab-layout`** and applied client-side via **`frontend/js/config.js`**.
 
 The `backend-simple/` folder holds small lab-related Python snippets with **relative imports** meant for use inside a larger **`lab_automation`** tree; it is **not** the FastAPI entrypoint.
 
@@ -252,14 +262,18 @@ The `backend-simple/` folder holds small lab-related Python snippets with **rela
 |--------|------|------|
 | GET | `/` | Main UI |
 | GET | `/debug` | Debugger / visualizer |
-| GET | `/api/catalog` | Component catalog |
+| GET | `/api/catalog` | Component catalog (**`component_library.json` ∩ `active_catalog.json`** order for the running mode) |
+| GET | `/api/lab-layout` | **`layout.json`** plus derived fields — used by the UI before first paint |
+| GET | `/api/component-library` | Full component library rows (optional / tooling) |
 | GET | `/api/lab-state` | Current lab JSON (includes **`lab_mode`**: `MOCK` \| `REAL`) |
 | GET | `/api/components/{tag_id}/tunables` | Commanded **tunables** for one component |
 | GET | `/api/components/{tag_id}/measurables` | Lab-reported **measurables** for one component |
 | POST | `/api/lab-state/refresh-pose` | Re-localize **measurables.pose** from overhead / table camera (real: full scan; mock: simulated). Alias: `POST /api/lab-state/refresh` |
 | POST | `/api/components` | Request add-to-lab (catalog item payload) |
 | POST | `/api/command` | Move / motor / optimize / store / … — body validated by **`lab_primitives`** (`parse_command_payload` → `schedule_validated_command`) |
-| GET | `/api/laser-line` | Laser line coefficients `{ a, b, source, … }` |
+| GET | `/api/laser-line` | Legacy single-line coefficients `{ a, b, source, … }` |
+| GET | `/api/laser-lines` | All overlays from **`laser_lines.json`** |
+| PATCH | `/api/laser-lines/{line_id}` | Adjust a line in **`laser_lines.json`** |
 | GET | `/api/video-feed/status` | Stream availability + source URL |
 | GET | `/api/video-feed/stream` | MJPEG (real) or static mock SVG |
 | GET | `/api/optimization-feed/stream` | Optimization MJPEG when supported |
@@ -269,7 +283,7 @@ The `backend-simple/` folder holds small lab-related Python snippets with **rela
 | GET | `/api/cobyla-reference-image/status` | Whether a reference is set (+ size); includes **`lab_mode`** |
 | DELETE | `/api/cobyla-reference-image` | Clear stored reference |
 | GET/POST | `/api/recipes`, `/api/recipes/{id}/play`, `/api/recipes/{id}/golden`, `/api/recipes/{id}/compare` | Recipe CRUD, play, golden, drift report |
-| GET/POST | `/api/states`, `/api/states/save`, `/api/states/load` | List / save / load snapshots in `states/` |
+| GET/POST | `/api/states`, `/api/states/save`, `/api/states/load` | List / save / load snapshots under **`{LAB_VIEW_PATH}/states/`** |
 | GET | `/api/debug/ghost-state`, `/api/debug/golden-states` | Debug aggregates |
 
 ---
@@ -284,7 +298,7 @@ From the **repository root**:
 pip install -r requirements.txt
 ```
 
-Mock mode only needs the **FastAPI** stack (`fastapi`, `uvicorn`, `pydantic`, `python-dotenv`, `numpy` for laser file loading in real paths). Full `requirements.txt` also lists vision/robot packages used when you point `LAB_AUTOMATION_PATH` at a real `lab_automation` checkout.
+Mock mode only needs the **FastAPI** stack (`fastapi`, `uvicorn`, `pydantic`, `python-dotenv`; `numpy` only if other code paths load array files). Full `requirements.txt` also lists vision/robot packages used when you point `LAB_AUTOMATION_PATH` at a real `lab_automation` checkout.
 
 ### 2. Configuration (optional)
 
@@ -292,11 +306,13 @@ Create or edit **`.env`** in the **project root** (same folder as `requirements.
 
 ```env
 LAB_MODE=MOCK
+# Required: folder with layout.json, component_library.json, active_catalog.json, laser_lines.json, recipes/, states/, …
+LAB_VIEW_PATH=backend/lab_communicator/mock/lab_view
 # Absolute or repo-relative path to the lab_automation *package directory* (the folder named lab_automation)
 LAB_AUTOMATION_PATH=../lab_automation
 ```
 
-`backend/main.py` resolves `LAB_AUTOMATION_PATH` to an absolute path relative to the project root. **`LAB_MODE`** defaults to **`MOCK`** if unset.
+`backend/main.py` resolves `LAB_AUTOMATION_PATH` and `LAB_VIEW_PATH` to absolute paths relative to the project root. **`LAB_MODE`** defaults to **`MOCK`** if unset. If **`LAB_VIEW_PATH`** is missing or invalid, startup **exits** with a clear error.
 
 **Console noise (polling):** the UI hits `/api/lab-state` about twice per second. Those messages are no longer printed at info level. If you start the app with **`python main.py`**, Uvicorn **access** logging (every `GET … HTTP/1.1` line) is **off** by default; set **`UVICORN_ACCESS_LOG=1`** in `.env` to turn it back on. To see per-poll debug lines from our handler, set **`LOG_LEVEL=DEBUG`**. If you use **`uvicorn main:app`** directly, add **`--no-access-log`** unless you want the access log.
 
@@ -322,18 +338,20 @@ Set `LAB_MODE=REAL` and a valid `LAB_AUTOMATION_PATH` so `from lab_automation...
 2. **Place and align** — Drag on the canvas or use the **floating component controls**; confirm moves; run **Optimize** with strategy parameters. For **Cobyla**, use **Latest capture** for new table-cam frames, then **Set Cobyla reference** to store that frame as the server reference (shown in the separate **red-bordered** preview so you can keep capturing). **Save ref to file** / **Load ref from file** reuses a PNG for testing without recapturing on hardware.
 3. **Record a recipe** — Toggle record, perform actions, save; play back from the sidebar.
 4. **Drift / golden** — After a good run, a golden file may exist; use **Debug** or `GET /api/recipes/{id}/compare` to compare poses to the current lab state.
-5. **Snapshots** — Use **Save / Load state** to persist JSON under `states/`.
+5. **Snapshots** — Use **Save / Load state** to persist JSON under **`{LAB_VIEW_PATH}/states/`**.
 
 ---
 
 ## Extending the inventory
 
-Mock and real modes load **different** catalog files so UI demos in mock mode can showcase parts the real table may not have yet. `GET /api/catalog` automatically serves the catalog for the **currently running** mode (resolved via `lab.get_catalog()`).
+The server builds the active catalog from **`component_library.json`** filtered and ordered by **`active_catalog.json`** (`tag_ids`), using **`catalog_bundle`** (see **`backend/lab_communicator/shared/catalog_bundle.py`**). `GET /api/catalog` returns the merged rows for the **currently running** communicator (`lab.get_catalog()`).
 
 1. Tag physical parts (e.g. ArUco) consistently with your vision stack.
-2. Add or edit the appropriate catalog:
-   - **Real lab:** **`schemas/component_catalog.real.json`** — the physical inventory on the table (`tag_id`, type, size, optional `motor_ids`, properties). Keep this in sync with what is literally tagged on the breadboard.
-   - **Mock / UI demos:** **`schemas/component_catalog.mock.json`** — freely extend with parts you want to showcase in mock mode.
-3. `GET /api/catalog` is re-read from disk on every call, so edits are picked up without restart; restart the backend only if you changed `LAB_MODE`.
+2. Under your deployment’s **`LAB_VIEW_PATH`**:
+   - **`component_library.json`** — all part definitions keyed by **`tag_id`**.
+   - **`active_catalog.json`** — `tag_ids` list: only those parts appear in the UI, in that order.
+3. `GET /api/catalog` is re-read from disk on every call, so edits are picked up without restart.
+
+For a new real deployment, copy **`backend/lab_communicator/real/lab_view/default/`** to a writable folder, point **`LAB_VIEW_PATH`** at it, and grow **`component_library.json` / `active_catalog.json`** there. (Some older **`schemas/component_catalog*.json`** copies may still exist in the repo as documentation only — they are **not** what the FastAPI app loads.)
 
 See **`ROADMAP.md`** (repo-wide) and **`backend/lab_primitives/ROADMAP.md`** (primitive layer: tests, macros, tooling).

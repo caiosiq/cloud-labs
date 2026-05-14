@@ -1,8 +1,12 @@
 /**
- * Lab frame (mm): third quadrant (x < 0 and y < 0) is the storage / inventory strip on the breadboard.
- * Placed / active area = anywhere else within lab bounds.
+ * Lab frame (mm): inventory uses the rectangle from `/api/lab-layout` (`storage_grid.q3`):
+ * [STORAGE_RECT_X_MIN, 0) × [STORAGE_RECT_Y_MIN, 0). Breadboard = complementary within lab bounds.
  */
 
+import {
+    STORAGE_RECT_X_MIN,
+    STORAGE_RECT_Y_MIN,
+} from './config.js';
 import {
     componentPresence,
     isBreadboardIntent,
@@ -13,7 +17,7 @@ import {
 } from './component-model.js';
 
 export function isStorageRegion(x, y) {
-    return x < 0 && y < 0;
+    return STORAGE_RECT_X_MIN <= x && x < 0 && STORAGE_RECT_Y_MIN <= y && y < 0;
 }
 
 export function isPlacedRegion(x, y) {
@@ -32,10 +36,10 @@ export function collectLayoutWarnings(labState) {
         const { x, y } = p;
         const pres = componentPresence(comp);
         if (pres === PRESENCE_STORAGE && !isStorageRegion(x, y)) {
-            warnings.push(`${id}: storage intent but center (${x.toFixed(1)}, ${y.toFixed(1)}) is not in storage (x<0, y<0).`);
+            warnings.push(`${id}: storage intent but center (${x.toFixed(1)}, ${y.toFixed(1)}) is outside the configured storage rectangle.`);
         }
         if (pres === PRESENCE_BREADBOARD && isStorageRegion(x, y)) {
-            warnings.push(`${id}: breadboard intent but center (${x.toFixed(1)}, ${y.toFixed(1)}) lies in storage quadrant.`);
+            warnings.push(`${id}: breadboard intent but center (${x.toFixed(1)}, ${y.toFixed(1)}) lies in the inventory storage rectangle.`);
         }
     }
     return warnings;
@@ -46,10 +50,10 @@ export function collectLayoutWarnings(labState) {
  */
 export function regionMoveBlocked(presenceBreadboard, x, y) {
     if (presenceBreadboard && isStorageRegion(x, y)) {
-        return { blocked: true, reason: 'STORAGE QUADRANT (use Store to move parts here)' };
+        return { blocked: true, reason: 'STORAGE (use Store / inventory tooling for this region)' };
     }
     if (!presenceBreadboard && isPlacedRegion(x, y)) {
-        return { blocked: true, reason: 'BREADBOARD AREA (stored parts must stay in x<0, y<0)' };
+        return { blocked: true, reason: 'BREADBOARD AREA (stored parts stay in inventory rectangle)' };
     }
     return { blocked: false };
 }

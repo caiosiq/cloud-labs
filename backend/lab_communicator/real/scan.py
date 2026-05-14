@@ -28,8 +28,6 @@ NOT import the mock backend or :mod:`lab_communicator.base`.
 
 from __future__ import annotations
 
-import json
-import os
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -74,16 +72,16 @@ def initialize_state(communicator: "RealLabCommunicator") -> None:
     print("[REAL LAB] Scanning components...")
     communicator._load_stored_intent_from_disk()
 
-    catalog_path = communicator.catalog_file
-    if not catalog_path or not os.path.exists(catalog_path):
-        print(f"[REAL LAB] Error: Catalog not found at {catalog_path}. Cannot scan.")
+    from lab_communicator.shared.catalog_bundle import merged_catalog_rows
+
+    try:
+        catalog = merged_catalog_rows()
+    except Exception as e:
+        print(f"[REAL LAB] Error loading lab_view catalog bundle: {e}. Cannot scan.")
         return
 
-    with open(catalog_path, "r") as f:
-        catalog = json.load(f)
-
     communicator.catalog_map = {
-        item.get("tag_id"): item for item in catalog if item.get("tag_id")
+        item.get("tag_id"): item for item in catalog if isinstance(item.get("tag_id"), str)
     }
 
     # Build OpticalComponent objects for everything in catalog. The

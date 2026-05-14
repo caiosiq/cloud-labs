@@ -21,6 +21,8 @@ from lab_model.holding import (
 )
 
 from lab_communicator.base import LabCommunicator
+from lab_communicator.shared.catalog_bundle import merged_catalog_maps
+from lab_communicator.shared.lab_view_config import get_lab_view_paths
 from lab_communicator.shared.snapshot import LabPose
 
 # Constants
@@ -28,12 +30,6 @@ from lab_communicator.shared.snapshot import LabPose
 # project ``schemas/`` directory is three levels up. (Was two levels
 # up when the class lived in ``backend/lab_communicator/mock.py``.)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SCHEMAS_DIR = os.path.join(BASE_DIR, "..", "..", "..", "schemas")
-LAB_STATE_FILE = os.path.abspath(os.path.join(SCHEMAS_DIR, "mock_lab_state.json"))
-# Mock mode has its own, richer catalog distinct from the real lab's physical
-# inventory (``component_catalog.real.json``). Keep them separate so mock
-# demos can showcase parts the real table may not have yet.
-CATALOG_FILE = os.path.abspath(os.path.join(SCHEMAS_DIR, "component_catalog.mock.json"))
 
 
 class MockLabCommunicator(LabCommunicator):
@@ -63,21 +59,13 @@ class MockLabCommunicator(LabCommunicator):
         # can seed a known starting state by editing the file).
         super().__init__()
 
-        self.state_file = LAB_STATE_FILE
-        self.catalog_file = CATALOG_FILE
+        paths = get_lab_view_paths()
+        self.state_file = paths.lab_state_json
         print(f"[MOCK LAB] Using state file: {self.state_file}")
+        rows, cmap = merged_catalog_maps()
+        self.catalog = rows
+        self.catalog_map = cmap
         self._ensure_state()
-        self._load_catalog()
-        # Build the catalog dict-by-tag mirror that ``base.py`` uses for
-        # O(1) catalog lookups. Mock historically scanned the list at
-        # every call site; Phase 2A unified both backends on the dict
-        # shape (the list ``self.catalog`` is preserved for legacy
-        # call sites that iterate it).
-        self.catalog_map = {
-            item["tag_id"]: item
-            for item in (self.catalog or [])
-            if isinstance(item, dict) and item.get("tag_id")
-        }
         # Initial in-memory load from disk. Subsequent mutations go
         # through ``_persist_state`` (migrated primitives) or
         # ``_write_state`` (still-file-backed primitives, both of
@@ -157,12 +145,10 @@ class MockLabCommunicator(LabCommunicator):
         ensure_state_file(self.state_file)
 
     def _load_catalog(self):
-        """Load the mock component catalog from disk into ``self.catalog``.
-
-        Thin wrapper -- body in :func:`lab_communicator.mock.persistence.load_catalog`.
-        """
-        from lab_communicator.mock.persistence import load_catalog
-        self.catalog = load_catalog(self.catalog_file)
+        """Reload library + active tags from ``lab_view`` (list + ``catalog_map``)."""
+        rows, cmap = merged_catalog_maps()
+        self.catalog = rows
+        self.catalog_map = cmap
 
     def _get_component_size(self, tag_id: str) -> float:
         size = 90.0
@@ -465,7 +451,7 @@ class MockLabCommunicator(LabCommunicator):
         :func:`lab_communicator.mock.primitives.primitive_observe_measurables`
         to land ``<tag>_last.png`` for the UI to pick up.
         """
-        return os.path.abspath(os.path.join(SCHEMAS_DIR, "mock_camera_captures"))
+        return os.path.abspath(get_lab_view_paths().camera_captures_dir)
 
     async def _primitive_observe_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]

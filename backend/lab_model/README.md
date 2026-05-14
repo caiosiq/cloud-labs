@@ -14,7 +14,7 @@ This folder is the **`lab_model`** Python package: shared domain logic for the d
 |--------|------|
 | **`component_model.py`** | Shape of per-component **tunables** vs **measurables**, presence (breadboard / storage / off table), helpers to read and update those dicts. |
 | **`storage_region.py`** | Geometry for **inventory quadrant Q3** (negative **x** and negative **y** in lab mm, origin at table center): grid cells, “does this pose fit this slot?”, layout conflict analysis, random placement helpers. Uses **measurables.pose** for “where the part is” and **tunables.storage** for **intent** (slot). |
-| **`motor_rotation_store.py`** | **Software-tracked** cumulative motor angles (per tag, per motor id), persisted under `schemas/` as `mock_motor_rotations.json` or `real_motor_rotations.json` depending on `LAB_MODE`. |
+| **`motor_rotation_store.py`** | **Software-tracked** cumulative motor angles (per tag, per motor id), persisted as ``motor_rotations.json`` inside the ``LAB_VIEW_PATH`` bundle. |
 
 It is **not** the place for mock vs real lab I/O—that lives in **`lab_communicator`** (`mock.py` / `real.py`). Communicators **import** `lab_model` to stay consistent when they update JSON state, run storage checks, or merge motor angles into lab state.
 
@@ -24,7 +24,7 @@ It is **not** the place for mock vs real lab I/O—that lives in **`lab_communic
 
 ## 2. Where tunables and measurables live
 
-Each component in lab state is a JSON-shaped object (see e.g. [`../../schemas/mock_lab_state.json`](../../schemas/mock_lab_state.json)). Conceptually:
+Each component in lab state is a JSON-shaped object (see e.g. ``lab_view/lab_state.json`` in the mock bundle). Conceptually:
 
 ```text
 components[tag_id] = {

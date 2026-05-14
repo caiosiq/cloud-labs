@@ -13,22 +13,6 @@ from typing import Dict, Any, List, Optional, Tuple
 import io
 import logging
 
-from lab_primitives import (
-    ConfirmHoldingTagBody,
-    HoverBody,
-    MoveComponentBody,
-    ObserveMeasurablesBody,
-    PickComponentBody,
-    PlaceFromHoverBody,
-    PrimitiveId,
-    ScanRotateInPlaceBody,
-    execute_validated_command,
-    fetch_read_primitive,
-    parse_command_payload,
-    schedule_validated_command,
-    validation_error_detail,
-)
-
 logger = logging.getLogger(__name__)
 
 # Load .env from project root (parent of backend/) so LAB_MODE and LAB_AUTOMATION_PATH are set
@@ -49,15 +33,42 @@ if _lab_path:
     if not os.path.exists(_lab_path_abs):
         print(f"[CONFIG] Warning: LAB_AUTOMATION_PATH resolved to {_lab_path_abs} (path does not exist)")
 
-# Import the new communicator
-# from lab_communicator import MockLabCommunicator
+from lab_communicator.shared.lab_view_config import (
+    bootstrap_lab_view,
+    get_lab_view_paths,
+    laser_line_coeffs_from_doc,
+    line_id_pattern,
+    load_layout_document,
+    read_laser_lines_doc,
+    two_points_to_ab,
+    write_laser_lines_doc,
+)
+from lab_model import motor_rotation_store as motor_rot
+
+bootstrap_lab_view(_project_root)
+motor_rot.configure(get_lab_view_paths().motor_rotations_json)
+
+from lab_primitives import (
+    ConfirmHoldingTagBody,
+    HoverBody,
+    MoveComponentBody,
+    ObserveMeasurablesBody,
+    PickComponentBody,
+    PlaceFromHoverBody,
+    PrimitiveId,
+    ScanRotateInPlaceBody,
+    execute_validated_command,
+    fetch_read_primitive,
+    parse_command_payload,
+    schedule_validated_command,
+    validation_error_detail,
+)
+
 
 app = FastAPI()
 
-# Constants
-SCHEMAS_DIR = os.path.join(os.path.dirname(__file__), "..", "schemas")
-RECIPES_DIR = os.path.join(os.path.dirname(__file__), "..", "recipes")
-STATES_DIR = os.path.join(os.path.dirname(__file__), "..", "states")
+RECIPES_DIR = get_lab_view_paths().recipes_dir
+STATES_DIR = get_lab_view_paths().states_dir
 
 # Initialize Communicator
 LAB_MODE = (os.getenv("LAB_MODE") or "MOCK").upper()
@@ -86,110 +97,6 @@ else:
     except Exception as e:
         print(f"CRITICAL ERROR: Failed to initialize Mock Lab Communicator: {e}")
         lab = None
-
-# Ensure recipes directory exists
-if not os.path.exists(RECIPES_DIR):
-    os.makedirs(RECIPES_DIR)
-
-# Ensure states directory exists
-if not os.path.exists(STATES_DIR):
-    os.makedirs(STATES_DIR)
-
-# --- Laser line overlays (per LAB_MODE JSON under schemas/) ---
-_LASER_LINES_FILES = {"REAL": "laser_lines.real.json", "MOCK": "laser_lines.mock.json"}
-_LINE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
-
-
-def _laser_lines_json_path() -> str:
-    fn = _LASER_LINES_FILES.get(LAB_MODE, _LASER_LINES_FILES["MOCK"])
-    return os.path.join(SCHEMAS_DIR, fn)
-
-
-def _load_laser_lines_doc() -> Dict[str, Any]:
-    path = _laser_lines_json_path()
-    if not os.path.exists(path):
-        return {"version": 1, "snap_line_id": None, "lines": []}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _atomic_write_json(path: str, data: Any) -> None:
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp, path)
-
-
-def _two_points_to_ab(
-    p1: Dict[str, Any], p2: Dict[str, Any]
-) -> Optional[Tuple[float, float]]:
-    """Return (a, b) for x = a*y + b in lab mm, or vertical (0, x0). None if degenerate."""
-    try:
-        x1 = float(p1["x"])
-        y1 = float(p1["y"])
-        x2 = float(p2["x"])
-        y2 = float(p2["y"])
-    except (TypeError, KeyError, ValueError):
-        return None
-    if abs(x2 - x1) < 1e-9 and abs(y2 - y1) < 1e-9:
-        return None
-    if abs(x2 - x1) < 1e-9:
-        return 0.0, x1
-    if abs(y2 - y1) < 1e-9:
-        return None
-    a = (x2 - x1) / (y2 - y1)
-    b = x1 - a * y1
-    return float(a), float(b)
-
-
-def _laser_line_coeffs_from_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
-    """Legacy single-line coefficients for GET /api/laser-line (snap reference)."""
-    lines = doc.get("lines") or []
-    snap_id = doc.get("snap_line_id")
-    by_id = {
-        ln["id"]: ln
-        for ln in lines
-        if isinstance(ln, dict) and isinstance(ln.get("id"), str)
-    }
-    chosen = None
-    if snap_id and snap_id in by_id:
-        cand = by_id[snap_id]
-        if cand.get("enabled", True):
-            chosen = cand
-    if chosen is None:
-        for ln in lines:
-            if not isinstance(ln, dict):
-                continue
-            if ln.get("enabled", True) and ln.get("p1") and ln.get("p2"):
-                chosen = ln
-                break
-    if chosen is None:
-        return {
-            "a": 0.0,
-            "b": 0.0,
-            "source": "schema",
-            "loaded": False,
-            "lab_mode": LAB_MODE,
-        }
-    ab = _two_points_to_ab(chosen["p1"], chosen["p2"])
-    if ab is None:
-        return {
-            "a": 0.0,
-            "b": 0.0,
-            "source": "schema",
-            "loaded": False,
-            "lab_mode": LAB_MODE,
-            "snap_line_id": chosen.get("id"),
-        }
-    a, b = ab
-    return {
-        "a": a,
-        "b": b,
-        "source": "schema",
-        "loaded": True,
-        "lab_mode": LAB_MODE,
-        "snap_line_id": chosen.get("id"),
-    }
 
 
 # --- Models ---
@@ -304,12 +211,8 @@ async def read_index():
 @app.get("/api/catalog")
 async def get_component_catalog():
     """
-    Return the component catalog for the *currently running* lab mode.
-
-    Mock and real labs load from *different* catalog files
-    (``component_catalog.mock.json`` vs ``component_catalog.real.json``)
-    so UI demos in mock mode can showcase parts the real table may not have
-    physically installed yet. Resolved via ``lab.get_catalog()``.
+    Tags listed in ``active_catalog.json`` merged with rows from ``component_library.json``
+    under ``LAB_VIEW_PATH``. Always re-read from disk — see ``lab.get_catalog()``.
     """
     if lab is None:
         return []
@@ -513,29 +416,49 @@ async def get_storage_grid():
     return storage_grid_spec()
 
 
+@app.get("/api/lab-layout")
+async def get_lab_layout():
+    """Breadboard/table bounds + storage grid overlay (single source matching ``layout.json``)."""
+    from lab_model.storage_region import storage_grid_spec
+
+    doc = load_layout_document()
+    enriched = dict(doc)
+    enriched["lab_view_root"] = get_lab_view_paths().root_dir
+    enriched["storage_grid"] = storage_grid_spec()
+    return enriched
+
+
+@app.get("/api/component-library")
+async def get_component_library():
+    """Full component definitions (human-edited); broader than GET /api/catalog."""
+    path = get_lab_view_paths().component_library_json
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 @app.get("/api/laser-line")
 async def get_laser_line():
-    """Single-line legacy coefficients (x = a*y + b, mm) from schemas laser_lines.*.json snap line."""
-    doc = _load_laser_lines_doc()
-    return _laser_line_coeffs_from_doc(doc)
+    """Single-line legacy coefficients (x = a*y + b, mm) from lab_view laser_lines.json snap line."""
+    doc = read_laser_lines_doc()
+    return laser_line_coeffs_from_doc(doc, LAB_MODE)
 
 
 @app.get("/api/laser-lines")
 async def get_laser_lines():
-    """All laser overlays for the current LAB_MODE (schemas/laser_lines.{real|mock}.json)."""
-    doc = _load_laser_lines_doc()
+    """All laser overlays defined in lab_view laser_lines.json."""
+    doc = read_laser_lines_doc()
     out = dict(doc)
     out["lab_mode"] = LAB_MODE
-    out["schema_file"] = os.path.basename(_laser_lines_json_path())
+    out["schema_file"] = os.path.basename(get_lab_view_paths().laser_lines_json)
     return out
 
 
 @app.patch("/api/laser-lines/{line_id}")
 async def patch_laser_line(line_id: str, payload: Dict[str, Any] = Body(...)):
     """Update one line: ``enabled`` anytime; ``p1``/``p2`` only with ``confirm: true``."""
-    if not _LINE_ID_RE.match(line_id or ""):
+    if not line_id_pattern().match(line_id or ""):
         raise HTTPException(status_code=400, detail="Invalid line id")
-    doc = _load_laser_lines_doc()
+    doc = read_laser_lines_doc()
     lines = doc.get("lines")
     if not isinstance(lines, list):
         lines = []
@@ -563,7 +486,7 @@ async def patch_laser_line(line_id: str, payload: Dict[str, Any] = Body(...)):
             p2f = {"x": float(p2["x"]), "y": float(p2["y"])}
         except (KeyError, TypeError, ValueError):
             raise HTTPException(status_code=400, detail="p1 and p2 require numeric x and y")
-        if _two_points_to_ab(p1f, p2f) is None:
+        if two_points_to_ab(p1f, p2f) is None:
             raise HTTPException(
                 status_code=422,
                 detail="Invalid geometry: coincident points or unsupported horizontal line.",
@@ -587,10 +510,10 @@ async def patch_laser_line(line_id: str, payload: Dict[str, Any] = Body(...)):
         lines[idx]["color"] = col
 
     doc["version"] = max(1, int(doc.get("version") or 1))
-    _atomic_write_json(_laser_lines_json_path(), doc)
-    out = dict(_load_laser_lines_doc())
+    write_laser_lines_doc(doc)
+    out = dict(read_laser_lines_doc())
     out["lab_mode"] = LAB_MODE
-    out["schema_file"] = os.path.basename(_laser_lines_json_path())
+    out["schema_file"] = os.path.basename(get_lab_view_paths().laser_lines_json)
     return out
 
 

@@ -50,6 +50,7 @@ from lab_model.storage_region import (
 )
 
 from lab_communicator.base import LabCommunicator
+from lab_communicator.shared.lab_view_config import get_lab_view_paths
 from lab_communicator.shared.snapshot import LabPose
 
 # Configuration for External Lab Automation Library
@@ -144,18 +145,6 @@ class RealLabCommunicator(LabCommunicator):
         # Cache of OpticalComponent objects: { "tag_22": OpticalComponent(...) }
         self.component_map: Dict[str, OpticalComponent] = {}
 
-        # Catalog path (real physical inventory). Mock mode uses a different
-        # file -- see ``schemas/component_catalog.mock.json`` and README.
-        # File now at ``backend/lab_communicator/real/communicator.py``;
-        # ``schemas/`` is three levels up. (Was two levels up when the
-        # class lived in ``backend/lab_communicator/real.py``.)
-        self.catalog_file = os.path.abspath(
-            os.path.join(
-                os.path.dirname(__file__), "..", "..", "..", "schemas",
-                "component_catalog.real.json",
-            )
-        )
-
         # ``HOVER_PLACEHOLDER_STATE`` was deleted in Phase 2B of the
         # communicator refactor: MockLabCommunicator now serves the
         # "exercise the UI without moving the table" use case. Real
@@ -174,7 +163,7 @@ class RealLabCommunicator(LabCommunicator):
         self._cobyla_ref_lock = threading.Lock()
         self._cobyla_reference_bgr: Optional[Any] = None  # np.ndarray when set
 
-        # Tags intentionally in storage (tag_id -> {i,j}); persisted under states/real_lab_stored_intent.json
+        # Tags intentionally in storage (tag_id -> {i,j}); persisted under lab_view/stored_intent.json
         self._stored_intent: Dict[str, Dict[str, int]] = {}
         self._load_stored_intent_from_disk()
 
@@ -293,19 +282,11 @@ class RealLabCommunicator(LabCommunicator):
 
     def _stored_intent_path(self) -> str:
         """Persisted map of which catalog tags are in inventory storage and at which grid cell."""
-        # File now at ``backend/lab_communicator/real/communicator.py``;
-        # ``states/`` is three levels up. (Was two levels up before the
-        # Phase 1 folder restructure.)
-        return os.path.abspath(
-            os.path.join(
-                os.path.dirname(__file__), "..", "..", "..", "states",
-                "real_lab_stored_intent.json",
-            )
-        )
+        return get_lab_view_paths().stored_intent_json
 
     def _load_stored_intent_from_disk(self) -> None:
-        """Hydrate ``self._stored_intent`` from
-        ``states/real_lab_stored_intent.json``.
+        """Hydrate ``self._stored_intent`` from ``stored_intent.json``
+        under ``LAB_VIEW_PATH``.
 
         Thin wrapper -- file I/O lives in
         :func:`lab_communicator.shared.storage_intent.load_stored_intent`.

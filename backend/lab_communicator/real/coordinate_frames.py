@@ -148,9 +148,9 @@ def robot_yaw_to_lab_rotation(yaw_robot: float) -> float:
 #   positive N means "closes N mm below the top". Override with env
 #   ``GRASP_OFFSET_MM``.
 # - ``height_mm`` (per-component catalog): total physical height of the
-#   part, base-to-top, in mm. Lives in
-#   ``schemas/component_catalog.real.json`` and is looked up by the
-#   communicator before calling ``z_lab_to_robot`` here.
+#   part, base-to-top, in mm. Lives in **component_library.json** under
+#   ``LAB_VIEW_PATH`` and is looked up by the communicator before calling
+#   ``z_lab_to_robot`` here.
 #
 # Plus two cloud-labs-only safety knobs:
 # - ``MAX_SAFE_HOVER_Z_LAB_MM``: hard upper bound on user-requested

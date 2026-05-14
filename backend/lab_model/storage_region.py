@@ -1,16 +1,18 @@
 """
-Storage quadrant Q3: x < 0 and y < 0 (lab mm, origin at table center).
+Inventory storage in the negative-x / negative-y corner of the lab frame (origin at table center).
 
-Inventory uses a fixed row-major grid: each STORED part reserves one cell; nominal pose is the
-cell center. Vision pose is valid if the axis-aligned footprint (width × height) fits inside
-that cell rectangle.
+Rule ``negative_xy`` tile the rectangle from ``(storage_rect_x_min, storage_rect_y_min)`` up to the
+axes (exclusive at ``x == 0`` / ``y == 0``). By default that rectangle is the full lab quadrant
+(up to ``lab_bounds_mm``). Optional ``storage.extent_from_origin_mm`` in ``layout.json`` limits how
+far from the corner at ``(0,0)`` the grid extends (**width_mm** / **height_mm** into negative X/Y).
 
-Geometry uses measurables.pose (physical center). Slot intent uses tunables.storage.
+Geometry is loaded from lab_view ``layout.json`` via :func:`configure_from_layout_document`.
 """
 from __future__ import annotations
 
 import math
 import random
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from .component_model import (
@@ -22,26 +24,153 @@ from .component_model import (
     storage_slot,
 )
 
-LAB_X_MIN = -500.0
-LAB_X_MAX = 500.0
-LAB_Y_MIN = -500.0
-LAB_Y_MAX = 500.0
 
-DANGER_RADIUS_MM = 90.0
-PADDING_MM = 5.0
+@dataclass(frozen=True)
+class LabLayoutSnapshot:
+    lab_x_min: float
+    lab_x_max: float
+    lab_y_min: float
+    lab_y_max: float
+    danger_radius_mm: float
+    padding_mm: float
+    storage_grid_nx: int
+    storage_grid_ny: int
+    storage_rule: str
+    #: West/south edges of the storage rectangle (negative values). Cells tile to ``(0, 0)`` (axes excluded).
+    storage_rect_x_min: float
+    storage_rect_y_min: float
+    breadboard_grid_spacing_mm: float
+    breadboard_origin_offset_x_mm: float
+    breadboard_origin_offset_y_mm: float
 
-# Q3 spans (mm)
-Q3_WIDTH_MM = 0.0 - LAB_X_MIN
-Q3_HEIGHT_MM = 0.0 - LAB_Y_MIN
 
-# Grid resolution (row-major: j = row from bottom, i = column from left).
-# 5×5 over Q3 (500×500 mm) → 100×100 mm cells; easier to fit real parts than a denser grid.
-STORAGE_GRID_NX = 5
-STORAGE_GRID_NY = 5
+_geom: Optional[LabLayoutSnapshot] = None
+
+
+def reset_lab_layout_for_tests() -> None:
+    global _geom
+    _geom = None
+
+
+def get_lab_layout_snapshot() -> LabLayoutSnapshot:
+    if _geom is None:
+        raise RuntimeError("storage_region not configured; bootstrap_lab_view must run first.")
+    return _geom
+
+
+def configure_from_layout_document(document: Dict[str, Any]) -> LabLayoutSnapshot:
+    """Populate module-level geometry from lab_view ``layout.json`` (called once at startup)."""
+    global _geom
+    if not isinstance(document, dict):
+        raise ValueError("layout document must be a dict")
+    bb = document["lab_bounds_mm"]
+    dz = document["danger_zone"]
+    st = document["storage"]
+    br = document.get("breadboard") or {}
+    rule = str(st.get("rule") or "negative_xy")
+    if rule != "negative_xy":
+        raise ValueError(f'Unsupported storage.rule: {rule!r} (only "negative_xy" is implemented)')
+
+    lab_x_min = float(bb["x_min"])
+    lab_x_max = float(bb["x_max"])
+    lab_y_min = float(bb["y_min"])
+    lab_y_max = float(bb["y_max"])
+
+    # Full negative quadrant clipped to lab bounds (legacy default).
+    storage_rect_x_min = lab_x_min
+    storage_rect_y_min = lab_y_min
+    ext = st.get("extent_from_origin_mm")
+    if ext is not None:
+        if not isinstance(ext, dict):
+            raise ValueError("storage.extent_from_origin_mm must be an object with width_mm and height_mm")
+        try:
+            ew = float(ext["width_mm"])
+            eh = float(ext["height_mm"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "storage.extent_from_origin_mm requires numeric width_mm and height_mm "
+                "(extent into negative X and negative Y from the table-center corner)"
+            ) from exc
+        if ew <= 0 or eh <= 0:
+            raise ValueError("extent_from_origin_mm width_mm and height_mm must be positive")
+        # Rectangle adjacent to origin: [-ew, 0) × [-eh, 0), intersected with lab_bounds.
+        storage_rect_x_min = max(lab_x_min, -abs(ew))
+        storage_rect_y_min = max(lab_y_min, -abs(eh))
+
+    snapshot = LabLayoutSnapshot(
+        lab_x_min=lab_x_min,
+        lab_x_max=lab_x_max,
+        lab_y_min=lab_y_min,
+        lab_y_max=lab_y_max,
+        danger_radius_mm=float(dz["radius_mm"]),
+        padding_mm=float(dz.get("padding_mm", 5.0)),
+        storage_grid_nx=int(st["grid_nx"]),
+        storage_grid_ny=int(st["grid_ny"]),
+        storage_rule=rule,
+        storage_rect_x_min=storage_rect_x_min,
+        storage_rect_y_min=storage_rect_y_min,
+        breadboard_grid_spacing_mm=float(br.get("grid_spacing_mm", 25.0)),
+        breadboard_origin_offset_x_mm=float((br.get("origin_offset_mm") or {}).get("x", 0.0)),
+        breadboard_origin_offset_y_mm=float((br.get("origin_offset_mm") or {}).get("y", 0.0)),
+    )
+    _geom = snapshot
+    return snapshot
+
+
+def lab_x_min() -> float:
+    return get_lab_layout_snapshot().lab_x_min
+
+
+def lab_x_max() -> float:
+    return get_lab_layout_snapshot().lab_x_max
+
+
+def lab_y_min() -> float:
+    return get_lab_layout_snapshot().lab_y_min
+
+
+def lab_y_max() -> float:
+    return get_lab_layout_snapshot().lab_y_max
+
+
+def danger_radius_mm() -> float:
+    return get_lab_layout_snapshot().danger_radius_mm
+
+
+def padding_mm() -> float:
+    return get_lab_layout_snapshot().padding_mm
+
+
+def q3_width_mm() -> float:
+    """East–west span of the **configured** storage rectangle (toward ``x == 0``)."""
+    g = get_lab_layout_snapshot()
+    return 0.0 - g.storage_rect_x_min
+
+
+def q3_height_mm() -> float:
+    """North–south span of the **configured** storage rectangle (toward ``y == 0``)."""
+    g = get_lab_layout_snapshot()
+    return 0.0 - g.storage_rect_y_min
+
+
+def storage_grid_nx() -> int:
+    return get_lab_layout_snapshot().storage_grid_nx
+
+
+def storage_grid_ny() -> int:
+    return get_lab_layout_snapshot().storage_grid_ny
+
+
+STORAGE_NOMINAL_ROTATION_DEG = 0.0
 
 
 def is_storage_region(x: float, y: float) -> bool:
-    return x < 0.0 and y < 0.0
+    """Inside the tiled storage rectangle open toward the origin (exclusive on ``x==0``, ``y==0``)."""
+    g = get_lab_layout_snapshot()
+    return (
+        g.storage_rect_x_min <= x < 0.0
+        and g.storage_rect_y_min <= y < 0.0
+    )
 
 
 def is_placed_region(x: float, y: float) -> bool:
@@ -57,16 +186,20 @@ def layout_consistent(presence: str, x: float, y: float) -> bool:
 
 
 def cell_dimensions_mm() -> Tuple[float, float]:
-    return Q3_WIDTH_MM / STORAGE_GRID_NX, Q3_HEIGHT_MM / STORAGE_GRID_NY
+    g = get_lab_layout_snapshot()
+    cw = q3_width_mm() / g.storage_grid_nx
+    ch = q3_height_mm() / g.storage_grid_ny
+    return cw, ch
 
 
 def cell_bounds(i: int, j: int) -> Tuple[float, float, float, float]:
     """Half-open-friendly bounds [xmin, xmax) × [ymin, ymax) in lab mm."""
+    g = get_lab_layout_snapshot()
     cw, ch = cell_dimensions_mm()
-    xmin = LAB_X_MIN + i * cw
-    xmax = LAB_X_MIN + (i + 1) * cw
-    ymin = LAB_Y_MIN + j * ch
-    ymax = LAB_Y_MIN + (j + 1) * ch
+    xmin = g.storage_rect_x_min + i * cw
+    xmax = g.storage_rect_x_min + (i + 1) * cw
+    ymin = g.storage_rect_y_min + j * ch
+    ymax = g.storage_rect_y_min + (j + 1) * ch
     return xmin, xmax, ymin, ymax
 
 
@@ -75,14 +208,11 @@ def cell_center(i: int, j: int) -> Tuple[float, float]:
     return (xmin + xmax) / 2.0, (ymin + ymax) / 2.0
 
 
-# Standard in-plane rotation (degrees) when a part is parked in inventory.
-STORAGE_NOMINAL_ROTATION_DEG = 0.0
-
-
 def nominal_center_pose_for_stored_entry(entry: Dict[str, Any]) -> Optional[Tuple[float, float, int, int]]:
     """
     Nominal pose for a STORED part: center of its grid cell at standard rotation.
-    Uses tunables.storage.slot when present; otherwise infers the cell from the current center pose in Q3.
+    Uses tunables.storage.slot when present; otherwise infers the cell from the current center pose
+    inside the configured storage rectangle.
     Returns (cx_mm, cy_mm, i, j) or None if the cell cannot be resolved.
     """
     if not isinstance(entry, dict) or not is_stored(entry):
@@ -107,23 +237,22 @@ def nominal_center_pose_for_stored_entry(entry: Dict[str, Any]) -> Optional[Tupl
 
 def iter_slots_row_major() -> List[Tuple[int, int]]:
     out: List[Tuple[int, int]] = []
-    for j in range(STORAGE_GRID_NY):
-        for i in range(STORAGE_GRID_NX):
+    g = get_lab_layout_snapshot()
+    for j in range(g.storage_grid_ny):
+        for i in range(g.storage_grid_nx):
             out.append((i, j))
     return out
 
 
 def cell_index_for_point(px: float, py: float) -> Optional[Tuple[int, int]]:
-    """Which grid cell contains this point (center location), if inside Q3."""
+    """Which grid cell contains this point (center location), if inside the storage rectangle."""
     if not is_storage_region(px, py):
         return None
+    g = get_lab_layout_snapshot()
     cw, ch = cell_dimensions_mm()
-    # Map to indices; clamp inside [0, nx-1] if on boundary 0
-    if px >= 0 or py >= 0:
-        return None
-    i = int((px - LAB_X_MIN) / cw)
-    j = int((py - LAB_Y_MIN) / ch)
-    if i < 0 or i >= STORAGE_GRID_NX or j < 0 or j >= STORAGE_GRID_NY:
+    i = int((px - g.storage_rect_x_min) / cw)
+    j = int((py - g.storage_rect_y_min) / ch)
+    if i < 0 or i >= g.storage_grid_nx or j < 0 or j >= g.storage_grid_ny:
         return None
     return (i, j)
 
@@ -174,8 +303,9 @@ def occupied_slots(components: Dict[str, Any], exclude_tag_id: Optional[str] = N
 
 
 def _center_clear_of_danger(cx: float, cy: float, w: float, h: float) -> bool:
+    g = get_lab_layout_snapshot()
     r = math.sqrt(w * w + h * h) / 2.0
-    return math.hypot(cx, cy) >= DANGER_RADIUS_MM + r + PADDING_MM
+    return math.hypot(cx, cy) >= g.danger_radius_mm + r + g.padding_mm
 
 
 def find_storage_slot_and_center(
@@ -192,7 +322,6 @@ def find_storage_slot_and_center(
     occ = occupied_slots(components, exclude_tag_id=tag_id)
     cw, ch = cell_dimensions_mm()
     if max(width_mm, height_mm) > min(cw, ch) + 1e-6:
-        # Part larger than a single cell — cannot use grid (caller may scale grid constants)
         return None
 
     for i, j in iter_slots_row_major():
@@ -210,13 +339,19 @@ def find_storage_slot_and_center(
 
 def storage_grid_spec() -> Dict[str, Any]:
     cw, ch = cell_dimensions_mm()
+    g = get_lab_layout_snapshot()
     return {
-        "nx": STORAGE_GRID_NX,
-        "ny": STORAGE_GRID_NY,
+        "nx": g.storage_grid_nx,
+        "ny": g.storage_grid_ny,
         "cell_width_mm": cw,
         "cell_height_mm": ch,
         "nominal_storage_rotation_deg": STORAGE_NOMINAL_ROTATION_DEG,
-        "q3": {"x_min": LAB_X_MIN, "x_max": 0.0, "y_min": LAB_Y_MIN, "y_max": 0.0},
+        "q3": {
+            "x_min": g.storage_rect_x_min,
+            "x_max": 0.0,
+            "y_min": g.storage_rect_y_min,
+            "y_max": 0.0,
+        },
     }
 
 
@@ -228,12 +363,6 @@ def analyze_layout_issues(
     """
     Structured issues for UI modals.
     Kinds: PLACED_IN_Q3, STORED_OUTSIDE_Q3, STORED_OFF_SLOT, STORED_WRONG_SLOT
-
-    When ``stored_intent`` is provided (real lab: ``states/real_lab_stored_intent.json``), only tags
-    listed there are treated as *intended* storage inventory. Breadboard parts physically in Q3
-    that are **not** in ``stored_intent`` do not raise PLACED_IN_Q3 (e.g. temporary layout in the
-    storage quadrant). Tags in ``stored_intent`` get an extra check that the measured cell matches
-    the recorded slot ``{i,j}``.
     """
     issues: List[Dict[str, Any]] = []
     for tag_id, entry in components.items():
@@ -250,13 +379,12 @@ def analyze_layout_issues(
 
         if pres == PRESENCE_BREADBOARD and is_storage_region(px, py):
             if stored_intent is not None and tag_id not in stored_intent:
-                # Physical Q3 is OK when this tag is not recorded as storage inventory.
                 continue
             issues.append(
                 {
                     "tag_id": tag_id,
                     "kind": "PLACED_IN_Q3",
-                    "message": f"{tag_id} is intended on the breadboard but its measured center lies in Q3.",
+                    "message": f"{tag_id} is intended on the breadboard but its measured center lies in the inventory storage rectangle.",
                 }
             )
             continue
@@ -269,7 +397,7 @@ def analyze_layout_issues(
                 {
                     "tag_id": tag_id,
                     "kind": "STORED_OUTSIDE_Q3",
-                    "message": f"{tag_id} is STORED but its measured center is not in Q3 (x<0, y<0).",
+                    "message": f"{tag_id} is STORED but its measured center is outside the inventory storage rectangle (see layout.json).",
                 }
             )
             continue
@@ -331,9 +459,10 @@ def _collides(
     y: float,
     r: float,
     others: List[Tuple[float, float, float]],
-    pad: float = PADDING_MM,
+    pad: float,
 ) -> bool:
-    if math.hypot(x, y) < DANGER_RADIUS_MM + r + pad:
+    g = get_lab_layout_snapshot()
+    if math.hypot(x, y) < g.danger_radius_mm + r + pad:
         return True
     for ox, oy, or_ in others:
         if math.hypot(x - ox, y - oy) < r + or_ + pad:
@@ -349,6 +478,7 @@ def random_placed_position(
     get_size_for_tag: Callable[[str], Tuple[float, float]],
 ) -> Optional[Tuple[float, float]]:
     """Random pose in placed region, avoiding overlaps (breadboard adds)."""
+    g = get_lab_layout_snapshot()
     r_self = _circ_r(width_mm, height_mm)
     others: List[Tuple[float, float, float]] = []
     for tid, entry in components.items():
@@ -368,10 +498,10 @@ def random_placed_position(
         others.append((ox, oy, _circ_r(ow, oh)))
 
     for _ in range(200):
-        x = random.uniform(LAB_X_MIN + r_self, LAB_X_MAX - r_self)
-        y = random.uniform(LAB_Y_MIN + r_self, LAB_Y_MAX - r_self)
+        x = random.uniform(g.lab_x_min + r_self, g.lab_x_max - r_self)
+        y = random.uniform(g.lab_y_min + r_self, g.lab_y_max - r_self)
         if not is_placed_region(x, y):
             continue
-        if not _collides(x, y, r_self, others):
+        if not _collides(x, y, r_self, others, g.padding_mm):
             return (x, y)
     return None

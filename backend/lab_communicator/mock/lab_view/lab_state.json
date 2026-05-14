@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-05-14T00:53:40.321615",
+  "last_updated": "2026-05-14T12:21:46.095147",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -8,8 +8,8 @@
       "tunables": {
         "presence": "storage",
         "nominal_pose": {
-          "x": -450.0,
-          "y": -450.0,
+          "x": -262.5,
+          "y": -332.5,
           "rotation": 0.0
         },
         "nominal_motor_positions": {},
@@ -26,8 +26,8 @@
       },
       "measurables": {
         "pose": {
-          "x": -450.0,
-          "y": -450.0,
+          "x": -262.37040704030306,
+          "y": -332.8717924987569,
           "rotation": 0.0
         },
         "last_optimization_score": 0.99,
@@ -66,12 +66,7 @@
           "y": 304.5333807278503,
           "rotation": 680.7747230668006
         },
-        "camera_image": {
-          "path": "C:\\Users\\CaioV\\OneDrive - Massachusetts Institute of Technology\\UROP - AI Optics\\optics-digital-twin\\schemas\\mock_camera_captures\\tag_22_last.png",
-          "source": "mock_table_cam",
-          "cam_id": 1,
-          "format": "png"
-        }
+        "camera_image": null
       }
     },
     "tag_21": {
@@ -101,22 +96,17 @@
         },
         "last_optimization_score": null,
         "last_optimized_pose": null,
-        "camera_image": {
-          "path": "C:\\Users\\CaioV\\OneDrive - Massachusetts Institute of Technology\\UROP - AI Optics\\optics-digital-twin\\schemas\\mock_camera_captures\\tag_21_last.png",
-          "source": "mock_table_cam",
-          "cam_id": 1,
-          "format": "png"
-        }
+        "camera_image": null
       }
     },
     "tag_18": {
       "id": "tag_18",
       "type": "OPTICAL_MIRROR",
       "tunables": {
-        "presence": "storage",
+        "presence": "breadboard",
         "nominal_pose": {
-          "x": -350.0,
-          "y": -450.0,
+          "x": 305.7142857142857,
+          "y": 67.14285714285715,
           "rotation": 0.0
         },
         "nominal_motor_positions": {
@@ -124,25 +114,18 @@
           "2": 0.0
         },
         "storage": {
-          "in_storage": true,
-          "slot": {
-            "i": 1,
-            "j": 0
-          }
+          "in_storage": false,
+          "slot": null
         },
         "placement": {
-          "mode": "STORAGE"
+          "mode": "MANUAL"
         }
       },
       "measurables": {
         "pose": {
-          "x": -350.0,
-          "y": -450.0,
-          "rotation": 0.0,
-          "motor_rotations": {
-            "1": 0.0,
-            "2": 0.0
-          }
+          "x": 305.41440683150137,
+          "y": 66.9985085437002,
+          "rotation": 0.0
         },
         "last_optimization_score": null,
         "last_optimized_pose": null,
@@ -183,10 +166,10 @@
       "id": "tag_11",
       "type": "OPTICAL_LENS",
       "tunables": {
-        "presence": "storage",
+        "presence": "breadboard",
         "nominal_pose": {
-          "x": -250.0,
-          "y": -450.0,
+          "x": -212.85714285714286,
+          "y": 324.28571428571433,
           "rotation": 0.0
         },
         "nominal_motor_positions": {
@@ -194,25 +177,18 @@
           "3": 0.0
         },
         "storage": {
-          "in_storage": true,
-          "slot": {
-            "i": 2,
-            "j": 0
-          }
+          "in_storage": false,
+          "slot": null
         },
         "placement": {
-          "mode": "STORAGE"
+          "mode": "MANUAL"
         }
       },
       "measurables": {
         "pose": {
-          "x": -250.0,
-          "y": -450.0,
-          "rotation": 0.0,
-          "motor_rotations": {
-            "1": 0.0,
-            "3": 0.0
-          }
+          "x": -213.01496844274251,
+          "y": 324.11108030795003,
+          "rotation": 0.0
         },
         "last_optimization_score": null,
         "last_optimized_pose": null,
@@ -260,28 +236,25 @@
       "id": "tag_3",
       "type": "OPTICAL_FILTER",
       "tunables": {
-        "presence": "storage",
+        "presence": "breadboard",
         "nominal_pose": {
-          "x": -50.0,
-          "y": -450.0,
+          "x": 74.28571428571429,
+          "y": 320.0,
           "rotation": 0.0
         },
         "nominal_motor_positions": {},
         "storage": {
-          "in_storage": true,
-          "slot": {
-            "i": 4,
-            "j": 0
-          }
+          "in_storage": false,
+          "slot": null
         },
         "placement": {
-          "mode": "STORAGE"
+          "mode": "MANUAL"
         }
       },
       "measurables": {
         "pose": {
-          "x": -50.0,
-          "y": -450.0,
+          "x": 74.5483311227949,
+          "y": 319.9480838703817,
           "rotation": 0.0
         },
         "last_optimization_score": null,

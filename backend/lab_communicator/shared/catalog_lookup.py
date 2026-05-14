@@ -1,7 +1,7 @@
 """Catalog-shaped lookups (size, height, motor validation) usable by any backend.
 
 The "catalog" is a per-tag dict of metadata loaded at startup from
-``schemas/component_catalog.<backend>.json``: width/height (UI footprint),
+``lab_view/component_library.json`` rows: width/height (UI footprint),
 ``height_mm`` (physical Z extent), ``motor_ids``, ``type``, etc. The real
 backend stores it as ``catalog_map: Dict[str, Dict]`` (O(1) lookups);
 mock stores it as a list and provides its own scan helper. Both are

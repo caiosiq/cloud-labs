@@ -1,7 +1,7 @@
 """File-backed state + catalog persistence for the mock backend.
 
 The mock communicator's authoritative source of truth is a JSON file on
-disk (``schemas/mock_lab_state.json``). Every primitive's pattern is
+disk (the path from ``lab_view/lab_state.json``). Every primitive's pattern is
 "read-modify-write" -- read the file, mutate the dict, write it back.
 This is *deliberately* slower than the real backend's in-memory
 snapshot (which can stream updates to a UI WebSocket without ever
