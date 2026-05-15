@@ -28,6 +28,7 @@ class LabViewPaths:
     motor_rotations_json: str
     lab_state_json: str
     stored_intent_json: str
+    session_checkpoint_json: str
     recipes_dir: str
     states_dir: str
     camera_captures_dir: str
@@ -77,6 +78,7 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
         motor_rotations_json=os.path.join(root, "motor_rotations.json"),
         lab_state_json=os.path.join(root, "lab_state.json"),
         stored_intent_json=os.path.join(root, "stored_intent.json"),
+        session_checkpoint_json=os.path.join(root, "session_last_lab_state.json"),
         recipes_dir=os.path.join(root, "recipes"),
         states_dir=os.path.join(root, "states"),
         camera_captures_dir=os.path.join(root, "camera_captures"),

@@ -653,30 +653,146 @@
         </div>
 
         <div id="sidebar-right-scroll">
-        <!-- Table cam capture: real = hardware; mock = synthetic PNG from /api/table-cam/capture -->
+        <!-- Table cam: lazy connect + live / capture (real + mock) -->
+        <style>
+            /* Same viewport for latest capture vs Cobyla ref so stills scale identically for A/B */
+            #table-cam-section {
+                --cam-still-preview-height: 200px;
+            }
+            #table-cam-section .cam-still-preview-slot {
+                height: var(--cam-still-preview-height);
+                margin: 0 12px 10px;
+                border-radius: 6px;
+                box-sizing: border-box;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: hidden;
+                position: relative;
+            }
+            #table-cam-section .table-cam-toolbar-row { gap: 6px; align-items: center; flex-wrap: wrap; }
+            /* Single connect toggle */
+            #table-cam-section .table-cam-connect-toggle {
+                flex: 1;
+                min-width: 140px;
+                justify-content: center;
+                gap: 6px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+                transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+                display: inline-flex;
+                align-items: center;
+            }
+            #table-cam-section .table-cam-connect-toggle--connected {
+                background: linear-gradient(180deg, #15803d 0%, #166534 100%);
+                border-color: #22c55e;
+                color: #ecfdf5;
+            }
+            #table-cam-section .table-cam-connect-toggle--connected:hover {
+                filter: brightness(1.06);
+                color: #fff;
+            }
+            #table-cam-section .table-cam-connect-toggle--disconnected {
+                background: var(--bg-secondary);
+                border-color: #4b5563;
+                color: #9ca3af;
+            }
+            #table-cam-section .table-cam-connect-toggle--disconnected:hover {
+                border-color: #6b7280;
+                color: #e5e7eb;
+            }
+            /* Live + Capture pill buttons — same chassis */
+            #table-cam-section .table-cam-action-btn {
+                font-size: 11px;
+                padding: 5px 10px;
+                min-width: 0;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+            }
+            #table-cam-section .table-cam-action-btn.table-cam-live-btn--streaming {
+                background: rgba(34, 197, 94, 0.14);
+                border-color: #22c55e;
+                color: #86efac;
+            }
+            #table-cam-section .table-cam-action-btn.table-cam-live-btn--streaming:hover {
+                filter: brightness(1.08);
+            }
+            #table-cam-section .table-cam-action-btn:disabled {
+                opacity: 0.45;
+                cursor: not-allowed;
+            }
+            /* Preview frame: MOCK-only accents so live vs snapshot are obvious */
+            #table-cam-preview.table-cam-preview--mock-live {
+                border-color: #0891b2;
+                box-shadow: inset 0 0 0 1px rgba(8, 145, 178, 0.35), 0 0 14px rgba(8, 145, 178, 0.12);
+            }
+            #table-cam-preview.table-cam-preview--mock-capture {
+                border-color: #a855f7;
+                box-shadow: inset 0 0 0 1px rgba(168, 85, 247, 0.35), 0 0 14px rgba(168, 85, 247, 0.08);
+            }
+            #table-cam-preview.table-cam-preview--mock-neutral {
+                border-color: var(--border-color);
+                box-shadow: none;
+            }
+            #table-cam-mode-chip {
+                position: absolute;
+                top: 6px;
+                left: 6px;
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                padding: 3px 7px;
+                border-radius: 4px;
+                pointer-events: none;
+                display: none;
+                z-index: 2;
+            }
+            #table-cam-mode-chip.mode-live {
+                background: rgba(8, 145, 178, 0.9);
+                color: #ecfeff;
+            }
+            #table-cam-mode-chip.mode-capture {
+                background: rgba(126, 34, 206, 0.92);
+                color: #faf5ff;
+            }
+        </style>
         <div id="table-cam-section" style="border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
             <div class="section-header">Table cam capture</div>
             <div id="table-cam-mock-hint" style="display: none; padding: 0 12px 6px; font-size: 10px; color: var(--text-muted); line-height: 1.35;">
-                Mock mode: <strong>Capture</strong> returns a synthetic PNG (grid + fake beam) so you can exercise this panel and <strong>Set Cobyla reference</strong> without hardware.
+                Mock mode: <strong style="color:#22d3ee;">Live</strong> preview uses a teal frame + animated stream imagery; <strong style="color:#c084fc;">Still</strong> uses a violet frame + your latest capture (mock graphic until you Capture); press <strong>Capture</strong> for a fresh still.
             </div>
-            <div class="sidebar-right-toolbar" style="padding-top: 4px;">
+            <div class="sidebar-right-toolbar table-cam-toolbar-row" style="padding-top: 4px;">
                 <span style="font-size: 11px; color: var(--text-secondary); flex-shrink: 0;">Camera</span>
                 <button id="table-cam-btn-1" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-sel" style="font-size: 11px; padding: 4px 8px;">CAM 1</button>
                 <button id="table-cam-btn-2" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-sel" style="font-size: 11px; padding: 4px 8px;">CAM 2</button>
             </div>
-            <div class="sidebar-right-toolbar" style="padding-top: 0;">
-                <label style="font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;" title="Exposure (seconds) for table camera capture">
+            <div class="sidebar-right-toolbar table-cam-toolbar-row" style="padding-top: 4px;">
+                <button id="table-cam-link-toggle" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-connect-toggle table-cam-connect-toggle--disconnected" title="Toggle SDK session (releases camera when off)">
+                    <span id="table-cam-link-dot" class="material-icons-round" style="font-size: 14px;">link_off</span>
+                    <span id="table-cam-link-toggle-label">Disconnected</span>
+                </button>
+            </div>
+            <div class="sidebar-right-toolbar table-cam-toolbar-row" style="padding-top: 4px;">
+                <button id="table-cam-live-btn" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-action-btn" title="Toggle MJPEG live (STREAM_ON) vs still / last capture">
+                    <span id="table-cam-live-btn-icon" class="material-icons-round" style="font-size: 15px;">videocam</span>
+                    <span id="table-cam-live-btn-label">Live</span>
+                </button>
+                <button id="table-cam-capture-btn" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-action-btn" title="Single still capture (CAP pipeline)">
+                    <span class="material-icons-round" style="font-size: 15px;">camera_alt</span>
+                    Capture
+                </button>
+                <label style="font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto;" title="Exposure (seconds) for CAP + VEXP on real hardware">
                     Exp (s)
                     <input id="table-cam-exposure" type="number" value="0.2" min="0.001" max="30" step="0.05" style="width: 64px; font-size: 11px; padding: 4px 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
                 </label>
-                <button id="table-cam-capture-btn" type="button" class="btn btn-primary btn--sidebar-inline" style="font-size: 11px; padding: 4px 10px; margin-left: auto; flex: 0 1 auto; min-width: min-content;">
-                    <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">camera</span> Capture
-                </button>
             </div>
             <div style="padding: 4px 12px 2px; font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Latest capture</div>
-            <div id="table-cam-preview" style="height: 160px; background: #0f1115; margin: 0 12px 10px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; transition: border-color 150ms ease, box-shadow 150ms ease;">
+            <div id="table-cam-preview" class="table-cam-preview--mock-neutral cam-still-preview-slot" style="background: #0f1115; border: 1px solid var(--border-color); transition: border-color 160ms ease, box-shadow 160ms ease;">
+                <span id="table-cam-mode-chip" class="table-cam-mode-chip" aria-hidden="true"></span>
                 <img id="table-cam-img" src="" alt="Table cam" style="max-width: 100%; max-height: 100%; object-fit: contain; display: none;">
-                <div id="table-cam-placeholder" style="color: var(--text-muted); font-size: 12px; text-align: center;">Click Capture to get image</div>
+                <div id="table-cam-placeholder" style="color: var(--text-muted); font-size: 12px; text-align: center;">Connect to enable Live or Capture.</div>
                 <div id="table-cam-error" style="color: var(--status-error); font-size: 11px; display: none;"></div>
                 
                 <!-- Optimization Feed Overlay -->
@@ -687,7 +803,7 @@
             </div>
 
             <div style="padding: 4px 12px 2px; font-size: 10px; color: #f87171; text-transform: uppercase; letter-spacing: 0.04em;">Cobyla reference — stored for OPTIMIZE (COBYLA)</div>
-            <div id="cobyla-ref-preview-wrap" style="height: 140px; margin: 0 12px 10px; border-radius: 6px; border: 2px solid #ef4444; box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.15); background: #0a0c10; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;">
+            <div id="cobyla-ref-preview-wrap" class="cam-still-preview-slot" style="border: 1px solid #ef4444; box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.2), 0 0 0 1px rgba(239, 68, 68, 0.35); background: #0a0c10;">
                 <img id="cobyla-ref-preview-img" src="" alt="Cobyla reference" style="max-width: 100%; max-height: 100%; object-fit: contain; display: none;">
                 <div id="cobyla-ref-placeholder" style="color: var(--text-muted); font-size: 11px; text-align: center; padding: 12px; line-height: 1.45;">No reference stored.<br><span style="font-size: 10px; opacity: 0.9;">Set from <strong>Latest capture</strong> above, or load a PNG you saved earlier.</span></div>
             </div>

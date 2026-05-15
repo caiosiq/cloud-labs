@@ -28,8 +28,9 @@ NOT import the mock backend or :mod:`lab_communicator.base`.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Optional
 
 from lab_model.component_model import (
     PRESENCE_BREADBOARD,
@@ -37,15 +38,22 @@ from lab_model.component_model import (
     PRESENCE_STORAGE,
     default_measurables,
     default_tunables,
+    is_on_table,
 )
 from lab_model.storage_region import is_storage_region
+
+from lab_communicator.shared.pose_refresh_merge import merge_scan_into_components
+from lab_communicator.shared.snapshot import LabPose
 
 
 if TYPE_CHECKING:
     from lab_communicator.real.communicator import RealLabCommunicator
 
 
-def initialize_state(communicator: "RealLabCommunicator") -> None:
+def initialize_state(
+    communicator: "RealLabCommunicator",
+    preserve_component_ids: Optional[Iterable[str]] = None,
+) -> None:
     """Boot-time scan: load catalog, scan the table, populate components.
 
     Mutates ``communicator``:
@@ -66,11 +74,26 @@ def initialize_state(communicator: "RealLabCommunicator") -> None:
          on the table) -> ``BREADBOARD``.
       3. neither -> ``OFF_TABLE``.
 
+    ``preserve_component_ids`` (optional): after the scan builds ``candidate``
+    components, merge with the pre-scan ``components`` block so preserved tag
+    rows are deep-copied unchanged (tunables + measurables), then reconcile
+    ``OpticalComponent.current_location`` for those tags from the preserved
+    lab-frame pose — keeping the planner aligned with digital twin snapshots.
+
     No-ops with a logged warning if the catalog file is missing -- the
     UI then shows an empty inventory rather than crashing the backend.
     """
     print("[REAL LAB] Scanning components...")
     communicator._load_stored_intent_from_disk()
+
+    with communicator._state_lock:
+        previous_components: Dict[str, Any] = json.loads(
+            json.dumps(communicator.current_state.get("components") or {})
+        )
+
+    preserve_frozen = frozenset(
+        str(x).strip() for x in (preserve_component_ids or ()) if isinstance(x, str) and x.strip()
+    )
 
     from lab_communicator.shared.catalog_bundle import merged_catalog_rows
 
@@ -219,27 +242,50 @@ def initialize_state(communicator: "RealLabCommunicator") -> None:
             f"tunables.nominal_pose: {tun.get('nominal_pose')}"
         )
 
+    merged_components = merge_scan_into_components(
+        previous_components,
+        new_components,
+        preserve_frozen,
+    )
+
     with communicator._state_lock:
-        communicator.current_state["components"] = new_components
+        communicator.current_state["components"] = merged_components
         communicator.current_state["last_updated"] = datetime.now().isoformat()
+
+    # Digital twin snapshots for preserved rows win over fresh camera poses for
+    # those tags — push the preserved lab-frame pose back into OpticalComponent.
+    if preserve_frozen:
+        for tid in preserve_frozen:
+            ent = merged_components.get(tid)
+            if not isinstance(ent, dict):
+                continue
+            communicator._apply_loaded_pose_to_hardware(
+                tid,
+                LabPose.from_entry(ent),
+                is_placed=is_on_table(ent),
+            )
+
     n_bb = len(
         [
             c
-            for c in new_components.values()
+            for c in merged_components.values()
             if (c.get("tunables") or {}).get("presence") == PRESENCE_BREADBOARD
         ]
     )
     n_st = len(
         [
             c
-            for c in new_components.values()
+            for c in merged_components.values()
             if (c.get("tunables") or {}).get("presence") == PRESENCE_STORAGE
         ]
     )
     print(f"[REAL LAB] Scan complete. breadboard={n_bb}, storage={n_st}.")
 
 
-def refresh_pose_from_camera(communicator: "RealLabCommunicator") -> None:
+def refresh_pose_from_camera(
+    communicator: "RealLabCommunicator",
+    preserve_component_ids: Optional[Iterable[str]] = None,
+) -> None:
     """User-triggered re-scan (UI "Refresh poses" button / SCAN_TABLE primitive).
 
     Wraps :func:`initialize_state` in a BUSY/IDLE status transition and
@@ -250,7 +296,9 @@ def refresh_pose_from_camera(communicator: "RealLabCommunicator") -> None:
     with communicator._state_lock:
         communicator.current_state["system_status"] = "BUSY"
     try:
-        initialize_state(communicator)
+        initialize_state(
+            communicator, preserve_component_ids=preserve_component_ids
+        )
     finally:
         with communicator._state_lock:
             communicator.current_state["system_status"] = "IDLE"

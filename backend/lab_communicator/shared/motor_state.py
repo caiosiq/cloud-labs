@@ -16,7 +16,7 @@ Architectural rule (``communicator_refactor.md`` §5.1): no
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from lab_model import motor_rotation_store as motor_rot
 from lab_model.component_model import default_measurables, default_tunables
@@ -70,3 +70,40 @@ def inject_motor_rotations_into_state(
         nm = tun.setdefault("nominal_motor_positions", {})
         for k, v in mr.items():
             nm[str(k)] = float(v)
+
+
+def persist_motor_rotations_from_component(
+    tag_id: str, comp: Dict[str, Any], motor_ids: List[int]
+) -> None:
+    """Write motor angles inferred from checkpoint merge into motor_rotation_store.
+
+    Prefer ``tunables.nominal_motor_positions``, then ``measurables.pose.motor_rotations``.
+    """
+
+    mid_list = []
+    for m in motor_ids:
+        try:
+            mid_list.append(int(m))
+        except (TypeError, ValueError):
+            continue
+    if not mid_list:
+        return
+    tun_nm = (((comp.get("tunables") or {}).get("nominal_motor_positions")) or {})
+    mr_pose = (
+        (((comp.get("measurables") or {}).get("pose") or {}).get("motor_rotations"))
+        or {}
+    )
+    out: Dict[str, float] = {}
+    for mid in mid_list:
+        ks = str(mid)
+        v = tun_nm.get(ks)
+        if v is None:
+            v = mr_pose.get(ks)
+        if v is None:
+            continue
+        try:
+            out[ks] = float(v)
+        except (TypeError, ValueError):
+            continue
+    if out:
+        motor_rot.set_rotations_for_tag(tag_id, out)

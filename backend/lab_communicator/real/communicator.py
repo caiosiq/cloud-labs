@@ -120,6 +120,10 @@ def _env_float(name: str, default: float) -> float:
     return _env_float_shared(name, default, log_prefix="[REAL LAB]")
 
 
+_ENV_TRUE = frozenset({"1", "true", "yes", "on"})
+_ENV_FALSE = frozenset({"0", "false", "no", "off"})
+
+
 class RealLabCommunicator(LabCommunicator):
     log_prefix = "[REAL LAB]"
     # Calibrated safe-hover bound (lab frame), forwarded from
@@ -127,6 +131,14 @@ class RealLabCommunicator(LabCommunicator):
     # refuse runaway HTTP payloads in :meth:`hover_component` before
     # they hit the forward transform.
     max_safe_hover_z_lab_mm = MAX_SAFE_HOVER_Z_LAB_MM
+
+    def session_checkpoint_enabled(self) -> bool:
+        raw = (os.getenv("SESSION_CHECKPOINT") or "").strip().lower()
+        if raw in _ENV_TRUE:
+            return True
+        if raw in _ENV_FALSE:
+            return False
+        return False
 
     def __init__(self):
         if not LAB_LIB_AVAILABLE:
@@ -175,7 +187,15 @@ class RealLabCommunicator(LabCommunicator):
         # GET /api/lab-state that the UI issues.
         self._reconcile_holding_on_boot()
         self._recorder_procs: List[subprocess.Popen] = []
+        self._use_cloudlab_table_recorder = False
+        self._table_cam_connected = {1: False, 2: False}
+        self._table_cam_streaming = {1: False, 2: False}
+        self._table_cam_lock = threading.Lock()
         self._start_recorder_processes()
+        if not self._use_cloudlab_table_recorder:
+            # Legacy recorder already initializes both cameras — treat them as logically hot.
+            self._table_cam_connected = {1: True, 2: True}
+
         # Fallback when image names have no stepNN: count once per new basename (avoids double bumps on mtime+size).
         self._last_optimization_image_basename: Optional[str] = None
         # During OPTIMIZING, watch only this run's subdirectory (see _make_optimization_run_dir).
@@ -349,18 +369,18 @@ class RealLabCommunicator(LabCommunicator):
         from lab_communicator.real.scan import initialize_state
         initialize_state(self)
 
-    def refresh_pose_from_camera(self):
-        """Re-scan the table (camera-driven) and rebuild measurables.pose for each component.
+    def refresh_pose_from_camera(
+        self, preserve_tag_ids: Optional[List[str]] = None
+    ) -> None:
+        """Re-scan the table; optional ``preserve_tag_ids`` freeze whole component rows."""
 
-        Thin wrapper -- the body lives in
-        :func:`lab_communicator.real.scan.refresh_pose_from_camera`.
-        """
-        from lab_communicator.real.scan import refresh_pose_from_camera
-        refresh_pose_from_camera(self)
+        from lab_communicator.real.scan import refresh_pose_from_camera as rpc
+
+        rpc(self, preserve_component_ids=preserve_tag_ids)
 
     def refresh_state(self):
         """Deprecated name; use :meth:`refresh_pose_from_camera`."""
-        self.refresh_pose_from_camera()
+        self.refresh_pose_from_camera(None)
 
     # ``set_lab_state`` and ``get_lab_state`` now live on the base
     # template class (Phase 2A of the communicator refactor). Real
@@ -730,7 +750,43 @@ class RealLabCommunicator(LabCommunicator):
         Thin wrapper -- body in :func:`lab_communicator.real.video.capture_table_cam`.
         """
         from lab_communicator.real.video import capture_table_cam
+
         return capture_table_cam(self, cam_id, exposure)
+
+    def table_cam_connect(self, cam_id: int) -> Tuple[bool, str]:
+        from lab_communicator.real.video import table_cam_connect
+
+        return table_cam_connect(self, cam_id)
+
+    def table_cam_disconnect(self, cam_id: int) -> Tuple[bool, str]:
+        from lab_communicator.real.video import table_cam_disconnect
+
+        return table_cam_disconnect(self, cam_id)
+
+    def table_cam_live_set(self, cam_id: int, enabled: bool) -> Tuple[bool, str]:
+        from lab_communicator.real.video import table_cam_live_set
+
+        return table_cam_live_set(self, cam_id, enabled)
+
+    def table_cam_send_vexp(self, cam_id: int, exposure_s: float) -> Tuple[bool, str]:
+        from lab_communicator.real.video import table_cam_send_vexp
+
+        return table_cam_send_vexp(self, cam_id, exposure_s)
+
+    def table_cam_send_vgain(self, cam_id: int, gain: float) -> Tuple[bool, str]:
+        from lab_communicator.real.video import table_cam_send_vgain
+
+        return table_cam_send_vgain(self, cam_id, gain)
+
+    def get_table_cam_stream(self, cam_id: int, fps: int = 18):
+        """MJPEG-ish multipart stream for `/api/table-cam/stream`.
+
+        Implemented only for backends that wired the communicator hooks; callers
+        should ``yield from`` this helper to preserve iteration semantics.
+        """
+        from lab_communicator.real.video import get_table_cam_stream
+
+        yield from get_table_cam_stream(self, cam_id, fps)
 
     async def _primitive_observe_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]

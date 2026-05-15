@@ -2,16 +2,18 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Query, Bod
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 import json
 import os
 import re
 import asyncio
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import io
 import logging
+import functools
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +67,6 @@ from lab_primitives import (
 )
 
 
-app = FastAPI()
-
 RECIPES_DIR = get_lab_view_paths().recipes_dir
 STATES_DIR = get_lab_view_paths().states_dir
 
@@ -99,6 +99,25 @@ else:
         lab = None
 
 
+def _persist_session_checkpoint_on_shutdown() -> None:
+    try:
+        if lab is None:
+            return
+        saver = getattr(lab, "save_session_checkpoint_if_enabled", None)
+        if callable(saver):
+            saver()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Shutdown session checkpoint save failed: %s", e)
+
+
+@asynccontextmanager
+async def _app_lifespan(_: FastAPI):
+    yield
+    _persist_session_checkpoint_on_shutdown()
+
+
+app = FastAPI(lifespan=_app_lifespan)
+
 # --- Models ---
 class RecipeStep(BaseModel):
     step: int
@@ -115,6 +134,85 @@ class Recipe(BaseModel):
 
 class StateName(BaseModel):
     name: str
+
+
+class SessionReconcileApplyBody(BaseModel):
+    tag_ids: List[str]
+
+
+class RefreshPoseBody(BaseModel):
+    """Optional tag ids whose full component rows are left unchanged after a scan."""
+
+    preserve_tag_ids: List[str] = Field(default_factory=list)
+
+
+def _session_reconciliation_offers_dict() -> Dict[str, Any]:
+    from lab_communicator.shared.session_checkpoint import (
+        checkpoint_age_hours,
+        checkpoint_lab_state,
+        default_thresholds_from_env,
+        env_stale_warning_hours,
+        merge_offers_tag_ids,
+        read_checkpoint_document,
+    )
+
+    paths = get_lab_view_paths()
+    chk_path = getattr(paths, "session_checkpoint_json", "") or ""
+    stale_warn_hours = env_stale_warning_hours()
+    thresholds = (
+        lab.session_reconciliation_thresholds()
+        if lab is not None
+        else default_thresholds_from_env()
+    )
+    thresholds_dict = {"position_mm": thresholds.position_mm, "yaw_deg": thresholds.yaw_deg}
+
+    doc = read_checkpoint_document(chk_path) if chk_path else None
+    age_h = checkpoint_age_hours(doc.get("saved_at")) if isinstance(doc, dict) else None
+    resp: Dict[str, Any] = {
+        "enabled": bool(lab is not None and getattr(lab, "session_checkpoint_enabled", lambda: False)()),
+        "skipped_reason": None,
+        "checkpoint_path": chk_path or None,
+        "checkpoint_saved_at": doc.get("saved_at") if isinstance(doc, dict) else None,
+        "checkpoint_lab_mode": doc.get("lab_mode") if isinstance(doc, dict) else None,
+        "age_hours": age_h,
+        "stale_warning_hours": stale_warn_hours,
+        "stale_warning": False,
+        "thresholds": thresholds_dict,
+        "offers": [],
+    }
+
+    if age_h is not None:
+        resp["stale_warning"] = float(age_h) >= float(stale_warn_hours)
+
+    if lab is None:
+        resp["enabled"] = False
+        resp["skipped_reason"] = "lab_unavailable"
+        return resp
+
+    chk_state = checkpoint_lab_state(doc) if isinstance(doc, dict) else None
+
+    if not getattr(lab, "session_checkpoint_enabled", lambda: False)():
+        resp["enabled"] = False
+        resp["skipped_reason"] = "feature_disabled"
+        return resp
+
+    cur = lab.get_lab_state()
+    if cur.get("system_status") != "IDLE":
+        resp["skipped_reason"] = f"busy:{cur.get('system_status')}"
+        return resp
+
+    if not isinstance(chk_state, dict):
+        resp["skipped_reason"] = "no_checkpoint"
+        return resp
+
+    offer_ids = merge_offers_tag_ids(
+        current_state=cur,
+        checkpoint_state=chk_state,
+        thresholds=thresholds,
+    )
+    resp["offers"] = [{"tag_id": tid} for tid in offer_ids]
+    return resp
+
 
 # --- Recipe Executor (Uses Communicator) ---
 
@@ -288,14 +386,16 @@ async def get_lab_state():
         logger.exception("GET /api/lab-state failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read Lab State: {str(e)}")
 
-def _schedule_pose_refresh(background_tasks: BackgroundTasks) -> Dict[str, Any]:
+def _schedule_pose_refresh(
+    background_tasks: BackgroundTasks,
+    preserve_tag_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     if lab is None:
         raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
     fn = getattr(lab, "refresh_pose_from_camera", None)
-    if fn is None and hasattr(lab, "refresh_state"):
-        fn = lab.refresh_state
     if callable(fn):
-        background_tasks.add_task(fn)
+        plist = list(preserve_tag_ids or [])
+        background_tasks.add_task(functools.partial(fn, preserve_tag_ids=plist))
         return {
             "status": "accepted",
             "message": "Pose refresh from camera started (updates measurables.pose)",
@@ -307,17 +407,78 @@ def _schedule_pose_refresh(background_tasks: BackgroundTasks) -> Dict[str, Any]:
 
 
 @app.post("/api/lab-state/refresh-pose")
-async def refresh_lab_pose_from_camera(background_tasks: BackgroundTasks):
+async def refresh_lab_pose_from_camera(
+    background_tasks: BackgroundTasks,
+    payload: Optional[RefreshPoseBody] = Body(None),
+):
     """
     Re-localize component poses from the overhead / table camera (real: full scan; mock: simulated noise).
     """
-    return _schedule_pose_refresh(background_tasks)
+    plist = []
+    if payload is not None:
+        plist = list(payload.preserve_tag_ids or [])
+    cur = getattr(lab, "get_lab_state", lambda: {})
+    try:
+        st = cur()
+    except Exception:  # noqa: BLE001
+        st = {}
+    if isinstance(st, dict):
+        cs = st.get("system_status")
+        if cs in ("BUSY", "OPTIMIZING"):
+            raise HTTPException(status_code=409, detail=f"System is {cs}. Please wait.")
+    return _schedule_pose_refresh(background_tasks, plist)
 
 
 @app.post("/api/lab-state/refresh")
-async def refresh_lab_state_legacy(background_tasks: BackgroundTasks):
+async def refresh_lab_state_legacy(
+    background_tasks: BackgroundTasks,
+    payload: Optional[RefreshPoseBody] = Body(None),
+):
     """Deprecated: use ``POST /api/lab-state/refresh-pose`` (same behavior)."""
-    return _schedule_pose_refresh(background_tasks)
+    plist = []
+    if payload is not None:
+        plist = list(payload.preserve_tag_ids or [])
+    return _schedule_pose_refresh(background_tasks, plist)
+
+
+@app.get("/api/session-reconciliation/offers")
+async def api_session_reconciliation_offers():
+    return _session_reconciliation_offers_dict()
+
+
+@app.post("/api/session-reconciliation/apply")
+async def api_session_reconciliation_apply(payload: SessionReconcileApplyBody):
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab communicator not initialized")
+    if not getattr(lab, "session_checkpoint_enabled", lambda: False)():
+        raise HTTPException(status_code=400, detail="Session checkpoint disabled for this communicator")
+    cur = lab.get_lab_state()
+    if cur.get("system_status") != "IDLE":
+        raise HTTPException(
+            status_code=409,
+            detail=f"System is {cur.get('system_status')}; reconciliation only applies in IDLE.",
+        )
+    merged = lab.apply_session_reconciliation_tags(payload.tag_ids)
+    return {"status": "ok", "applied_tag_ids": merged}
+
+
+@app.post("/api/session-reconciliation/save")
+async def api_session_checkpoint_save():
+    """Write ``session_last_lab_state.json`` now (same shape as graceful shutdown save)."""
+
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab communicator not initialized")
+    if not getattr(lab, "session_checkpoint_enabled", lambda: False)():
+        raise HTTPException(status_code=400, detail="Session checkpoint disabled for this communicator")
+    cur = lab.get_lab_state()
+    if cur.get("system_status") in ("BUSY", "OPTIMIZING"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"System is {cur.get('system_status')}. Please wait.",
+        )
+    lab.save_session_checkpoint_if_enabled()
+    return {"status": "ok"}
+
 
 @app.get("/api/states")
 async def list_saved_states():
@@ -634,7 +795,20 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
 
     return schedule_validated_command(lab, cmd, background_tasks)
 
-# --- Video Feed Endpoints ---
+# --- Video feeds + table camera HTTP surface ---
+
+
+class TableCamLiveBody(BaseModel):
+    enabled: bool = True
+
+
+class TableCamExposureBody(BaseModel):
+    exposure: float = Field(..., gt=5e-4, le=30.0)
+
+
+class TableCamGainBody(BaseModel):
+    gain: float = Field(..., gt=0, le=512.0)
+
 
 @app.get("/api/table-cam/capture")
 async def table_cam_capture(
@@ -657,6 +831,85 @@ async def table_cam_capture(
     if data is None:
         raise HTTPException(status_code=503, detail="Capture failed or table cams not available")
     return Response(content=data, media_type="image/png")
+
+
+@app.post("/api/table-cam/{cam_id}/connect")
+async def table_cam_http_connect(cam_id: int):
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if cam_id not in (1, 2):
+        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
+    ok, msg = lab.table_cam_connect(cam_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "detail": msg}
+
+
+@app.post("/api/table-cam/{cam_id}/disconnect")
+async def table_cam_http_disconnect(cam_id: int):
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if cam_id not in (1, 2):
+        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
+    ok, msg = lab.table_cam_disconnect(cam_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "detail": msg}
+
+
+@app.post("/api/table-cam/{cam_id}/live")
+async def table_cam_http_live(cam_id: int, body: TableCamLiveBody):
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if cam_id not in (1, 2):
+        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
+    ok, msg = lab.table_cam_live_set(cam_id, bool(body.enabled))
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "detail": msg, "enabled": body.enabled}
+
+
+@app.post("/api/table-cam/{cam_id}/vexp")
+async def table_cam_http_vexp(cam_id: int, body: TableCamExposureBody):
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if cam_id not in (1, 2):
+        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
+    ok, msg = lab.table_cam_send_vexp(cam_id, float(body.exposure))
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "detail": msg}
+
+
+@app.post("/api/table-cam/{cam_id}/vgain")
+async def table_cam_http_vgain(cam_id: int, body: TableCamGainBody):
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if cam_id not in (1, 2):
+        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
+    ok, msg = lab.table_cam_send_vgain(cam_id, float(body.gain))
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "detail": msg}
+
+
+@app.get("/api/table-cam/stream")
+async def table_cam_http_stream(cam_id: int = 1, fps: int = 18):
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if cam_id not in (1, 2):
+        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
+    try:
+        gen = lab.get_table_cam_stream(int(cam_id), int(fps))
+    except NotImplementedError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail="table cam streaming is unavailable for this lab backend.",
+        ) from exc
+    return StreamingResponse(
+        gen,
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @app.get("/api/cobyla-reference-image")

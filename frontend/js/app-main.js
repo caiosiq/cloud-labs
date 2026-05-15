@@ -43,8 +43,56 @@ import {
 /** Degrees per wheel tick while dragging a component (was 5°). */
 const ROTATION_WHEEL_STEP_DEG = 2.5;
 
-/** Snap to alignment segments (enabled laser lines + user guides) while dragging/dropping. */
-const ALIGNMENT_SNAP_THRESHOLD_MM = 10;
+/** Perpendicular snap to alignment segments — lab mm. */
+let ALIGNMENT_SNAP_THRESHOLD_MM = 10;
+/**
+ * Corners segment–segment crossings use segment threshold + extra so intersection wins over
+ * nearer feet on one line. Larger = easier junction snap. Tunable via URL when debug=1.
+ */
+let ALIGNMENT_INTERSECTION_EXTRA_MM = 12;
+/** Max distance from pointer at which crossings take priority over lone-segment snaps. */
+let ALIGNMENT_INTERSECTION_SNAP_THRESHOLD_MM =
+    ALIGNMENT_SNAP_THRESHOLD_MM + ALIGNMENT_INTERSECTION_EXTRA_MM;
+
+(() => {
+    if (typeof URLSearchParams === 'undefined') return;
+    const params = new URLSearchParams(window.location.search || '');
+    if (params.get('debug') !== '1') return;
+    let absInterSnap = NaN;
+    const interRaw = parseFloat(params.get('alignment_intersection_mm'));
+    if (Number.isFinite(interRaw) && interRaw > 0 && interRaw <= 300) absInterSnap = interRaw;
+
+    const segRaw = parseFloat(params.get('alignment_snap_mm'));
+    if (Number.isFinite(segRaw) && segRaw > 0 && segRaw <= 200) {
+        ALIGNMENT_SNAP_THRESHOLD_MM = segRaw;
+    }
+
+    const extraRaw = parseFloat(params.get('alignment_intersection_extra_mm'));
+    if (Number.isFinite(extraRaw) && extraRaw >= 0 && extraRaw <= 120) {
+        ALIGNMENT_INTERSECTION_EXTRA_MM = extraRaw;
+    }
+
+    ALIGNMENT_INTERSECTION_SNAP_THRESHOLD_MM = Number.isFinite(absInterSnap)
+        ? Math.max(absInterSnap, ALIGNMENT_SNAP_THRESHOLD_MM)
+        : ALIGNMENT_SNAP_THRESHOLD_MM + ALIGNMENT_INTERSECTION_EXTRA_MM;
+
+    console.info('[alignment snap] thresholds (mm)', {
+        segment: ALIGNMENT_SNAP_THRESHOLD_MM,
+        intersection: ALIGNMENT_INTERSECTION_SNAP_THRESHOLD_MM,
+        intersectionExtra: ALIGNMENT_INTERSECTION_EXTRA_MM,
+    });
+})();
+
+/** Max chord distance (mm) foot→corner on glued segment: inside this band we snap to the junction, not the foot (foot is always closer to P in px so pointer-distance tie-break was wrong). */
+const ALIGNMENT_CORNER_SPINE_MM = 22;
+/** Switch glued segment during drag only if competitor is this much tighter (mm) to pointer. */
+const ALIGNMENT_DRAG_STICKY_BREAK_MM = 8;
+/** Prefer previous sticky segment if feet are nearly tied — tie zone (mm) when using prev ghost. */
+const ALIGNMENT_SEGMENT_CHOICE_TIE_MM = 2;
+
+/** While dragging components: latch which alignment segment spine we follow unless another line pulls away. Reset on drag end. */
+let dragAlignmentStickySegIdx = null;
+
 const GUIDE_LINES_STORAGE_KEY = 'optics_alignment_guides_v1';
 const GUIDE_MIN_LENGTH_MM = 2;
 
@@ -112,6 +160,7 @@ const ctxMoveBtn = document.getElementById('ctx-move-btn');
 const ctxStrategies = document.getElementById('ctx-strategies');
 const ctxPanelCloseBtn = document.getElementById('ctx-panel-close');
 const ctxObserveSlot = document.getElementById('ctx-observe-slot');
+/** When `?debug=1`: extra dev copy in context panel; alignment snap URL overrides (see IIFE above) log as `[alignment snap]`. */
 const PRIMITIVE_DEV_HINTS =
     typeof URLSearchParams !== 'undefined' &&
     new URLSearchParams(window.location.search).get('debug') === '1';
@@ -318,61 +367,177 @@ function collectAlignmentSegments() {
 }
 
 /**
- * Snap (x,y) to the nearest snap point on enabled laser segments and user guides.
- * Candidates: pairwise segment intersections + perpendicular feet on each segment.
- * Picks the candidate within `threshold` with minimum distance to (x,y).
+ * Combined alignment snap — laser/guide segments plus crossings on the active spine.
+ * After choosing glued segment S (sticky + proximity): foot Q is closest on S to pointer.
+ * If Q lies within ALIGNMENT_CORNER_SPINE_MM of a crossing on S, snap to that apex (nearest
+ * along chord), otherwise optional pointer “hold” bubble — never pick apex by min dist(P,*) vs Q
+ * (Q always wins that comparison while sliding toward a corner).
+ * @returns {{ x: number; y: number; segIdx: number | null }}
  */
-function snapLabPointToAlignmentGuides(x, y, threshold = ALIGNMENT_SNAP_THRESHOLD_MM) {
+function snapLabPointUnified(x, y, options = {}) {
+    const {
+        segmentSnapMm = ALIGNMENT_SNAP_THRESHOLD_MM,
+        prevGhost = null,
+        stickySegIdx = null,
+    } = options;
     const segments = collectAlignmentSegments();
-    if (segments.length === 0) return { x, y };
+    if (segments.length === 0) {
+        return { x, y, segIdx: null };
+    }
 
-    let bestDist = threshold;
-    let bestX = x;
-    let bestY = y;
+    const n = segments.length;
+    const qix = new Array(n);
+    const qiy = new Array(n);
+    const da = new Array(n);
+    let anyFinite = false;
+    for (let i = 0; i < n; i++) {
+        const s = segments[i];
+        const c = closestPointOnSegment(x, y, s.p1.x, s.p1.y, s.p2.x, s.p2.y);
+        qix[i] = c.x;
+        qiy[i] = c.y;
+        da[i] = c.dist;
+        if (Number.isFinite(c.dist)) anyFinite = true;
+    }
+    if (!anyFinite) {
+        return { x, y, segIdx: null };
+    }
 
-    for (let i = 0; i < segments.length; i++) {
-        for (let j = i + 1; j < segments.length; j++) {
-            const A = segments[i];
-            const B = segments[j];
-            const I = segmentSegmentIntersection(
-                A.p1.x,
-                A.p1.y,
-                A.p2.x,
-                A.p2.y,
-                B.p1.x,
-                B.p1.y,
-                B.p2.x,
-                B.p2.y,
-            );
-            if (!I) continue;
-            const d = Math.hypot(x - I.x, y - I.y);
-            if (d < bestDist) {
-                bestDist = d;
-                bestX = I.x;
-                bestY = I.y;
+    const argMinBare = da.reduce((b, _, i, arr) => (arr[i] < arr[b] ? i : b), 0);
+
+    let bestIdx = argMinBare;
+    if (prevGhost && Number.isFinite(prevGhost.x) && Number.isFinite(prevGhost.y)) {
+        let best = 0;
+        for (let i = 1; i < n; i++) {
+            if (da[i] + 1e-9 < da[best] - 1e-9) {
+                best = i;
+            } else if (Math.abs(da[i] - da[best]) <= ALIGNMENT_SEGMENT_CHOICE_TIE_MM) {
+                const di = Math.hypot(qix[i] - prevGhost.x, qiy[i] - prevGhost.y);
+                const db = Math.hypot(qix[best] - prevGhost.x, qiy[best] - prevGhost.y);
+                if (di + 1e-9 < db) best = i;
+            }
+        }
+        bestIdx = best;
+    }
+
+    let chosenIdx = bestIdx;
+    if (
+        stickySegIdx != null &&
+        Number.isFinite(stickySegIdx) &&
+        stickySegIdx >= 0 &&
+        stickySegIdx < n
+    ) {
+        const ds = da[stickySegIdx];
+        if (Number.isFinite(ds) && ds < segmentSnapMm * 1.55) {
+            const db = da[bestIdx];
+            if (!(ds - db > ALIGNMENT_DRAG_STICKY_BREAK_MM)) {
+                chosenIdx = stickySegIdx;
             }
         }
     }
 
-    segments.forEach((s) => {
-        const c = closestPointOnSegment(x, y, s.p1.x, s.p1.y, s.p2.x, s.p2.y);
-        if (c.dist < bestDist) {
-            bestDist = c.dist;
-            bestX = c.x;
-            bestY = c.y;
-        }
-    });
+    if (!Number.isFinite(da[chosenIdx]) || da[chosenIdx] >= segmentSnapMm) {
+        return { x, y, segIdx: null };
+    }
 
-    return { x: bestX, y: bestY };
+    const fqix = qix[chosenIdx];
+    const fqiy = qiy[chosenIdx];
+    const spineMax = ALIGNMENT_CORNER_SPINE_MM;
+    const holdMm = ALIGNMENT_INTERSECTION_SNAP_THRESHOLD_MM;
+
+    /** @type {{ ax: number; ay: number; spine: number }[]} */
+    const apexes = [];
+    for (let j = 0; j < n; j++) {
+        if (j === chosenIdx) continue;
+        const Sa = segments[chosenIdx];
+        const Sb = segments[j];
+        const IX = segmentSegmentIntersection(
+            Sa.p1.x,
+            Sa.p1.y,
+            Sa.p2.x,
+            Sa.p2.y,
+            Sb.p1.x,
+            Sb.p1.y,
+            Sb.p2.x,
+            Sb.p2.y,
+        );
+        if (!IX) continue;
+        apexes.push({
+            ax: IX.x,
+            ay: IX.y,
+            spine: Math.hypot(IX.x - fqix, IX.y - fqiy),
+        });
+    }
+
+    let outX = fqix;
+    let outY = fqiy;
+
+    if (apexes.length > 0) {
+        // 1) Approaching junction along glued spine — prefer apex over foot Q (Q is always nearer to P until you pass the apex in px distance).
+        const inBand = apexes.filter((a) => a.spine <= spineMax);
+        if (inBand.length > 0) {
+            let best = inBand[0];
+            for (let z = 1; z < inBand.length; z++) {
+                if (inBand[z].spine + 1e-9 < best.spine - 1e-9) best = inBand[z];
+            }
+            outX = best.ax;
+            outY = best.ay;
+        } else {
+            // 2) Hold / latch near crossing (pointer bubble + optional continuity from ghost).
+            const dPQ = Math.hypot(x - fqix, y - fqiy);
+            let holdCand = null;
+            let holdD = Infinity;
+            for (const a of apexes) {
+                const dP = Math.hypot(x - a.ax, y - a.ay);
+                if (dP > holdMm) continue;
+                const prevNear =
+                    prevGhost &&
+                    Number.isFinite(prevGhost.x) &&
+                    Number.isFinite(prevGhost.y) &&
+                    Math.hypot(prevGhost.x - a.ax, prevGhost.y - a.ay) <= 3.2;
+                if (prevNear || dP <= dPQ + 1.75) {
+                    if (dP + 1e-9 < holdD - 1e-9) {
+                        holdD = dP;
+                        holdCand = a;
+                    }
+                }
+            }
+            if (holdCand != null) {
+                outX = holdCand.ax;
+                outY = holdCand.ay;
+            }
+        }
+    }
+
+    return { x: outX, y: outY, segIdx: chosenIdx };
+}
+
+/**
+ * Single-shot placement / non-drag snapping: prefer continuity with nearest spine + corners on it.
+ * Drops and context moves use this — no sticky carry-over.
+ */
+function snapLabPointToAlignmentGuides(x, y, threshold = ALIGNMENT_SNAP_THRESHOLD_MM) {
+    const r = snapLabPointUnified(x, y, {
+        segmentSnapMm: threshold,
+        prevGhost: null,
+        stickySegIdx: null,
+    });
+    return { x: r.x, y: r.y };
 }
 
 /**
  * Pointer lab position during a component drag: optional Shift locks motion to
  * horizontal or vertical through (sx,sy), same rule as `constrainGuideEndWithShift`.
- * Then alignment snap; if Shift is on, project back onto that axis so the ghost
- * stays glued to the line.
+ * Then alignment snap with optional drag glue (`prevGhost` / `stickySegIdx`).
+ * Returns `{ x,y,segIdx }` — `segIdx` is meaningful when `alignmentDragOpts` is passed.
  */
-function snapLabPointWithOptionalShiftAxis(sx, sy, cx, cy, shiftKey) {
+function snapLabPointWithOptionalShiftAxis(
+    sx,
+    sy,
+    cx,
+    cy,
+    shiftKey,
+    alignmentDragOpts = undefined,
+) {
     let x = cx;
     let y = cy;
     let horizontal = true;
@@ -384,12 +549,17 @@ function snapLabPointWithOptionalShiftAxis(sx, sy, cx, cy, shiftKey) {
         x = c.x;
         y = c.y;
     }
-    const snapped = snapLabPointToAlignmentGuides(x, y, ALIGNMENT_SNAP_THRESHOLD_MM);
-    if (!shiftKey) return snapped;
-    if (horizontal) {
-        return { x: snapped.x, y: sy };
+    const snapped = snapLabPointUnified(x, y, {
+        segmentSnapMm: ALIGNMENT_SNAP_THRESHOLD_MM,
+        ...(alignmentDragOpts || {}),
+    });
+    let outX = snapped.x;
+    let outY = snapped.y;
+    if (shiftKey) {
+        outX = horizontal ? snapped.x : sx;
+        outY = horizontal ? sy : snapped.y;
     }
-    return { x: sx, y: snapped.y };
+    return { x: outX, y: outY, segIdx: snapped.segIdx };
 }
 
 function loadGuideLinesFromStorage() {
@@ -810,25 +980,16 @@ async function fetchLabState() {
                 if (optOverlay) optOverlay.style.display = 'none';
                 store.isOptimizingFeedActive = false;
 
-                // Revert table-cam highlight
+                // Revert table-cam preview to latest capture vs live MJPEG vs placeholder
                 const tableCamPreview = document.getElementById('table-cam-preview');
                 if (tableCamPreview) {
                     tableCamPreview.style.border = '1px solid var(--border-color)';
                     tableCamPreview.style.backgroundColor = '#0f1115';
                     tableCamPreview.style.boxShadow = '';
                 }
-                
-                // Stop optimization stream to save bandwidth
-                const tableCamImg = document.getElementById('table-cam-img');
-                const tableCamPlaceholder = document.getElementById('table-cam-placeholder');
-                if (tableCamImg) {
-                    tableCamImg.src = ""; 
-                    tableCamImg.style.display = 'none';
-                }
-                if (tableCamPlaceholder) {
-                    tableCamPlaceholder.style.display = 'flex';
-                    tableCamPlaceholder.innerHTML = '<span class="material-icons-round" style="font-size: 24px; margin-bottom: 8px;">camera_alt</span><span style="font-size: 11px;">Table Cam Capture</span>';
-                }
+
+                restoreTableCamPanelVisuals();
+                updateTableCamMockPreviewChrome();
             }
         } else if (store.labState.system_status === 'OPTIMIZING') {
             store.isOptimizing = true;
@@ -886,6 +1047,10 @@ async function fetchLabState() {
                     value: Math.min(1.0, 0.2 + store.optimizationData.length * 0.05 + Math.random() * 0.1)
                 });
             }
+        }
+
+        if (store.labState.system_status === 'IDLE') {
+            void maybeTriggerSessionReconciliation();
         }
 
         fetchLayoutConflicts()
@@ -948,6 +1113,235 @@ function showErrorModal(title, message) {
     `;
 
     overlay.appendChild(card);
+    document.body.appendChild(overlay);
+}
+
+const SESSION_REC_STORAGE_DISMISS_KEY = 'optics-session-reconcile-dismiss';
+
+async function maybeTriggerSessionReconciliation() {
+    if (store.sessionReconciliationFetched) return;
+    try {
+        if (typeof sessionStorage !== 'undefined' &&
+            sessionStorage.getItem(SESSION_REC_STORAGE_DISMISS_KEY) === '1') {
+            store.sessionReconciliationFetched = true;
+            return;
+        }
+    } catch (_) {
+        /* ignore */
+    }
+    try {
+        const res = await fetch('/api/session-reconciliation/offers');
+        const data = await res.json();
+        if (!res.ok) return;
+        const skipReason = typeof data.skipped_reason === 'string' ? data.skipped_reason : '';
+        if (/^busy:/i.test(skipReason)) return;
+
+        store.sessionReconciliationFetched = true;
+        if (!data || document.getElementById('session-reconcile-modal')) return;
+        if (!data.offers || !data.offers.length) return;
+
+        openSessionReconciliationModal(data);
+    } catch (e) {
+        console.warn('session reconciliation offers unavailable:', e);
+    }
+}
+
+function closeSessionReconciliationModal() {
+    const el = document.getElementById('session-reconcile-modal');
+    if (el) el.remove();
+}
+
+function openSessionReconciliationModal(payload) {
+    if (document.getElementById('session-reconcile-modal')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'session-reconcile-modal';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100vw';
+    overlay.style.height = '100vh';
+    overlay.style.backgroundColor = 'rgba(0,0,0,0.82)';
+    overlay.style.zIndex = '2999';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.backdropFilter = 'blur(4px)';
+
+    const card = document.createElement('div');
+    card.style.backgroundColor = '#181b21';
+    card.style.border = '1px solid #f59e0b';
+    card.style.borderRadius = '8px';
+    card.style.padding = '24px';
+    card.style.width = '480px';
+    card.style.maxHeight = '80vh';
+    card.style.overflow = 'auto';
+    card.style.boxShadow = '0 20px 50px rgba(0,0,0,0.7)';
+
+    const offers = payload.offers || [];
+    const staleEl =
+        payload.stale_warning ?
+            document.createElement('p')
+        : null;
+    if (staleEl) {
+        staleEl.style.margin = '0 0 12px 0';
+        staleEl.style.padding = '8px 10px';
+        staleEl.style.borderRadius = '6px';
+        staleEl.style.background = '#3b2f0b';
+        staleEl.style.color = '#fde68a';
+        staleEl.style.fontSize = '12px';
+        staleEl.style.lineHeight = '1.4';
+        const at =
+            payload.checkpoint_saved_at != null ? String(payload.checkpoint_saved_at) : 'unknown';
+        staleEl.textContent = `Last session file is older than ${payload.stale_warning_hours}h (saved ${at}). Review before restoring.`;
+    }
+
+    const listHost = document.createElement('div');
+    listHost.style.maxHeight = '220px';
+    listHost.style.overflow = 'auto';
+    listHost.style.marginBottom = '16px';
+    listHost.style.border = '1px solid var(--border-color, #2a2e36)';
+    listHost.style.borderRadius = '6px';
+    listHost.style.padding = '8px';
+
+    offers.forEach((o) => {
+        const row = document.createElement('label');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '8px';
+        row.style.padding = '4px 0';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = true;
+        cb.dataset.tagId = o.tag_id;
+        const span = document.createElement('span');
+        span.textContent = o.tag_id;
+        row.appendChild(cb);
+        row.appendChild(span);
+        listHost.appendChild(row);
+    });
+
+    const titleEl = document.createElement('h2');
+    titleEl.style.margin = '0 0 8px 0';
+    titleEl.style.color = '#e2e8f0';
+    titleEl.style.fontSize = '18px';
+    titleEl.textContent = 'Restore last session (tunables & measurables)';
+
+    const sub = document.createElement('p');
+    sub.style.margin = '0 0 14px 0';
+    sub.style.color = '#94a3b8';
+    sub.style.fontSize = '13px';
+    sub.style.lineHeight = '1.5';
+    sub.textContent = 'Measured poses still match within tolerance for these tags; you can reload saved tunables and measurables from the last graceful shutdown checkpoint. Hardware is not commanded.';
+
+    const meta = document.createElement('div');
+    meta.style.fontSize = '11px';
+    meta.style.color = '#64748b';
+    meta.style.marginBottom = '10px';
+    meta.textContent = `Checkpoint ${payload.checkpoint_saved_at || '?'} · age ${payload.age_hours != null ? payload.age_hours.toFixed(1) + ' h' : '—'} · ±${payload.thresholds?.position_mm} mm · ±${payload.thresholds?.yaw_deg}° yaw`;
+
+    const btnRow = document.createElement('div');
+    btnRow.style.display = 'flex';
+    btnRow.style.flexWrap = 'wrap';
+    btnRow.style.gap = '8px';
+    btnRow.style.justifyContent = 'flex-end';
+
+    const dismissBtn = document.createElement('button');
+    dismissBtn.className = 'btn btn-secondary';
+    dismissBtn.style.width = 'auto';
+    dismissBtn.textContent = 'Dismiss';
+    dismissBtn.onclick = () => {
+        try {
+            if (typeof sessionStorage !== 'undefined') {
+                sessionStorage.setItem(SESSION_REC_STORAGE_DISMISS_KEY, '1');
+            }
+        } catch (_) {
+            /* ignore */
+        }
+        closeSessionReconciliationModal();
+    };
+
+    const selAllBtn = document.createElement('button');
+    selAllBtn.className = 'btn btn-secondary';
+    selAllBtn.style.width = 'auto';
+    selAllBtn.textContent = offers.length ? 'Select all' : '—';
+    selAllBtn.disabled = !offers.length;
+    selAllBtn.onclick = () => {
+        listHost.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+            cb.checked = true;
+        });
+    };
+
+    const selNoneBtn = document.createElement('button');
+    selNoneBtn.className = 'btn btn-secondary';
+    selNoneBtn.style.width = 'auto';
+    selNoneBtn.textContent = 'Clear';
+    selNoneBtn.onclick = () => {
+        listHost.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+            cb.checked = false;
+        });
+    };
+
+    const applyBtn = document.createElement('button');
+    applyBtn.className = 'btn btn-primary';
+    applyBtn.style.width = 'auto';
+    applyBtn.textContent = 'Apply selected';
+
+    async function submitSelection(all) {
+        let ids = all ? offers.map((o) => o.tag_id) : [];
+        if (!all) {
+            ids = [];
+            listHost.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+                if (cb.checked) ids.push(cb.dataset.tagId);
+            });
+        }
+        if (!ids.length) {
+            log('No tags selected for session restore.', 'warn');
+            return;
+        }
+        try {
+            const res = await fetch('/api/session-reconciliation/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tag_ids: ids }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || 'Apply failed');
+            log(`Restored checkpoint for tags: ${(data.applied_tag_ids || ids).join(', ')}`, 'info');
+            store.forceGhostSync = true;
+            closeSessionReconciliationModal();
+            await fetchLabState();
+        } catch (e) {
+            console.error(e);
+            showErrorModal('Session Restore Failed', e.message || String(e));
+        }
+    }
+
+    applyBtn.onclick = () => submitSelection(false);
+
+    const applyAllBtn = document.createElement('button');
+    applyAllBtn.className = 'btn btn-primary';
+    applyAllBtn.style.width = 'auto';
+    applyAllBtn.textContent = 'Apply all listed';
+    applyAllBtn.onclick = () => submitSelection(true);
+
+    btnRow.appendChild(dismissBtn);
+    btnRow.appendChild(selNoneBtn);
+    btnRow.appendChild(selAllBtn);
+    btnRow.appendChild(applyAllBtn);
+    btnRow.appendChild(applyBtn);
+
+    card.appendChild(titleEl);
+    card.appendChild(sub);
+    card.appendChild(meta);
+    if (staleEl) card.appendChild(staleEl);
+    card.appendChild(listHost);
+    card.appendChild(btnRow);
+    overlay.appendChild(card);
+
+    overlay.addEventListener('click', (ev) => {
+        if (ev.target === overlay) dismissBtn.click();
+    });
     document.body.appendChild(overlay);
 }
 
@@ -1282,6 +1676,7 @@ canvas.addEventListener('mousedown', (e) => {
             if (isStoredComponent(stComp)) {
                 if (store.dragFromStorageTag === hit.name) {
                     store.isDragging = true;
+                    dragAlignmentStickySegIdx = null;
                     store.draggingComponent = hit.name;
                     const g = store.ghostState[hit.name];
                     store.dragFromStorageStartPose = {
@@ -1298,6 +1693,7 @@ canvas.addEventListener('mousedown', (e) => {
                 return;
             }
             store.isDragging = true;
+            dragAlignmentStickySegIdx = null;
             store.draggingComponent = hit.name;
             const g0 = store.ghostState[hit.name];
             store.dragComponentStartLab = { x: g0.x, y: g0.y };
@@ -2179,13 +2575,23 @@ canvas.addEventListener('mousemove', (e) => {
 
     const o = store.dragComponentStartLab;
     const useShiftAxis = e.shiftKey && o;
+    const dc = store.draggingComponent;
+    const prevGh = dc && store.ghostState[dc] ? store.ghostState[dc] : null;
     const snapped = snapLabPointWithOptionalShiftAxis(
         useShiftAxis ? o.x : lab.x,
         useShiftAxis ? o.y : lab.y,
         lab.x,
         lab.y,
         useShiftAxis,
+        {
+            prevGhost:
+                prevGh && Number.isFinite(prevGh.x) && Number.isFinite(prevGh.y)
+                    ? { x: prevGh.x, y: prevGh.y }
+                    : null,
+            stickySegIdx: dragAlignmentStickySegIdx,
+        },
     );
+    dragAlignmentStickySegIdx = snapped.segIdx;
     const finalX = snapped.x;
     const finalY = snapped.y;
 
@@ -2219,6 +2625,7 @@ canvas.addEventListener('wheel', (e) => {
 canvas.addEventListener('mouseup', async (e) => {
     if (store.isDragging && store.draggingComponent) {
         store.isDragging = false;
+        dragAlignmentStickySegIdx = null;
         const dc = store.draggingComponent;
         const current = store.ghostState[dc];
         const labSt = placementUiLabel(store.labState.components[dc]);
@@ -3169,6 +3576,7 @@ function updateUI() {
     });
 
     syncTableCamMockHint();
+    updateTableCamMockPreviewChrome();
     updateMotorAngleLabels(store.selectedComponent);
     updateLayoutWarningBanner();
     render();
@@ -3329,6 +3737,52 @@ function syncTableCamMockHint() {
     const el = document.getElementById('table-cam-mock-hint');
     if (!el || !store.labState) return;
     el.style.display = store.labState.lab_mode === 'MOCK' ? 'block' : 'none';
+}
+
+function updateTableCamMockPreviewChrome() {
+    const preview = document.getElementById('table-cam-preview');
+    const chip = document.getElementById('table-cam-mode-chip');
+    if (!preview || !chip) return;
+
+    chip.textContent = '';
+    chip.className = 'table-cam-mode-chip';
+    chip.style.display = 'none';
+
+    preview.classList.remove(
+        'table-cam-preview--mock-live',
+        'table-cam-preview--mock-capture',
+        'table-cam-preview--mock-neutral',
+    );
+
+    if (store.isOptimizingFeedActive) {
+        preview.classList.add('table-cam-preview--mock-neutral');
+        return;
+    }
+
+    const mock = !!(store.labState && store.labState.lab_mode === 'MOCK');
+    if (!mock) {
+        preview.classList.add('table-cam-preview--mock-neutral');
+        return;
+    }
+
+    const cid = store.selectedTableCam;
+    preview.classList.add('table-cam-preview--mock-neutral');
+
+    if (store.tableCamLive[cid]) {
+        preview.classList.remove('table-cam-preview--mock-neutral');
+        preview.classList.add('table-cam-preview--mock-live');
+        chip.textContent = 'MOCK · LIVE STREAM';
+        chip.classList.add('mode-live');
+        chip.style.display = 'block';
+        return;
+    }
+    if (getTableCamLastBlobUrl(cid)) {
+        preview.classList.remove('table-cam-preview--mock-neutral');
+        preview.classList.add('table-cam-preview--mock-capture');
+        chip.textContent = 'MOCK · STILL CAPTURE';
+        chip.classList.add('mode-capture');
+        chip.style.display = 'block';
+    }
 }
 
 function renderRecipes() {
@@ -3905,10 +4359,187 @@ function initLaserLinesPanel() {
     renderLaserLinesPanel();
 }
 
+/** Collect tag ids eligible for simulated / camera pose refresh (on layout canvas). */
+function poseRefreshEligibleTagIds() {
+    const comps = store.labState?.components || {};
+    return Object.keys(comps)
+        .filter((tid) => comps[tid] && isOnTableComponent(comps[tid]))
+        .sort();
+}
+
+/**
+ * Modal: unchecked tags stay frozen (full component row unchanged); checked tags get scan updates.
+ * @returns {Promise<string[]|null>} preserve list, empty if none unchecked, ``null`` if cancelled.
+ */
+function promptRefreshPosePreserveIds() {
+    const ids = poseRefreshEligibleTagIds();
+    if (!ids.length) {
+        return Promise.resolve([]);
+    }
+    return new Promise((resolve) => {
+        const existing = document.getElementById('refresh-pose-preserve-modal');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'refresh-pose-preserve-modal';
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100vw';
+        overlay.style.height = '100vh';
+        overlay.style.backgroundColor = 'rgba(0,0,0,0.82)';
+        overlay.style.zIndex = '3100';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.backdropFilter = 'blur(4px)';
+
+        const card = document.createElement('div');
+        card.style.backgroundColor = '#181b21';
+        card.style.border = '1px solid var(--primary-accent, #3b82f6)';
+        card.style.borderRadius = '8px';
+        card.style.padding = '24px';
+        card.style.width = '440px';
+        card.style.maxHeight = '76vh';
+        card.style.overflow = 'auto';
+        card.style.boxShadow = '0 20px 50px rgba(0,0,0,0.7)';
+
+        const titleEl = document.createElement('h2');
+        titleEl.style.margin = '0 0 8px 0';
+        titleEl.style.color = '#e2e8f0';
+        titleEl.style.fontSize = '18px';
+        titleEl.textContent = 'Refresh poses from camera';
+
+        const sub = document.createElement('p');
+        sub.style.margin = '0 0 12px 0';
+        sub.style.color = '#94a3b8';
+        sub.style.fontSize = '13px';
+        sub.style.lineHeight = '1.5';
+        sub.textContent =
+            'Checked = update this component from the scan. Unchecked = keep the entire current row (measurables, tunables, nominal pose) unchanged.';
+
+        const listHost = document.createElement('div');
+        listHost.style.maxHeight = '260px';
+        listHost.style.overflow = 'auto';
+        listHost.style.marginBottom = '16px';
+        listHost.style.border = '1px solid var(--border-color, #2a2e36)';
+        listHost.style.borderRadius = '6px';
+        listHost.style.padding = '8px';
+
+        ids.forEach((tid) => {
+            const row = document.createElement('label');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.gap = '8px';
+            row.style.padding = '4px 0';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = true;
+            cb.dataset.tagId = tid;
+            const span = document.createElement('span');
+            span.textContent = tid;
+            row.appendChild(cb);
+            row.appendChild(span);
+            listHost.appendChild(row);
+        });
+
+        const rowSel = document.createElement('div');
+        rowSel.style.display = 'flex';
+        rowSel.style.flexWrap = 'wrap';
+        rowSel.style.gap = '8px';
+        rowSel.style.marginBottom = '12px';
+
+        const allBtn = document.createElement('button');
+        allBtn.type = 'button';
+        allBtn.className = 'btn btn-secondary';
+        allBtn.style.width = 'auto';
+        allBtn.textContent = 'Refresh all';
+        allBtn.onclick = () => {
+            listHost.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+                cb.checked = true;
+            });
+        };
+        const noneBtn = document.createElement('button');
+        noneBtn.type = 'button';
+        noneBtn.className = 'btn btn-secondary';
+        noneBtn.style.width = 'auto';
+        noneBtn.textContent = 'Keep all (no pose updates)';
+        noneBtn.onclick = () => {
+            listHost.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+                cb.checked = false;
+            });
+        };
+        rowSel.appendChild(allBtn);
+        rowSel.appendChild(noneBtn);
+
+        const btnRow = document.createElement('div');
+        btnRow.style.display = 'flex';
+        btnRow.style.gap = '10px';
+        btnRow.style.justifyContent = 'flex-end';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn btn-secondary';
+        cancelBtn.style.width = 'auto';
+        cancelBtn.textContent = 'Cancel';
+
+        const goBtn = document.createElement('button');
+        goBtn.type = 'button';
+        goBtn.className = 'btn btn-primary';
+        goBtn.style.width = 'auto';
+        goBtn.textContent = 'Start refresh';
+
+        const finish = () => {
+            overlay.remove();
+        };
+
+        cancelBtn.onclick = () => {
+            finish();
+            resolve(null);
+        };
+        goBtn.onclick = () => {
+            const preserve = [];
+            listHost.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+                if (!cb.checked && cb.dataset.tagId) preserve.push(cb.dataset.tagId);
+            });
+            finish();
+            resolve(preserve);
+        };
+
+        overlay.addEventListener('click', (ev) => {
+            if (ev.target === overlay) cancelBtn.click();
+        });
+
+        btnRow.appendChild(cancelBtn);
+        btnRow.appendChild(goBtn);
+        card.appendChild(titleEl);
+        card.appendChild(sub);
+        card.appendChild(rowSel);
+        card.appendChild(listHost);
+        card.appendChild(btnRow);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+    });
+}
+
 /** Same behavior as the Refresh Pose button (shared with Command Console): camera pose pass → measurables.pose. */
 async function runLabPoseRefresh() {
-    log("Refreshing poses from camera (re-localize)...", "warn");
-    const res = await fetch('/api/lab-state/refresh-pose', { method: 'POST' });
+    const preserve_tag_ids = await promptRefreshPosePreserveIds();
+    if (preserve_tag_ids === null) {
+        log('Refresh poses cancelled.', 'info');
+        return;
+    }
+    log(
+        preserve_tag_ids.length
+            ? `Refreshing poses (${preserve_tag_ids.length} tag(s) frozen)…`
+            : 'Refreshing poses from camera (re-localize)…',
+        'warn'
+    );
+    const res = await fetch('/api/lab-state/refresh-pose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preserve_tag_ids }),
+    });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || 'Refresh pose failed');
@@ -3919,7 +4550,7 @@ async function runLabPoseRefresh() {
         const stateRes = await fetch('/api/lab-state');
         const state = await stateRes.json();
         if (state && state.system_status === 'IDLE') break;
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 500));
     }
 
     store.forceGhostSync = true;
@@ -4035,15 +4666,186 @@ function initVideoFeed() {
     checkVideoStatus();
 }
 
-// --- Table cam capture (on-demand, real lab only) ---
+// --- Table cam: lazy connect + MJPEG live (cloud/mock parity) ---
+const TABLE_CAM_STREAM_FPS = 18;
+let tableCamVexpDebounceTimer = null;
+
+function buildTableCamStreamUrl(camId) {
+    return `/api/table-cam/stream?cam_id=${camId}&fps=${TABLE_CAM_STREAM_FPS}&t=${Date.now()}`;
+}
+
+function getTableCamLastBlobUrl(camId) {
+    return store.tableCamLastBlobUrl[camId] || null;
+}
+
+function setTableCamLastBlobUrl(camId, objectUrl) {
+    const prev = store.tableCamLastBlobUrl[camId];
+    if (prev) URL.revokeObjectURL(prev);
+    store.tableCamLastBlobUrl[camId] = objectUrl;
+}
+
+function restoreTableCamPanelVisuals() {
+    const img = document.getElementById('table-cam-img');
+    const placeholder = document.getElementById('table-cam-placeholder');
+    if (!img || !placeholder) return;
+    if (store.isOptimizingFeedActive) return;
+
+    const cid = store.selectedTableCam;
+    const hint =
+        '<span style="font-size: 11px;line-height:1.45;color:var(--text-muted);">Use <strong>Connected</strong>, then the <strong>Live / Still</strong> toggle for stream vs frozen preview. <strong>Capture</strong> grabs a fresh still and switches to Still.</span>';
+
+    if (store.tableCamLive[cid]) {
+        img.src = buildTableCamStreamUrl(cid);
+        img.style.display = 'block';
+        placeholder.style.display = 'none';
+        placeholder.textContent = '';
+        return;
+    }
+    const lastCap = getTableCamLastBlobUrl(cid);
+    if (lastCap) {
+        img.src = lastCap;
+        img.style.display = 'block';
+        placeholder.style.display = 'none';
+        placeholder.textContent = '';
+        return;
+    }
+    img.src = '';
+    img.style.display = 'none';
+    placeholder.style.display = 'block';
+    placeholder.innerHTML = hint;
+}
+
+function syncTableCamConnectToggleAppearance() {
+    const btn = document.getElementById('table-cam-link-toggle');
+    const label = document.getElementById('table-cam-link-toggle-label');
+    const icon = document.getElementById('table-cam-link-dot');
+    if (!btn || !label || !icon) return;
+    const on = !!store.tableCamConnected[store.selectedTableCam];
+    btn.classList.toggle('table-cam-connect-toggle--connected', on);
+    btn.classList.toggle('table-cam-connect-toggle--disconnected', !on);
+    icon.textContent = on ? 'link' : 'link_off';
+    label.textContent = on ? 'Connected' : 'Disconnected';
+    btn.title = on
+        ? 'Tap to disconnect and release the camera session'
+        : 'Tap to connect / open SDK session';
+}
+
+function syncTableCamLiveButtonAppearance() {
+    const liveBtn = document.getElementById('table-cam-live-btn');
+    if (!liveBtn) return;
+    const cid = store.selectedTableCam;
+    const streaming = !!store.tableCamLive[cid];
+    const connected = !!store.tableCamConnected[cid];
+    liveBtn.classList.toggle('table-cam-live-btn--streaming', streaming);
+    liveBtn.setAttribute('aria-pressed', streaming ? 'true' : 'false');
+    liveBtn.disabled = !connected;
+    const icon = document.getElementById('table-cam-live-btn-icon');
+    const label = document.getElementById('table-cam-live-btn-label');
+    if (icon && label) {
+        if (!connected) {
+            icon.textContent = 'videocam';
+            label.textContent = 'Live';
+        } else if (streaming) {
+            icon.textContent = 'videocam';
+            label.textContent = 'Live';
+        } else {
+            icon.textContent = 'photo';
+            label.textContent = 'Still';
+        }
+    }
+    liveBtn.title = streaming
+        ? 'Live stream (STREAM_ON) — click to show still / last capture'
+        : connected
+          ? 'Still / last capture — click to start live stream'
+          : 'Connect the camera to toggle live stream vs still preview';
+}
+
+function syncTableCamCaptureButtonAppearance() {
+    const btn = document.getElementById('table-cam-capture-btn');
+    const cid = store.selectedTableCam;
+    if (!btn) return;
+    btn.disabled = !store.tableCamConnected[cid];
+}
+
+async function refreshTableCamLiveUi() {
+    syncTableCamConnectToggleAppearance();
+    syncTableCamLiveButtonAppearance();
+    syncTableCamCaptureButtonAppearance();
+    updateTableCamMockPreviewChrome();
+    restoreTableCamPanelVisuals();
+}
+
+async function apiTableCamConnect(camId) {
+    const res = await fetch(`/api/table-cam/${camId}/connect`, { method: 'POST' });
+    if (!res.ok) {
+        const msg = (await res.json().catch(() => ({}))).detail || 'connect failed';
+        throw new Error(msg);
+    }
+    store.tableCamConnected[camId] = true;
+}
+
+async function apiTableCamDisconnect(camId) {
+    if (store.tableCamLive[camId]) {
+        try {
+            await fetch(`/api/table-cam/${camId}/live`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: false }),
+            });
+        } catch {
+            /* best-effort */
+        }
+        store.tableCamLive[camId] = false;
+    }
+    const res = await fetch(`/api/table-cam/${camId}/disconnect`, { method: 'POST' });
+    if (!res.ok) {
+        const msg = (await res.json().catch(() => ({}))).detail || 'disconnect failed';
+        throw new Error(msg);
+    }
+    store.tableCamConnected[camId] = false;
+}
+
+async function apiTableCamLive(camId, enabled) {
+    const res = await fetch(`/api/table-cam/${camId}/live`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !!enabled }),
+    });
+    if (!res.ok) {
+        const msg = (await res.json().catch(() => ({}))).detail || 'live toggle failed';
+        throw new Error(msg);
+    }
+    store.tableCamLive[camId] = !!enabled;
+}
+
+function scheduleTableCamVexpPush() {
+    if (tableCamVexpDebounceTimer) clearTimeout(tableCamVexpDebounceTimer);
+    tableCamVexpDebounceTimer = setTimeout(async () => {
+        const cid = store.selectedTableCam;
+        const exp = getTableCamExposureSeconds();
+        if (!store.tableCamConnected[cid]) return;
+        try {
+            await fetch(`/api/table-cam/${cid}/vexp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ exposure: exp }),
+            });
+        } catch {
+            /* non-fatal */
+        }
+    }, 320);
+}
+
 const tableCamBtn1 = document.getElementById('table-cam-btn-1');
 const tableCamBtn2 = document.getElementById('table-cam-btn-2');
+const tableCamLinkToggle = document.getElementById('table-cam-link-toggle');
+const tableCamLiveBtn = document.getElementById('table-cam-live-btn');
 const tableCamCaptureBtn = document.getElementById('table-cam-capture-btn');
 const tableCamImg = document.getElementById('table-cam-img');
 const tableCamPlaceholder = document.getElementById('table-cam-placeholder');
 const tableCamError = document.getElementById('table-cam-error');
 
-function setTableCamSelection(camId) {
+async function setTableCamSelection(camId) {
     store.selectedTableCam = camId;
     if (tableCamBtn1) {
         tableCamBtn1.classList.toggle('btn-primary', camId === 1);
@@ -4053,11 +4855,58 @@ function setTableCamSelection(camId) {
         tableCamBtn2.classList.toggle('btn-primary', camId === 2);
         tableCamBtn2.classList.toggle('btn-secondary', camId !== 2);
     }
+
+    try {
+        await apiTableCamConnect(camId);
+    } catch (e) {
+        store.tableCamConnected[camId] = false;
+        console.warn(`[table-cam] auto-connect CAM${camId}:`, e.message || e);
+    }
+    await refreshTableCamLiveUi();
 }
 
-if (tableCamBtn1) tableCamBtn1.addEventListener('click', () => setTableCamSelection(1));
-if (tableCamBtn2) tableCamBtn2.addEventListener('click', () => setTableCamSelection(2));
-setTableCamSelection(1);
+if (tableCamBtn1) tableCamBtn1.addEventListener('click', () => void setTableCamSelection(1));
+if (tableCamBtn2) tableCamBtn2.addEventListener('click', () => void setTableCamSelection(2));
+
+if (tableCamLinkToggle) {
+    tableCamLinkToggle.addEventListener('click', async () => {
+        const cid = store.selectedTableCam;
+        if (tableCamError) tableCamError.style.display = 'none';
+        try {
+            if (store.tableCamConnected[cid]) {
+                await apiTableCamDisconnect(cid);
+            } else {
+                await apiTableCamConnect(cid);
+                scheduleTableCamVexpPush();
+            }
+            await refreshTableCamLiveUi();
+        } catch (e) {
+            if (tableCamError) {
+                tableCamError.textContent = e.message || 'Toggle failed';
+                tableCamError.style.display = 'block';
+            }
+        }
+    });
+}
+
+if (tableCamLiveBtn) {
+    tableCamLiveBtn.addEventListener('click', async () => {
+        const cid = store.selectedTableCam;
+        if (tableCamError) tableCamError.style.display = 'none';
+        if (!store.tableCamConnected[cid]) return;
+        const next = !store.tableCamLive[cid];
+        try {
+            await apiTableCamLive(cid, next);
+            await refreshTableCamLiveUi();
+        } catch (e) {
+            if (tableCamError) {
+                tableCamError.textContent = e.message || 'Live toggle failed';
+                tableCamError.style.display = 'block';
+            }
+            await refreshTableCamLiveUi();
+        }
+    });
+}
 
 function getTableCamExposureSeconds() {
     const el = document.getElementById('table-cam-exposure');
@@ -4068,37 +4917,80 @@ function getTableCamExposureSeconds() {
     return v;
 }
 
+(function wireTableCamExposureVexpDebounce() {
+    const expEl = document.getElementById('table-cam-exposure');
+    if (!expEl) return;
+    expEl.addEventListener('change', scheduleTableCamVexpPush);
+    expEl.addEventListener('input', scheduleTableCamVexpPush);
+})();
+
+void (async () => {
+    await setTableCamSelection(1);
+})();
+
 if (tableCamCaptureBtn) {
     tableCamCaptureBtn.addEventListener('click', async () => {
         if (!tableCamImg || !tableCamPlaceholder || !tableCamError) return;
         const exp = getTableCamExposureSeconds();
+        const cid = store.selectedTableCam;
+        tableCamError.style.display = 'none';
+        if (!store.tableCamConnected[cid]) {
+            tableCamError.textContent = 'Connect the camera before capturing.';
+            tableCamError.style.display = 'block';
+            return;
+        }
+
+        try {
+            if (store.tableCamLive[cid]) {
+                await apiTableCamLive(cid, false);
+            }
+        } catch (e) {
+            tableCamError.textContent = e.message || 'Could not stop live stream for capture';
+            tableCamError.style.display = 'block';
+            await refreshTableCamLiveUi();
+            return;
+        }
+
+        syncTableCamConnectToggleAppearance();
+        syncTableCamLiveButtonAppearance();
+        updateTableCamMockPreviewChrome();
+
+        tableCamImg.src = '';
+        tableCamImg.style.display = 'none';
         tableCamPlaceholder.textContent = 'Capturing...';
         tableCamPlaceholder.style.display = 'block';
-        tableCamImg.style.display = 'none';
-        tableCamImg.src = '';
-        tableCamError.style.display = 'none';
+
         try {
-            const res = await fetch(`/api/table-cam/capture?cam_id=${store.selectedTableCam}&exposure=${encodeURIComponent(exp)}`);
+            const res = await fetch(
+                `/api/table-cam/capture?cam_id=${cid}&exposure=${encodeURIComponent(exp)}`,
+            );
             if (res.ok) {
                 const blob = await res.blob();
-                if (store.tableCamLastBlobUrl) URL.revokeObjectURL(store.tableCamLastBlobUrl);
-                store.tableCamLastBlobUrl = URL.createObjectURL(blob);
-                tableCamImg.src = store.tableCamLastBlobUrl;
+                setTableCamLastBlobUrl(cid, URL.createObjectURL(blob));
+                tableCamImg.src = getTableCamLastBlobUrl(cid);
                 tableCamImg.style.display = 'block';
                 tableCamPlaceholder.style.display = 'none';
-                tableCamPlaceholder.textContent = 'Click Capture to get image';
+                await refreshTableCamLiveUi();
             } else {
-                const err = (await res.json().catch(() => ({}))).detail || 'Capture failed';
-                tableCamError.textContent = err;
+                let msg = 'Capture failed';
+                try {
+                    const j = await res.json().catch(() => ({}));
+                    if (typeof j.detail === 'string') {
+                        msg = j.detail;
+                    }
+                } catch (_) {
+                    /* ignore */
+                }
+                tableCamError.textContent = msg;
                 tableCamError.style.display = 'block';
                 tableCamPlaceholder.style.display = 'none';
-                tableCamPlaceholder.textContent = 'Click Capture to get image';
+                await refreshTableCamLiveUi();
             }
         } catch (e) {
             tableCamError.textContent = e.message || 'Request failed';
             tableCamError.style.display = 'block';
             tableCamPlaceholder.style.display = 'none';
-            tableCamPlaceholder.textContent = 'Click Capture to get image';
+            await refreshTableCamLiveUi();
         }
     });
 }

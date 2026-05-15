@@ -3,7 +3,7 @@ import os
 import random
 from datetime import datetime
 from io import BytesIO
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from lab_model.component_model import (
     PRESENCE_BREADBOARD,
@@ -30,6 +30,8 @@ from lab_communicator.shared.snapshot import LabPose
 # project ``schemas/`` directory is three levels up. (Was two levels
 # up when the class lived in ``backend/lab_communicator/mock.py``.)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_ENV_TRUE = frozenset({"1", "true", "yes", "on"})
+_ENV_FALSE = frozenset({"0", "false", "no", "off"})
 
 
 class MockLabCommunicator(LabCommunicator):
@@ -79,6 +81,8 @@ class MockLabCommunicator(LabCommunicator):
             os.getenv("MOCK_GRIPPER_CLOSED_ON_BOOT", "").strip().lower()
             in ("1", "true", "yes", "on")
         )
+        self._table_cam_connected = {1: False, 2: False}
+        self._table_cam_streaming = {1: False, 2: False}
         self._reconcile_holding_on_boot()
 
     def _reconcile_holding_on_boot(self) -> None:
@@ -218,6 +222,14 @@ class MockLabCommunicator(LabCommunicator):
             snapshot = json.loads(json.dumps(self.current_state))
         write_state(self.state_file, snapshot)
 
+    def session_checkpoint_enabled(self) -> bool:
+        raw = (os.getenv("SESSION_CHECKPOINT") or "").strip().lower()
+        if raw in _ENV_TRUE:
+            return True
+        if raw in _ENV_FALSE:
+            return False
+        return True
+
     # ``get_lab_state`` lives on the base template class (Phase 2A);
     # mock's in-memory ``self.current_state`` is kept in sync with the
     # disk file by :meth:`_write_state` and :meth:`_persist_state`, so
@@ -232,29 +244,33 @@ class MockLabCommunicator(LabCommunicator):
             return {"closed": True, "confidence": 1.0, "source": "mock_env_flag"}
         return {"closed": False, "confidence": 1.0, "source": "mock"}
 
-    def refresh_pose_from_camera(self):
-        """
-        Simulate an overhead-camera pose pass: update **measurables.pose** toward
-        **tunables.nominal_pose** with small localization noise (mock only).
-        """
+    def refresh_pose_from_camera(
+        self, preserve_tag_ids: Optional[List[str]] = None
+    ) -> None:
+        """Simulate camera re-localisation; ``preserve_tag_ids`` keep prior rows verbatim."""
+        from lab_communicator.shared.pose_refresh_merge import merge_scan_into_components
+
         state = self._read_state()
         comps = state.get("components") or {}
         if not isinstance(comps, dict):
             return
-        state["system_status"] = "BUSY"
+
+        baseline = json.loads(json.dumps(comps))
+
+        state["system_status"] = SYSTEM_STATUS_BUSY
         self._write_state(state)
 
-        state = self._read_state()
-        comps = state.get("components") or {}
-        for _tag_id, comp in comps.items():
+        candidate: Dict[str, Any] = {}
+        for tag_id, comp in baseline.items():
             if not isinstance(comp, dict):
                 continue
             tun = comp.get("tunables") or {}
             pres = tun.get("presence")
             if pres not in (PRESENCE_BREADBOARD, PRESENCE_STORAGE):
                 continue
-            np = tun.get("nominal_pose") or {}
-            meas = comp.setdefault("measurables", default_measurables())
+            refreshed = json.loads(json.dumps(comp))
+            np = refreshed.get("tunables", {}).get("nominal_pose") or {}
+            meas = refreshed.setdefault("measurables", default_measurables())
             pose = meas.setdefault("pose", {})
             nx = float(np.get("x", pose.get("x", 0.0)))
             ny = float(np.get("y", pose.get("y", 0.0)))
@@ -262,15 +278,25 @@ class MockLabCommunicator(LabCommunicator):
             pose["x"] = nx + random.uniform(-0.8, 0.8)
             pose["y"] = ny + random.uniform(-0.8, 0.8)
             pose["rotation"] = nr + random.uniform(-0.35, 0.35)
+            candidate[tag_id] = refreshed
 
-        state["system_status"] = "IDLE"
+        merged_components = merge_scan_into_components(
+            baseline, candidate, preserve_tag_ids
+        )
+
+        state = self._read_state()
+        state["components"] = merged_components
+        state["system_status"] = SYSTEM_STATUS_IDLE
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
-        print("[MOCK LAB] refresh_pose_from_camera: updated measurables.pose (simulated camera)")
+        print(
+            "[MOCK LAB] refresh_pose_from_camera: updated measurables.pose "
+            "(simulated camera)"
+        )
 
     def refresh_state(self):
         """Deprecated name; use :meth:`refresh_pose_from_camera`."""
-        self.refresh_pose_from_camera()
+        self.refresh_pose_from_camera(None)
 
     # ``set_lab_state`` lives on the base template class (Phase 2A).
     # Mock has no robot, so :meth:`_apply_loaded_pose_to_hardware`
@@ -453,10 +479,215 @@ class MockLabCommunicator(LabCommunicator):
         """
         return os.path.abspath(get_lab_view_paths().camera_captures_dir)
 
+    def table_cam_connect(self, cam_id: int) -> Tuple[bool, str]:
+        if cam_id not in (1, 2):
+            return False, "cam_id must be 1 or 2"
+        self._table_cam_connected[int(cam_id)] = True
+        return True, "ok"
+
+    def table_cam_disconnect(self, cam_id: int) -> Tuple[bool, str]:
+        if cam_id not in (1, 2):
+            return False, "cam_id must be 1 or 2"
+        self._table_cam_streaming[int(cam_id)] = False
+        self._table_cam_connected[int(cam_id)] = False
+        return True, "ok"
+
+    def table_cam_live_set(self, cam_id: int, enabled: bool) -> Tuple[bool, str]:
+        if cam_id not in (1, 2):
+            return False, "cam_id must be 1 or 2"
+        if not self._table_cam_connected.get(int(cam_id)):
+            return False, "connect camera first"
+        self._table_cam_streaming[int(cam_id)] = bool(enabled)
+        return True, "ok"
+
+    def table_cam_send_vexp(self, cam_id: int, exposure_s: float) -> Tuple[bool, str]:
+        if cam_id not in (1, 2):
+            return False, "cam_id must be 1 or 2"
+        if not self._table_cam_connected.get(int(cam_id)):
+            return False, "connect camera first"
+        _ = float(exposure_s)
+        return True, "ok (mock)"
+
+    def table_cam_send_vgain(self, cam_id: int, gain: float) -> Tuple[bool, str]:
+        if cam_id not in (1, 2):
+            return False, "cam_id must be 1 or 2"
+        if not self._table_cam_connected.get(int(cam_id)):
+            return False, "connect camera first"
+        _ = float(gain)
+        return True, "ok (mock)"
+
+    def get_table_cam_stream(self, cam_id: int = 1, fps: int = 18):
+        import math
+        import time
+
+        import cv2  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
+
+        fps = max(4, min(int(fps), 40))
+        sleep_dur = 1.0 / fps
+
+        while True:
+            loop_t0 = time.perf_counter()
+            ts = time.perf_counter()
+
+            def _yield_placeholder(text: str, sub: str = "") -> bytes:
+                frame = np.zeros((360, 480, 3), dtype=np.uint8)
+                cv2.putText(
+                    frame,
+                    text[:40],
+                    (20, 150),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.65,
+                    (198, 198, 220),
+                    2,
+                )
+                if sub:
+                    cv2.putText(
+                        frame,
+                        sub[:48],
+                        (20, 190),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.45,
+                        (130, 130, 150),
+                        1,
+                    )
+                ret, buf = cv2.imencode(".jpg", frame)
+                return buf.tobytes() if ret else b""
+
+            cid = int(cam_id)
+            if not self._table_cam_connected.get(cid):
+                frame_bytes = _yield_placeholder(
+                    "Mock table cam disconnected", "CONNECT first"
+                )
+            elif not self._table_cam_streaming.get(cid):
+                frame_bytes = _yield_placeholder(
+                    "Mock LIVE paused",
+                    "Enable Live to stream",
+                )
+            else:
+                # GIF-like loop: optic “object” with continuous tiny motion vs static CAPTURE PNG.
+                h, w_frame = 360, 480
+                frame = np.zeros((h, w_frame, 3), dtype=np.uint8)
+
+                cid_f = float(cid)
+                # Soft vignette teal lab background
+                for yy in range(h):
+                    v = float(yy) / float(h)
+                    fill_b = int(22 + v * 18 + 6 * math.sin(ts * 0.4 + cid_f * 0.2))
+                    fill_g = int(62 + v * 24 + 4 * math.sin(ts * 0.35))
+                    fill_r = int(58 + v * 20 + 5 * math.cos(ts * 0.42))
+                    frame[yy, :, 0] = min(140, fill_b)
+                    frame[yy, :, 1] = min(180, fill_g)
+                    frame[yy, :, 2] = min(170, fill_r)
+
+                dx = int(8 * math.sin(ts * (0.85 + 0.04 * cid_f)))
+                dy = int(6 * math.cos(ts * (0.7 + 0.05 * cid_f)))
+                cx = 240 + dx
+                cy = 172 + dy
+
+                axis_long = int(96 + math.sin(ts * (2.2 + cid_f * 0.08)) * 8)
+                axis_short = int(62 + math.cos(ts * (2.0 + cid_f * 0.07)) * 7)
+
+                # Mount base under optic
+                base_y = cy + axis_short // 2 + 14
+                cv2.rectangle(
+                    frame,
+                    (cx - 118, base_y),
+                    (cx + 118, base_y + 54),
+                    (78, 78, 95),
+                    -1,
+                )
+                cv2.rectangle(frame, (cx - 118, base_y), (cx + 118, base_y + 54), (40, 45, 55), 2)
+
+                # Outer housing ring
+                cv2.ellipse(
+                    frame,
+                    (cx, cy),
+                    (axis_long + 10, axis_short + 10),
+                    0,
+                    0,
+                    360,
+                    (35, 45, 62),
+                    8,
+                )
+                cv2.ellipse(frame, (cx, cy), (axis_long + 10, axis_short + 10), 0, 0, 360, (90, 100, 120), 3)
+
+                # Glass element (muted teal fill)
+                cv2.ellipse(
+                    frame,
+                    (cx, cy),
+                    (axis_long, axis_short),
+                    0,
+                    0,
+                    360,
+                    (95, 55, 45),
+                    -1,
+                )
+                cv2.ellipse(frame, (cx, cy), (axis_long, axis_short), 0, 0, 360, (165, 200, 220), 2)
+
+                # Inner aperture wedge (tiny rotation-feel via arc sweep that moves)
+                a0 = (ts * 55.0 + cid_f * 17.0) % 360.0
+                cv2.ellipse(frame, (cx, cy), (axis_long - 28, axis_short - 22), 0, a0, a0 + 110, (30, 120, 150), -1)
+
+                # Crawling highlight (specular glide)
+                glide = ts * (1.25 + 0.12 * cid_f)
+                hl_x = int(cx + (axis_long * 0.52) * math.cos(glide))
+                hl_y = int(cy + (axis_short * 0.45) * math.sin(glide))
+                cv2.circle(
+                    frame,
+                    (hl_x, hl_y),
+                    int(14 + 4 * math.sin(ts * (4.8 + cid_f * 0.3))),
+                    (240, 255, 255),
+                    -1,
+                )
+
+                # Below: alignment spot that breathes like a realtime beam centroid
+                spot_phase = ts * (3.15 + cid_f * 0.11)
+                spot_x = cx + int(42 * math.sin(spot_phase * 0.5))
+                spot_y = 268 + int(14 * math.sin(spot_phase + 1.0))
+                spot_r = int(26 + 8 * math.sin(spot_phase * 1.3))
+                cv2.circle(frame, (spot_x, spot_y), spot_r + 18, (12, 80, 100), -1)
+                cv2.circle(frame, (spot_x, spot_y), spot_r + 12, (0, 210, 255), 8)
+                cv2.circle(frame, (spot_x, spot_y), int(spot_r * 0.45), (220, 255, 255), -1)
+
+                cv2.rectangle(frame, (10, 8), (w_frame - 10, h - 10), (20, 100, 110), 2)
+                cv2.putText(
+                    frame,
+                    f"MOCK LIVE — CAM{cid} (moving preview)",
+                    (22, 32),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (210, 250, 255),
+                    1,
+                    lineType=cv2.LINE_AA,
+                )
+                cv2.putText(
+                    frame,
+                    "~gif-like motion / compare to violet CAPTURE still",
+                    (22, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.38,
+                    (160, 230, 240),
+                    1,
+                    lineType=cv2.LINE_AA,
+                )
+                ret, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 86])
+                frame_bytes = buffer.tobytes() if ret else b""
+
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n"
+                + frame_bytes
+                + b"\r\n"
+            )
+            elapsed = time.perf_counter() - loop_t0
+            time.sleep(max(sleep_dur - elapsed, 0.001))
+
     async def _primitive_observe_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         from lab_communicator.mock.primitives import primitive_observe_measurables
+
         return await primitive_observe_measurables(self, tag_id, catalog_meta)
 
     def capture_table_cam(self, cam_id: int, exposure: float = 0.2) -> bytes:
@@ -467,37 +698,58 @@ class MockLabCommunicator(LabCommunicator):
             return None
         if cam_id not in (1, 2):
             return None
+        if not self._table_cam_connected.get(cam_id):
+            print(
+                "[MOCK LAB] capture_table_cam refused: connect the table cam "
+                f"(CAM {cam_id}) first."
+            )
+            return None
 
         w, h = 640, 480
-        img = Image.new("RGB", (w, h), (18, 22, 30))
+        # Static "single CAPTURE" mock — violet / amber palette distinct from teal LIVE MJPEG.
+        bg = (32, 20, 48)
+        img = Image.new("RGB", (w, h), bg)
         draw = ImageDraw.Draw(img)
-        grid = (36, 40, 52)
-        for x in range(0, w, 40):
-            draw.line([(x, 0), (x, h)], fill=grid, width=1)
-        for y in range(0, h, 40):
-            draw.line([(0, y), (w, y)], fill=grid, width=1)
+        magenta = (90, 32, 86)
+        for i in range(-h, w, 42):
+            draw.line([(i, 0), (i + h, h)], fill=magenta, width=2)
+        for i in range(0, w + h, 46):
+            draw.line([(i, 0), (i - h, h)], fill=(48, 30, 64), width=1)
 
+        draw.rectangle([(0, 0), (w, 52)], fill=(217, 160, 60))
         try:
             font = ImageFont.load_default()
         except Exception:
             font = None
-
-        title = f"MOCK table cam {cam_id}"
-        sub = f"exposure={exposure:g}s -- LAB_MODE=MOCK"
-        hint = "Capture / Set Cobyla reference use this image for UI testing."
+        banner_a = "MOCK · SINGLE CAPTURE (PNG / CAP)"
+        banner_b = f"CAM{cam_id} · exp {exposure:g}s · still frame"
         if font:
-            draw.text((24, 20), title, fill=(226, 232, 240), font=font)
-            draw.text((24, 38), sub, fill=(148, 163, 184), font=font)
-            draw.text((24, 58), hint, fill=(100, 116, 139), font=font)
+            draw.text((14, 8), banner_a, fill=(40, 30, 10), font=font)
+            draw.text((14, 28), banner_b, fill=(60, 44, 16), font=font)
         else:
-            draw.text((24, 20), title, fill=(226, 232, 240))
-            draw.text((24, 38), sub, fill=(148, 163, 184))
+            draw.text((14, 10), banner_a, fill=(40, 30, 10))
+            draw.text((14, 28), banner_b, fill=(60, 44, 16))
 
-        cx = w // 2 + (cam_id - 1) * 55
-        cy = h // 2 - 10
-        r = 28
-        draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(248, 113, 113), width=3)
-        draw.line([(cx - 40, cy), (cx + 40, cy)], fill=(251, 191, 36), width=2)
+        margin = 18
+        draw.rectangle(
+            [(margin, 68), (w - margin, h - margin)],
+            outline=(147, 197, 253),
+            width=4,
+        )
+        inset = margin + 32
+        draw.line([(w // 2, inset), (w // 2, h - inset)], fill=(148, 163, 184), width=2)
+        draw.line([(inset, h // 2), (w - inset, h // 2)], fill=(148, 163, 184), width=2)
+
+        cx = w // 2 + (cam_id - 1) * 72
+        cy = h // 2 + 6
+        r = 40
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(251, 113, 133), width=5)
+        draw.line([(cx - 52, cy), (cx + 52, cy)], fill=(250, 204, 21), width=4)
+        stamp = "[STATIC SAMPLE — not live]"
+        if font:
+            draw.text((inset + 6, inset + 12), stamp, fill=(226, 232, 240), font=font)
+        else:
+            draw.text((inset + 6, inset + 12), stamp, fill=(226, 232, 240))
 
         buf = BytesIO()
         img.save(buf, format="PNG", compress_level=6)

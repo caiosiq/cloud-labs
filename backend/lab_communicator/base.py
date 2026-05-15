@@ -30,7 +30,7 @@ import json
 import os
 import threading
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from lab_model.component_model import (
     PRESENCE_BREADBOARD,
@@ -79,7 +79,10 @@ from lab_communicator.shared.commits import (
     commit_place_from_hover,
     commit_scan_rotation,
 )
-from lab_communicator.shared.motor_state import inject_motor_rotations_into_state
+from lab_communicator.shared.motor_state import (
+    inject_motor_rotations_into_state,
+    persist_motor_rotations_from_component,
+)
 from lab_communicator.shared.snapshot import (
     LabPose,
     merge_snapshot_components,
@@ -367,6 +370,96 @@ class LabCommunicator:
         and call :meth:`_persist_state` once at the end of the batch.
         """
         return
+
+    def session_checkpoint_enabled(self) -> bool:
+        """When True, process shutdown persists :meth:`get_lab_state`."""
+
+        return False
+
+    def session_reconciliation_thresholds(self):
+        from lab_communicator.shared.session_checkpoint import default_thresholds_from_env
+
+        return default_thresholds_from_env()
+
+    def save_session_checkpoint_if_enabled(self) -> None:
+        """Write ``session_last_lab_state.json`` beside lab_view JSON (feature-gated)."""
+
+        if not self.session_checkpoint_enabled():
+            return
+
+        lab_mode = (os.getenv("LAB_MODE") or "MOCK").upper()
+        snapshot = self.get_lab_state()
+        from lab_communicator.shared.session_checkpoint import persist_checkpoint
+
+        persist_checkpoint(lab_mode, snapshot)
+
+    def apply_session_reconciliation_tags(self, tag_ids: List[str]) -> List[str]:
+        """Copy ``tunables`` + ``measurables`` for ``tag_ids`` from the checkpoint file."""
+
+        from lab_communicator.shared.lab_view_config import get_lab_view_paths_optional
+        from lab_communicator.shared.session_checkpoint import (
+            checkpoint_lab_state,
+            merge_offers_tag_ids,
+            read_checkpoint_document,
+        )
+
+        paths = get_lab_view_paths_optional()
+        if paths is None:
+            return []
+        ck_path = getattr(paths, "session_checkpoint_json", "") or ""
+
+        thresholds = self.session_reconciliation_thresholds()
+        with self._state_lock:
+            current = json.loads(json.dumps(self.current_state))
+        chk_doc = read_checkpoint_document(ck_path)
+        chk_state = checkpoint_lab_state(chk_doc)
+        if not isinstance(chk_state, dict):
+            return []
+
+        allow = merge_offers_tag_ids(
+            current_state=current,
+            checkpoint_state=chk_state,
+            thresholds=thresholds,
+        )
+        allow_set = set(allow)
+        merged_ids: List[str] = []
+
+        meta_ch = chk_state.get("components") or {}
+        if not isinstance(meta_ch, dict):
+            meta_ch = {}
+
+        with self._state_lock:
+            comps = self.current_state.setdefault("components", {})
+            if not isinstance(comps, dict):
+                return []
+            for tid in tag_ids:
+                if tid not in allow_set:
+                    continue
+                src_ent = meta_ch.get(tid)
+                if not isinstance(src_ent, dict) or tid not in comps:
+                    continue
+                dst = comps[tid]
+                if not isinstance(dst, dict):
+                    continue
+                st_t = json.loads(json.dumps(src_ent.get("tunables") or {}))
+                st_m = json.loads(json.dumps(src_ent.get("measurables") or {}))
+                dst["tunables"] = st_t
+                dst["measurables"] = st_m
+                meta = self._catalog_meta_for_tag(tid) or {}
+                motor_ids_any = meta.get("motor_ids") or []
+                motor_ids_int: List[int] = []
+                for m in motor_ids_any:
+                    try:
+                        motor_ids_int.append(int(m))
+                    except (TypeError, ValueError):
+                        continue
+                if motor_ids_int:
+                    persist_motor_rotations_from_component(tid, dst, motor_ids_int)
+                merged_ids.append(tid)
+            self.current_state["last_updated"] = datetime.now().isoformat()
+
+        self._persist_state()
+        return merged_ids
 
     def _post_apply_snapshot(self, components: Dict[str, Any]) -> None:
         """Called once at the end of :meth:`set_lab_state`.
@@ -1664,10 +1757,30 @@ class LabCommunicator:
         """
         return None
 
+    def table_cam_connect(self, cam_id: int) -> Tuple[bool, str]:
+        """Optional HTTP hook for lazy table-cam ownership (real cloudlabs build)."""
+        return False, "table cam lifecycle is not available for this backend"
+
+    def table_cam_disconnect(self, cam_id: int) -> Tuple[bool, str]:
+        return False, "table cam lifecycle is not available for this backend"
+
+    def table_cam_live_set(self, cam_id: int, enabled: bool) -> Tuple[bool, str]:
+        return False, "table cam lifecycle is not available for this backend"
+
+    def table_cam_send_vexp(self, cam_id: int, exposure_s: float) -> Tuple[bool, str]:
+        return False, "table cam imaging controls are not available for this backend"
+
+    def table_cam_send_vgain(self, cam_id: int, gain: float) -> Tuple[bool, str]:
+        return False, "table cam imaging controls are not available for this backend"
+
+    def get_table_cam_stream(self, cam_id: int = 1, fps: int = 18):
+        """Multipart MJPEG generator for ``/api/table-cam/stream`` when implemented."""
+        raise NotImplementedError
+
     def get_cobyla_reference_png_bytes(self) -> Optional[bytes]:
         """PNG of the stored cobyla reference, or ``None`` if unset."""
         return None
 
-    def refresh_pose_from_camera(self) -> None:
+    def refresh_pose_from_camera(self, preserve_tag_ids: Optional[List[str]] = None) -> None:
         """Re-localize component poses from the camera. Default no-op."""
         return

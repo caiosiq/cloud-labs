@@ -115,3 +115,22 @@ def get_rotations_for_motor_ids(tag_id: str, motor_ids: List[int]) -> Dict[str, 
             except (TypeError, ValueError):
                 out[key] = 0.0
         return out
+
+
+def set_rotations_for_tag(tag_id: str, rotations: Dict[str, Any]) -> None:
+    """Replace stored angles for ``tag_id`` with the given motor_id(str)->deg map."""
+
+    with _lock:
+        path = _path()
+        data = _load_path(path)
+        tag = data.setdefault(tag_id, {})
+        if not isinstance(tag, dict):
+            tag = {}
+            data[tag_id] = tag
+        for raw_k, raw_v in (rotations or {}).items():
+            key = str(raw_k)
+            try:
+                tag[key] = float(raw_v)
+            except (TypeError, ValueError):
+                continue
+        _save_path(path, data)
