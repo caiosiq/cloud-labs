@@ -88,7 +88,7 @@ except ImportError:
     RECORDER_CAPTURE_AVAILABLE = False
 
 # --- Coordinate frames + utility helpers (Phase 1 of the communicator
-# refactor; see ``communicator_refactor.md`` §10) ---
+# refactor; see ``communicator_refactor.md`` ?10) ---
 #
 # All cross-wall coordinate-frame logic now lives in
 # ``real/coordinate_frames.py``: XY rotation, Z transforms, yaw
@@ -146,7 +146,7 @@ class RealLabCommunicator(LabCommunicator):
 
         # Base seeds ``current_state`` (with empty components / IDLE),
         # ``catalog_map``, and the state lock. Phase 2A made base the
-        # owner of all three -- see ``communicator_refactor.md`` §5.2.
+        # owner of all three -- see ``communicator_refactor.md`` ?5.2.
         super().__init__()
 
         print("[REAL LAB] Initializing OpticalExperiment...")
@@ -188,13 +188,28 @@ class RealLabCommunicator(LabCommunicator):
         self._reconcile_holding_on_boot()
         self._recorder_procs: List[subprocess.Popen] = []
         self._use_cloudlab_table_recorder = False
+        self._table_cam_recorder_mock = False
         self._table_cam_connected = {1: False, 2: False}
         self._table_cam_streaming = {1: False, 2: False}
+        self._table_cam_hardware = {1: "none", 2: "none"}
+        self._table_cam_last_error: Dict[int, Any] = {1: None, 2: None}
         self._table_cam_lock = threading.Lock()
         self._start_recorder_processes()
         if not self._use_cloudlab_table_recorder:
-            # Legacy recorder already initializes both cameras — treat them as logically hot.
-            self._table_cam_connected = {1: True, 2: True}
+            # Legacy recorder: mark connected only when subprocess + TCP port are up.
+            from lab_communicator.real.video import (  # noqa: PLC0415
+                _probe_recorder_port,
+                _recorder_port_for_cam,
+                _recorder_procs_alive,
+            )
+
+            if _recorder_procs_alive(self):
+                for cid in (1, 2):
+                    if _probe_recorder_port(_recorder_port_for_cam(cid)):
+                        self._table_cam_connected[cid] = True
+                        self._table_cam_hardware[cid] = (
+                            "mock" if self._table_cam_recorder_mock else "real"
+                        )
 
         # Fallback when image names have no stepNN: count once per new basename (avoids double bumps on mtime+size).
         self._last_optimization_image_basename: Optional[str] = None
@@ -402,7 +417,7 @@ class RealLabCommunicator(LabCommunicator):
         enforces this. Snapshot poses are lab / UI frame; the
         ``lab_automation`` library expects robot frame. All three axes
         are transformed through the dedicated helpers so the cross-wall
-        convention stays in one place (``fixing.md`` §3, §3.1, §5):
+        convention stays in one place (``fixing.md`` ?3, ?3.1, ?5):
 
         - **XY**       :func:`lab_table_xy_to_robot_xy` (calibrated rotation)
         - **Z**        :meth:`_z_lab_to_robot`            (per-tag; uses catalog ``height_mm``)
@@ -410,7 +425,7 @@ class RealLabCommunicator(LabCommunicator):
 
         We write only ``current_location`` and ``is_placed``;
         ``inventory_location`` is owned elsewhere in ``lab_automation``
-        (see ``labautomation_new_primitives.md`` §5).
+        (see ``labautomation_new_primitives.md`` ?5).
         """
         comp = self.component_map.get(tag_id)
         if not comp:
@@ -788,6 +803,11 @@ class RealLabCommunicator(LabCommunicator):
 
         yield from get_table_cam_stream(self, cam_id, fps)
 
+    def get_table_cam_status(self, only_cam_id: Optional[int] = None) -> Dict[str, Any]:
+        from lab_communicator.real.video import table_cam_status_snapshot
+
+        return table_cam_status_snapshot(self, only_cam_id=only_cam_id)
+
     async def _primitive_observe_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
@@ -815,24 +835,24 @@ class RealLabCommunicator(LabCommunicator):
         if cobj is not None:
             cobj.is_placed = bool(value)
 
-    # --- In-air manipulation (see ``new_primitives.md`` §6 and §8.3) ---
+    # --- In-air manipulation (see ``new_primitives.md`` ?6 and ?8.3) ---
     #
     # Stage 8 wiring is live: ``lab_automation`` ships
     # ``pick_component_cloudlab``, ``hover_component_cloudlab``,
     # ``place_from_hover_cloudlab``, ``scan_rotate_held_cloudlab``,
     # ``scan_rotate_placed_cloudlab`` (see
-    # ``labautomation_new_primitives.md`` §2). Each primitive below dispatches
+    # ``labautomation_new_primitives.md`` ?2). Each primitive below dispatches
     # to the corresponding method via ``asyncio.to_thread`` and updates
     # ``current_state`` on success.
     #
     # ``HOVER_PLACEHOLDER_STATE=1`` keeps a debug escape hatch that bypasses
     # the real call and only mutates ``current_state`` (matches the
     # mock-lab behavior for UI testing without moving the robot). Left in
-    # place intentionally per ``labautomation_new_primitives.md`` §6
+    # place intentionally per ``labautomation_new_primitives.md`` ?6
     # item 3 ("remove or keep as debug escape hatch").
 
     def _reconcile_holding_on_boot(self) -> None:
-        """Boot-time HOLDING reconciliation (see ``new_primitives.md`` §6.3).
+        """Boot-time HOLDING reconciliation (see ``new_primitives.md`` ?6.3).
 
         Thin wrapper -- the body lives in
         :func:`lab_communicator.real.gripper.reconcile_holding_on_boot`.

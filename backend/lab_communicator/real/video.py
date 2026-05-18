@@ -38,12 +38,123 @@ import atexit
 import os
 import subprocess
 import sys
+import threading
 import time
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 
 if TYPE_CHECKING:
     from lab_communicator.real.communicator import RealLabCommunicator
+
+
+def _table_cam_use_mock_env() -> bool:
+    return os.getenv("TABLE_CAM_USE_MOCK", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _parse_status_kv(message: str) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for token in (message or "").split():
+        if "=" not in token:
+            continue
+        k, v = token.split("=", 1)
+        if v in ("0", "1"):
+            out[k] = v == "1"
+        else:
+            out[k] = v
+    return out
+
+
+def _recorder_port_for_cam(cam_id: int) -> int:
+    return 9999 if int(cam_id) == 1 else 10000
+
+
+def _drain_recorder_stderr(proc: subprocess.Popen, label: str) -> None:
+    """Log recorder subprocess stderr so mvsdk / import errors are visible."""
+
+    def _run() -> None:
+        if proc.stderr is None:
+            return
+        try:
+            for raw in iter(proc.stderr.readline, b""):
+                if not raw:
+                    break
+                line = raw.decode(errors="replace").rstrip()
+                if line:
+                    print(f"[REAL LAB][recorder {label}] {line}", flush=True)
+        except Exception as e:
+            print(f"[REAL LAB][recorder {label}] stderr drain ended: {e}", flush=True)
+
+    threading.Thread(target=_run, daemon=True, name=f"recorder-stderr-{label}").start()
+
+
+def _recorder_procs_alive(communicator: "RealLabCommunicator") -> bool:
+    procs = getattr(communicator, "_recorder_procs", None) or []
+    if not procs:
+        return False
+    for p in procs:
+        if p.poll() is not None:
+            return False
+    return True
+
+
+def _probe_recorder_port(port: int) -> bool:
+    try:
+        import socket
+
+        s = socket.create_connection(("localhost", port), timeout=0.4)
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
+def table_cam_status_snapshot(
+    communicator: "RealLabCommunicator",
+    only_cam_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Aggregate table-cam state for API / UI."""
+    cloud = bool(getattr(communicator, "_use_cloudlab_table_recorder", False))
+    mock_mode = bool(getattr(communicator, "_table_cam_recorder_mock", False))
+    alive = _recorder_procs_alive(communicator)
+    out: Dict[str, Any] = {
+        "recorder_variant": "cloudlab" if cloud else "legacy",
+        "recorder_alive": alive,
+        "recorder_mock": mock_mode,
+        "ports": {"cam1": 9999, "cam2": 10000},
+        "cameras": {},
+    }
+    cam_ids = (only_cam_id,) if only_cam_id in (1, 2) else (1, 2)
+    for cam_id in cam_ids:
+        port = _recorder_port_for_cam(cam_id)
+        entry: Dict[str, Any] = {
+            "connected": bool(communicator._table_cam_connected.get(cam_id)),  # noqa: SLF001
+            "streaming": bool(communicator._table_cam_streaming.get(cam_id)),  # noqa: SLF001
+            "hardware": communicator._table_cam_hardware.get(cam_id, "none"),  # noqa: SLF001
+            "port": port,
+            "port_open": _probe_recorder_port(port) if alive else False,
+            "last_error": communicator._table_cam_last_error.get(cam_id),  # noqa: SLF001
+        }
+        if cloud and alive and _probe_recorder_port(port):
+            try:
+                from lab_automation.managers.recorder_capture_helpers_cloudlab import (  # noqa: PLC0415
+                    query_status_cloudlab,
+                )
+
+                ok, msg = query_status_cloudlab(cam_id, timeout_s=1.2)
+                if ok:
+                    entry["recorder_status"] = _parse_status_kv(msg)
+                    # HTTP handlers own connected/streaming; recorder STATUS is diagnostic only.
+                    hw = entry["recorder_status"].get("hardware")
+                    if hw:
+                        entry["hardware"] = str(hw)
+            except ImportError:
+                entry["last_error"] = "recorder_capture_helpers_cloudlab unavailable"
+        out["cameras"][str(cam_id)] = entry
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +182,35 @@ def camera_images_base_dir() -> str:
 # ---------------------------------------------------------------------------
 # Recorder subprocesses (cam1=9999, cam2=10000)
 # ---------------------------------------------------------------------------
+
+def _recorder_subprocess_env(lab_path: str) -> Dict[str, str]:
+    """Ensure MindVision ``mvsdk.py`` in lab root wins over PyPI ``mvsdk`` (MediaValet).
+
+    Recorder scripts live under ``lab_automation/scripts/``, so Python puts ``scripts/``
+    on ``sys.path`` first. Without ``PYTHONPATH``, ``pip install mvsdk`` shadows the
+    real camera SDK and CONNECT fails with
+    ``module 'mvsdk' has no attribute 'CameraEnumerateDevice'``.
+    """
+    env = os.environ.copy()
+    lab_abs = os.path.abspath(lab_path)
+    prev = env.get("PYTHONPATH", "").strip()
+    env["PYTHONPATH"] = lab_abs if not prev else f"{lab_abs}{os.pathsep}{prev}"
+    return env
+
+
+def _recorder_python_executable(lab_path: str) -> str:
+    """Prefer ``lab_automation/.venv`` when present so recorder deps match the lab stack."""
+    override = os.getenv("TABLE_CAM_RECORDER_PYTHON", "").strip()
+    if override:
+        return override
+    venv_py = os.path.join(lab_path, ".venv", "Scripts", "python.exe")
+    if os.name == "nt" and os.path.isfile(venv_py):
+        return venv_py
+    venv_py_unix = os.path.join(lab_path, ".venv", "bin", "python")
+    if os.path.isfile(venv_py_unix):
+        return venv_py_unix
+    return sys.executable
+
 
 def send_recorder_cmd(port: int, cmd: str) -> None:
     """Send a one-line text command to a recorder process on ``port``.
@@ -151,17 +291,18 @@ def start_recorder_processes(communicator: "RealLabCommunicator") -> None:
         )
         return
 
-    use_real_camera = (
-        os.getenv("TABLE_CAM_USE_MOCK", "").strip().lower()
-        not in ("1", "true", "yes")
-    )
+    use_mock = _table_cam_use_mock_env()
+    use_real_camera = not use_mock
+    communicator._table_cam_recorder_mock = use_mock  # noqa: SLF001
     extra = ["--real-camera"] if use_real_camera else []
 
     cloudlab_spawn = communicator._use_cloudlab_table_recorder  # noqa: SLF001
+    recorder_py = _recorder_python_executable(lab_path)
+    recorder_env = _recorder_subprocess_env(lab_path)
     try:
         p1 = subprocess.Popen(
             [
-                sys.executable,
+                recorder_py,
                 recorder_script,
                 "--cam",
                 "0",
@@ -172,12 +313,13 @@ def start_recorder_processes(communicator: "RealLabCommunicator") -> None:
             ]
             + extra,
             cwd=lab_path,
-            stdout=subprocess.DEVNULL,
+            env=recorder_env,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
         p2 = subprocess.Popen(
             [
-                sys.executable,
+                recorder_py,
                 recorder_script,
                 "--cam",
                 "1",
@@ -188,11 +330,29 @@ def start_recorder_processes(communicator: "RealLabCommunicator") -> None:
             ]
             + extra,
             cwd=lab_path,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
         communicator._recorder_procs = [p1, p2]
-        time.sleep(0.35 if cloudlab_spawn else 1.2)
+        _drain_recorder_stderr(p1, "cam1")
+        _drain_recorder_stderr(p2, "cam2")
+        time.sleep(0.5 if cloudlab_spawn else 1.2)
+
+        dead = []
+        for label, proc in (("cam1", p1), ("cam2", p2)):
+            code = proc.poll()
+            if code is not None:
+                dead.append(f"{label} exit={code}")
+        if dead:
+            print(
+                "[REAL LAB] Recorder subprocess died on startup: "
+                + "; ".join(dead)
+                + " (see [REAL LAB][recorder …] lines above; often wrong PyPI mvsdk or missing deps)",
+                flush=True,
+            )
+            communicator._recorder_procs = []
+            return
+
         mode = (
             "cloudlabs (lazy CONNECT)"
             if cloudlab_spawn
@@ -200,11 +360,22 @@ def start_recorder_processes(communicator: "RealLabCommunicator") -> None:
         )
         print(
             f"[REAL LAB] Recorder processes started ({mode}) cam1=9999, cam2=10000 "
-            f"script={os.path.basename(recorder_script)}."
+            f"script={os.path.basename(recorder_script)} "
+            f"python={sys.executable} real_camera={use_real_camera} "
+            f"TABLE_CAM_USE_MOCK={use_mock}",
+            flush=True,
         )
+        if cloudlab_spawn and use_real_camera:
+            for port in (9999, 10000):
+                if not _probe_recorder_port(port):
+                    print(
+                        f"[REAL LAB] Warning: recorder port {port} not accepting "
+                        "connections after spawn",
+                        flush=True,
+                    )
         atexit.register(communicator._shutdown_recorders)
     except Exception as e:
-        print(f"[REAL LAB] Failed to start recorders: {e}")
+        print(f"[REAL LAB] Failed to start recorders: {e}", flush=True)
         communicator._recorder_procs = []
 
 
@@ -381,6 +552,12 @@ def get_optimization_stream(communicator: "RealLabCommunicator", fps: int = 5):
 # Table cam lifecycle + MJPEG (cloudlabs recorder fork)
 # ---------------------------------------------------------------------------
 
+def _set_table_cam_error(
+    communicator: "RealLabCommunicator", cam_id: int, message: Optional[str]
+) -> None:
+    communicator._table_cam_last_error[cam_id] = message  # noqa: SLF001
+
+
 def table_cam_connect(
     communicator: "RealLabCommunicator",
     cam_id: int,
@@ -388,26 +565,57 @@ def table_cam_connect(
     if cam_id not in (1, 2):
         return False, "cam_id must be 1 or 2"
     with communicator._table_cam_lock:
-        if not getattr(communicator, "_recorder_procs", []):
-            return False, "recorder subprocesses are not running"
+        if not _recorder_procs_alive(communicator):
+            msg = "recorder subprocesses are not running (see startup logs)"
+            _set_table_cam_error(communicator, cam_id, msg)
+            communicator._table_cam_connected[cam_id] = False  # noqa: SLF001
+            return False, msg
         if not communicator._use_cloudlab_table_recorder:
+            port = _recorder_port_for_cam(cam_id)
+            if not _probe_recorder_port(port):
+                msg = f"legacy recorder port {port} is not open"
+                _set_table_cam_error(communicator, cam_id, msg)
+                communicator._table_cam_connected[cam_id] = False  # noqa: SLF001
+                return False, msg
             communicator._table_cam_connected[cam_id] = True  # noqa: SLF001
-            return True, "legacy recorder: hardware already owns the camera session"
+            communicator._table_cam_hardware[cam_id] = (  # noqa: SLF001
+                "mock" if communicator._table_cam_recorder_mock else "real"  # noqa: SLF001
+            )
+            _set_table_cam_error(communicator, cam_id, None)
+            return True, "legacy recorder port open"
         try:
             from lab_automation.managers.recorder_capture_helpers_cloudlab import (  # noqa: PLC0415
                 connect_cam_cloudlab,
             )
-        except ImportError:
-            return (
-                False,
-                "cannot import recorder_capture_helpers_cloudlab (upgrade lab_automation)",
-            )
+        except ImportError as e:
+            msg = f"cannot import recorder_capture_helpers_cloudlab: {e}"
+            _set_table_cam_error(communicator, cam_id, msg)
+            return False, msg
 
-        connect_cam_cloudlab(cam_id)
-        # Give the recorder a moment to negotiate mvsdk.
-        time.sleep(0.3)
-        communicator._table_cam_connected[cam_id] = True  # noqa: SLF001
-        return True, "ok"
+        print(f"[REAL LAB] table_cam_connect cam{cam_id} …", flush=True)
+        ok, msg = connect_cam_cloudlab(cam_id)
+        if not ok:
+            communicator._table_cam_connected[cam_id] = False  # noqa: SLF001
+            communicator._table_cam_hardware[cam_id] = "none"  # noqa: SLF001
+            _set_table_cam_error(communicator, cam_id, msg)
+            print(f"[REAL LAB] table_cam_connect cam{cam_id} FAILED: {msg}", flush=True)
+            return False, msg
+
+        parsed = _parse_status_kv(msg)
+        communicator._table_cam_connected[cam_id] = bool(  # noqa: SLF001
+            parsed.get("connected", True)
+        )
+        communicator._table_cam_streaming[cam_id] = bool(  # noqa: SLF001
+            parsed.get("streaming", False)
+        )
+        hw = str(parsed.get("hardware", "real" if not communicator._table_cam_recorder_mock else "mock"))  # noqa: SLF001
+        communicator._table_cam_hardware[cam_id] = hw  # noqa: SLF001
+        _set_table_cam_error(communicator, cam_id, None)
+        print(
+            f"[REAL LAB] table_cam_connect cam{cam_id} OK ({msg})",
+            flush=True,
+        )
+        return True, msg or "ok"
 
 
 def table_cam_disconnect(
@@ -418,26 +626,34 @@ def table_cam_disconnect(
         return False, "cam_id must be 1 or 2"
     with communicator._table_cam_lock:
         if not communicator._use_cloudlab_table_recorder:
+            communicator._table_cam_streaming[cam_id] = False  # noqa: SLF001
+            communicator._table_cam_connected[cam_id] = False  # noqa: SLF001
+            _set_table_cam_error(communicator, cam_id, None)
             return (
-                False,
-                "full SDK release/disconnect requires recorder_cam_laser_align_cloudlab.py",
+                True,
+                "legacy recorder: UI disconnected (camera may stay open until backend exit)",
             )
 
         communicator._table_cam_streaming[cam_id] = False  # noqa: SLF001
         communicator._table_cam_connected[cam_id] = False  # noqa: SLF001
+        communicator._table_cam_hardware[cam_id] = "none"  # noqa: SLF001
         try:
             from lab_automation.managers.recorder_capture_helpers_cloudlab import (  # noqa: PLC0415
                 disconnect_cam_cloudlab,
             )
+        except ImportError as e:
+            msg = f"cannot import recorder_capture_helpers_cloudlab: {e}"
+            _set_table_cam_error(communicator, cam_id, msg)
+            return False, msg
 
-            disconnect_cam_cloudlab(cam_id)
-        except ImportError:
-            return (
-                False,
-                "cannot import recorder_capture_helpers_cloudlab (upgrade lab_automation)",
-            )
-        time.sleep(0.05)
-        return True, "ok"
+        ok, msg = disconnect_cam_cloudlab(cam_id)
+        if not ok:
+            _set_table_cam_error(communicator, cam_id, msg)
+            print(f"[REAL LAB] table_cam_disconnect cam{cam_id} FAILED: {msg}", flush=True)
+            return False, msg
+        _set_table_cam_error(communicator, cam_id, None)
+        print(f"[REAL LAB] table_cam_disconnect cam{cam_id} OK", flush=True)
+        return True, msg or "ok"
 
 
 def table_cam_live_set(
@@ -468,13 +684,27 @@ def table_cam_live_set(
                 "cannot import recorder_capture_helpers_cloudlab (upgrade lab_automation)",
             )
         if enabled:
-            stream_on_cloudlab(cam_id)
-            communicator._table_cam_streaming[cam_id] = True  # noqa: SLF001
+            ok, msg = stream_on_cloudlab(cam_id)
         else:
-            stream_off_cloudlab(cam_id)
+            ok, msg = stream_off_cloudlab(cam_id)
+        if not ok:
             communicator._table_cam_streaming[cam_id] = False  # noqa: SLF001
-        time.sleep(0.03)
-        return True, "ok"
+            _set_table_cam_error(communicator, cam_id, msg)
+            print(
+                f"[REAL LAB] table_cam_live_set cam{cam_id} enabled={enabled} FAILED: {msg}",
+                flush=True,
+            )
+            return False, msg
+        parsed = _parse_status_kv(msg)
+        communicator._table_cam_streaming[cam_id] = bool(  # noqa: SLF001
+            parsed.get("streaming", enabled)
+        )
+        _set_table_cam_error(communicator, cam_id, None)
+        print(
+            f"[REAL LAB] table_cam_live_set cam{cam_id} enabled={enabled} OK ({msg})",
+            flush=True,
+        )
+        return True, msg or "ok"
 
 
 def table_cam_send_vexp(
@@ -499,8 +729,11 @@ def table_cam_send_vexp(
         )
     except ImportError:
         return False, "recorder_capture_helpers_cloudlab unavailable"
-    set_vexp_cloudlab(cam_id, float(exposure_s))
-    return True, "ok"
+    ok, msg = set_vexp_cloudlab(cam_id, float(exposure_s))
+    if not ok:
+        _set_table_cam_error(communicator, cam_id, msg)
+        return False, msg
+    return True, msg or "ok"
 
 
 def table_cam_send_vgain(
@@ -520,8 +753,43 @@ def table_cam_send_vgain(
         )
     except ImportError:
         return False, "recorder_capture_helpers_cloudlab unavailable"
-    set_vgain_cloudlab(cam_id, float(gain))
-    return True, "ok"
+    ok, msg = set_vgain_cloudlab(cam_id, float(gain))
+    if not ok:
+        _set_table_cam_error(communicator, cam_id, msg)
+        return False, msg
+    return True, msg or "ok"
+
+
+def _mjpeg_status_frame(title: str, detail: str = "") -> bytes:
+    import cv2  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    frame = np.zeros((360, 480, 3), dtype=np.uint8)
+    frame[:] = (18, 18, 24)
+    cv2.putText(
+        frame,
+        title[:40],
+        (16, 160),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.62,
+        (80, 160, 255),
+        2,
+    )
+    if detail:
+        y = 195
+        for chunk in detail[:120].split("\n"):
+            cv2.putText(
+                frame,
+                chunk[:56],
+                (16, y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.42,
+                (180, 180, 200),
+                1,
+            )
+            y += 22
+    _, buffer = cv2.imencode(".jpg", frame)
+    return buffer.tobytes() if buffer is not None else b""
 
 
 def get_table_cam_stream(
@@ -530,70 +798,36 @@ def get_table_cam_stream(
     fps: int = 18,
 ):
     """MJPEG bytes for ``GET /api/table-cam/stream`` (cloudlabs recorder)."""
-    import cv2  # noqa: PLC0415
-    import numpy as np  # noqa: PLC0415
-
     fps = max(4, min(fps, 40))
     sleep_duration = 1.0 / fps
-
-    label = ""
+    allow_placeholder = bool(getattr(communicator, "_table_cam_recorder_mock", False))
 
     while True:
         frame_bytes = None
         cloud = communicator._use_cloudlab_table_recorder
         streaming = communicator._table_cam_streaming.get(cam_id, False)
+        last_err = communicator._table_cam_last_error.get(cam_id)  # noqa: SLF001
 
-        if not cloud:
-            label = "LEGACY recorder (no MJPEG shim)"
-            frame = np.zeros((360, 480, 3), dtype=np.uint8)
-            cv2.putText(
-                frame,
-                "Live preview unavailable",
-                (30, 150),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (200, 200, 200),
-                1,
+        if not _recorder_procs_alive(communicator):
+            frame_bytes = _mjpeg_status_frame(
+                "RECORDER DEAD",
+                last_err or "restart backend; check [REAL LAB][recorder] logs",
             )
-            cv2.putText(
-                frame,
-                "Use cloud recorder or Capture",
-                (30, 180),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.55,
-                (160, 160, 180),
-                1,
+        elif not cloud:
+            frame_bytes = _mjpeg_status_frame(
+                "LEGACY RECORDER",
+                "Live MJPEG needs recorder_cam_laser_align_cloudlab.py",
             )
-            _, buffer = cv2.imencode(".jpg", frame)
-            frame_bytes = buffer.tobytes()
         elif not communicator._table_cam_connected.get(cam_id):
-            label = "disconnected"
-            frame = np.zeros((360, 480, 3), dtype=np.uint8)
-            cv2.putText(
-                frame,
-                "Table cam disconnected",
-                (36, 180),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (200, 200, 200),
-                2,
+            frame_bytes = _mjpeg_status_frame(
+                "NOT CONNECTED",
+                last_err or "Click Connected or pick CAM1/CAM2",
             )
-            _, buffer = cv2.imencode(".jpg", frame)
-            frame_bytes = buffer.tobytes()
         elif not streaming:
-            label = "live paused"
-            frame = np.zeros((360, 480, 3), dtype=np.uint8)
-            cv2.putText(
-                frame,
-                "Live paused (STREAM_OFF)",
-                (40, 180),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.66,
-                (230, 200, 150),
-                2,
+            frame_bytes = _mjpeg_status_frame(
+                "LIVE OFF",
+                "Enable Live (STREAM_ON) after connect",
             )
-            _, buffer = cv2.imencode(".jpg", frame)
-            frame_bytes = buffer.tobytes()
         else:
             try:
                 from lab_automation.managers.recorder_capture_helpers_cloudlab import (  # noqa: PLC0415
@@ -601,34 +835,22 @@ def get_table_cam_stream(
                 )
 
                 payload = fetch_preview_jpeg_cloudlab(cam_id, timeout_s=1.75)
-                if payload:
+                if payload and len(payload) > 800:
                     frame_bytes = payload
+                elif payload and allow_placeholder:
+                    frame_bytes = payload
+                elif not payload:
+                    hw = communicator._table_cam_hardware.get(cam_id, "?")  # noqa: SLF001
+                    frame_bytes = _mjpeg_status_frame(
+                        "NO FRAME FROM CAMERA",
+                        last_err or f"hardware={hw}; check exposure / lens cap",
+                    )
             except Exception as e:
-                print(f"[REAL LAB] table-cam MJPEG grab failed: {e}")
+                print(f"[REAL LAB] table-cam MJPEG grab failed: {e}", flush=True)
+                frame_bytes = _mjpeg_status_frame("STREAM ERROR", str(e))
 
         if frame_bytes is None:
-            frame = np.zeros((360, 480, 3), dtype=np.uint8)
-            cv2.putText(
-                frame,
-                "WAITING FOR FRAME",
-                (60, 180),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.67,
-                (60, 200, 255),
-                2,
-            )
-            if label:
-                cv2.putText(
-                    frame,
-                    label[:48],
-                    (20, 220),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.45,
-                    (120, 120, 140),
-                    1,
-                )
-            ret, buffer = cv2.imencode(".jpg", frame)
-            frame_bytes = buffer.tobytes() if ret else b""
+            frame_bytes = _mjpeg_status_frame("TABLE CAM ERROR", last_err or "unknown")
 
         yield (
             b"--frame\r\n"
@@ -692,12 +914,26 @@ def capture_table_cam(
                 print("[REAL LAB] recorder_capture_helpers_cloudlab import failed.")
                 return None
 
-            settle_s = 0.5
-            set_vexp_cloudlab(cam_id, exp)
-            time.sleep(settle_s)
-            img = request_capture_cloudlab(cam_id, exp, tmp_path, timeout=6.5)
-            if img is None:
+            ok_exp, exp_msg = set_vexp_cloudlab(cam_id, exp)
+            if not ok_exp:
+                print(
+                    f"[REAL LAB] capture_table_cam cam{cam_id} VEXP failed: {exp_msg}",
+                    flush=True,
+                )
+                _set_table_cam_error(communicator, cam_id, exp_msg)
                 return None
+            time.sleep(0.35)
+            img, cap_msg = request_capture_cloudlab(
+                cam_id, exp, tmp_path, timeout=8.0
+            )
+            if img is None:
+                print(
+                    f"[REAL LAB] capture_table_cam cam{cam_id} failed: {cap_msg}",
+                    flush=True,
+                )
+                _set_table_cam_error(communicator, cam_id, cap_msg)
+                return None
+            _set_table_cam_error(communicator, cam_id, None)
             _, buf = cv2.imencode(".png", img)
             return buf.tobytes()
 

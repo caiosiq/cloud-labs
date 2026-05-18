@@ -690,6 +690,32 @@ class MockLabCommunicator(LabCommunicator):
 
         return await primitive_observe_measurables(self, tag_id, catalog_meta)
 
+    def get_table_cam_status(self, only_cam_id=None) -> Dict[str, Any]:
+        return {
+            "recorder_variant": "mock",
+            "recorder_alive": True,
+            "recorder_mock": True,
+            "ports": {"cam1": 9999, "cam2": 10000},
+            "cameras": {
+                "1": {
+                    "connected": bool(self._table_cam_connected.get(1)),
+                    "streaming": bool(self._table_cam_streaming.get(1)),
+                    "hardware": "mock",
+                    "port": 9999,
+                    "port_open": True,
+                    "last_error": None,
+                },
+                "2": {
+                    "connected": bool(self._table_cam_connected.get(2)),
+                    "streaming": bool(self._table_cam_streaming.get(2)),
+                    "hardware": "mock",
+                    "port": 10000,
+                    "port_open": True,
+                    "last_error": None,
+                },
+            },
+        }
+
     def capture_table_cam(self, cam_id: int, exposure: float = 0.2) -> bytes:
         try:
             from PIL import Image, ImageDraw, ImageFont
