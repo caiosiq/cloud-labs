@@ -35,8 +35,19 @@ export const store = {
     selectedTableCam: 1,
     /** Per CAM (1/2): CONNECT lifecycle (lazy cloud recorder + mock parity). */
     tableCamConnected: { 1: false, 2: false },
+    /** Optimistic / in-flight CONNECT (grey "Connecting" button). */
+    tableCamConnecting: { 1: false, 2: false },
     /** STREAM_ON semantics per CAM — drives `/api/table-cam/stream`. */
     tableCamLive: { 1: false, 2: false },
+    /** Optimistic live toggle in flight (reconcile on server response). */
+    tableCamLivePending: { 1: false, 2: false },
+    /** Capture in progress (Still + "Capturing…" shown immediately). */
+    tableCamCapturePending: { 1: false, 2: false },
+    /** From GET /api/table-cam/status: real | mock | none */
+    tableCamHardware: { 1: 'none', 2: 'none' },
+    tableCamLastError: { 1: null, 2: null },
+    tableCamRecorderAlive: true,
+    tableCamRecorderVariant: 'cloudlab',
     /** Seconds; used for GET /api/table-cam/capture exposure query param */
     tableCamExposure: 0.2,
     /** Per CAM: Object URL from last PNG capture (`URL.createObjectURL`) */

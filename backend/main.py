@@ -833,6 +833,36 @@ async def table_cam_capture(
     return Response(content=data, media_type="image/png")
 
 
+def _table_cam_api_payload(cam_id: int, ok: bool, detail: str) -> Dict[str, Any]:
+    """Merge per-camera status into table-cam JSON responses."""
+    out: Dict[str, Any] = {"ok": ok, "detail": detail, "cam_id": cam_id}
+    if hasattr(lab, "get_table_cam_status"):
+        try:
+            snap = lab.get_table_cam_status(only_cam_id=cam_id)
+            out["state"] = snap
+            cam = (snap.get("cameras") or {}).get(str(cam_id))
+            if cam:
+                out["camera"] = cam
+        except Exception as e:
+            out["state_error"] = str(e)
+    return out
+
+
+@app.get("/api/table-cam/status")
+async def table_cam_http_status(cam_id: Optional[int] = None):
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if not hasattr(lab, "get_table_cam_status"):
+        raise HTTPException(status_code=503, detail="Table cam status not available")
+    only = cam_id if cam_id in (1, 2) else None
+    snap = lab.get_table_cam_status(only_cam_id=only)
+    if cam_id is not None:
+        if cam_id not in (1, 2):
+            raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
+        return {"cam_id": cam_id, "camera": (snap.get("cameras") or {}).get(str(cam_id)), **snap}
+    return snap
+
+
 @app.post("/api/table-cam/{cam_id}/connect")
 async def table_cam_http_connect(cam_id: int):
     if lab is None:
@@ -841,8 +871,11 @@ async def table_cam_http_connect(cam_id: int):
         raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
     ok, msg = lab.table_cam_connect(cam_id)
     if not ok:
-        raise HTTPException(status_code=400, detail=msg)
-    return {"ok": True, "detail": msg}
+        return JSONResponse(
+            status_code=400,
+            content=_table_cam_api_payload(cam_id, False, msg),
+        )
+    return _table_cam_api_payload(cam_id, True, msg)
 
 
 @app.post("/api/table-cam/{cam_id}/disconnect")
@@ -853,8 +886,11 @@ async def table_cam_http_disconnect(cam_id: int):
         raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
     ok, msg = lab.table_cam_disconnect(cam_id)
     if not ok:
-        raise HTTPException(status_code=400, detail=msg)
-    return {"ok": True, "detail": msg}
+        return JSONResponse(
+            status_code=400,
+            content=_table_cam_api_payload(cam_id, False, msg),
+        )
+    return _table_cam_api_payload(cam_id, True, msg)
 
 
 @app.post("/api/table-cam/{cam_id}/live")
@@ -865,8 +901,13 @@ async def table_cam_http_live(cam_id: int, body: TableCamLiveBody):
         raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
     ok, msg = lab.table_cam_live_set(cam_id, bool(body.enabled))
     if not ok:
-        raise HTTPException(status_code=400, detail=msg)
-    return {"ok": True, "detail": msg, "enabled": body.enabled}
+        return JSONResponse(
+            status_code=400,
+            content=_table_cam_api_payload(cam_id, False, msg),
+        )
+    out = _table_cam_api_payload(cam_id, True, msg)
+    out["enabled"] = body.enabled
+    return out
 
 
 @app.post("/api/table-cam/{cam_id}/vexp")

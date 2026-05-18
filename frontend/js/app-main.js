@@ -1036,7 +1036,7 @@ async function fetchLabState() {
                     tableCamImg.src = `/api/optimization-feed/stream?t=${Date.now()}`;
                     tableCamImg.style.display = 'block';
                     if (tableCamPlaceholder) tableCamPlaceholder.style.display = 'none';
-                    if (tableCamError) tableCamError.style.display = 'none';
+                    clearTableCamError();
                 }
             }
 
@@ -3734,9 +3734,72 @@ function updateLayoutConflictModal() {
 }
 
 function syncTableCamMockHint() {
-    const el = document.getElementById('table-cam-mock-hint');
-    if (!el || !store.labState) return;
-    el.style.display = store.labState.lab_mode === 'MOCK' ? 'block' : 'none';
+    const mockEl = document.getElementById('table-cam-mock-hint');
+    const realEl = document.getElementById('table-cam-real-hint');
+    if (!store.labState) return;
+    const mock = store.labState.lab_mode === 'MOCK';
+    if (mockEl) mockEl.style.display = mock ? 'block' : 'none';
+    if (realEl) realEl.style.display = mock ? 'none' : 'block';
+}
+
+function tableCamApiErrorMessage(payload) {
+    if (!payload) return 'request failed';
+    if (typeof payload.detail === 'string') return payload.detail;
+    if (payload.detail && typeof payload.detail === 'object') {
+        return payload.detail.detail || JSON.stringify(payload.detail);
+    }
+    return payload.detail || payload.message || 'request failed';
+}
+
+function applyTableCamServerPayload(data, camId) {
+    if (!data || camId == null) return;
+    const cam =
+        data.camera ||
+        (data.state &&
+            data.state.cameras &&
+            data.state.cameras[String(camId)]);
+    if (cam) {
+        store.tableCamConnected[camId] = !!cam.connected;
+        store.tableCamLive[camId] = !!cam.streaming;
+        store.tableCamHardware[camId] = cam.hardware || 'none';
+        store.tableCamLastError[camId] = cam.last_error || null;
+        if (cam.connected) {
+            store.tableCamConnecting[camId] = false;
+        }
+    } else if (data.ok) {
+        store.tableCamConnected[camId] = true;
+        store.tableCamConnecting[camId] = false;
+    }
+    if (data.state) {
+        store.tableCamRecorderAlive = !!data.state.recorder_alive;
+        store.tableCamRecorderVariant = data.state.recorder_variant || '';
+    }
+}
+
+function isTableCamStreamSrc(src) {
+    return typeof src === 'string' && src.includes('/api/table-cam/stream');
+}
+
+function stopTableCamStreamImg(camId) {
+    const img = document.getElementById('table-cam-img');
+    if (img && isTableCamStreamSrc(img.src)) {
+        img.src = '';
+    }
+}
+
+function setTableCamPreviewLoading(message, visible) {
+    const el = document.getElementById('table-cam-preview-loading');
+    const text = document.getElementById('table-cam-preview-loading-text');
+    if (!el) return;
+    if (text && message) text.textContent = message;
+    el.classList.toggle('table-cam-preview-loading--visible', !!visible);
+    el.setAttribute('aria-hidden', visible ? 'false' : 'true');
+}
+
+function tableCamConnectPhase(camId) {
+    if (store.tableCamConnecting[camId]) return 'connecting';
+    if (store.tableCamConnected[camId]) return 'connected';
+    return 'disconnected';
 }
 
 function updateTableCamMockPreviewChrome() {
@@ -3762,6 +3825,22 @@ function updateTableCamMockPreviewChrome() {
     const mock = !!(store.labState && store.labState.lab_mode === 'MOCK');
     if (!mock) {
         preview.classList.add('table-cam-preview--mock-neutral');
+        const cid = store.selectedTableCam;
+        const parts = [];
+        if (!store.tableCamRecorderAlive) parts.push('RECORDER DOWN');
+        else parts.push((store.tableCamRecorderVariant || 'recorder').toUpperCase());
+        parts.push((store.tableCamHardware[cid] || 'none').toUpperCase());
+        if (store.tableCamConnecting[cid]) parts.push('CONNECTING');
+        else if (store.tableCamConnected[cid]) parts.push('CONNECTED');
+        if (store.tableCamLive[cid]) parts.push('LIVE');
+        if (store.tableCamLivePending[cid]) parts.push('…');
+        chip.textContent = parts.join(' · ');
+        chip.style.display = 'block';
+        if (store.tableCamLastError[cid]) {
+            chip.title = String(store.tableCamLastError[cid]);
+        } else {
+            chip.removeAttribute('title');
+        }
         return;
     }
 
@@ -4694,13 +4773,52 @@ function restoreTableCamPanelVisuals() {
     const hint =
         '<span style="font-size: 11px;line-height:1.45;color:var(--text-muted);">Use <strong>Connected</strong>, then the <strong>Live / Still</strong> toggle for stream vs frozen preview. <strong>Capture</strong> grabs a fresh still and switches to Still.</span>';
 
-    if (store.tableCamLive[cid]) {
-        img.src = buildTableCamStreamUrl(cid);
-        img.style.display = 'block';
-        placeholder.style.display = 'none';
-        placeholder.textContent = '';
+    if (!store.tableCamConnected[cid]) {
+        img.src = '';
+        img.style.display = 'none';
+        const lastCap = getTableCamLastBlobUrl(cid);
+        if (lastCap) {
+            img.src = lastCap;
+            img.style.display = 'block';
+            placeholder.style.display = 'none';
+            placeholder.textContent = '';
+            return;
+        }
+        placeholder.style.display = 'block';
+        placeholder.innerHTML = hint;
         return;
     }
+
+    if (store.tableCamCapturePending[cid]) {
+        stopTableCamStreamImg(cid);
+        img.src = '';
+        img.style.display = 'none';
+        placeholder.textContent = 'Capturing…';
+        placeholder.style.display = 'block';
+        setTableCamPreviewLoading('', false);
+        return;
+    }
+
+    if (store.tableCamLive[cid] || store.tableCamLivePending[cid]) {
+        if (store.tableCamLive[cid]) {
+            img.src = buildTableCamStreamUrl(cid);
+            img.style.display = 'block';
+            placeholder.style.display = 'none';
+            placeholder.textContent = '';
+        } else {
+            stopTableCamStreamImg(cid);
+            img.style.display = 'none';
+            placeholder.style.display = 'none';
+        }
+        setTableCamPreviewLoading(
+            'Obtaining live feed…',
+            store.tableCamLivePending[cid] || !store.tableCamLive[cid],
+        );
+        return;
+    }
+
+    setTableCamPreviewLoading('', false);
+
     const lastCap = getTableCamLastBlobUrl(cid);
     if (lastCap) {
         img.src = lastCap;
@@ -4720,14 +4838,25 @@ function syncTableCamConnectToggleAppearance() {
     const label = document.getElementById('table-cam-link-toggle-label');
     const icon = document.getElementById('table-cam-link-dot');
     if (!btn || !label || !icon) return;
-    const on = !!store.tableCamConnected[store.selectedTableCam];
+    const cid = store.selectedTableCam;
+    const phase = tableCamConnectPhase(cid);
+    const on = phase === 'connected';
+    const connecting = phase === 'connecting';
     btn.classList.toggle('table-cam-connect-toggle--connected', on);
-    btn.classList.toggle('table-cam-connect-toggle--disconnected', !on);
-    icon.textContent = on ? 'link' : 'link_off';
-    label.textContent = on ? 'Connected' : 'Disconnected';
-    btn.title = on
-        ? 'Tap to disconnect and release the camera session'
-        : 'Tap to connect / open SDK session';
+    btn.classList.toggle('table-cam-connect-toggle--connecting', connecting);
+    btn.classList.toggle(
+        'table-cam-connect-toggle--disconnected',
+        phase === 'disconnected',
+    );
+    btn.disabled = connecting;
+    icon.textContent = connecting ? 'sync' : on ? 'link' : 'link_off';
+    label.textContent =
+        connecting ? 'Connecting' : on ? 'Connected' : 'Disconnected';
+    btn.title = connecting
+        ? 'Opening camera session…'
+        : on
+          ? 'Tap to disconnect and release the camera session'
+          : 'Tap to connect / open SDK session';
 }
 
 function syncTableCamLiveButtonAppearance() {
@@ -4735,16 +4864,22 @@ function syncTableCamLiveButtonAppearance() {
     if (!liveBtn) return;
     const cid = store.selectedTableCam;
     const streaming = !!store.tableCamLive[cid];
+    const pending = !!store.tableCamLivePending[cid];
     const connected = !!store.tableCamConnected[cid];
+    const connecting = !!store.tableCamConnecting[cid];
     liveBtn.classList.toggle('table-cam-live-btn--streaming', streaming);
+    liveBtn.classList.toggle('table-cam-live-btn--pending', pending);
     liveBtn.setAttribute('aria-pressed', streaming ? 'true' : 'false');
-    liveBtn.disabled = !connected;
+    liveBtn.disabled = !connected || connecting || pending;
     const icon = document.getElementById('table-cam-live-btn-icon');
     const label = document.getElementById('table-cam-live-btn-label');
     if (icon && label) {
         if (!connected) {
             icon.textContent = 'videocam';
             label.textContent = 'Live';
+        } else if (pending) {
+            icon.textContent = 'sync';
+            label.textContent = streaming ? 'Live' : 'Still';
         } else if (streaming) {
             icon.textContent = 'videocam';
             label.textContent = 'Live';
@@ -4764,7 +4899,11 @@ function syncTableCamCaptureButtonAppearance() {
     const btn = document.getElementById('table-cam-capture-btn');
     const cid = store.selectedTableCam;
     if (!btn) return;
-    btn.disabled = !store.tableCamConnected[cid];
+    btn.disabled =
+        !store.tableCamConnected[cid] ||
+        store.tableCamConnecting[cid] ||
+        store.tableCamCapturePending[cid] ||
+        store.tableCamLivePending[cid];
 }
 
 async function refreshTableCamLiveUi() {
@@ -4777,32 +4916,24 @@ async function refreshTableCamLiveUi() {
 
 async function apiTableCamConnect(camId) {
     const res = await fetch(`/api/table-cam/${camId}/connect`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-        const msg = (await res.json().catch(() => ({}))).detail || 'connect failed';
-        throw new Error(msg);
+        applyTableCamServerPayload(data, camId);
+        throw new Error(tableCamApiErrorMessage(data) || 'connect failed');
     }
-    store.tableCamConnected[camId] = true;
+    applyTableCamServerPayload(data, camId);
+    return data;
 }
 
 async function apiTableCamDisconnect(camId) {
-    if (store.tableCamLive[camId]) {
-        try {
-            await fetch(`/api/table-cam/${camId}/live`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled: false }),
-            });
-        } catch {
-            /* best-effort */
-        }
-        store.tableCamLive[camId] = false;
-    }
     const res = await fetch(`/api/table-cam/${camId}/disconnect`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-        const msg = (await res.json().catch(() => ({}))).detail || 'disconnect failed';
-        throw new Error(msg);
+        applyTableCamServerPayload(data, camId);
+        throw new Error(tableCamApiErrorMessage(data) || 'disconnect failed');
     }
-    store.tableCamConnected[camId] = false;
+    applyTableCamServerPayload(data, camId);
+    return data;
 }
 
 async function apiTableCamLive(camId, enabled) {
@@ -4811,11 +4942,54 @@ async function apiTableCamLive(camId, enabled) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !!enabled }),
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-        const msg = (await res.json().catch(() => ({}))).detail || 'live toggle failed';
-        throw new Error(msg);
+        applyTableCamServerPayload(data, camId);
+        throw new Error(tableCamApiErrorMessage(data) || 'live toggle failed');
     }
-    store.tableCamLive[camId] = !!enabled;
+    applyTableCamServerPayload(data, camId);
+    return data;
+}
+
+async function fetchTableCamStatus(camId) {
+    try {
+        const res = await fetch(`/api/table-cam/status?cam_id=${camId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        applyTableCamServerPayload({ state: data, camera: data.camera }, camId);
+    } catch (e) {
+        console.warn('[table-cam] status fetch failed', e);
+    }
+}
+
+function optimisticTableCamDisconnect(camId) {
+    store.tableCamConnected[camId] = false;
+    store.tableCamConnecting[camId] = false;
+    store.tableCamLive[camId] = false;
+    store.tableCamLivePending[camId] = false;
+    store.tableCamCapturePending[camId] = false;
+    stopTableCamStreamImg(camId);
+}
+
+function beginTableCamConnect(camId) {
+    store.tableCamConnecting[camId] = true;
+    store.tableCamConnected[camId] = false;
+    clearTableCamError();
+    void refreshTableCamLiveUi();
+    return (async () => {
+        try {
+            await apiTableCamConnect(camId);
+            scheduleTableCamVexpPush();
+        } catch (e) {
+            store.tableCamConnected[camId] = false;
+            store.tableCamHardware[camId] = 'none';
+            showTableCamError(e.message || String(e));
+            throw e;
+        } finally {
+            store.tableCamConnecting[camId] = false;
+            await refreshTableCamLiveUi();
+        }
+    })();
 }
 
 function scheduleTableCamVexpPush() {
@@ -4845,6 +5019,16 @@ const tableCamImg = document.getElementById('table-cam-img');
 const tableCamPlaceholder = document.getElementById('table-cam-placeholder');
 const tableCamError = document.getElementById('table-cam-error');
 
+function showTableCamError(message) {
+    if (!tableCamError) return;
+    tableCamError.textContent = message || '';
+    tableCamError.style.display = message ? 'block' : 'none';
+}
+
+function clearTableCamError() {
+    showTableCamError('');
+}
+
 async function setTableCamSelection(camId) {
     store.selectedTableCam = camId;
     if (tableCamBtn1) {
@@ -4855,14 +5039,13 @@ async function setTableCamSelection(camId) {
         tableCamBtn2.classList.toggle('btn-primary', camId === 2);
         tableCamBtn2.classList.toggle('btn-secondary', camId !== 2);
     }
-
-    try {
-        await apiTableCamConnect(camId);
-    } catch (e) {
-        store.tableCamConnected[camId] = false;
-        console.warn(`[table-cam] auto-connect CAM${camId}:`, e.message || e);
-    }
     await refreshTableCamLiveUi();
+    if (
+        !store.tableCamConnected[camId] &&
+        !store.tableCamConnecting[camId]
+    ) {
+        void beginTableCamConnect(camId);
+    }
 }
 
 if (tableCamBtn1) tableCamBtn1.addEventListener('click', () => void setTableCamSelection(1));
@@ -4871,20 +5054,37 @@ if (tableCamBtn2) tableCamBtn2.addEventListener('click', () => void setTableCamS
 if (tableCamLinkToggle) {
     tableCamLinkToggle.addEventListener('click', async () => {
         const cid = store.selectedTableCam;
-        if (tableCamError) tableCamError.style.display = 'none';
+        if (store.tableCamConnecting[cid]) return;
+        clearTableCamError();
+        const wasConnected = !!store.tableCamConnected[cid];
+        if (wasConnected) {
+            optimisticTableCamDisconnect(cid);
+            await refreshTableCamLiveUi();
+        } else {
+            store.tableCamConnecting[cid] = true;
+            await refreshTableCamLiveUi();
+        }
         try {
-            if (store.tableCamConnected[cid]) {
+            if (wasConnected) {
                 await apiTableCamDisconnect(cid);
             } else {
                 await apiTableCamConnect(cid);
                 scheduleTableCamVexpPush();
             }
-            await refreshTableCamLiveUi();
         } catch (e) {
-            if (tableCamError) {
-                tableCamError.textContent = e.message || 'Toggle failed';
-                tableCamError.style.display = 'block';
+            if (wasConnected) {
+                try {
+                    await fetchTableCamStatus(cid);
+                } catch {
+                    /* ignore */
+                }
+            } else {
+                store.tableCamConnected[cid] = false;
             }
+            showTableCamError(e.message || 'Toggle failed');
+        } finally {
+            store.tableCamConnecting[cid] = false;
+            await refreshTableCamLiveUi();
         }
     });
 }
@@ -4892,17 +5092,29 @@ if (tableCamLinkToggle) {
 if (tableCamLiveBtn) {
     tableCamLiveBtn.addEventListener('click', async () => {
         const cid = store.selectedTableCam;
-        if (tableCamError) tableCamError.style.display = 'none';
-        if (!store.tableCamConnected[cid]) return;
-        const next = !store.tableCamLive[cid];
+        clearTableCamError();
+        if (store.tableCamConnecting[cid]) {
+            showTableCamError('Wait for the camera to finish connecting.');
+            return;
+        }
+        if (!store.tableCamConnected[cid]) {
+            showTableCamError('Connect the camera before enabling live preview.');
+            return;
+        }
+        if (store.tableCamLivePending[cid]) return;
+        const prevLive = !!store.tableCamLive[cid];
+        const next = !prevLive;
+        store.tableCamLivePending[cid] = true;
+        store.tableCamLive[cid] = next;
+        await refreshTableCamLiveUi();
         try {
             await apiTableCamLive(cid, next);
-            await refreshTableCamLiveUi();
         } catch (e) {
-            if (tableCamError) {
-                tableCamError.textContent = e.message || 'Live toggle failed';
-                tableCamError.style.display = 'block';
-            }
+            store.tableCamLive[cid] = prevLive;
+            stopTableCamStreamImg(cid);
+            showTableCamError(e.message || 'Live toggle failed');
+        } finally {
+            store.tableCamLivePending[cid] = false;
             await refreshTableCamLiveUi();
         }
     });
@@ -4925,7 +5137,18 @@ function getTableCamExposureSeconds() {
 })();
 
 void (async () => {
-    await setTableCamSelection(1);
+    store.selectedTableCam = 1;
+    if (tableCamBtn1) {
+        tableCamBtn1.classList.add('btn-primary');
+        tableCamBtn1.classList.remove('btn-secondary');
+    }
+    if (tableCamBtn2) {
+        tableCamBtn2.classList.add('btn-secondary');
+        tableCamBtn2.classList.remove('btn-primary');
+    }
+    store.tableCamConnecting[1] = true;
+    await refreshTableCamLiveUi();
+    void beginTableCamConnect(1);
 })();
 
 if (tableCamCaptureBtn) {
@@ -4933,63 +5156,55 @@ if (tableCamCaptureBtn) {
         if (!tableCamImg || !tableCamPlaceholder || !tableCamError) return;
         const exp = getTableCamExposureSeconds();
         const cid = store.selectedTableCam;
-        tableCamError.style.display = 'none';
+        clearTableCamError();
+        if (store.tableCamConnecting[cid]) {
+            showTableCamError('Wait for the camera to finish connecting.');
+            return;
+        }
         if (!store.tableCamConnected[cid]) {
-            tableCamError.textContent = 'Connect the camera before capturing.';
-            tableCamError.style.display = 'block';
+            showTableCamError('Connect the camera before capturing.');
             return;
         }
+        if (store.tableCamCapturePending[cid]) return;
+
+        const wasLive = !!store.tableCamLive[cid];
+        store.tableCamCapturePending[cid] = true;
+        store.tableCamLive[cid] = false;
+        store.tableCamLivePending[cid] = false;
+        stopTableCamStreamImg(cid);
+        await refreshTableCamLiveUi();
+
+        const streamOffPromise = wasLive
+            ? apiTableCamLive(cid, false).catch((e) => {
+                  showTableCamError(e.message || 'Could not stop live stream for capture');
+                  throw e;
+              })
+            : Promise.resolve();
 
         try {
-            if (store.tableCamLive[cid]) {
-                await apiTableCamLive(cid, false);
-            }
-        } catch (e) {
-            tableCamError.textContent = e.message || 'Could not stop live stream for capture';
-            tableCamError.style.display = 'block';
-            await refreshTableCamLiveUi();
-            return;
-        }
-
-        syncTableCamConnectToggleAppearance();
-        syncTableCamLiveButtonAppearance();
-        updateTableCamMockPreviewChrome();
-
-        tableCamImg.src = '';
-        tableCamImg.style.display = 'none';
-        tableCamPlaceholder.textContent = 'Capturing...';
-        tableCamPlaceholder.style.display = 'block';
-
-        try {
+            await streamOffPromise;
             const res = await fetch(
                 `/api/table-cam/capture?cam_id=${cid}&exposure=${encodeURIComponent(exp)}`,
             );
             if (res.ok) {
                 const blob = await res.blob();
                 setTableCamLastBlobUrl(cid, URL.createObjectURL(blob));
-                tableCamImg.src = getTableCamLastBlobUrl(cid);
-                tableCamImg.style.display = 'block';
-                tableCamPlaceholder.style.display = 'none';
-                await refreshTableCamLiveUi();
             } else {
                 let msg = 'Capture failed';
                 try {
                     const j = await res.json().catch(() => ({}));
-                    if (typeof j.detail === 'string') {
-                        msg = j.detail;
-                    }
+                    msg = tableCamApiErrorMessage(j) || msg;
                 } catch (_) {
                     /* ignore */
                 }
-                tableCamError.textContent = msg;
-                tableCamError.style.display = 'block';
-                tableCamPlaceholder.style.display = 'none';
-                await refreshTableCamLiveUi();
+                showTableCamError(msg);
             }
         } catch (e) {
-            tableCamError.textContent = e.message || 'Request failed';
-            tableCamError.style.display = 'block';
-            tableCamPlaceholder.style.display = 'none';
+            if (!tableCamError.textContent) {
+                showTableCamError(e.message || 'Request failed');
+            }
+        } finally {
+            store.tableCamCapturePending[cid] = false;
             await refreshTableCamLiveUi();
         }
     });
