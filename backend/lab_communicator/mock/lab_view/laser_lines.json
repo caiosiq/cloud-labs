@@ -6,7 +6,7 @@
       "id": "demo_beam",
       "name": "Mock table beam",
       "color": "#ff3b3b",
-      "enabled": false,
+      "enabled": true,
       "p1": {
         "x": 0,
         "y": -450
@@ -20,7 +20,7 @@
       "id": "demo_secondary",
       "name": "Mock secondary (angled)",
       "color": "#ff8c42",
-      "enabled": false,
+      "enabled": true,
       "p1": {
         "x": -200,
         "y": -200
