@@ -43,55 +43,66 @@ import {
 /** Degrees per wheel tick while dragging a component (was 5°). */
 const ROTATION_WHEEL_STEP_DEG = 2.5;
 
+/** Perpendicular snap to lines during drag (junction glue still preferred when in range). */
+const ALIGNMENT_LINE_SNAP_ENABLED = true;
+/** Draw amber dots at every detected line crossing (lab mm). */
+const ALIGNMENT_SHOW_INTERSECTION_MARKERS = true;
+
 /** Perpendicular snap to alignment segments — lab mm. */
 let ALIGNMENT_SNAP_THRESHOLD_MM = 10;
 /**
- * Corners segment–segment crossings use segment threshold + extra so intersection wins over
- * nearer feet on one line. Larger = easier junction snap. Tunable via URL when debug=1.
+ * Junction capture: pointer within this distance (mm) of the crossing point, OR within
+ * ALIGNMENT_SNAP_THRESHOLD_MM of both lines that meet (corner zone — same feel as line glue).
  */
-let ALIGNMENT_INTERSECTION_EXTRA_MM = 12;
-/** Max distance from pointer at which crossings take priority over lone-segment snaps. */
-let ALIGNMENT_INTERSECTION_SNAP_THRESHOLD_MM =
-    ALIGNMENT_SNAP_THRESHOLD_MM + ALIGNMENT_INTERSECTION_EXTRA_MM;
+let ALIGNMENT_INTERSECTION_ENTER_MM = 18;
+/** While latched to a junction, stay locked until pointer leaves this radius (mm) from the point. */
+let ALIGNMENT_INTERSECTION_LATCH_MM = 26;
 
 (() => {
     if (typeof URLSearchParams === 'undefined') return;
     const params = new URLSearchParams(window.location.search || '');
     if (params.get('debug') !== '1') return;
-    let absInterSnap = NaN;
-    const interRaw = parseFloat(params.get('alignment_intersection_mm'));
-    if (Number.isFinite(interRaw) && interRaw > 0 && interRaw <= 300) absInterSnap = interRaw;
 
     const segRaw = parseFloat(params.get('alignment_snap_mm'));
     if (Number.isFinite(segRaw) && segRaw > 0 && segRaw <= 200) {
         ALIGNMENT_SNAP_THRESHOLD_MM = segRaw;
     }
 
-    const extraRaw = parseFloat(params.get('alignment_intersection_extra_mm'));
-    if (Number.isFinite(extraRaw) && extraRaw >= 0 && extraRaw <= 120) {
-        ALIGNMENT_INTERSECTION_EXTRA_MM = extraRaw;
+    const enterRaw = parseFloat(params.get('alignment_intersection_mm'));
+    if (Number.isFinite(enterRaw) && enterRaw > 0 && enterRaw <= 300) {
+        ALIGNMENT_INTERSECTION_ENTER_MM = enterRaw;
     }
 
-    ALIGNMENT_INTERSECTION_SNAP_THRESHOLD_MM = Number.isFinite(absInterSnap)
-        ? Math.max(absInterSnap, ALIGNMENT_SNAP_THRESHOLD_MM)
-        : ALIGNMENT_SNAP_THRESHOLD_MM + ALIGNMENT_INTERSECTION_EXTRA_MM;
+    const latchRaw = parseFloat(params.get('alignment_intersection_latch_mm'));
+    if (Number.isFinite(latchRaw) && latchRaw > 0 && latchRaw <= 300) {
+        ALIGNMENT_INTERSECTION_LATCH_MM = latchRaw;
+    }
 
     console.info('[alignment snap] thresholds (mm)', {
         segment: ALIGNMENT_SNAP_THRESHOLD_MM,
-        intersection: ALIGNMENT_INTERSECTION_SNAP_THRESHOLD_MM,
-        intersectionExtra: ALIGNMENT_INTERSECTION_EXTRA_MM,
+        intersectionEnter: ALIGNMENT_INTERSECTION_ENTER_MM,
+        intersectionLatch: ALIGNMENT_INTERSECTION_LATCH_MM,
     });
 })();
 
-/** Max chord distance (mm) foot→corner on glued segment: inside this band we snap to the junction, not the foot (foot is always closer to P in px so pointer-distance tie-break was wrong). */
-const ALIGNMENT_CORNER_SPINE_MM = 22;
+const _frontendBuild =
+    new URL(import.meta.url).searchParams.get('v') ?? 'dev';
+console.info('[cloud-labs] frontend loaded', {
+    build: _frontendBuild,
+    module: 'app-main.js',
+    alignmentIntersectionEnterMm: ALIGNMENT_INTERSECTION_ENTER_MM,
+    lineSnapEnabled: ALIGNMENT_LINE_SNAP_ENABLED,
+    intersectionMarkers: ALIGNMENT_SHOW_INTERSECTION_MARKERS,
+});
 /** Switch glued segment during drag only if competitor is this much tighter (mm) to pointer. */
 const ALIGNMENT_DRAG_STICKY_BREAK_MM = 8;
 /** Prefer previous sticky segment if feet are nearly tied — tie zone (mm) when using prev ghost. */
 const ALIGNMENT_SEGMENT_CHOICE_TIE_MM = 2;
 
-/** While dragging components: latch which alignment segment spine we follow unless another line pulls away. Reset on drag end. */
+/** While dragging: latched segment index and/or junction point. Reset on drag end. */
 let dragAlignmentStickySegIdx = null;
+/** @type {{ x: number; y: number } | null} */
+let dragAlignmentStickyIntersection = null;
 
 const GUIDE_LINES_STORAGE_KEY = 'optics_alignment_guides_v1';
 const GUIDE_MIN_LENGTH_MM = 2;
@@ -199,7 +210,8 @@ async function fetchCatalogMap() {
     } catch (e) { console.error("Catalog fetch failed", e); }
 }
 
-// Call this early
+// Call this early (guides before first render so junction scan includes pencil lines)
+loadGuideLinesFromStorage();
 fetchCatalogMap();
 fetchLaserLines();
 
@@ -327,10 +339,61 @@ function closestPointOnSegment(px, py, x1, y1, x2, y2) {
     return { x, y, dist: Math.hypot(px - x, py - y) };
 }
 
-/**
- * Intersection of two finite segments (inclusive). Null if parallel or no crossing.
- */
-function segmentSegmentIntersection(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2) {
+function pointInLabBoundsMm(x, y) {
+    return (
+        x >= LAB_X_MIN &&
+        x <= LAB_X_MAX &&
+        y >= LAB_Y_MIN &&
+        y <= LAB_Y_MAX
+    );
+}
+
+/** Analytic crossing of two line models (lab mm); null if parallel or degenerate. */
+function lineModelIntersection(mA, mB) {
+    if (!mA || !mB) return null;
+    if (mA.kind === 'vertical' && mB.kind === 'vertical') return null;
+    if (mA.kind === 'horizontal' && mB.kind === 'horizontal') return null;
+    if (mA.kind === 'vertical' && mB.kind === 'horizontal') {
+        return { x: mA.x0, y: mB.y0 };
+    }
+    if (mA.kind === 'horizontal' && mB.kind === 'vertical') {
+        return { x: mB.x0, y: mA.y0 };
+    }
+    if (mA.kind === 'vertical' && mB.kind === 'ab') {
+        const x = mA.x0;
+        if (Math.abs(mB.a) < 1e-12) return null;
+        return { x, y: (x - mB.b) / mB.a };
+    }
+    if (mA.kind === 'ab' && mB.kind === 'vertical') {
+        const x = mB.x0;
+        if (Math.abs(mA.a) < 1e-12) return null;
+        return { x, y: (x - mA.b) / mA.a };
+    }
+    if (mA.kind === 'horizontal' && mB.kind === 'ab') {
+        const y = mA.y0;
+        return { x: mB.a * y + mB.b, y };
+    }
+    if (mA.kind === 'ab' && mB.kind === 'horizontal') {
+        const y = mB.y0;
+        return { x: mA.a * y + mA.b, y };
+    }
+    const da = mA.a - mB.a;
+    if (Math.abs(da) < 1e-12) return null;
+    const y = (mB.b - mA.b) / da;
+    const x = mA.a * y + mA.b;
+    return { x, y };
+}
+
+/** Crossing of infinite lines through (p1a,p2a) and (p1b,p2b); null if parallel. */
+function infiniteLineIntersection(p1a, p2a, p1b, p2b) {
+    const ax1 = p1a.x;
+    const ay1 = p1a.y;
+    const ax2 = p2a.x;
+    const ay2 = p2a.y;
+    const bx1 = p1b.x;
+    const by1 = p1b.y;
+    const bx2 = p2b.x;
+    const by2 = p2b.y;
     const rx = ax2 - ax1;
     const ry = ay2 - ay1;
     const sx = bx2 - bx1;
@@ -340,11 +403,7 @@ function segmentSegmentIntersection(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2) {
     const qpx = ax1 - bx1;
     const qpy = ay1 - by1;
     const t = (qpx * sy - qpy * sx) / denom;
-    const u = (qpx * ry - qpy * rx) / denom;
-    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
-        return { x: ax1 + t * rx, y: ay1 + t * ry };
-    }
-    return null;
+    return { x: ax1 + t * rx, y: ay1 + t * ry };
 }
 
 function collectAlignmentSegments() {
@@ -353,55 +412,208 @@ function collectAlignmentSegments() {
     if (doc && Array.isArray(doc.lines)) {
         doc.lines.forEach((line) => {
             if (!line || line.enabled === false || !line.p1 || !line.p2) return;
+            const model = twoPointsToLineModel(line.p1, line.p2);
             const seg = clipTwoPointLineToLabBounds(line.p1, line.p2);
-            if (!seg) return;
-            segments.push({ p1: seg[0], p2: seg[1], source: 'laser' });
+            if (!seg || !model) return;
+            segments.push({
+                p1: seg[0],
+                p2: seg[1],
+                source: 'laser',
+                model,
+                label: line.name || line.id || 'laser',
+            });
         });
     }
-    (store.guideLines || []).forEach((g) => {
+    (store.guideLines || []).forEach((g, gi) => {
         if (g && g.p1 && g.p2 && [g.p1.x, g.p1.y, g.p2.x, g.p2.y].every(Number.isFinite)) {
-            segments.push({ p1: { x: g.p1.x, y: g.p1.y }, p2: { x: g.p2.x, y: g.p2.y }, source: 'guide' });
+            const model = twoPointsToLineModel(g.p1, g.p2);
+            if (!model) return;
+            segments.push({
+                p1: { x: g.p1.x, y: g.p1.y },
+                p2: { x: g.p2.x, y: g.p2.y },
+                source: 'guide',
+                model,
+                label: g.id || `guide-${gi}`,
+            });
         }
     });
     return segments;
 }
 
-/**
- * Combined alignment snap — laser/guide segments plus crossings on the active spine.
- * After choosing glued segment S (sticky + proximity): foot Q is closest on S to pointer.
- * If Q lies within ALIGNMENT_CORNER_SPINE_MM of a crossing on S, snap to that apex (nearest
- * along chord), otherwise optional pointer “hold” bubble — never pick apex by min dist(P,*) vs Q
- * (Q always wins that comparison while sliding toward a corner).
- * @returns {{ x: number; y: number; segIdx: number | null }}
- */
-function snapLabPointUnified(x, y, options = {}) {
-    const {
-        segmentSnapMm = ALIGNMENT_SNAP_THRESHOLD_MM,
-        prevGhost = null,
-        stickySegIdx = null,
-    } = options;
-    const segments = collectAlignmentSegments();
-    if (segments.length === 0) {
-        return { x, y, segIdx: null };
+function intersectionForSegmentPair(Sa, Sb) {
+    let IX = lineModelIntersection(Sa.model, Sb.model);
+    if (!IX) {
+        IX = infiniteLineIntersection(Sa.p1, Sa.p2, Sb.p1, Sb.p2);
     }
+    return IX;
+}
 
+/** Pairwise crossings (infinite lines); `inBounds` marks table-visible junctions. */
+function collectSegmentIntersections(segments, { includeOutOfBounds = false } = {}) {
+    const out = [];
     const n = segments.length;
-    const qix = new Array(n);
-    const qiy = new Array(n);
-    const da = new Array(n);
-    let anyFinite = false;
     for (let i = 0; i < n; i++) {
-        const s = segments[i];
-        const c = closestPointOnSegment(x, y, s.p1.x, s.p1.y, s.p2.x, s.p2.y);
-        qix[i] = c.x;
-        qiy[i] = c.y;
-        da[i] = c.dist;
-        if (Number.isFinite(c.dist)) anyFinite = true;
+        const Sa = segments[i];
+        for (let j = i + 1; j < n; j++) {
+            const Sb = segments[j];
+            const IX = intersectionForSegmentPair(Sa, Sb);
+            if (!IX) continue;
+            const inBounds = pointInLabBoundsMm(IX.x, IX.y);
+            if (!inBounds && !includeOutOfBounds) continue;
+            out.push({
+                x: IX.x,
+                y: IX.y,
+                segA: i,
+                segB: j,
+                inBounds,
+                labelA: Sa.label,
+                labelB: Sb.label,
+            });
+        }
     }
-    if (!anyFinite) {
-        return { x, y, segIdx: null };
+    return out;
+}
+
+let _alignmentIntersectionCache = [];
+let _alignmentIntersectionOutOfBounds = [];
+let _alignmentIntersectionLogKey = '';
+
+function refreshAlignmentIntersectionCache() {
+    const segments = collectAlignmentSegments();
+    const allMath = collectSegmentIntersections(segments, { includeOutOfBounds: true });
+    _alignmentIntersectionCache = allMath.filter((ix) => ix.inBounds);
+    _alignmentIntersectionOutOfBounds = allMath.filter((ix) => !ix.inBounds);
+
+    const pairNotes = [];
+    const n = segments.length;
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            const Sa = segments[i];
+            const Sb = segments[j];
+            const IX = intersectionForSegmentPair(Sa, Sb);
+            if (!IX) {
+                pairNotes.push({
+                    a: Sa.label,
+                    b: Sb.label,
+                    reason: 'parallel or degenerate',
+                });
+                continue;
+            }
+            if (!pointInLabBoundsMm(IX.x, IX.y)) {
+                pairNotes.push({
+                    a: Sa.label,
+                    b: Sb.label,
+                    reason: 'crosses outside lab bounds',
+                    x: Math.round(IX.x * 10) / 10,
+                    y: Math.round(IX.y * 10) / 10,
+                });
+                continue;
+            }
+            pairNotes.push({
+                a: Sa.label,
+                b: Sb.label,
+                reason: 'junction',
+                x: Math.round(IX.x * 10) / 10,
+                y: Math.round(IX.y * 10) / 10,
+            });
+        }
     }
 
+    const logKey = JSON.stringify({
+        n: segments.length,
+        in: _alignmentIntersectionCache.length,
+        pairNotes,
+    });
+    if (logKey !== _alignmentIntersectionLogKey) {
+        _alignmentIntersectionLogKey = logKey;
+        console.info('[alignment] junction scan', {
+            segmentCount: segments.length,
+            segments: segments.map((s) => ({
+                label: s.label,
+                source: s.source,
+                kind: s.model?.kind,
+            })),
+            inBoundsJunctions: _alignmentIntersectionCache.length,
+            outOfBoundsCrossings: _alignmentIntersectionOutOfBounds.length,
+            pairs: pairNotes,
+        });
+    }
+    return _alignmentIntersectionCache;
+}
+
+/**
+ * True when pointer is in range to glue to this junction: near the point itself, or in the
+ * "corner" where both meeting segments are within line snap distance (like line glue).
+ */
+function intersectionInCaptureZone(px, py, ix, da, segmentSnapMm, enterMm) {
+    const dPoint = Math.hypot(px - ix.x, py - ix.y);
+    if (dPoint <= enterMm) return true;
+    if (!ALIGNMENT_LINE_SNAP_ENABLED) return false;
+    const dA = da[ix.segA];
+    const dB = da[ix.segB];
+    return (
+        Number.isFinite(dA) &&
+        Number.isFinite(dB) &&
+        dA <= segmentSnapMm &&
+        dB <= segmentSnapMm
+    );
+}
+
+function resolveLatchedIntersection(stickyIntersection, intersections) {
+    if (
+        !stickyIntersection ||
+        !Number.isFinite(stickyIntersection.x) ||
+        !Number.isFinite(stickyIntersection.y)
+    ) {
+        return null;
+    }
+    let match = null;
+    let matchD = 2.5;
+    for (const ix of intersections) {
+        const d = Math.hypot(ix.x - stickyIntersection.x, ix.y - stickyIntersection.y);
+        if (d + 1e-9 < matchD - 1e-9) {
+            matchD = d;
+            match = ix;
+        }
+    }
+    return (
+        match || {
+            x: stickyIntersection.x,
+            y: stickyIntersection.y,
+            segA:
+                typeof stickyIntersection.segA === 'number' ? stickyIntersection.segA : 0,
+            segB:
+                typeof stickyIntersection.segB === 'number' ? stickyIntersection.segB : 1,
+        }
+    );
+}
+
+/**
+ * Best junction to glue to: must be in capture zone; prefer smallest distance to crossing.
+ * @returns {{ x: number; y: number; segA: number; segB: number } | null}
+ */
+function bestIntersectionForCapture(px, py, intersections, da, segmentSnapMm, enterMm) {
+    let best = null;
+    let bestD = Infinity;
+    for (const ix of intersections) {
+        if (!intersectionInCaptureZone(px, py, ix, da, segmentSnapMm, enterMm)) continue;
+        const dPoint = Math.hypot(px - ix.x, py - ix.y);
+        if (dPoint + 1e-9 < bestD - 1e-9) {
+            bestD = dPoint;
+            best = ix;
+        }
+    }
+    return best;
+}
+
+function pickSegmentIndexForSnap(
+    n,
+    da,
+    qix,
+    qiy,
+    segmentSnapMm,
+    { prevGhost, stickySegIdx, useSegmentSticky },
+) {
     const argMinBare = da.reduce((b, _, i, arr) => (arr[i] < arr[b] ? i : b), 0);
 
     let bestIdx = argMinBare;
@@ -421,6 +633,7 @@ function snapLabPointUnified(x, y, options = {}) {
 
     let chosenIdx = bestIdx;
     if (
+        useSegmentSticky &&
         stickySegIdx != null &&
         Number.isFinite(stickySegIdx) &&
         stickySegIdx >= 0 &&
@@ -434,81 +647,118 @@ function snapLabPointUnified(x, y, options = {}) {
             }
         }
     }
+    return chosenIdx;
+}
 
-    if (!Number.isFinite(da[chosenIdx]) || da[chosenIdx] >= segmentSnapMm) {
-        return { x, y, segIdx: null };
+/**
+ * Alignment snap: nearest junction in range first, else closest line segment.
+ * Leaving a junction re-picks the closest line (segment sticky disabled for one frame).
+ * @returns {{ x: number; y: number; segIdx: number | null; snapKind: 'intersection'|'segment'|'none'; intersection?: { x: number; y: number } }}
+ */
+function snapLabPointUnified(x, y, options = {}) {
+    const {
+        segmentSnapMm = ALIGNMENT_SNAP_THRESHOLD_MM,
+        prevGhost = null,
+        stickySegIdx = null,
+        stickyIntersection = null,
+    } = options;
+    const none = { x, y, segIdx: null, snapKind: 'none' };
+    const segments = collectAlignmentSegments();
+    if (segments.length === 0) {
+        return none;
     }
 
-    const fqix = qix[chosenIdx];
-    const fqiy = qiy[chosenIdx];
-    const spineMax = ALIGNMENT_CORNER_SPINE_MM;
-    const holdMm = ALIGNMENT_INTERSECTION_SNAP_THRESHOLD_MM;
-
-    /** @type {{ ax: number; ay: number; spine: number }[]} */
-    const apexes = [];
-    for (let j = 0; j < n; j++) {
-        if (j === chosenIdx) continue;
-        const Sa = segments[chosenIdx];
-        const Sb = segments[j];
-        const IX = segmentSegmentIntersection(
-            Sa.p1.x,
-            Sa.p1.y,
-            Sa.p2.x,
-            Sa.p2.y,
-            Sb.p1.x,
-            Sb.p1.y,
-            Sb.p2.x,
-            Sb.p2.y,
-        );
-        if (!IX) continue;
-        apexes.push({
-            ax: IX.x,
-            ay: IX.y,
-            spine: Math.hypot(IX.x - fqix, IX.y - fqiy),
-        });
+    const n = segments.length;
+    const qix = new Array(n);
+    const qiy = new Array(n);
+    const da = new Array(n);
+    let anyFinite = false;
+    for (let i = 0; i < n; i++) {
+        const s = segments[i];
+        const c = closestPointOnSegment(x, y, s.p1.x, s.p1.y, s.p2.x, s.p2.y);
+        qix[i] = c.x;
+        qiy[i] = c.y;
+        da[i] = c.dist;
+        if (Number.isFinite(c.dist)) anyFinite = true;
+    }
+    if (!anyFinite) {
+        return none;
     }
 
-    let outX = fqix;
-    let outY = fqiy;
+    const intersections = collectSegmentIntersections(segments);
+    const enterMm = ALIGNMENT_INTERSECTION_ENTER_MM;
+    const latchMm = ALIGNMENT_INTERSECTION_LATCH_MM;
+    const hadIxLatch =
+        stickyIntersection &&
+        Number.isFinite(stickyIntersection.x) &&
+        Number.isFinite(stickyIntersection.y);
 
-    if (apexes.length > 0) {
-        // 1) Approaching junction along glued spine — prefer apex over foot Q (Q is always nearer to P until you pass the apex in px distance).
-        const inBand = apexes.filter((a) => a.spine <= spineMax);
-        if (inBand.length > 0) {
-            let best = inBand[0];
-            for (let z = 1; z < inBand.length; z++) {
-                if (inBand[z].spine + 1e-9 < best.spine - 1e-9) best = inBand[z];
-            }
-            outX = best.ax;
-            outY = best.ay;
-        } else {
-            // 2) Hold / latch near crossing (pointer bubble + optional continuity from ghost).
-            const dPQ = Math.hypot(x - fqix, y - fqiy);
-            let holdCand = null;
-            let holdD = Infinity;
-            for (const a of apexes) {
-                const dP = Math.hypot(x - a.ax, y - a.ay);
-                if (dP > holdMm) continue;
-                const prevNear =
-                    prevGhost &&
-                    Number.isFinite(prevGhost.x) &&
-                    Number.isFinite(prevGhost.y) &&
-                    Math.hypot(prevGhost.x - a.ax, prevGhost.y - a.ay) <= 3.2;
-                if (prevNear || dP <= dPQ + 1.75) {
-                    if (dP + 1e-9 < holdD - 1e-9) {
-                        holdD = dP;
-                        holdCand = a;
-                    }
-                }
-            }
-            if (holdCand != null) {
-                outX = holdCand.ax;
-                outY = holdCand.ay;
+    let ixHit = null;
+    if (hadIxLatch) {
+        const latched = resolveLatchedIntersection(stickyIntersection, intersections);
+        if (latched) {
+            const dPoint = Math.hypot(x - latched.x, y - latched.y);
+            const stillInCorner =
+                ALIGNMENT_LINE_SNAP_ENABLED &&
+                intersectionInCaptureZone(x, y, latched, da, segmentSnapMm, enterMm);
+            if (dPoint <= latchMm || stillInCorner) {
+                ixHit = latched;
             }
         }
     }
+    if (!ixHit) {
+        ixHit = bestIntersectionForCapture(
+            x,
+            y,
+            intersections,
+            da,
+            segmentSnapMm,
+            enterMm,
+        );
+    }
 
-    return { x: outX, y: outY, segIdx: chosenIdx };
+    if (ixHit) {
+        const dA = da[ixHit.segA];
+        const dB = da[ixHit.segB];
+        let segIdx = ixHit.segA;
+        if (Number.isFinite(dB) && (!Number.isFinite(dA) || dB + 1e-9 < dA - 1e-9)) {
+            segIdx = ixHit.segB;
+        }
+        return {
+            x: ixHit.x,
+            y: ixHit.y,
+            segIdx,
+            snapKind: 'intersection',
+            intersection: {
+                x: ixHit.x,
+                y: ixHit.y,
+                segA: ixHit.segA,
+                segB: ixHit.segB,
+            },
+        };
+    }
+
+    if (!ALIGNMENT_LINE_SNAP_ENABLED) {
+        return none;
+    }
+
+    const useSegmentSticky = !hadIxLatch;
+    const chosenIdx = pickSegmentIndexForSnap(n, da, qix, qiy, segmentSnapMm, {
+        prevGhost,
+        stickySegIdx,
+        useSegmentSticky,
+    });
+
+    if (!Number.isFinite(da[chosenIdx]) || da[chosenIdx] >= segmentSnapMm) {
+        return none;
+    }
+
+    return {
+        x: qix[chosenIdx],
+        y: qiy[chosenIdx],
+        segIdx: chosenIdx,
+        snapKind: 'segment',
+    };
 }
 
 /**
@@ -520,6 +770,7 @@ function snapLabPointToAlignmentGuides(x, y, threshold = ALIGNMENT_SNAP_THRESHOL
         segmentSnapMm: threshold,
         prevGhost: null,
         stickySegIdx: null,
+        stickyIntersection: null,
     });
     return { x: r.x, y: r.y };
 }
@@ -559,7 +810,13 @@ function snapLabPointWithOptionalShiftAxis(
         outX = horizontal ? snapped.x : sx;
         outY = horizontal ? sy : snapped.y;
     }
-    return { x: outX, y: outY, segIdx: snapped.segIdx };
+    return {
+        x: outX,
+        y: outY,
+        segIdx: snapped.segIdx,
+        snapKind: snapped.snapKind,
+        intersection: snapped.intersection,
+    };
 }
 
 function loadGuideLinesFromStorage() {
@@ -587,6 +844,43 @@ function saveGuideLinesToStorage() {
     } catch (e) {
         console.warn('Alignment guides save failed', e);
     }
+}
+
+function drawAlignmentIntersectionDot(px, py, { fill, stroke, r = 4 }) {
+    ctx.save();
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 2;
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = fill;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawAlignmentIntersectionMarkers() {
+    if (!ALIGNMENT_SHOW_INTERSECTION_MARKERS) return;
+    const intersections = refreshAlignmentIntersectionCache();
+    intersections.forEach((ix) => {
+        const p = mmToPx(ix.x, ix.y);
+        drawAlignmentIntersectionDot(p.x, p.y, {
+            fill: '#fbbf24',
+            stroke: '#0f172a',
+        });
+    });
+    _alignmentIntersectionOutOfBounds.forEach((ix) => {
+        const p = mmToPx(ix.x, ix.y);
+        if (p.x < -40 || p.x > CANVAS_WIDTH + 40 || p.y < -40 || p.y > CANVAS_HEIGHT + 40) {
+            return;
+        }
+        drawAlignmentIntersectionDot(p.x, p.y, {
+            fill: 'rgba(168, 85, 247, 0.55)',
+            stroke: '#c4b5fd',
+            r: 3,
+        });
+    });
 }
 
 function drawAlignmentGuides() {
@@ -703,6 +997,7 @@ function finishGuideDraw() {
         p2: { x: gd.currentLab.x, y: gd.currentLab.y },
     });
     saveGuideLinesToStorage();
+    refreshAlignmentIntersectionCache();
     log('Alignment guide added. Drag components near it to snap (with laser lines).', 'info');
     render();
 }
@@ -759,7 +1054,9 @@ async function fetchLaserLines() {
         if (response.ok) {
             store.laserLinesDoc = await response.json();
             store.laserLineCoeffs = coeffsFromLaserLinesDoc(store.laserLinesDoc);
+            refreshAlignmentIntersectionCache();
             renderLaserLinesPanel();
+            render();
             const n = (store.laserLinesDoc.lines || []).length;
             console.log(
                 `Laser lines (${store.laserLinesDoc.lab_mode || '?'}, ${n}):`,
@@ -1690,6 +1987,7 @@ canvas.addEventListener('mousedown', (e) => {
                 if (store.dragFromStorageTag === hit.name) {
                     store.isDragging = true;
                     dragAlignmentStickySegIdx = null;
+                    dragAlignmentStickyIntersection = null;
                     store.draggingComponent = hit.name;
                     const g = store.ghostState[hit.name];
                     store.dragFromStorageStartPose = {
@@ -1707,6 +2005,7 @@ canvas.addEventListener('mousedown', (e) => {
             }
             store.isDragging = true;
             dragAlignmentStickySegIdx = null;
+            dragAlignmentStickyIntersection = null;
             store.draggingComponent = hit.name;
             const g0 = store.ghostState[hit.name];
             store.dragComponentStartLab = { x: g0.x, y: g0.y };
@@ -2602,9 +2901,19 @@ canvas.addEventListener('mousemove', (e) => {
                     ? { x: prevGh.x, y: prevGh.y }
                     : null,
             stickySegIdx: dragAlignmentStickySegIdx,
+            stickyIntersection: dragAlignmentStickyIntersection,
         },
     );
-    dragAlignmentStickySegIdx = snapped.segIdx;
+    if (snapped.snapKind === 'intersection' && snapped.intersection) {
+        dragAlignmentStickyIntersection = snapped.intersection;
+        dragAlignmentStickySegIdx = snapped.segIdx;
+    } else if (snapped.snapKind === 'segment') {
+        dragAlignmentStickyIntersection = null;
+        dragAlignmentStickySegIdx = snapped.segIdx;
+    } else {
+        dragAlignmentStickyIntersection = null;
+        dragAlignmentStickySegIdx = null;
+    }
     const finalX = snapped.x;
     const finalY = snapped.y;
 
@@ -2639,6 +2948,7 @@ canvas.addEventListener('mouseup', async (e) => {
     if (store.isDragging && store.draggingComponent) {
         store.isDragging = false;
         dragAlignmentStickySegIdx = null;
+        dragAlignmentStickyIntersection = null;
         const dc = store.draggingComponent;
         const current = store.ghostState[dc];
         const labSt = placementUiLabel(store.labState.components[dc]);
@@ -3407,6 +3717,7 @@ function render() {
     drawStorageZone();
     drawLaserPath();
     drawAlignmentGuides();
+    drawAlignmentIntersectionMarkers();
 
     if (!store.labState) return;
 

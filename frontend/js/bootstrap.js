@@ -9,7 +9,9 @@ async function start() {
         throw new Error(`HTTP ${r.status}`);
     }
     applyLabLayoutFromApiDoc(await r.json());
-    await import('./app-main.js');
+    const buildV =
+        new URL(import.meta.url).searchParams.get('v') ?? String(Date.now());
+    await import(`./app-main.js?v=${buildV}`);
 }
 
 start().catch((e) => {
