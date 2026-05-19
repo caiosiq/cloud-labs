@@ -1132,8 +1132,21 @@ async function maybeTriggerSessionReconciliation() {
     try {
         const res = await fetch('/api/session-reconciliation/offers');
         const data = await res.json();
-        if (!res.ok) return;
+        if (!res.ok) {
+            console.warn('[session-reconcile] offers HTTP', res.status, data);
+            return;
+        }
         const skipReason = typeof data.skipped_reason === 'string' ? data.skipped_reason : '';
+        console.info('[session-reconcile] offers response', {
+            enabled: data.enabled,
+            skipped_reason: skipReason || null,
+            offer_count: (data.offers || []).length,
+            checkpoint_path: data.checkpoint_path,
+            checkpoint_saved_at: data.checkpoint_saved_at,
+            checkpoint_exists: !!data.checkpoint_saved_at,
+            debug: data.debug,
+            manifest: data.manifest,
+        });
         if (/^busy:/i.test(skipReason)) return;
 
         store.sessionReconciliationFetched = true;
@@ -3774,15 +3787,15 @@ function applyTableCamServerPayload(data, camId) {
         store.tableCamRecorderAlive = !!data.state.recorder_alive;
         store.tableCamRecorderVariant = data.state.recorder_variant || '';
     }
-}
-
-function isTableCamStreamSrc(src) {
-    return typeof src === 'string' && src.includes('/api/table-cam/stream');
+    const previewCfg =
+        data.preview_config || (data.state && data.state.preview_config);
+    if (previewCfg) applyTableCamPreviewConfig(previewCfg);
 }
 
 function stopTableCamStreamImg(camId) {
+    stopTableCamLivePreview(camId);
     const img = document.getElementById('table-cam-img');
-    if (img && isTableCamStreamSrc(img.src)) {
+    if (img && typeof img.src === 'string' && img.src.includes('/api/table-cam/stream')) {
         img.src = '';
     }
 }
@@ -4745,12 +4758,130 @@ function initVideoFeed() {
     checkVideoStatus();
 }
 
-// --- Table cam: lazy connect + MJPEG live (cloud/mock parity) ---
-const TABLE_CAM_STREAM_FPS = 18;
-let tableCamVexpDebounceTimer = null;
+// --- Table cam: lazy connect + polled JPEG live preview (lower latency than MJPEG) ---
+/** From lab view ``table_cam_preview.json`` via GET /api/table-cam/status. */
+let tableCamPreviewTargetFps = 144;
+let tableCamPreviewMaxInflight = 3;
 
-function buildTableCamStreamUrl(camId) {
-    return `/api/table-cam/stream?cam_id=${camId}&fps=${TABLE_CAM_STREAM_FPS}&t=${Date.now()}`;
+function applyTableCamPreviewConfig(cfg) {
+    if (!cfg || typeof cfg !== 'object') return;
+    const fps = Number(cfg.target_fps);
+    if (Number.isFinite(fps) && fps >= 8 && fps <= 240) {
+        tableCamPreviewTargetFps = fps;
+    }
+    const inflight = Number(cfg.max_inflight_requests);
+    if (Number.isFinite(inflight) && inflight >= 1 && inflight <= 8) {
+        tableCamPreviewMaxInflight = inflight;
+    }
+}
+
+function tableCamPreviewMinIntervalMs() {
+    return 1000 / tableCamPreviewTargetFps;
+}
+let tableCamVexpDebounceTimer = null;
+let tableCamPreviewRafId = null;
+let tableCamPreviewObjectUrl = null;
+let tableCamPreviewInflight = 0;
+let tableCamPreviewLastKickMs = 0;
+let tableCamPreviewKickSeq = 0;
+let tableCamPreviewDisplayedSeq = 0;
+
+function isTableCamLivePreviewActive(camId) {
+    return !!(
+        store.tableCamLive[camId] &&
+        store.tableCamConnected[camId] &&
+        !store.tableCamCapturePending[camId]
+    );
+}
+
+function revokeTableCamPreviewObjectUrl() {
+    if (tableCamPreviewObjectUrl) {
+        URL.revokeObjectURL(tableCamPreviewObjectUrl);
+        tableCamPreviewObjectUrl = null;
+    }
+}
+
+function stopTableCamLivePreview(camId) {
+    if (tableCamPreviewRafId != null) {
+        cancelAnimationFrame(tableCamPreviewRafId);
+        tableCamPreviewRafId = null;
+    }
+    tableCamPreviewInflight = 0;
+    tableCamPreviewLastKickMs = 0;
+    const img = document.getElementById('table-cam-img');
+    if (img && tableCamPreviewObjectUrl && img.src === tableCamPreviewObjectUrl) {
+        img.src = '';
+    }
+    revokeTableCamPreviewObjectUrl();
+}
+
+function applyTableCamPreviewBlob(camId, blob, seq) {
+    if (seq <= tableCamPreviewDisplayedSeq || !isTableCamLivePreviewActive(camId)) {
+        return;
+    }
+    tableCamPreviewDisplayedSeq = seq;
+    const url = URL.createObjectURL(blob);
+    const img = document.getElementById('table-cam-img');
+    const placeholder = document.getElementById('table-cam-placeholder');
+    if (!img) {
+        URL.revokeObjectURL(url);
+        return;
+    }
+    revokeTableCamPreviewObjectUrl();
+    tableCamPreviewObjectUrl = url;
+    img.src = url;
+    img.style.display = 'block';
+    if (placeholder) {
+        placeholder.style.display = 'none';
+        placeholder.textContent = '';
+    }
+    setTableCamPreviewLoading('', false);
+}
+
+function kickTableCamPreviewFetch(camId, seq) {
+    tableCamPreviewInflight += 1;
+    fetch(`/api/table-cam/preview?cam_id=${camId}`, { cache: 'no-store' })
+        .then(async (res) => {
+            if (!res.ok || !isTableCamLivePreviewActive(camId)) return;
+            const blob = await res.blob();
+            applyTableCamPreviewBlob(camId, blob, seq);
+        })
+        .catch(() => {
+            /* transient network errors */
+        })
+        .finally(() => {
+            tableCamPreviewInflight = Math.max(0, tableCamPreviewInflight - 1);
+        });
+}
+
+function pumpTableCamPreview(camId) {
+    tableCamPreviewRafId = null;
+    if (!isTableCamLivePreviewActive(camId)) return;
+
+    const now = performance.now();
+    if (
+        tableCamPreviewInflight < tableCamPreviewMaxInflight &&
+        now - tableCamPreviewLastKickMs >= tableCamPreviewMinIntervalMs()
+    ) {
+        tableCamPreviewLastKickMs = now;
+        kickTableCamPreviewFetch(camId, ++tableCamPreviewKickSeq);
+    }
+    tableCamPreviewRafId = requestAnimationFrame(() => pumpTableCamPreview(camId));
+}
+
+function startTableCamPreviewPoll(camId) {
+    stopTableCamLivePreview(camId);
+    tableCamPreviewKickSeq = 0;
+    tableCamPreviewDisplayedSeq = 0;
+    tableCamPreviewRafId = requestAnimationFrame(() => pumpTableCamPreview(camId));
+}
+
+function syncTableCamPreviewPoll(camId) {
+    if (isTableCamLivePreviewActive(camId)) {
+        if (tableCamPreviewRafId == null) startTableCamPreviewPoll(camId);
+    } else {
+        stopTableCamLivePreview(camId);
+    }
 }
 
 function getTableCamLastBlobUrl(camId) {
@@ -4800,13 +4931,8 @@ function restoreTableCamPanelVisuals() {
     }
 
     if (store.tableCamLive[cid] || store.tableCamLivePending[cid]) {
-        if (store.tableCamLive[cid]) {
-            img.src = buildTableCamStreamUrl(cid);
-            img.style.display = 'block';
-            placeholder.style.display = 'none';
-            placeholder.textContent = '';
-        } else {
-            stopTableCamStreamImg(cid);
+        if (!store.tableCamLive[cid]) {
+            stopTableCamLivePreview(cid);
             img.style.display = 'none';
             placeholder.style.display = 'none';
         }
@@ -4814,9 +4940,11 @@ function restoreTableCamPanelVisuals() {
             'Obtaining live feed…',
             store.tableCamLivePending[cid] || !store.tableCamLive[cid],
         );
+        syncTableCamPreviewPoll(cid);
         return;
     }
 
+    stopTableCamLivePreview(cid);
     setTableCamPreviewLoading('', false);
 
     const lastCap = getTableCamLastBlobUrl(cid);
@@ -4889,10 +5017,10 @@ function syncTableCamLiveButtonAppearance() {
         }
     }
     liveBtn.title = streaming
-        ? 'Live stream (STREAM_ON) — click to show still / last capture'
+        ? 'Live preview (STREAM_ON) — click to show still / last capture'
         : connected
-          ? 'Still / last capture — click to start live stream'
-          : 'Connect the camera to toggle live stream vs still preview';
+          ? 'Still / last capture — click to start live preview'
+          : 'Connect the camera to toggle live preview vs still';
 }
 
 function syncTableCamCaptureButtonAppearance() {
@@ -5109,6 +5237,7 @@ if (tableCamLiveBtn) {
         await refreshTableCamLiveUi();
         try {
             await apiTableCamLive(cid, next);
+            if (next) scheduleTableCamVexpPush();
         } catch (e) {
             store.tableCamLive[cid] = prevLive;
             stopTableCamStreamImg(cid);
@@ -5132,8 +5261,14 @@ function getTableCamExposureSeconds() {
 (function wireTableCamExposureVexpDebounce() {
     const expEl = document.getElementById('table-cam-exposure');
     if (!expEl) return;
-    expEl.addEventListener('change', scheduleTableCamVexpPush);
-    expEl.addEventListener('input', scheduleTableCamVexpPush);
+    expEl.addEventListener('change', () => {
+        getTableCamExposureSeconds();
+        scheduleTableCamVexpPush();
+    });
+    expEl.addEventListener('input', () => {
+        getTableCamExposureSeconds();
+        scheduleTableCamVexpPush();
+    });
 })();
 
 void (async () => {
@@ -5145,6 +5280,15 @@ void (async () => {
     if (tableCamBtn2) {
         tableCamBtn2.classList.add('btn-secondary');
         tableCamBtn2.classList.remove('btn-primary');
+    }
+    try {
+        const res = await fetch('/api/table-cam/status');
+        if (res.ok) {
+            const data = await res.json();
+            applyTableCamPreviewConfig(data.preview_config);
+        }
+    } catch {
+        /* defaults */
     }
     store.tableCamConnecting[1] = true;
     await refreshTableCamLiveUi();

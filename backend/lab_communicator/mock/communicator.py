@@ -30,10 +30,6 @@ from lab_communicator.shared.snapshot import LabPose
 # project ``schemas/`` directory is three levels up. (Was two levels
 # up when the class lived in ``backend/lab_communicator/mock.py``.)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_ENV_TRUE = frozenset({"1", "true", "yes", "on"})
-_ENV_FALSE = frozenset({"0", "false", "no", "off"})
-
-
 class MockLabCommunicator(LabCommunicator):
     """
     Mock implementation that simulates a physical lab.
@@ -221,14 +217,6 @@ class MockLabCommunicator(LabCommunicator):
         with self._state_lock:
             snapshot = json.loads(json.dumps(self.current_state))
         write_state(self.state_file, snapshot)
-
-    def session_checkpoint_enabled(self) -> bool:
-        raw = (os.getenv("SESSION_CHECKPOINT") or "").strip().lower()
-        if raw in _ENV_TRUE:
-            return True
-        if raw in _ENV_FALSE:
-            return False
-        return True
 
     # ``get_lab_state`` lives on the base template class (Phase 2A);
     # mock's in-memory ``self.current_state`` is kept in sync with the
@@ -683,6 +671,17 @@ class MockLabCommunicator(LabCommunicator):
             elapsed = time.perf_counter() - loop_t0
             time.sleep(max(sleep_dur - elapsed, 0.001))
 
+    def fetch_table_cam_preview_jpeg(self, cam_id: int = 1) -> Optional[bytes]:
+        """One JPEG frame for polled live preview (same visuals as the mock stream)."""
+        for part in self.get_table_cam_stream(int(cam_id), fps=30):
+            start = part.find(b"\xff\xd8")
+            if start < 0:
+                continue
+            end = part.find(b"\xff\xd9", start)
+            if end >= 0:
+                return bytes(part[start : end + 2])
+        return None
+
     async def _primitive_observe_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
@@ -691,11 +690,25 @@ class MockLabCommunicator(LabCommunicator):
         return await primitive_observe_measurables(self, tag_id, catalog_meta)
 
     def get_table_cam_status(self, only_cam_id=None) -> Dict[str, Any]:
+        try:
+            from lab_communicator.shared.lab_view_config import (  # noqa: PLC0415
+                load_table_cam_preview_config,
+            )
+
+            preview_config = load_table_cam_preview_config().as_dict()
+        except Exception:
+            preview_config = {
+                "scale": 0.75,
+                "jpeg_quality": 72,
+                "target_fps": 144,
+                "max_inflight_requests": 3,
+            }
         return {
             "recorder_variant": "mock",
             "recorder_alive": True,
             "recorder_mock": True,
             "ports": {"cam1": 9999, "cam2": 10000},
+            "preview_config": preview_config,
             "cameras": {
                 "1": {
                     "connected": bool(self._table_cam_connected.get(1)),

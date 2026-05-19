@@ -18,7 +18,7 @@ start().catch((e) => {
         'beforeend',
         `<pre style="padding:2rem;color:#fca5a5;background:#450a0a;font-family:ui-monospace,monospace;margin:2rem;border-radius:8px">`
             + `<strong>Failed to load lab layout.</strong>\n`
-            + `Set LAB_VIEW_PATH in .env (path to lab_view bundle with layout.json).\n\n`
+            + `Set LAB_VIEW_PATH in .env (lab view bundle with lab_manifest.json and layout.json).\n\n`
             + `${e}</pre>`,
     );
 });

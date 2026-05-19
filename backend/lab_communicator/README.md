@@ -8,7 +8,7 @@ This package sits **between** the HTTP-facing vocabulary (`lab_primitives`) and 
 
 ## 0. Rule that applies to every communicator: **`LAB_VIEW_PATH`**
 
-Before **any** communicator runs, `backend/main.py` calls `bootstrap_lab_view()` (`shared/lab_view_config.py`). That reads **`LAB_VIEW_PATH`** from the environment (repo-relative or absolute), validates files, configures storage geometry from **`layout.json`**, and exposes paths for lasers, catalogs, recipes, saved UI states, camera captures, motor rotations, etc.
+Before **any** communicator runs, `backend/main.py` calls `bootstrap_lab_view()` (`shared/lab_view_config.py`). That reads **`LAB_VIEW_PATH`** from `.env` (the **only** required env entry for lab selection), loads **`lab_manifest.json`** from that bundle (communicator id + `lab_automation_path`), validates files, configures storage geometry from **`layout.json`**, and exposes paths for lasers, catalogs, recipes, saved UI states, camera captures, motor rotations, etc.
 
 So a communicator implementation **never** hardcodes catalog paths or repo-root `schemas/` folders. It pulls bundle paths via `get_lab_view_paths()` when it needs disk locations (see `mock/communicator.py`, `real/communicator.py`).
 
@@ -18,6 +18,8 @@ These are enforced at process startup (`bootstrap_lab_view`). If any are missing
 
 | File | Role |
 |------|------|
+| **`lab_manifest.json`** | Deployment identity: `communicator` (`mock` \| `real`), optional `lab_automation_path` (project-relative path to the `lab_automation` package for real benches), `session_checkpoint` (default **true** — graceful shutdown snapshot + UI reconciliation). Created with inferred defaults when missing. |
+| **`table_cam_preview.json`** | Live preview: recorder `scale` / `jpeg_quality`, UI `target_fps` / `max_inflight_requests`. |
 | **`layout.json`** | Lab bounds, danger zone, storage grid (`negative_xy`), breadboard spacing — feeds `lab_model.storage_region`. |
 | **`laser_lines.json`** | Laser overlays (`GET /api/laser-line`, `/api/laser-lines`). |
 | **`component_library.json`** | Full parts catalog keyed by `tag_id`. |

@@ -17,7 +17,7 @@ import functools
 
 logger = logging.getLogger(__name__)
 
-# Load .env from project root (parent of backend/) so LAB_MODE and LAB_AUTOMATION_PATH are set
+# Load .env from project root (parent of backend/) — only LAB_VIEW_PATH is required there.
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _env_path = os.path.join(_project_root, ".env")
 if os.path.exists(_env_path):
@@ -27,16 +27,9 @@ if os.path.exists(_env_path):
 else:
     print(f"[CONFIG] No .env at {_env_path}")
 
-# Resolve LAB_AUTOMATION_PATH relative to project root so it works from backend/ cwd
-_lab_path = os.getenv("LAB_AUTOMATION_PATH")
-if _lab_path:
-    _lab_path_abs = os.path.abspath(os.path.join(_project_root, _lab_path))
-    os.environ["LAB_AUTOMATION_PATH"] = _lab_path_abs
-    if not os.path.exists(_lab_path_abs):
-        print(f"[CONFIG] Warning: LAB_AUTOMATION_PATH resolved to {_lab_path_abs} (path does not exist)")
-
 from lab_communicator.shared.lab_view_config import (
     bootstrap_lab_view,
+    get_lab_manifest,
     get_lab_view_paths,
     laser_line_coeffs_from_doc,
     line_id_pattern,
@@ -45,6 +38,7 @@ from lab_communicator.shared.lab_view_config import (
     two_points_to_ab,
     write_laser_lines_doc,
 )
+from lab_communicator.shared.communicator_factory import create_communicator
 from lab_model import motor_rotation_store as motor_rot
 
 bootstrap_lab_view(_project_root)
@@ -70,33 +64,34 @@ from lab_primitives import (
 RECIPES_DIR = get_lab_view_paths().recipes_dir
 STATES_DIR = get_lab_view_paths().states_dir
 
-# Initialize Communicator
-LAB_MODE = (os.getenv("LAB_MODE") or "MOCK").upper()
-print(f"LAB_MODE: {LAB_MODE}")
+# Initialize communicator from lab_manifest.json inside LAB_VIEW_PATH
+_manifest = get_lab_manifest()
+LAB_MODE = _manifest.lab_mode
+COMMUNICATOR_ID = _manifest.communicator
+print(f"LAB_MODE: {LAB_MODE} (communicator={COMMUNICATOR_ID!r})")
 
-if LAB_MODE == "REAL":
-    try:
-        from lab_communicator.real import RealLabCommunicator
-        print(">>> STARTING IN REAL LAB MODE <<<")
-        lab = RealLabCommunicator()
-    except ImportError as e:
-        print(f"CRITICAL ERROR: Failed to import RealLabCommunicator: {e}")
-        print("Falling back to Mock Mode...")
-        from lab_communicator.mock import MockLabCommunicator
-        lab = MockLabCommunicator()
-    except Exception as e:
-        print(f"CRITICAL ERROR: Failed to initialize Real Lab: {e}")
-        print("Falling back to Mock Mode...")
-        from lab_communicator.mock import MockLabCommunicator
-        lab = MockLabCommunicator()
-else:
-    print(">>> STARTING IN MOCK MODE <<<")
-    try:
-        from lab_communicator.mock import MockLabCommunicator
-        lab = MockLabCommunicator()
-    except Exception as e:
-        print(f"CRITICAL ERROR: Failed to initialize Mock Lab Communicator: {e}")
-        lab = None
+lab = None
+try:
+    lab = create_communicator(COMMUNICATOR_ID)
+    print(f">>> STARTING WITH {COMMUNICATOR_ID.upper()} COMMUNICATOR <<<")
+except ImportError as e:
+    print(f"CRITICAL ERROR: Failed to import communicator {COMMUNICATOR_ID!r}: {e}")
+    if COMMUNICATOR_ID != "mock":
+        print("Falling back to mock communicator...")
+        try:
+            lab = create_communicator("mock")
+            LAB_MODE = "MOCK"
+        except Exception as e2:
+            print(f"CRITICAL ERROR: Mock fallback failed: {e2}")
+except Exception as e:
+    print(f"CRITICAL ERROR: Failed to initialize communicator {COMMUNICATOR_ID!r}: {e}")
+    if COMMUNICATOR_ID != "mock":
+        print("Falling back to mock communicator...")
+        try:
+            lab = create_communicator("mock")
+            LAB_MODE = "MOCK"
+        except Exception as e2:
+            print(f"CRITICAL ERROR: Mock fallback failed: {e2}")
 
 
 def _persist_session_checkpoint_on_shutdown() -> None:
@@ -150,19 +145,19 @@ def _session_reconciliation_offers_dict() -> Dict[str, Any]:
     from lab_communicator.shared.session_checkpoint import (
         checkpoint_age_hours,
         checkpoint_lab_state,
-        default_thresholds_from_env,
-        env_stale_warning_hours,
-        merge_offers_tag_ids,
+        merge_offers_with_debug,
         read_checkpoint_document,
+        reconciliation_thresholds_from_manifest,
+        stale_warning_hours_from_manifest,
     )
 
     paths = get_lab_view_paths()
     chk_path = getattr(paths, "session_checkpoint_json", "") or ""
-    stale_warn_hours = env_stale_warning_hours()
+    stale_warn_hours = stale_warning_hours_from_manifest()
     thresholds = (
         lab.session_reconciliation_thresholds()
         if lab is not None
-        else default_thresholds_from_env()
+        else reconciliation_thresholds_from_manifest()
     )
     thresholds_dict = {"position_mm": thresholds.position_mm, "yaw_deg": thresholds.yaw_deg}
 
@@ -205,12 +200,31 @@ def _session_reconciliation_offers_dict() -> Dict[str, Any]:
         resp["skipped_reason"] = "no_checkpoint"
         return resp
 
-    offer_ids = merge_offers_tag_ids(
+    offer_ids, merge_debug = merge_offers_with_debug(
         current_state=cur,
         checkpoint_state=chk_state,
         thresholds=thresholds,
     )
     resp["offers"] = [{"tag_id": tid} for tid in offer_ids]
+    resp["debug"] = merge_debug
+    try:
+        from lab_communicator.shared.lab_view_config import get_lab_manifest
+
+        resp["manifest"] = {
+            "session_checkpoint": bool(get_lab_manifest().session_checkpoint),
+            "session_reconciliation": get_lab_manifest().as_dict().get(
+                "session_reconciliation"
+            ),
+        }
+    except Exception:
+        resp["manifest"] = None
+    print(
+        f"[session-reconcile] enabled={resp['enabled']} skipped={resp.get('skipped_reason')!r} "
+        f"offers={len(offer_ids)} checkpoint={chk_path!r} "
+        f"exists={os.path.isfile(chk_path) if chk_path else False} "
+        f"debug={merge_debug}",
+        flush=True,
+    )
     return resp
 
 
@@ -584,8 +598,13 @@ async def get_lab_layout():
 
     doc = load_layout_document()
     enriched = dict(doc)
-    enriched["lab_view_root"] = get_lab_view_paths().root_dir
+    paths = get_lab_view_paths()
+    manifest = get_lab_manifest()
+    enriched["lab_view_root"] = paths.root_dir
     enriched["storage_grid"] = storage_grid_spec()
+    enriched["lab_manifest"] = manifest.as_dict()
+    enriched["lab_mode"] = manifest.lab_mode
+    enriched["communicator"] = manifest.communicator
     return enriched
 
 
@@ -934,8 +953,31 @@ async def table_cam_http_vgain(cam_id: int, body: TableCamGainBody):
     return {"ok": True, "detail": msg}
 
 
+@app.get("/api/table-cam/preview")
+async def table_cam_http_preview(cam_id: int = 1):
+    """Single JPEG frame for low-latency polled live preview (replaces MJPEG in UI)."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    if cam_id not in (1, 2):
+        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
+    if not hasattr(lab, "fetch_table_cam_preview_jpeg"):
+        raise HTTPException(status_code=503, detail="Table cam preview not available")
+    data = lab.fetch_table_cam_preview_jpeg(int(cam_id))
+    if not data:
+        raise HTTPException(status_code=503, detail="No preview frame available")
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 @app.get("/api/table-cam/stream")
-async def table_cam_http_stream(cam_id: int = 1, fps: int = 18):
+async def table_cam_http_stream(cam_id: int = 1, fps: int = 30):
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
     if cam_id not in (1, 2):
@@ -950,6 +992,12 @@ async def table_cam_http_stream(cam_id: int = 1, fps: int = 18):
     return StreamingResponse(
         gen,
         media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

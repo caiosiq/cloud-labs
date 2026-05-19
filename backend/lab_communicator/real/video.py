@@ -120,11 +120,26 @@ def table_cam_status_snapshot(
     cloud = bool(getattr(communicator, "_use_cloudlab_table_recorder", False))
     mock_mode = bool(getattr(communicator, "_table_cam_recorder_mock", False))
     alive = _recorder_procs_alive(communicator)
+    try:
+        from lab_communicator.shared.lab_view_config import (  # noqa: PLC0415
+            load_table_cam_preview_config,
+        )
+
+        preview_config = load_table_cam_preview_config().as_dict()
+    except Exception:
+        preview_config = {
+            "scale": 0.75,
+            "jpeg_quality": 72,
+            "target_fps": 144,
+            "max_inflight_requests": 3,
+        }
+
     out: Dict[str, Any] = {
         "recorder_variant": "cloudlab" if cloud else "legacy",
         "recorder_alive": alive,
         "recorder_mock": mock_mode,
         "ports": {"cam1": 9999, "cam2": 10000},
+        "preview_config": preview_config,
         "cameras": {},
     }
     cam_ids = (only_cam_id,) if only_cam_id in (1, 2) else (1, 2)
@@ -170,7 +185,12 @@ def camera_images_base_dir() -> str:
     optimization strategies dump PNGs into per-run subdirs and we want
     that parent to exist no matter what.
     """
-    lab_path = os.getenv("LAB_AUTOMATION_PATH")
+    try:
+        from lab_communicator.shared.lab_view_config import get_lab_automation_path  # noqa: PLC0415
+
+        lab_path = get_lab_automation_path()
+    except Exception:
+        lab_path = os.getenv("LAB_AUTOMATION_PATH")
     if lab_path:
         base = os.path.join(os.path.abspath(lab_path), "Camera_Images")
     else:
@@ -245,7 +265,12 @@ def start_recorder_processes(communicator: "RealLabCommunicator") -> None:
     Honors ``$TABLE_CAM_USE_MOCK``. Registers ``shutdown_recorders`` with
     ``atexit``.
     """
-    lab_path = os.getenv("LAB_AUTOMATION_PATH")
+    try:
+        from lab_communicator.shared.lab_view_config import get_lab_automation_path  # noqa: PLC0415
+
+        lab_path = get_lab_automation_path()
+    except Exception:
+        lab_path = os.getenv("LAB_AUTOMATION_PATH")
     if not lab_path or not os.path.isdir(lab_path):
         print(
             "[REAL LAB] LAB_AUTOMATION_PATH not set or invalid; "
@@ -295,6 +320,27 @@ def start_recorder_processes(communicator: "RealLabCommunicator") -> None:
     use_real_camera = not use_mock
     communicator._table_cam_recorder_mock = use_mock  # noqa: SLF001
     extra = ["--real-camera"] if use_real_camera else []
+    if communicator._use_cloudlab_table_recorder:
+        try:
+            from lab_communicator.shared.lab_view_config import (  # noqa: PLC0415
+                load_table_cam_preview_config,
+            )
+
+            preview_cfg = load_table_cam_preview_config()
+            extra.extend(
+                [
+                    "--scale",
+                    str(preview_cfg.scale),
+                    "--jpeg-quality",
+                    str(preview_cfg.jpeg_quality),
+                ]
+            )
+        except Exception as e:
+            print(
+                f"[REAL LAB] table_cam_preview.json not loaded ({e}); "
+                "recorder using script defaults",
+                flush=True,
+            )
 
     cloudlab_spawn = communicator._use_cloudlab_table_recorder  # noqa: SLF001
     recorder_py = _recorder_python_executable(lab_path)
@@ -639,6 +685,7 @@ def table_cam_disconnect(
         communicator._table_cam_hardware[cam_id] = "none"  # noqa: SLF001
         try:
             from lab_automation.managers.recorder_capture_helpers_cloudlab import (  # noqa: PLC0415
+                _close_preview_jpeg_sock,
                 disconnect_cam_cloudlab,
             )
         except ImportError as e:
@@ -646,6 +693,7 @@ def table_cam_disconnect(
             _set_table_cam_error(communicator, cam_id, msg)
             return False, msg
 
+        _close_preview_jpeg_sock(cam_id)
         ok, msg = disconnect_cam_cloudlab(cam_id)
         if not ok:
             _set_table_cam_error(communicator, cam_id, msg)
@@ -795,11 +843,12 @@ def _mjpeg_status_frame(title: str, detail: str = "") -> bytes:
 def get_table_cam_stream(
     communicator: "RealLabCommunicator",
     cam_id: int,
-    fps: int = 18,
+    fps: int = 30,
 ):
     """MJPEG bytes for ``GET /api/table-cam/stream`` (cloudlabs recorder)."""
-    fps = max(4, min(fps, 40))
-    sleep_duration = 1.0 / fps
+    fps = max(8, min(int(fps), 45))
+    frame_interval = 1.0 / fps
+    next_frame_at = time.monotonic()
     allow_placeholder = bool(getattr(communicator, "_table_cam_recorder_mock", False))
 
     while True:
@@ -834,7 +883,7 @@ def get_table_cam_stream(
                     fetch_preview_jpeg_cloudlab,
                 )
 
-                payload = fetch_preview_jpeg_cloudlab(cam_id, timeout_s=1.75)
+                payload = fetch_preview_jpeg_cloudlab(cam_id, timeout_s=0.45)
                 if payload and len(payload) > 800:
                     frame_bytes = payload
                 elif payload and allow_placeholder:
@@ -859,7 +908,52 @@ def get_table_cam_stream(
             + b"\r\n"
         )
 
-        time.sleep(sleep_duration)
+        next_frame_at += frame_interval
+        delay = next_frame_at - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        else:
+            next_frame_at = time.monotonic()
+
+
+def fetch_table_cam_preview_jpeg(
+    communicator: "RealLabCommunicator",
+    cam_id: int,
+) -> Optional[bytes]:
+    """Latest JPEG for polled live preview (lower latency than browser MJPEG)."""
+    if cam_id not in (1, 2):
+        return None
+    allow_placeholder = bool(getattr(communicator, "_table_cam_recorder_mock", False))
+
+    if not _recorder_procs_alive(communicator):
+        return _mjpeg_status_frame(
+            "RECORDER DEAD",
+            "restart backend",
+        )
+    if not communicator._use_cloudlab_table_recorder:
+        return _mjpeg_status_frame("LEGACY RECORDER", "use cloudlab recorder")
+    if not communicator._table_cam_connected.get(cam_id):
+        return _mjpeg_status_frame("NOT CONNECTED", "Connect first")
+    if not communicator._table_cam_streaming.get(cam_id):
+        return _mjpeg_status_frame("LIVE OFF", "Enable Live")
+
+    try:
+        from lab_automation.managers.recorder_capture_helpers_cloudlab import (  # noqa: PLC0415
+            fetch_preview_jpeg_cloudlab,
+        )
+
+        payload = fetch_preview_jpeg_cloudlab(cam_id, timeout_s=0.12)
+        if payload and len(payload) > 800:
+            return payload
+        if payload and allow_placeholder:
+            return payload
+        last_err = communicator._table_cam_last_error.get(cam_id)  # noqa: SLF001
+        return _mjpeg_status_frame(
+            "NO FRAME FROM CAMERA",
+            last_err or "check exposure",
+        )
+    except Exception as e:
+        return _mjpeg_status_frame("STREAM ERROR", str(e))
 
 
 # ---------------------------------------------------------------------------

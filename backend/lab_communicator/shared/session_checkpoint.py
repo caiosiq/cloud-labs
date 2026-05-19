@@ -2,19 +2,22 @@
 
 Writes ``get_lab_state()``-shaped snapshots next to lab_view JSON so a restart
 can offer to restore tunables/measurables when measured poses still match within
-noise.
+noise. Thresholds and enable flag come from ``lab_manifest.json``.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from lab_communicator.shared.lab_view_config import atomic_write_json, get_lab_view_paths_optional
+
+logger = logging.getLogger(__name__)
 
 CHECKPOINT_VERSION = 1
 
@@ -27,30 +30,54 @@ class ReconciliationThresholds:
     yaw_deg: float
 
 
-def env_stale_warning_hours(default: float = 168.0) -> float:
-    raw = (os.getenv("SESSION_CHECKPOINT_WARN_HOURS") or "").strip()
-    if not raw:
-        return float(default)
-    try:
-        return float(raw)
-    except ValueError:
-        return float(default)
+def reconciliation_thresholds_from_manifest() -> ReconciliationThresholds:
+    """Load tolerances from ``lab_manifest.json`` (env vars override if set)."""
 
-
-def default_thresholds_from_env() -> ReconciliationThresholds:
-    def _f(name: str, default: str) -> float:
+    def _env_override(name: str) -> Optional[float]:
         raw = (os.getenv(name) or "").strip()
         if not raw:
-            return float(default)
+            return None
         try:
             return float(raw)
         except ValueError:
-            return float(default)
+            return None
 
-    return ReconciliationThresholds(
-        position_mm=_f("SESSION_REC_THRESH_MM", "2"),
-        yaw_deg=_f("SESSION_REC_THRESH_DEG", "5"),
-    )
+    try:
+        from lab_communicator.shared.lab_view_config import get_lab_manifest
+
+        m = get_lab_manifest()
+        pos = _env_override("SESSION_REC_THRESH_MM")
+        yaw = _env_override("SESSION_REC_THRESH_DEG")
+        return ReconciliationThresholds(
+            position_mm=pos if pos is not None else float(m.reconciliation_position_mm),
+            yaw_deg=yaw if yaw is not None else float(m.reconciliation_yaw_deg),
+        )
+    except Exception:
+        return ReconciliationThresholds(
+            position_mm=_env_override("SESSION_REC_THRESH_MM") or 2.0,
+            yaw_deg=_env_override("SESSION_REC_THRESH_DEG") or 5.0,
+        )
+
+
+def stale_warning_hours_from_manifest() -> float:
+    raw = (os.getenv("SESSION_CHECKPOINT_WARN_HOURS") or "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    try:
+        from lab_communicator.shared.lab_view_config import get_lab_manifest
+
+        return float(get_lab_manifest().reconciliation_stale_warning_hours)
+    except Exception:
+        return 168.0
+
+
+def default_thresholds_from_env() -> ReconciliationThresholds:
+    """Backward-compatible alias — prefer :func:`reconciliation_thresholds_from_manifest`."""
+
+    return reconciliation_thresholds_from_manifest()
 
 
 def yaw_diff_deg(a: Any, b: Any) -> float:
@@ -127,12 +154,40 @@ def merge_offers_tag_ids(
 ) -> List[str]:
     """Tags in both snapshots whose meas poses match but tunables/meas differ."""
 
+    offers, _ = merge_offers_with_debug(
+        current_state=current_state,
+        checkpoint_state=checkpoint_state,
+        thresholds=thresholds,
+    )
+    return offers
+
+
+def merge_offers_with_debug(
+    *,
+    current_state: Dict[str, Any],
+    checkpoint_state: Dict[str, Any],
+    thresholds: ReconciliationThresholds,
+) -> Tuple[List[str], Dict[str, Any]]:
     cc = current_state.get("components") or {}
     ck = checkpoint_state.get("components") or {}
+    debug: Dict[str, Any] = {
+        "shared_tag_count": 0,
+        "pose_mismatch_tags": [],
+        "already_synced_tags": [],
+        "offered_tags": [],
+        "only_in_current": [],
+        "only_in_checkpoint": [],
+    }
     if not isinstance(cc, dict) or not isinstance(ck, dict):
-        return []
+        return [], debug
 
+    only_cur = sorted(set(cc.keys()) - set(ck.keys()))
+    only_ck = sorted(set(ck.keys()) - set(cc.keys()))
+    debug["only_in_current"] = only_cur[:20]
+    debug["only_in_checkpoint"] = only_ck[:20]
     shared = sorted(set(cc.keys()) & set(ck.keys()))
+    debug["shared_tag_count"] = len(shared)
+
     out: List[str] = []
     for tid in shared:
         a = cc[tid]
@@ -144,11 +199,25 @@ def merge_offers_tag_ids(
         if not isinstance(pa, dict) or not isinstance(pb, dict):
             continue
         if not poses_close(pa, pb, thresholds):
+            if len(debug["pose_mismatch_tags"]) < 20:
+                x1, y1, _ = _pose_xy_yaw(pa)
+                x2, y2, _ = _pose_xy_yaw(pb)
+                debug["pose_mismatch_tags"].append(
+                    {
+                        "tag_id": tid,
+                        "delta_mm": round(math.hypot(x1 - x2, y1 - y2), 3),
+                        "delta_yaw_deg": round(yaw_diff_deg(pa.get("rotation"), pb.get("rotation")), 3),
+                    }
+                )
             continue
         if _canonical_blob(a) == _canonical_blob(b):
+            if len(debug["already_synced_tags"]) < 20:
+                debug["already_synced_tags"].append(tid)
             continue
         out.append(tid)
-    return out
+        if len(debug["offered_tags"]) < 20:
+            debug["offered_tags"].append(tid)
+    return out, debug
 
 
 def read_checkpoint_document(path: str) -> Optional[Dict[str, Any]]:
@@ -183,10 +252,23 @@ def build_checkpoint_document(lab_mode: str, lab_state_snapshot: Dict[str, Any])
 def persist_checkpoint(lab_mode: str, lab_state_snapshot: Dict[str, Any]) -> Optional[str]:
     paths = get_lab_view_paths_optional()
     if paths is None:
+        logger.warning("[session-checkpoint] persist skipped: lab_view paths not bootstrapped")
         return None
     path = getattr(paths, "session_checkpoint_json", None)
     if not path:
+        logger.warning("[session-checkpoint] persist skipped: no session_checkpoint_json path")
         return None
     doc = build_checkpoint_document(lab_mode, lab_state_snapshot)
     atomic_write_json(path, doc)
+    n_comp = len((doc.get("lab_state") or {}).get("components") or {})
+    print(
+        f"[session-checkpoint] saved {path} "
+        f"(lab_mode={doc.get('lab_mode')}, components={n_comp}, saved_at={doc.get('saved_at')})",
+        flush=True,
+    )
+    logger.info(
+        "session checkpoint saved path=%s components=%s",
+        path,
+        n_comp,
+    )
     return path

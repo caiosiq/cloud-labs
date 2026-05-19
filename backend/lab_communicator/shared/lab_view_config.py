@@ -11,11 +11,13 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 _LINE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 _lab_paths_singleton: Optional["LabViewPaths"] = None
+_lab_manifest_singleton: Optional["LabViewManifest"] = None
+_project_root_cached: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,57 @@ class LabViewPaths:
     recipes_dir: str
     states_dir: str
     camera_captures_dir: str
+    table_cam_preview_json: str
+    lab_manifest_json: str
+
+
+@dataclass(frozen=True)
+class LabViewManifest:
+    """Deployment identity for this lab view bundle (``lab_manifest.json``)."""
+
+    communicator: str
+    lab_mode: str
+    lab_automation_path: Optional[str] = None
+    session_checkpoint: bool = True
+    reconciliation_position_mm: float = 2.0
+    reconciliation_yaw_deg: float = 5.0
+    reconciliation_stale_warning_hours: float = 168.0
+
+    def as_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "communicator": self.communicator,
+            "lab_mode": self.lab_mode,
+            "session_checkpoint": self.session_checkpoint,
+            "session_reconciliation": {
+                "position_mm": self.reconciliation_position_mm,
+                "yaw_deg": self.reconciliation_yaw_deg,
+                "stale_warning_hours": self.reconciliation_stale_warning_hours,
+            },
+        }
+        if self.lab_automation_path:
+            out["lab_automation_path"] = self.lab_automation_path
+        return out
+
+
+@dataclass(frozen=True)
+class TableCamPreviewConfig:
+    """Live preview poll / recorder JPEG tuning (from ``table_cam_preview.json``)."""
+
+    scale: float = 0.75
+    jpeg_quality: int = 72
+    target_fps: int = 144
+    max_inflight_requests: int = 3
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "scale": self.scale,
+            "jpeg_quality": self.jpeg_quality,
+            "target_fps": self.target_fps,
+            "max_inflight_requests": self.max_inflight_requests,
+        }
+
+
+_DEFAULT_TABLE_CAM_PREVIEW = TableCamPreviewConfig()
 
 
 def get_lab_view_paths() -> LabViewPaths:
@@ -44,10 +97,160 @@ def get_lab_view_paths_optional() -> Optional[LabViewPaths]:
     return _lab_paths_singleton
 
 
+def get_lab_manifest() -> LabViewManifest:
+    if _lab_manifest_singleton is None:
+        raise RuntimeError("lab_view bootstrap did not run; call bootstrap_lab_view() from main.")
+    return _lab_manifest_singleton
+
+
+def get_lab_automation_path() -> Optional[str]:
+    """Absolute path to the ``lab_automation`` package directory, if configured."""
+    return get_lab_manifest().lab_automation_path
+
+
 def reset_lab_viewpaths_for_tests() -> None:
     """Test-only — allow loading a fresh ``LAB_VIEW_PATH`` bundle in-process."""
-    global _lab_paths_singleton
+    global _lab_paths_singleton, _lab_manifest_singleton, _project_root_cached
     _lab_paths_singleton = None
+    _lab_manifest_singleton = None
+    _project_root_cached = None
+
+
+def _resolve_project_relative(project_root: str, raw: str) -> str:
+    p = (raw or "").strip()
+    if not p:
+        return ""
+    if os.path.isabs(p):
+        return os.path.abspath(p)
+    return os.path.abspath(os.path.join(project_root, p))
+
+
+def _manifest_bool(doc: Mapping[str, Any], key: str, default: bool) -> bool:
+    if key not in doc:
+        return default
+    v = doc[key]
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("1", "true", "yes", "on"):
+            return True
+        if s in ("0", "false", "no", "off"):
+            return False
+    return bool(v)
+
+
+def _infer_communicator_from_bundle_path(bundle_root: str) -> str:
+    norm = bundle_root.replace("\\", "/").lower()
+    if "/mock/" in norm or norm.endswith("/mock/lab_view") or "/mock/lab_view" in norm:
+        return "mock"
+    if "/real/" in norm:
+        return "real"
+    return "mock"
+
+
+def _load_lab_manifest(paths: LabViewPaths, project_root: str) -> LabViewManifest:
+    from lab_communicator.shared.communicator_factory import known_communicator_ids
+
+    p = paths.lab_manifest_json
+    if not os.path.isfile(p):
+        inferred = _infer_communicator_from_bundle_path(paths.root_dir)
+        doc: Dict[str, Any] = {
+            "version": 1,
+            "communicator": inferred,
+            "description": "Which lab_communicator backend this bundle uses.",
+            "session_checkpoint": True,
+        }
+        if inferred == "real":
+            doc["lab_automation_path"] = "../lab_automation"
+            doc["session_reconciliation"] = {
+                "position_mm": 8,
+                "yaw_deg": 10,
+                "stale_warning_hours": 168,
+            }
+        else:
+            doc["session_reconciliation"] = {
+                "position_mm": 2,
+                "yaw_deg": 5,
+                "stale_warning_hours": 168,
+            }
+        atomic_write_json(p, doc)
+        print(f"[CONFIG] Created default lab_manifest.json ({p})", flush=True)
+
+    with open(p, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    if not isinstance(raw, dict):
+        raise SystemExit(f"[CONFIG] lab_manifest.json must be a JSON object: {p}")
+
+    comm = str(raw.get("communicator", "")).strip().lower()
+    if not comm:
+        raise SystemExit(f"[CONFIG] lab_manifest.json missing required field 'communicator': {p}")
+    if comm not in known_communicator_ids():
+        raise SystemExit(
+            f"[CONFIG] lab_manifest.json communicator {comm!r} is not supported "
+            f"(use one of: {', '.join(sorted(known_communicator_ids()))})"
+        )
+
+    lab_auto: Optional[str] = None
+    raw_auto = raw.get("lab_automation_path")
+    if raw_auto is not None and str(raw_auto).strip():
+        lab_auto = _resolve_project_relative(project_root, str(raw_auto))
+        if not os.path.isdir(lab_auto):
+            raise SystemExit(
+                f"[CONFIG] lab_manifest.json lab_automation_path does not exist: {lab_auto}"
+            )
+
+    if comm == "real" and not lab_auto:
+        raise SystemExit(
+            f"[CONFIG] lab_manifest.json for communicator 'real' requires "
+            f"'lab_automation_path' (path to the lab_automation package directory): {p}"
+        )
+
+    pos_mm, yaw_deg, stale_h = _session_reconciliation_fields(raw, comm)
+    return LabViewManifest(
+        communicator=comm,
+        lab_mode=comm.upper(),
+        lab_automation_path=lab_auto,
+        session_checkpoint=_manifest_bool(raw, "session_checkpoint", True),
+        reconciliation_position_mm=pos_mm,
+        reconciliation_yaw_deg=yaw_deg,
+        reconciliation_stale_warning_hours=stale_h,
+    )
+
+
+def _session_reconciliation_fields(
+    raw: Mapping[str, Any], communicator: str
+) -> Tuple[float, float, float]:
+    """Parse ``session_reconciliation`` block (or legacy flat keys) from lab_manifest."""
+
+    def _float_val(src: Mapping[str, Any], key: str, default: float) -> float:
+        try:
+            return float(src.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    def_pos = 8.0 if communicator == "real" else 2.0
+    def_yaw = 10.0 if communicator == "real" else 5.0
+    block = raw.get("session_reconciliation")
+    if isinstance(block, dict):
+        return (
+            _float_val(block, "position_mm", def_pos),
+            _float_val(block, "yaw_deg", def_yaw),
+            _float_val(block, "stale_warning_hours", 168.0),
+        )
+    return (
+        _float_val(raw, "reconciliation_position_mm", def_pos),
+        _float_val(raw, "reconciliation_yaw_deg", def_yaw),
+        _float_val(raw, "reconciliation_stale_warning_hours", 168.0),
+    )
+
+
+def _apply_manifest_to_process_env(manifest: LabViewManifest) -> None:
+    os.environ["LAB_MODE"] = manifest.lab_mode
+    if manifest.lab_automation_path:
+        os.environ["LAB_AUTOMATION_PATH"] = manifest.lab_automation_path
+    else:
+        os.environ.pop("LAB_AUTOMATION_PATH", None)
 
 
 def bootstrap_lab_view(project_root: str) -> LabViewPaths:
@@ -55,17 +258,19 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
 
     No legacy fallbacks: missing required files abort startup loudly.
     """
-    global _lab_paths_singleton
+    global _lab_paths_singleton, _lab_manifest_singleton, _project_root_cached
+
+    _project_root_cached = os.path.abspath(project_root)
 
     raw = (os.getenv("LAB_VIEW_PATH") or "").strip()
     if not raw:
         raise SystemExit(
-            "[CONFIG] LAB_VIEW_PATH is required — absolute or project-relative path "
-            'to your lab bundle directory (must contain layout.json, laser_lines.json, '
-            "component_library.json, active_catalog.json)."
+            "[CONFIG] LAB_VIEW_PATH is required in .env — absolute or project-relative path "
+            'to your lab bundle directory (must contain lab_manifest.json, layout.json, '
+            "laser_lines.json, component_library.json, active_catalog.json)."
         )
 
-    root = raw if os.path.isabs(raw) else os.path.abspath(os.path.join(project_root, raw))
+    root = _resolve_project_relative(project_root, raw)
     if not os.path.isdir(root):
         raise SystemExit(f"[CONFIG] LAB_VIEW_PATH does not exist or is not a directory: {root}")
 
@@ -82,6 +287,8 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
         recipes_dir=os.path.join(root, "recipes"),
         states_dir=os.path.join(root, "states"),
         camera_captures_dir=os.path.join(root, "camera_captures"),
+        table_cam_preview_json=os.path.join(root, "table_cam_preview.json"),
+        lab_manifest_json=os.path.join(root, "lab_manifest.json"),
     )
 
     mandatory = (
@@ -120,8 +327,83 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
             },
         )
 
+    if not os.path.isfile(paths.table_cam_preview_json):
+        atomic_write_json(
+            paths.table_cam_preview_json,
+            {
+                "version": 1,
+                "description": (
+                    "Table camera live preview: recorder JPEG scale/quality and UI poll rate."
+                ),
+                **_DEFAULT_TABLE_CAM_PREVIEW.as_dict(),
+            },
+        )
+
+    manifest = _load_lab_manifest(paths, project_root)
+    _lab_manifest_singleton = manifest
+    _apply_manifest_to_process_env(manifest)
+    print(
+        f"[CONFIG] lab_manifest: communicator={manifest.communicator!r} "
+        f"lab_mode={manifest.lab_mode}"
+        + (
+            f" lab_automation_path={manifest.lab_automation_path}"
+            if manifest.lab_automation_path
+            else ""
+        ),
+        flush=True,
+    )
+
     _lab_paths_singleton = paths
     return paths
+
+
+def load_table_cam_preview_config(
+    paths: Optional[LabViewPaths] = None,
+) -> TableCamPreviewConfig:
+    """Read ``table_cam_preview.json`` from the active lab view (defaults if missing/invalid)."""
+    p = (paths or get_lab_view_paths()).table_cam_preview_json
+    if not os.path.isfile(p):
+        return _DEFAULT_TABLE_CAM_PREVIEW
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"[CONFIG] table_cam_preview.json unreadable ({p}): {e}; using defaults")
+        return _DEFAULT_TABLE_CAM_PREVIEW
+    if not isinstance(raw, dict):
+        print(f"[CONFIG] table_cam_preview.json must be an object: {p}; using defaults")
+        return _DEFAULT_TABLE_CAM_PREVIEW
+    return _table_cam_preview_from_mapping(raw)
+
+
+def _table_cam_preview_from_mapping(doc: Mapping[str, Any]) -> TableCamPreviewConfig:
+    def _float(key: str, default: float, lo: float, hi: float) -> float:
+        try:
+            v = float(doc.get(key, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    def _int(key: str, default: int, lo: int, hi: int) -> int:
+        try:
+            v = int(doc.get(key, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    return TableCamPreviewConfig(
+        scale=_float("scale", _DEFAULT_TABLE_CAM_PREVIEW.scale, 0.1, 1.0),
+        jpeg_quality=_int(
+            "jpeg_quality", _DEFAULT_TABLE_CAM_PREVIEW.jpeg_quality, 40, 95
+        ),
+        target_fps=_int("target_fps", _DEFAULT_TABLE_CAM_PREVIEW.target_fps, 8, 240),
+        max_inflight_requests=_int(
+            "max_inflight_requests",
+            _DEFAULT_TABLE_CAM_PREVIEW.max_inflight_requests,
+            1,
+            8,
+        ),
+    )
 
 
 def load_layout_document() -> Dict[str, Any]:

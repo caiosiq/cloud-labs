@@ -48,8 +48,8 @@ export const store = {
     tableCamLastError: { 1: null, 2: null },
     tableCamRecorderAlive: true,
     tableCamRecorderVariant: 'cloudlab',
-    /** Seconds; used for GET /api/table-cam/capture exposure query param */
-    tableCamExposure: 0.2,
+    /** Seconds; live VEXP + capture exposure */
+    tableCamExposure: 0.02,
     /** Per CAM: Object URL from last PNG capture (`URL.createObjectURL`) */
     tableCamLastBlobUrl: { 1: null, 2: null },
     /** Object URL for Cobyla reference preview image (revoked when clearing/updating). */

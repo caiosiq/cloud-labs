@@ -127,7 +127,12 @@ def get_optimization_watch_dirs(communicator: "RealLabCommunicator") -> List[str
     if active and os.path.isdir(active):
         return [active]
     candidates = {os.path.abspath("Camera_Images")}
-    lab_path = os.getenv("LAB_AUTOMATION_PATH")
+    try:
+        from lab_communicator.shared.lab_view_config import get_lab_automation_path  # noqa: PLC0415
+
+        lab_path = get_lab_automation_path()
+    except Exception:
+        lab_path = os.getenv("LAB_AUTOMATION_PATH")
     if lab_path:
         candidates.add(os.path.join(os.path.abspath(lab_path), "Camera_Images"))
     return sorted(candidates)

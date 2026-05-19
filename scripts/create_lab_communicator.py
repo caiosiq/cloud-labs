@@ -386,7 +386,7 @@ __all__ = [
     (pkg / "primitives.py").write_text(text, encoding="utf-8")
 
 
-def _copy_lab_view(template: Path, dest: Path) -> None:
+def _copy_lab_view(template: Path, dest: Path, *, communicator_id: str) -> None:
     if dest.exists():
         raise SystemExit(f"lab_view destination already exists: {dest}")
     shutil.copytree(template, dest)
@@ -395,6 +395,18 @@ def _copy_lab_view(template: Path, dest: Path) -> None:
         with open(lab_state_path, "w", encoding="utf-8") as f:
             json.dump(_minimal_lab_state(), f, indent=2)
             f.write("\n")
+    manifest_path = dest / "lab_manifest.json"
+    manifest: dict = {
+        "version": 1,
+        "description": "Deployment identity for this lab view bundle.",
+        "communicator": communicator_id,
+        "session_checkpoint": True,
+    }
+    if communicator_id == "real":
+        manifest["lab_automation_path"] = "../lab_automation"
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+        f.write("\n")
 
 
 def main() -> int:
@@ -456,23 +468,26 @@ def main() -> int:
         lab_view_dest = Path(args.lab_view_root) if args.lab_view_root else pkg / "lab_view"
         if not lab_view_dest.is_absolute():
             lab_view_dest = root / lab_view_dest
-        _copy_lab_view(lv_template, lab_view_dest)
+        _copy_lab_view(lv_template, lab_view_dest, communicator_id=name)
 
     print(f"Created package: backend/lab_communicator/{name}/")
     print(f"  Class: {class_name}")
     if lab_view_dest is not None:
         print(f"  lab_view: {lab_view_dest.relative_to(root)}")
         print()
-        print("Next: set in .env (repo root paths resolve like main.py):")
+        print("Next: set in .env (repo root):")
         print(f"  LAB_VIEW_PATH={lab_view_dest.relative_to(root).as_posix()}")
-        print('  LAB_MODE=<YOUR_MODE>   # add a matching branch in backend/main.py')
+        print(f"  (lab_manifest.json in that bundle sets communicator={name!r})")
     else:
         print()
         print("No lab_view copied. Point LAB_VIEW_PATH at any bundle that contains:")
-        print("  layout.json, laser_lines.json, component_library.json,")
+        print("  lab_manifest.json, layout.json, laser_lines.json, component_library.json,")
         print("  active_catalog.json, motor_rotations.json (+ lab_state.json recommended).")
     print()
-    print("Wire backend/main.py: import your class and instantiate when LAB_MODE matches.")
+    print(
+        "Register your class in lab_communicator/shared/communicator_factory.py "
+        f"(add {name!r} to create_communicator)."
+    )
     print("CI guardrails: backend/tests/test_lab_primitives.py")
     return 0
 

@@ -53,17 +53,20 @@ from lab_communicator.base import LabCommunicator
 from lab_communicator.shared.lab_view_config import get_lab_view_paths
 from lab_communicator.shared.snapshot import LabPose
 
-# Configuration for External Lab Automation Library
-# LAB_AUTOMATION_PATH = path to the lab_automation package folder (repo root).
-# For "from lab_automation.managers..." we must add its parent to sys.path so the package name resolves.
+# ``lab_automation_path`` comes from ``lab_manifest.json`` (via bootstrap ? os.environ).
 LAB_AUTOMATION_PATH = os.getenv("LAB_AUTOMATION_PATH")
 if LAB_AUTOMATION_PATH and os.path.exists(LAB_AUTOMATION_PATH):
     _lab_parent = os.path.dirname(LAB_AUTOMATION_PATH)
     if _lab_parent not in sys.path:
         sys.path.insert(0, _lab_parent)
-    print(f"[REAL LAB] Added parent {_lab_parent} to sys.path (package lab_automation at {LAB_AUTOMATION_PATH})")
+    print(
+        f"[REAL LAB] Added parent {_lab_parent} to sys.path "
+        f"(lab_automation from lab_manifest.json: {LAB_AUTOMATION_PATH})"
+    )
 else:
-    print("[REAL LAB] Warning: LAB_AUTOMATION_PATH not set or invalid.")
+    print(
+        "[REAL LAB] Warning: lab_automation_path not set in lab_manifest.json or path invalid."
+    )
 
 # Import Real Lab Automation
 try:
@@ -120,10 +123,6 @@ def _env_float(name: str, default: float) -> float:
     return _env_float_shared(name, default, log_prefix="[REAL LAB]")
 
 
-_ENV_TRUE = frozenset({"1", "true", "yes", "on"})
-_ENV_FALSE = frozenset({"0", "false", "no", "off"})
-
-
 class RealLabCommunicator(LabCommunicator):
     log_prefix = "[REAL LAB]"
     # Calibrated safe-hover bound (lab frame), forwarded from
@@ -131,14 +130,6 @@ class RealLabCommunicator(LabCommunicator):
     # refuse runaway HTTP payloads in :meth:`hover_component` before
     # they hit the forward transform.
     max_safe_hover_z_lab_mm = MAX_SAFE_HOVER_Z_LAB_MM
-
-    def session_checkpoint_enabled(self) -> bool:
-        raw = (os.getenv("SESSION_CHECKPOINT") or "").strip().lower()
-        if raw in _ENV_TRUE:
-            return True
-        if raw in _ENV_FALSE:
-            return False
-        return False
 
     def __init__(self):
         if not LAB_LIB_AVAILABLE:
@@ -802,6 +793,11 @@ class RealLabCommunicator(LabCommunicator):
         from lab_communicator.real.video import get_table_cam_stream
 
         yield from get_table_cam_stream(self, cam_id, fps)
+
+    def fetch_table_cam_preview_jpeg(self, cam_id: int = 1) -> Optional[Any]:
+        from lab_communicator.real.video import fetch_table_cam_preview_jpeg
+
+        return fetch_table_cam_preview_jpeg(self, int(cam_id))
 
     def get_table_cam_status(self, only_cam_id: Optional[int] = None) -> Dict[str, Any]:
         from lab_communicator.real.video import table_cam_status_snapshot

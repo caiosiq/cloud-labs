@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "description": "Table camera live preview: recorder JPEG scale/quality and UI poll rate.",
+  "scale": 0.3,
+  "jpeg_quality": 40,
+  "target_fps": 144,
+  "max_inflight_requests": 5
+}

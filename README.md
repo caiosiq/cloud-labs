@@ -114,7 +114,7 @@ Larger slices of logic (dedicated API client, separate render module) can be pee
 
 ### Lab deployment bundle (`LAB_VIEW_PATH`)
 
-Startup **requires** **`LAB_VIEW_PATH`**: a directory whose JSON drives geometry (`layout.json`), lasers (`laser_lines.json`), merged catalog (`component_library.json` + `active_catalog.json`), motor bookkeeping (`motor_rotations.json`), and directories for recipes, UI snapshots, and camera captures. **`bootstrap_lab_view()`** runs in `main.py` **before** the communicator is constructed so mock and real share the same configuration story—swap benches by swapping **`LAB_VIEW_PATH`**, not Python imports.
+Startup **requires** **`LAB_VIEW_PATH`** in `.env` (the only lab-selection env var): a directory whose **`lab_manifest.json`** names the communicator (`mock` / `real`) and optional **`lab_automation_path`**, plus JSON for geometry (`layout.json`), lasers, catalog, motors, table-cam preview tuning, recipes, and saved states. **`bootstrap_lab_view()`** runs in `main.py` **before** the communicator is constructed—swap benches by changing **`LAB_VIEW_PATH`** only.
 
 Mandatory files and scaffolding instructions are spelled out in **`backend/lab_communicator/README.md`** (section 0). Quick path to a new backend package **and** a starter bundle:
 
@@ -122,7 +122,7 @@ Mandatory files and scaffolding instructions are spelled out in **`backend/lab_c
 python scripts/create_lab_communicator.py my_backend --with-lab-view
 ```
 
-Then add a matching **`LAB_MODE`** branch in **`backend/main.py`** and point **`LAB_VIEW_PATH`** at the generated `lab_view/` tree (or copy **`backend/lab_communicator/real/lab_view/default/`** elsewhere for production).
+Register the new id in **`lab_communicator/shared/communicator_factory.py`**, set **`communicator`** in the bundle’s **`lab_manifest.json`**, and point **`LAB_VIEW_PATH`** at that `lab_view/` tree.
 
 ### Command–query style
 
@@ -133,11 +133,60 @@ Then add a matching **`LAB_MODE`** branch in **`backend/main.py`** and point **`
 
 ### Real lab mode
 
-When `LAB_MODE=REAL` and `lab_automation` imports succeed, **`RealLabCommunicator`** wraps **`OpticalExperiment`**, initializes the robot, scans/populates state, and can expose MJPEG streams and table-camera PNG capture. If imports or initialization fail, the server **falls back to mock** with a log message.
+When the bundle’s **`lab_manifest.json`** sets **`communicator": "real"`** and `lab_automation` imports succeed, **`RealLabCommunicator`** wraps **`OpticalExperiment`**, initializes the robot, scans/populates state, and can expose MJPEG streams and table-camera PNG capture. If imports or initialization fail, the server **falls back to mock** with a log message.
 
-**`LAB_AUTOMATION_PATH`:** set this to the filesystem path of the **`lab_automation` package directory itself** (the folder that contains `__init__.py` for that package). The backend adds that folder’s **parent** to `sys.path` so `import lab_automation` works. A path that stops at the parent of `lab_automation` is wrong.
+**`lab_automation_path`:** in **`lab_manifest.json`**, set a project-relative path to the **`lab_automation` package directory** (the folder that contains that package’s `__init__.py`). The backend adds its **parent** to `sys.path` so `import lab_automation` works.
 
 Each **`GET /api/lab-state`** response includes **`lab_mode`**: `"MOCK"` or `"REAL"` (for UI behavior such as mock-only overlays).
+
+### Session checkpoint and UI reconciliation
+
+After a **graceful backend shutdown** (or **`POST /api/session-reconciliation/save`**), the server can write **`session_last_lab_state.json`** next to the other lab-view JSON files. On the next UI load, when the lab is **`IDLE`** and measured poses still match the checkpoint within tolerance, the client offers to **restore tunables and measurables** from that snapshot (hardware is not commanded).
+
+| Control | Location |
+|--------|-----------|
+| Enable/disable | **`lab_manifest.json`** → **`session_checkpoint`** (default **`true`**) |
+| Pose tolerances | **`session_reconciliation`** → **`position_mm`**, **`yaw_deg`** (real bundle defaults **8 mm / 10°**; mock **2 mm / 5°**) |
+| Stale warning | **`session_reconciliation.stale_warning_hours`** (default **168**) |
+| Env overrides | Optional **`SESSION_CHECKPOINT`**, **`SESSION_REC_THRESH_MM`**, **`SESSION_REC_THRESH_DEG`**, **`SESSION_CHECKPOINT_WARN_HOURS`** |
+
+**API:** **`GET /api/session-reconciliation/offers`** (called once per page load when status becomes **`IDLE`**), **`POST /api/session-reconciliation/apply`** with `{ "tag_ids": [...] }`, **`POST /api/session-reconciliation/save`** to flush a checkpoint without restarting.
+
+Previously **mock** defaulted this feature **on** and **real** **off**; both communicators now read the same flag from **`lab_manifest.json`**. Ensure **`"session_checkpoint": true`** in your real bundle (the default template includes it).
+
+### Table cameras (CAM1 / CAM2)
+
+Real benches use the **`lab_automation`** recorder subprocesses (`recorder_cam_laser_align_cloudlab.py` on ports **9999** / **10000**). The UI talks to them only through the FastAPI layer.
+
+**Right sidebar controls**
+
+| Control | Behavior |
+|--------|-----------|
+| **Connected** | **`POST /api/table-cam/{1\|2}/connect`** — opens SDK session (`CONNECT`) |
+| **Live / Still** | **`POST /api/table-cam/{id}/live`** — `STREAM_ON` / `STREAM_OFF` |
+| **Capture** | **`GET /api/table-cam/capture?cam_id=&exposure=`** — still PNG (`CAP`); stops live first |
+| **Exp (s)** | **`POST /api/table-cam/{id}/vexp`** — exposure for live + capture (default **0.02** s) |
+
+**Live preview (low latency)**
+
+The UI does **not** use browser MJPEG for the table cam anymore. It **polls** **`GET /api/table-cam/preview?cam_id=`**, which returns a single JPEG from the recorder’s latest cached frame (`GET_JPEG` over a reused TCP connection). Tuning lives in **`table_cam_preview.json`** inside **`LAB_VIEW_PATH`**:
+
+| Field | Role |
+|--------|------|
+| **`scale`** | Recorder resize before JPEG (default **0.75**) |
+| **`jpeg_quality`** | JPEG quality 40–95 (default **72**) |
+| **`target_fps`** | UI poll target (default **144**) |
+| **`max_inflight_requests`** | Parallel preview fetches (default **3**) |
+
+**`GET /api/table-cam/status`** includes **`preview_config`** so the browser picks up these values without a separate config file.
+
+**Legacy / debug:** **`GET /api/table-cam/stream`** remains a multipart MJPEG generator for compatibility; the main UI uses **`/preview`** only.
+
+**Performance notes**
+
+- Lower **Exp (s)** reduces exposure time and raises the camera’s achievable frame rate (roughly **1 / exposure** as an upper bound); the monitor refresh rate does not by itself increase sensor FPS.
+- The recorder live loop drains only a **small** number of queued SDK frames per iteration so brief events (e.g. blocking the beam) are less likely to be discarded before publish.
+- Restart the **backend** after changing **`scale`** / **`jpeg_quality`** in **`table_cam_preview.json`** (recorder CLI args are set at spawn).
 
 ---
 
@@ -195,7 +244,7 @@ The canvas plot labeled **Optimization Metric (Beam Intensity)** is **synthetic*
 
 ```
 cloud-labs/                   # repository root (historically also called optics-digital-twin in docs)
-├── .env                      # LAB_MODE, LAB_VIEW_PATH (required), LAB_AUTOMATION_PATH (real lab), …
+├── .env                      # LAB_VIEW_PATH (required) — communicator + lab_automation live in that bundle
 ├── backend/
 │   ├── main.py               # FastAPI app; bootstrap_lab_view → communicator; delegates /api/command to lab_primitives
 │   ├── lab_model/            # Domain: tunables/measurables, storage Q3 geometry, motor rotation JSON
@@ -277,7 +326,18 @@ The `backend-simple/` folder holds small lab-related Python snippets with **rela
 | GET | `/api/video-feed/status` | Stream availability + source URL |
 | GET | `/api/video-feed/stream` | MJPEG (real) or static mock SVG |
 | GET | `/api/optimization-feed/stream` | Optimization MJPEG when supported |
-| GET | `/api/table-cam/capture?cam_id=1\|2` | Single PNG — real hardware in **`LAB_MODE=REAL`**; synthetic PNG in **`MOCK`** (UI / Cobyla-ref testing) |
+| GET | `/api/table-cam/status` | Per-camera connected/streaming/hardware; includes **`preview_config`** |
+| POST | `/api/table-cam/{1\|2}/connect` | Open camera session |
+| POST | `/api/table-cam/{1\|2}/disconnect` | Release session |
+| POST | `/api/table-cam/{1\|2}/live` | Body `{ "enabled": true\|false }` — live preview on/off |
+| POST | `/api/table-cam/{1\|2}/vexp` | Body `{ "exposure": seconds }` |
+| POST | `/api/table-cam/{1\|2}/vgain` | Body `{ "gain": number }` |
+| GET | `/api/table-cam/preview?cam_id=1\|2` | Single JPEG frame (polled live preview) |
+| GET | `/api/table-cam/stream?cam_id=1\|2` | Legacy MJPEG multipart stream |
+| GET | `/api/table-cam/capture?cam_id=1\|2&exposure=` | Single PNG still |
+| GET | `/api/session-reconciliation/offers` | Tags eligible to restore from last checkpoint |
+| POST | `/api/session-reconciliation/apply` | Apply checkpoint tunables/measurables for given tag ids |
+| POST | `/api/session-reconciliation/save` | Write checkpoint now |
 | GET | `/api/cobyla-reference-image` | PNG bytes of the stored reference (**404** if none); used by the UI red “Cobyla reference” preview and **Save ref to file** |
 | POST | `/api/cobyla-reference-image` | Body: PNG bytes → stored as **`CobylaAlignmentStrategy.reference_image`** (BGR) for the next COBYLA run |
 | GET | `/api/cobyla-reference-image/status` | Whether a reference is set (+ size); includes **`lab_mode`** |
@@ -298,21 +358,34 @@ From the **repository root**:
 pip install -r requirements.txt
 ```
 
-Mock mode only needs the **FastAPI** stack (`fastapi`, `uvicorn`, `pydantic`, `python-dotenv`; `numpy` only if other code paths load array files). Full `requirements.txt` also lists vision/robot packages used when you point `LAB_AUTOMATION_PATH` at a real `lab_automation` checkout.
+Mock mode only needs the **FastAPI** stack (`fastapi`, `uvicorn`, `pydantic`, `python-dotenv`; `numpy` only if other code paths load array files). Full `requirements.txt` also lists vision/robot packages used when the lab view manifest points at a real `lab_automation` checkout.
 
-### 2. Configuration (optional)
+### 2. Configuration
 
 Create or edit **`.env`** in the **project root** (same folder as `requirements.txt`). Example:
 
 ```env
-LAB_MODE=MOCK
-# Required: folder with layout.json, component_library.json, active_catalog.json, laser_lines.json, recipes/, states/, …
+# Only lab-selection knob — everything else is in that bundle’s lab_manifest.json
 LAB_VIEW_PATH=backend/lab_communicator/mock/lab_view
-# Absolute or repo-relative path to the lab_automation *package directory* (the folder named lab_automation)
-LAB_AUTOMATION_PATH=../lab_automation
 ```
 
-`backend/main.py` resolves `LAB_AUTOMATION_PATH` and `LAB_VIEW_PATH` to absolute paths relative to the project root. **`LAB_MODE`** defaults to **`MOCK`** if unset. If **`LAB_VIEW_PATH`** is missing or invalid, startup **exits** with a clear error.
+Example **`lab_manifest.json`** for a real bench (inside the bundle pointed to by `LAB_VIEW_PATH`):
+
+```json
+{
+  "version": 1,
+  "communicator": "real",
+  "lab_automation_path": "../lab_automation",
+  "session_checkpoint": true,
+  "session_reconciliation": {
+    "position_mm": 8,
+    "yaw_deg": 10,
+    "stale_warning_hours": 168
+  }
+}
+```
+
+`backend/main.py` resolves `LAB_VIEW_PATH` relative to the project root, loads **`lab_manifest.json`**, and starts the named communicator. If **`LAB_VIEW_PATH`** is missing or invalid, startup **exits** with a clear error.
 
 **Console noise (polling):** the UI hits `/api/lab-state` about twice per second. Those messages are no longer printed at info level. If you start the app with **`python main.py`**, Uvicorn **access** logging (every `GET … HTTP/1.1` line) is **off** by default; set **`UVICORN_ACCESS_LOG=1`** in `.env` to turn it back on. To see per-poll debug lines from our handler, set **`LOG_LEVEL=DEBUG`**. If you use **`uvicorn main:app`** directly, add **`--no-access-log`** unless you want the access log.
 

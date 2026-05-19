@@ -841,7 +841,7 @@
                 Mock mode: <strong style="color:#22d3ee;">Live</strong> preview uses a teal frame + animated stream imagery; <strong style="color:#c084fc;">Still</strong> uses a violet frame + your latest capture (mock graphic until you Capture); press <strong>Capture</strong> for a fresh still.
             </div>
             <div id="table-cam-real-hint" style="display: none; padding: 0 12px 6px; font-size: 10px; color: var(--text-muted); line-height: 1.35;">
-                Real lab: status chip shows recorder health and hardware (real/mock). Connect before Live/Capture. Live stream shows status text when the camera is not delivering frames.
+                Real lab: use <strong>Live (s)</strong> for fast preview (try 0.01–0.03). <strong>Cap (s)</strong> applies only to Capture. Restart backend after recorder updates.
             </div>
             <div class="sidebar-right-toolbar table-cam-toolbar-row" style="padding-top: 4px;">
                 <span style="font-size: 11px; color: var(--text-secondary); flex-shrink: 0;">Camera</span>
@@ -855,7 +855,7 @@
                 </button>
             </div>
             <div class="sidebar-right-toolbar table-cam-toolbar-row" style="padding-top: 4px;">
-                <button id="table-cam-live-btn" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-action-btn" title="Toggle MJPEG live (STREAM_ON) vs still / last capture">
+                <button id="table-cam-live-btn" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-action-btn" title="Toggle live preview (STREAM_ON) vs still / last capture">
                     <span id="table-cam-live-btn-icon" class="material-icons-round" style="font-size: 15px;">videocam</span>
                     <span id="table-cam-live-btn-label">Live</span>
                 </button>
@@ -863,9 +863,9 @@
                     <span class="material-icons-round" style="font-size: 15px;">camera_alt</span>
                     Capture
                 </button>
-                <label style="font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto;" title="Exposure (seconds) for CAP + VEXP on real hardware">
+                <label style="font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto;" title="Exposure in seconds (live + capture). Max FPS is roughly 1/exp (e.g. 0.007 s ≈ 140 FPS). Lower = faster preview but darker.">
                     Exp (s)
-                    <input id="table-cam-exposure" type="number" value="0.2" min="0.001" max="30" step="0.05" style="width: 64px; font-size: 11px; padding: 4px 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                    <input id="table-cam-exposure" type="number" value="0.02" min="0.001" max="30" step="0.005" style="width: 56px; font-size: 11px; padding: 4px 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
                 </label>
             </div>
             <div style="padding: 4px 12px 2px; font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Latest capture</div>

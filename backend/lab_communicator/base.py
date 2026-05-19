@@ -320,6 +320,11 @@ class LabCommunicator:
             self.current_state["last_updated"] = datetime.now().isoformat()
         if persist:
             self._persist_state()
+        if status == SYSTEM_STATUS_IDLE:
+            try:
+                self.save_session_checkpoint_if_enabled()
+            except Exception:
+                pass
 
     def _set_holding(
         self,
@@ -372,14 +377,28 @@ class LabCommunicator:
         return
 
     def session_checkpoint_enabled(self) -> bool:
-        """When True, process shutdown persists :meth:`get_lab_state`."""
+        """When True, shutdown persists :meth:`get_lab_state` and UI reconciliation is offered."""
 
-        return False
+        _ENV_TRUE = frozenset({"1", "true", "yes", "on"})
+        _ENV_FALSE = frozenset({"0", "false", "no", "off"})
+        raw = (os.getenv("SESSION_CHECKPOINT") or "").strip().lower()
+        if raw in _ENV_TRUE:
+            return True
+        if raw in _ENV_FALSE:
+            return False
+        try:
+            from lab_communicator.shared.lab_view_config import get_lab_manifest
+
+            return bool(get_lab_manifest().session_checkpoint)
+        except Exception:
+            return False
 
     def session_reconciliation_thresholds(self):
-        from lab_communicator.shared.session_checkpoint import default_thresholds_from_env
+        from lab_communicator.shared.session_checkpoint import (
+            reconciliation_thresholds_from_manifest,
+        )
 
-        return default_thresholds_from_env()
+        return reconciliation_thresholds_from_manifest()
 
     def save_session_checkpoint_if_enabled(self) -> None:
         """Write ``session_last_lab_state.json`` beside lab_view JSON (feature-gated)."""
@@ -387,7 +406,12 @@ class LabCommunicator:
         if not self.session_checkpoint_enabled():
             return
 
-        lab_mode = (os.getenv("LAB_MODE") or "MOCK").upper()
+        try:
+            from lab_communicator.shared.lab_view_config import get_lab_manifest
+
+            lab_mode = get_lab_manifest().lab_mode
+        except Exception:
+            lab_mode = (os.getenv("LAB_MODE") or "MOCK").upper()
         snapshot = self.get_lab_state()
         from lab_communicator.shared.session_checkpoint import persist_checkpoint
 
@@ -1776,6 +1800,10 @@ class LabCommunicator:
     def get_table_cam_stream(self, cam_id: int = 1, fps: int = 18):
         """Multipart MJPEG generator for ``/api/table-cam/stream`` when implemented."""
         raise NotImplementedError
+
+    def fetch_table_cam_preview_jpeg(self, cam_id: int = 1) -> Optional[bytes]:
+        """Latest JPEG for ``/api/table-cam/preview`` when implemented."""
+        return None
 
     def get_cobyla_reference_png_bytes(self) -> Optional[bytes]:
         """PNG of the stored cobyla reference, or ``None`` if unset."""
