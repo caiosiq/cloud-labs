@@ -462,7 +462,7 @@ class MockLabCommunicator(LabCommunicator):
 
         Lives next to the mock state JSON so the directory layout
         matches the rest of the schemas folder. Used by
-        :func:`lab_communicator.mock.primitives.primitive_observe_measurables`
+        :func:`lab_communicator.mock.primitives.primitive_record_measurables`
         to land ``<tag>_last.png`` for the UI to pick up.
         """
         return os.path.abspath(get_lab_view_paths().camera_captures_dir)
@@ -682,12 +682,12 @@ class MockLabCommunicator(LabCommunicator):
                 return bytes(part[start : end + 2])
         return None
 
-    async def _primitive_observe_measurables(
+    async def _primitive_record_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        from lab_communicator.mock.primitives import primitive_observe_measurables
+        from lab_communicator.mock.primitives import primitive_record_measurables
 
-        return await primitive_observe_measurables(self, tag_id, catalog_meta)
+        return await primitive_record_measurables(self, tag_id, catalog_meta)
 
     def get_table_cam_status(self, only_cam_id=None) -> Dict[str, Any]:
         try:

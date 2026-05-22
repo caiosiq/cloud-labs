@@ -48,10 +48,10 @@ from lab_primitives import (
     ConfirmHoldingTagBody,
     HoverBody,
     MoveComponentBody,
-    ObserveMeasurablesBody,
     PickComponentBody,
     PlaceFromHoverBody,
     PrimitiveId,
+    RecordMeasurablesBody,
     ScanRotateInPlaceBody,
     execute_validated_command,
     fetch_read_primitive,
@@ -366,16 +366,16 @@ async def get_component_measurables(tag_id: str):
         raise HTTPException(status_code=422, detail=validation_error_detail(e))
 
 
-@app.post("/api/components/{tag_id}/measurables/observe")
-async def post_component_observe_measurables(tag_id: str):
-    """Refresh measurables for one component (camera capture, etc.). Primitive: ``OBSERVE_MEASURABLES``."""
+@app.post("/api/components/{tag_id}/measurables/record")
+async def post_component_record_measurables(tag_id: str):
+    """Record fresh measurables for one component (camera capture, etc.). Primitive: ``RECORD_MEASURABLES``."""
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
     state = lab.get_lab_state()
     current_status = state.get("system_status")
     if current_status == "BUSY" or current_status == "OPTIMIZING":
         raise HTTPException(status_code=409, detail=f"System is {current_status}. Please wait.")
-    await lab.observe_measurables_for_tag(tag_id)
+    await lab.record_measurables_for_tag(tag_id)
     try:
         meas = fetch_read_primitive(lab, PrimitiveId.GET_MEASURABLES, tag_id)
     except ValidationError as e:
@@ -807,7 +807,7 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
 
     _enforce_holding_rules(cmd, state)
 
-    if isinstance(cmd, ObserveMeasurablesBody):
+    if isinstance(cmd, RecordMeasurablesBody):
         await execute_validated_command(lab, cmd)
         meas = fetch_read_primitive(lab, PrimitiveId.GET_MEASURABLES, cmd.target_id)
         return {"status": "ok", "measurables": meas}

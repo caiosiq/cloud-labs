@@ -254,13 +254,13 @@ class LabCommunicator:
     def get_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
         return self.return_measurables_for_tag(tag_id)
 
-    async def observe_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
-        """Trigger a fresh observation of ``tag_id`` and return its measurables.
+    async def record_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
+        """Trigger a fresh measurement of ``tag_id`` and return its measurables.
 
         Template method:
 
         1. Refuse if the tag is unknown to current_state.
-        2. Delegate to :meth:`_primitive_observe_measurables`. The hook
+        2. Delegate to :meth:`_primitive_record_measurables`. The hook
            inspects the catalog ``type`` and may capture a camera frame
            (real lab) or a synthetic frame (mock UI demo); on success
            it returns a ``{"path", "source", "cam_id", "format"}`` dict.
@@ -275,9 +275,9 @@ class LabCommunicator:
 
         catalog_meta = self._catalog_meta_for_tag(tag_id) or {}
         try:
-            captured = await self._primitive_observe_measurables(tag_id, catalog_meta)
+            captured = await self._primitive_record_measurables(tag_id, catalog_meta)
         except Exception as e:  # noqa: BLE001 -- hook failures shouldn't kill UI
-            print(f"{self.log_prefix} observe_measurables_for_tag failed: {e}")
+            print(f"{self.log_prefix} record_measurables_for_tag failed: {e}")
             captured = None
 
         if isinstance(captured, dict) and captured.get("path"):
@@ -294,12 +294,12 @@ class LabCommunicator:
             self._persist_state()
         return self.return_measurables_for_tag(tag_id)
 
-    async def _primitive_observe_measurables(
+    async def _primitive_record_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Hardware step for :meth:`observe_measurables_for_tag`.
+        """Hardware step for :meth:`record_measurables_for_tag`.
 
-        Default returns ``None`` (no fresh observation -- saved
+        Default returns ``None`` (no fresh measurement -- saved
         measurables are returned verbatim). Real overrides for
         ``OPTICAL_CAMERA`` tags to capture a PNG and return its path
         + metadata; mock can do the same with a synthetic frame.

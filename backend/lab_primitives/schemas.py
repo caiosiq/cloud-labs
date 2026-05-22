@@ -135,8 +135,8 @@ class RemoveComponentBody(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
-class ObserveMeasurablesBody(BaseModel):
-    action: Literal["OBSERVE_MEASURABLES"]
+class RecordMeasurablesBody(BaseModel):
+    action: Literal["RECORD_MEASURABLES"]
     target_id: str = Field(..., min_length=1)
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
@@ -198,7 +198,7 @@ ValidatedCommand = Annotated[
         RecenterInStorageBody,
         ScanBody,
         RemoveComponentBody,
-        ObserveMeasurablesBody,
+        RecordMeasurablesBody,
         PickComponentBody,
         HoverBody,
         PlaceFromHoverBody,

@@ -1,20 +1,58 @@
 /**
- * Client-side accessors for tunables vs measurables (see refactor.md).
+ * Client-side accessors for tunables vs measurables.
+ *
+ * See `universal_component_architecture.md` §7-8 for the canvas-truth model:
+ * the canvas draws `tunables.nominal_pose` (intent), and `measurables` are
+ * off-canvas receipts (encoder readback, camera_image, optimization score).
+ *
+ * - `drawPose(c)` — the pose for canvas drawing, collision, ghost init,
+ *   storage validation, and command-revert logic. Prefers
+ *   `tunables.nominal_pose`; falls back to `measurables.pose` defensively
+ *   for legacy state files that may predate the universal-component
+ *   migration.
+ * - `nominalPose(c)` — strict tunables.nominal_pose lookup, no fallback.
+ *   Use when "intent" semantics specifically matter and a missing nominal
+ *   should be visible to the caller.
+ * - `measPose(c)` — strict measurables.pose lookup. Use *only* for
+ *   legitimate measurable consumers (encoder readback in
+ *   `ui/context-panel.js`). Do not use for canvas drawing.
  */
 
 export const PRESENCE_BREADBOARD = 'breadboard';
 export const PRESENCE_STORAGE = 'storage';
 export const PRESENCE_OFF_TABLE = 'off_table';
 
-/** @param {object | undefined} c */
+/**
+ * Strict `measurables.pose` accessor. **Not** the canvas-truth pose; see
+ * `drawPose` for that. Reserved for off-canvas readouts that genuinely
+ * need the hardware-reported value (e.g. motor encoder rotations).
+ * @param {object | undefined} c
+ */
 export function measPose(c) {
     return (c && c.measurables && c.measurables.pose) || {};
 }
 
-/** @param {object | undefined} c */
+/**
+ * Strict `tunables.nominal_pose` accessor. Returns `{}` if missing.
+ * @param {object | undefined} c
+ */
 export function nominalPose(c) {
     const n = c && c.tunables && c.tunables.nominal_pose;
     return n && typeof n === 'object' ? n : {};
+}
+
+/**
+ * Canvas-truth pose: `tunables.nominal_pose` with a defensive fallback to
+ * `measurables.pose` for state files that haven't been migrated to the
+ * tunables-only canvas model yet. Use this everywhere the canvas, ghost
+ * state, layout validation, or collision detection needs "where the user
+ * intends this component to sit".
+ * @param {object | undefined} c
+ */
+export function drawPose(c) {
+    const np = nominalPose(c);
+    if (np && (typeof np.x === 'number' || typeof np.y === 'number')) return np;
+    return measPose(c);
 }
 
 /** @param {object | undefined} c */

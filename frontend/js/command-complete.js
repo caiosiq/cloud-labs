@@ -14,8 +14,8 @@ const VERBS = [
     'get_tunables',
     'measurables',
     'get_measurables',
-    'observe',
-    'observe_measurables',
+    'record',
+    'record_measurables',
     'move',
     'motor',
     'motorhome',
@@ -127,8 +127,8 @@ export function getTabCompletions(line, caret, deps) {
             v === 'get_tunables' ||
             v === 'measurables' ||
             v === 'get_measurables' ||
-            v === 'observe' ||
-            v === 'observe_measurables'
+            v === 'record' ||
+            v === 'record_measurables'
         ) {
             return allTags;
         }
@@ -155,8 +155,8 @@ export function getTabCompletions(line, caret, deps) {
         verb === 'get_tunables' ||
         verb === 'measurables' ||
         verb === 'get_measurables' ||
-        verb === 'observe' ||
-        verb === 'observe_measurables'
+        verb === 'record' ||
+        verb === 'record_measurables'
     ) {
         if (tokens.length === 1 && endsWithSpace) {
             return allTags;

@@ -12,9 +12,9 @@ Long-form design notes live in [`../../primitives.md`](../../primitives.md). **P
 
 | Call site | What runs |
 |-----------|-----------|
-| **`main.py`** `POST /api/command` | `parse_command_payload` → `schedule_validated_command` → `execute_validated_command` → atomic `lab.*` calls (see macros below). **`OBSERVE_MEASURABLES`** is awaited inline and returns fresh **`measurables`**. |
+| **`main.py`** `POST /api/command` | `parse_command_payload` → `schedule_validated_command` → `execute_validated_command` → atomic `lab.*` calls (see macros below). **`RECORD_MEASURABLES`** is awaited inline and returns fresh **`measurables`**. |
 | **`main.py`** GET tunables/measurables | `fetch_read_primitive` → `return_tunables_for_tag` / `return_measurables_for_tag` (saved state only) |
-| **`main.py`** `POST /api/components/{tag_id}/measurables/observe` | `observe_measurables_for_tag` then same slice as GET measurables |
+| **`main.py`** `POST /api/components/{tag_id}/measurables/record` | `record_measurables_for_tag` then same slice as GET measurables |
 | **`execute_recipe`** | same parse + **await** `execute_validated_command` |
 
 ### Macros (implemented)

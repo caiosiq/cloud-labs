@@ -311,19 +311,19 @@ async def primitive_move_component(
 
 
 # ---------------------------------------------------------------------------
-# Camera observation primitive (OPTICAL_CAMERA only)
+# Camera measurement primitive (OPTICAL_CAMERA only)
 # ---------------------------------------------------------------------------
 
-async def primitive_observe_measurables(
+async def primitive_record_measurables(
     communicator: "RealLabCommunicator",
     tag_id: str,
     catalog_meta: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    """Hardware step for ``observe_measurables_for_tag``.
+    """Hardware step for ``record_measurables_for_tag``.
 
     For ``OPTICAL_CAMERA`` tags only: capture a single frame from
     table-cam 1 (``capture_table_cam(1, exposure=0.2)``), write it to
-    ``Camera_Images/<tag>_observe.png``, and return the metadata for
+    ``Camera_Images/<tag>_record.png``, and return the metadata for
     the orchestrator to merge into ``measurables.camera_image``. All
     other tag types fall through with ``None``; the orchestrator then
     returns saved measurables verbatim.
@@ -335,7 +335,7 @@ async def primitive_observe_measurables(
         return None
     base = communicator._camera_images_base_dir()
     os.makedirs(base, exist_ok=True)
-    path = os.path.join(base, f"{tag_id}_observe.png")
+    path = os.path.join(base, f"{tag_id}_record.png")
     with open(path, "wb") as f:
         f.write(png)
     return {
@@ -560,7 +560,7 @@ __all__ = [
     "primitive_place_from_hover",
     "primitive_scan_rotate_in_place",
     "primitive_move_component",
-    "primitive_observe_measurables",
+    "primitive_record_measurables",
     "primitive_prepare_optimization_run",
     "primitive_optimize_component",
     "primitive_finalize_optimization_run",

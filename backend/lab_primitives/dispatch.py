@@ -20,12 +20,12 @@ from .schemas import (
     MotorSetZeroBody,
     MoveMotorBody,
     MoveMotorParameters,
-    ObserveMeasurablesBody,
     OptimizeBody,
     PickComponentBody,
     PlaceFromHoverBody,
     PlaceFromStorageBody,
     RecenterInStorageBody,
+    RecordMeasurablesBody,
     RemoveComponentBody,
     RepackStorageBody,
     ScanBody,
@@ -64,7 +64,7 @@ ValidatedCommand = Union[
     RecenterInStorageBody,
     ScanBody,
     RemoveComponentBody,
-    ObserveMeasurablesBody,
+    RecordMeasurablesBody,
     PickComponentBody,
     HoverBody,
     PlaceFromHoverBody,
@@ -178,9 +178,9 @@ async def _invoke_atomic(
     elif isinstance(cmd, RecenterInStorageBody):
         _log_primitive("RECENTER_IN_STORAGE", cmd.target_id, macro_parent=macro_parent)
         await lab.recenter_stored_in_inventory(cmd.target_id)
-    elif isinstance(cmd, ObserveMeasurablesBody):
-        _log_primitive("OBSERVE_MEASURABLES", cmd.target_id, macro_parent=macro_parent)
-        await lab.observe_measurables_for_tag(cmd.target_id)
+    elif isinstance(cmd, RecordMeasurablesBody):
+        _log_primitive("RECORD_MEASURABLES", cmd.target_id, macro_parent=macro_parent)
+        await lab.record_measurables_for_tag(cmd.target_id)
     elif isinstance(cmd, ScanBody):
         _log_primitive("SCAN", cmd.target_id, macro_parent=macro_parent)
         _LOG.warning(
@@ -304,11 +304,11 @@ def schedule_validated_command(
         background_tasks.add_task(execute_validated_command, lab, cmd)
         return {"status": "accepted", "message": f"Removing {cmd.target_id}"}
 
-    if isinstance(cmd, ObserveMeasurablesBody):
+    if isinstance(cmd, RecordMeasurablesBody):
         background_tasks.add_task(execute_validated_command, lab, cmd)
         return {
             "status": "accepted",
-            "message": f"Observation refresh queued for {cmd.target_id}",
+            "message": f"Measurables recording queued for {cmd.target_id}",
         }
 
     if isinstance(cmd, PickComponentBody):

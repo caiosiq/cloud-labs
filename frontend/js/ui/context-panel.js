@@ -43,7 +43,7 @@ function refs() {
         ctxY: document.getElementById('ctx-y'),
         ctxRot: document.getElementById('ctx-rot'),
         ctxMoveBtn: document.getElementById('ctx-move-btn'),
-        ctxObserveSlot: document.getElementById('ctx-observe-slot'),
+        ctxRecordSlot: document.getElementById('ctx-record-slot'),
         ctxStrategies: document.getElementById('ctx-strategies'),
         selectedCompName: document.getElementById('selected-comp-name'),
         selectedCompTag: document.getElementById('selected-comp-tag'),
@@ -554,7 +554,7 @@ export function updateContextPanel(name) {
         ctxY,
         ctxRot,
         ctxMoveBtn,
-        ctxObserveSlot,
+        ctxRecordSlot,
         ctxStrategies,
         selectedCompName,
         selectedCompTag,
@@ -599,8 +599,8 @@ export function updateContextPanel(name) {
     ctxY.value = pose.y.toFixed(1);
     ctxRot.value = (pose.rotation || 0).toFixed(1);
 
-    if (ctxObserveSlot) {
-        ctxObserveSlot.innerHTML = '';
+    if (ctxRecordSlot) {
+        ctxRecordSlot.innerHTML = '';
         const wrap = document.createElement('div');
         wrap.style.borderTop = '1px solid #2a2e36';
         wrap.style.paddingTop = '10px';
@@ -618,7 +618,7 @@ export function updateContextPanel(name) {
         p.style.lineHeight = '1.35';
         p.style.margin = '0 0 8px 0';
         p.innerHTML =
-            'Coordinates above are <strong>intent</strong> (ghost). The UI polls <strong>saved</strong> measurables via lab state. <strong>Observe</strong> asks the lab to refresh this tag’s measurables (e.g. camera → <code style="color:#94a3b8;">camera_image</code>).';
+            'Coordinates above are <strong>intent</strong> (ghost). The UI polls <strong>saved</strong> measurables via lab state. <strong>Record</strong> asks the lab to take a fresh measurement (e.g. camera → <code style="color:#94a3b8;">camera_image</code>).';
         wrap.appendChild(p);
         if (PRIMITIVE_DEV_HINTS) {
             const dev = document.createElement('div');
@@ -626,7 +626,7 @@ export function updateContextPanel(name) {
             dev.style.color = '#475569';
             dev.style.marginBottom = '6px';
             dev.innerHTML =
-                'Dev: <code>OBSERVE_MEASURABLES</code> · <code>POST /api/components/{tag}/measurables/observe</code>';
+                'Dev: <code>RECORD_MEASURABLES</code> · <code>POST /api/components/{tag}/measurables/record</code>';
             wrap.appendChild(dev);
         }
         const row = document.createElement('div');
@@ -640,7 +640,7 @@ export function updateContextPanel(name) {
         btn.style.fontSize = '11px';
         btn.style.padding = '6px 10px';
         btn.innerHTML =
-            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">photo_camera</span> Observe measurables';
+            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">photo_camera</span> Record measurables';
         const status = document.createElement('span');
         status.style.fontSize = '10px';
         status.style.color = '#94a3b8';
@@ -649,14 +649,14 @@ export function updateContextPanel(name) {
             btn.disabled = true;
             try {
                 const r = await fetch(
-                    `/api/components/${encodeURIComponent(name)}/measurables/observe`,
+                    `/api/components/${encodeURIComponent(name)}/measurables/record`,
                     { method: 'POST' },
                 );
                 const data = await r.json().catch(() => ({}));
                 if (!r.ok) {
                     const det = data.detail !== undefined ? data.detail : r.status;
                     const msg = typeof det === 'string' ? det : JSON.stringify(det);
-                    log(`Observe failed: ${msg}`, 'error');
+                    log(`Record failed: ${msg}`, 'error');
                     status.textContent = 'Failed';
                     return;
                 }
@@ -669,7 +669,7 @@ export function updateContextPanel(name) {
                 await fetchLabState();
                 updateContextPanel(name);
             } catch (e) {
-                log(`Observe error: ${e && e.message ? e.message : e}`, 'error');
+                log(`Record error: ${e && e.message ? e.message : e}`, 'error');
                 status.textContent = 'Error';
             } finally {
                 btn.disabled = false;
@@ -687,7 +687,7 @@ export function updateContextPanel(name) {
             luEl.textContent = `Lab state last_updated: ${lu}`;
             wrap.appendChild(luEl);
         }
-        ctxObserveSlot.appendChild(wrap);
+        ctxRecordSlot.appendChild(wrap);
     }
 
     if (placementState === 'STORED') {

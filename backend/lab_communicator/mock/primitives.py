@@ -21,7 +21,7 @@ Architectural rules (``communicator_refactor.md`` §5.1, ``test_lab_primitives.p
   imports nothing from :mod:`lab_communicator.base` (avoid the
   circular-import trap from §5.1 rule 5) and nothing from
   :mod:`lab_communicator.real` (cross-backend isolation).
-- The synthetic-PNG branch in :func:`primitive_observe_measurables`
+- The synthetic-PNG branch in :func:`primitive_record_measurables`
   reads ``communicator.capture_table_cam(...)``, which itself doesn't
   touch state -- it's purely an image-rendering helper.
 """
@@ -201,15 +201,15 @@ async def primitive_move_component(
 
 
 # ---------------------------------------------------------------------------
-# Camera observation primitive (OPTICAL_CAMERA only)
+# Camera measurement primitive (OPTICAL_CAMERA only)
 # ---------------------------------------------------------------------------
 
-async def primitive_observe_measurables(
+async def primitive_record_measurables(
     communicator: "MockLabCommunicator",
     tag_id: str,
     catalog_meta: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    """Mock hardware step for ``observe_measurables_for_tag``.
+    """Mock hardware step for ``record_measurables_for_tag``.
 
     For ``OPTICAL_CAMERA`` tags only: render a synthetic PNG (via
     :meth:`MockLabCommunicator.capture_table_cam`) into the mock's
@@ -360,7 +360,7 @@ __all__ = [
     "primitive_place_from_hover",
     "primitive_scan_rotate_in_place",
     "primitive_move_component",
-    "primitive_observe_measurables",
+    "primitive_record_measurables",
     "primitive_optimize_component",
     "primitive_add_component_to_state",
 ]

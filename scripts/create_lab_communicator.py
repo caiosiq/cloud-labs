@@ -188,9 +188,9 @@ class {class_name}(LabCommunicator):
             on_rotation_update=on_rotation_update,
         )
 
-    async def _primitive_observe_measurables(self, tag_id: str, catalog_meta: Dict[str, Any]):
-        from lab_communicator.{module}.primitives import primitive_observe_measurables
-        return await primitive_observe_measurables(self, tag_id, catalog_meta)
+    async def _primitive_record_measurables(self, tag_id: str, catalog_meta: Dict[str, Any]):
+        from lab_communicator.{module}.primitives import primitive_record_measurables
+        return await primitive_record_measurables(self, tag_id, catalog_meta)
 
     async def _primitive_optimize_component(
         self,
@@ -321,7 +321,7 @@ async def primitive_move_component(
     )
 
 
-async def primitive_observe_measurables(
+async def primitive_record_measurables(
     communicator: "{class_name}",  # noqa: ARG001
     tag_id: str,  # noqa: ARG001
     catalog_meta: Dict[str, Any],  # noqa: ARG001
@@ -378,7 +378,7 @@ __all__ = [
     "primitive_place_from_hover",
     "primitive_scan_rotate_in_place",
     "primitive_move_component",
-    "primitive_observe_measurables",
+    "primitive_record_measurables",
     "primitive_optimize_component",
     "primitive_add_component_to_state",
 ]

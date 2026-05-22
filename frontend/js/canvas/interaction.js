@@ -15,7 +15,7 @@ import { DANGER_RADIUS_MM } from '../config.js';
 import { mmToPx, pxToMm } from './coordinates.js';
 import { store } from '../state/store.js';
 import { log } from '../ui/log.js';
-import { isBreadboardIntent, isStoredComponent, measPose } from '../component-model.js';
+import { drawPose, isBreadboardIntent, isStoredComponent } from '../component-model.js';
 import { isPlacedRegion, regionMoveBlocked } from '../storage-region.js';
 import { bindGuideDrawListeners } from './guides.js';
 import {
@@ -316,10 +316,10 @@ async function onMouseUp(_canvas, _e) {
         if (collision.detected) {
             log(`Move cancelled: ${collision.other}`, 'error');
 
-            // Revert ghost back to its pre-drag pose: measured pose for PLACED parts; the
+            // Revert ghost back to its pre-drag pose: committed intent for PLACED parts; the
             // drag-from-storage start pose for the STORED → BREADBOARD case.
             if (labSt === 'PLACED') {
-                const original = measPose(store.labState.components[dc]);
+                const original = drawPose(store.labState.components[dc]);
                 store.ghostState[dc].x = original.x;
                 store.ghostState[dc].y = original.y;
                 store.ghostState[dc].rotation = original.rotation;

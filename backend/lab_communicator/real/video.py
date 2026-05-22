@@ -17,7 +17,7 @@ Three sub-areas, all real-only:
 
 * **Single-shot capture** -- :func:`capture_table_cam` grabs one frame
   from a table recorder camera and returns PNG bytes. Used by the
-  ``OPTICAL_CAMERA``-typed components for ``observe_measurables_for_tag``.
+  ``OPTICAL_CAMERA``-typed components for ``record_measurables_for_tag``.
 
 All helpers take the ``RealLabCommunicator`` instance explicitly. The
 class keeps thin ``def`` wrappers so the dispatch layer

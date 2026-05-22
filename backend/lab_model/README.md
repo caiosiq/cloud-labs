@@ -68,7 +68,7 @@ Defaults (`default_measurables()`) include:
 | **`pose`** | Measured center pose: `x`, `y`, `rotation`. Used for drawing, collision-ish checks, and storage validation. |
 | **`last_optimization_score`** | Scalar feedback from the last run, when applicable. |
 | **`last_optimized_pose`** | Snapshot of pose after optimization, when applicable. |
-| **`camera_image`** | After **observe** (`OBSERVE_MEASURABLES` / `POST .../measurables/observe`), mock/real may set an object such as `{ "path", "source", "cam_id", "format" }` (PNG path on disk). Otherwise **`null`**. See **`schemas/README.md`**. |
+| **`camera_image`** | After **record** (`RECORD_MEASURABLES` / `POST .../measurables/record`), mock/real may set an object such as `{ "path", "source", "cam_id", "format" }` (PNG path on disk). Otherwise **`null`**. See **`schemas/README.md`**. |
 
 **Important distinction:** For layout and “where is the part on the table,” **`storage_region`** treats **`measurables.pose`** as the physical center (e.g. fitting a footprint inside a storage cell). **Tunables** carry **nominal** pose and **storage intent** (including slot), which can differ from measured pose when vision lags or the mock adds noise.
 
@@ -86,18 +86,18 @@ Defaults (`default_measurables()`) include:
 
 ---
 
-## 6. API surface (read slices vs observe)
+## 6. API surface (read slices vs record)
 
 Without a motion command, the backend exposes:
 
 - **`GET /api/components/{tag_id}/tunables`** → **`return_tunables_for_tag`** (same as legacy **`get_tunables_for_tag`**) → **`tunables`** dict.
 - **`GET /api/components/{tag_id}/measurables`** → **`return_measurables_for_tag`** → **`measurables`** dict (saved state only).
 
-To **poll** the lab and refresh measurables (e.g. camera capture into **`camera_image`**):
+To **record** a fresh measurement on the lab (e.g. camera capture into **`camera_image`**):
 
-- **`POST /api/components/{tag_id}/measurables/observe`** or **`POST /api/command`** with **`"action": "OBSERVE_MEASURABLES"`**.
+- **`POST /api/components/{tag_id}/measurables/record`** or **`POST /api/command`** with **`"action": "RECORD_MEASURABLES"`**.
 
-Those reads use **`lab_primitives.fetch_read_primitive`** for **`GET_TUNABLES`** / **`GET_MEASURABLES`**; observe is **`PrimitiveId.OBSERVE_MEASURABLES`** (see [`../../primitives.md`](../../primitives.md)). Full state: **`GET /api/lab-state`**.
+Those reads use **`lab_primitives.fetch_read_primitive`** for **`GET_TUNABLES`** / **`GET_MEASURABLES`**; record is **`PrimitiveId.RECORD_MEASURABLES`** (see [`../../primitives.md`](../../primitives.md)). Full state: **`GET /api/lab-state`**.
 
 ---
 

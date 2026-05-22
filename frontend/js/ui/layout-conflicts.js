@@ -16,7 +16,7 @@
 import { store } from '../state/store.js';
 import { log } from './log.js';
 import { collectLayoutWarnings, isStorageRegion } from '../storage-region.js';
-import { measPose } from '../component-model.js';
+import { drawPose } from '../component-model.js';
 
 let _executeSendCommand = async () => {};
 
@@ -63,7 +63,7 @@ function layoutIssueKey(issue) {
 function layoutConflictMoveDefaults(tagId) {
     const c = store.labState?.components?.[tagId];
     const g = store.ghostState[tagId];
-    const mp = measPose(c || {});
+    const mp = drawPose(c || {});
     const rot = typeof mp.rotation === 'number' ? mp.rotation : 0;
     if (g && typeof g.x === 'number' && typeof g.y === 'number' && !isStorageRegion(g.x, g.y)) {
         return { x: g.x, y: g.y, rotation: typeof g.rotation === 'number' ? g.rotation : rot };

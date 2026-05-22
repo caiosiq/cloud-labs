@@ -5,8 +5,10 @@
  * pulls `/api/lab-state`, mirrors it into `store.labState`, and reconciles three things that the
  * raw payload does not carry:
  *   1. **Ghost state** (`store.ghostState[tag]`) — the user-editable target pose that the canvas
- *      draws. We rebuild it from nominal/measured pose whenever the system status implies a
+ *      draws. We rebuild it from `tunables.nominal_pose` (canvas-truth model — see
+ *      `universal_component_architecture.md` §7-8) whenever the system status implies a
  *      "fresh start" (e.g. command just finished, OPTIMIZING tick, HOLDING transition).
+ *      `drawPose()` falls back to `measurables.pose` defensively for legacy state files.
  *   2. **Context panel state snapshots** — re-render the side panel on placement / holding edges
  *      but ignore the transient BUSY phase so the panel doesn't flicker mid-command.
  *   3. **Auxiliary cross-feature side effects** — optimization overlay, table-cam highlight,
@@ -20,13 +22,12 @@ import { store } from './store.js';
 import { log } from '../ui/log.js';
 import { POLLING_INTERVAL } from '../config.js';
 import {
+    drawPose,
     getHolding,
     isBreadboardIntent,
     isHeldTag,
     isHoldingState,
     isOnTableComponent,
-    measPose,
-    nominalPose,
 } from '../component-model.js';
 import { showErrorModal } from '../ui/modals.js';
 import { maybeTriggerSessionReconciliation } from '../ui/session-reconciliation.js';
@@ -121,23 +122,19 @@ export async function fetchLabState() {
 
             Object.entries(store.labState.components).forEach(([name, comp]) => {
                 if (isOnTableComponent(comp)) {
-                    const np = nominalPose(comp);
-                    const mp = measPose(comp);
-                    // First load: initialize from nominal if available, else from measured pose.
+                    const dp = drawPose(comp);
+                    const hasPose = dp && Object.keys(dp).length > 0;
+                    // First load: initialize from drawPose (intent first, measured fallback).
                     if (!store.ghostState[name]) {
-                        if (np && Object.keys(np).length) {
-                            store.ghostState[name] = { ...np };
-                        } else {
-                            store.ghostState[name] = { ...mp };
-                        }
+                        store.ghostState[name] = { ...dp };
                         if (typeof store.ghostState[name].rotation !== 'number') {
-                            store.ghostState[name].rotation = mp.rotation || 0;
+                            store.ghostState[name].rotation = 0;
                         }
                     }
-                    else if (store.labState.system_status === 'OPTIMIZING' && !store.isDragging && np && Object.keys(np).length) {
-                        store.ghostState[name] = { ...np };
+                    else if (store.labState.system_status === 'OPTIMIZING' && !store.isDragging && hasPose) {
+                        store.ghostState[name] = { ...dp };
                         if (typeof store.ghostState[name].rotation !== 'number') {
-                            store.ghostState[name].rotation = mp.rotation || 0;
+                            store.ghostState[name].rotation = 0;
                         }
                         if (store.selectedComponent === name && document.getElementById('ctx-x')) {
                             const ctxX = document.getElementById('ctx-x');
@@ -148,8 +145,8 @@ export async function fetchLabState() {
                             if (ctxRot) ctxRot.value = store.ghostState[name].rotation.toFixed(1);
                         }
                     }
-                    // HOLDING: only the held tag's ghost follows live nominal_pose (incl. z) —
-                    // every other component stays on the user's last intent.
+                    // HOLDING: only the held tag's ghost follows live intent (incl. z) —
+                    // every other component stays on the user's last committed intent.
                     //
                     // IMPORTANT: we deliberately do NOT overwrite the ctx-x/y/rot/z input fields
                     // here. Those represent the operator's *intent* for the next HOVER /
@@ -159,22 +156,17 @@ export async function fetchLabState() {
                         isHoldingState(store.labState) &&
                         isHeldTag(name, store.labState) &&
                         !store.isDragging &&
-                        np &&
-                        Object.keys(np).length
+                        hasPose
                     ) {
-                        store.ghostState[name] = { ...np };
+                        store.ghostState[name] = { ...dp };
                         if (typeof store.ghostState[name].rotation !== 'number') {
-                            store.ghostState[name].rotation = mp.rotation || 0;
+                            store.ghostState[name].rotation = 0;
                         }
                     }
                     else if (shouldSync && !store.isDragging) {
-                        if (np && Object.keys(np).length) {
-                            store.ghostState[name] = { ...np };
-                        } else {
-                            store.ghostState[name] = { ...mp };
-                        }
+                        store.ghostState[name] = { ...dp };
                         if (typeof store.ghostState[name].rotation !== 'number') {
-                            store.ghostState[name].rotation = mp.rotation || 0;
+                            store.ghostState[name].rotation = 0;
                         }
                         if (store.selectedComponent === name) {
                             if (document.getElementById('ctx-x')) {
@@ -214,15 +206,10 @@ export async function fetchLabState() {
                 rawStatus !== 'BUSY';
             if (placementChanged || statusChanged) {
                 if (placementChanged && isOnTableComponent(compCtx) && !store.isDragging) {
-                    const np = nominalPose(compCtx);
-                    const mp = measPose(compCtx);
-                    if (np && Object.keys(np).length) {
-                        store.ghostState[selCtx] = { ...np };
-                    } else {
-                        store.ghostState[selCtx] = { ...mp };
-                    }
+                    const dp = drawPose(compCtx);
+                    store.ghostState[selCtx] = { ...dp };
                     if (typeof store.ghostState[selCtx].rotation !== 'number') {
-                        store.ghostState[selCtx].rotation = mp.rotation || 0;
+                        store.ghostState[selCtx].rotation = 0;
                     }
                 }
                 _deps.updateContextPanel(selCtx);

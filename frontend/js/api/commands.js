@@ -18,7 +18,7 @@
 import { store } from '../state/store.js';
 import { log } from '../ui/log.js';
 import { showConfirmationModal } from '../ui/modals.js';
-import { isBreadboardIntent, measPose } from '../component-model.js';
+import { drawPose, isBreadboardIntent } from '../component-model.js';
 import { updateRecipeEditorList } from '../ui/recipes.js';
 
 let _render = () => {};
@@ -59,7 +59,7 @@ export async function sendCommand(command) {
                         store.labState.components[command.target_id] &&
                         isBreadboardIntent(store.labState.components[command.target_id])
                     ) {
-                        const original = measPose(store.labState.components[command.target_id]);
+                        const original = drawPose(store.labState.components[command.target_id]);
                         // Only revert if we have the ghost state object — the ghost is what the canvas draws,
                         // so without it there is nothing visible to roll back.
                         if (store.ghostState[command.target_id]) {

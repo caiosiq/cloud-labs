@@ -76,11 +76,11 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
         return;
     }
 
-    if (result.type === 'observe') {
+    if (result.type === 'record') {
         const tagId = result.tagId;
-        appendLine(`Observe measurables (${tagId})…`, 'info');
+        appendLine(`Record measurables (${tagId})…`, 'info');
         try {
-            const r = await fetch(`/api/components/${encodeURIComponent(tagId)}/measurables/observe`, {
+            const r = await fetch(`/api/components/${encodeURIComponent(tagId)}/measurables/record`, {
                 method: 'POST',
             });
             const text = await r.text();
@@ -102,7 +102,7 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
             }
         } catch (e) {
             const msg = e && e.message ? e.message : String(e);
-            appendLine(`Observe failed: ${msg}`, 'error');
+            appendLine(`Record failed: ${msg}`, 'error');
         }
         return;
     }

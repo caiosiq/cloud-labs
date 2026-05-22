@@ -2,7 +2,7 @@
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './config.js';
 import { mmToPx, pxToMm } from './canvas/coordinates.js';
 import { store } from './state/store.js';
-import { measPose, isBreadboardIntent } from './component-model.js';
+import { drawPose, isBreadboardIntent } from './component-model.js';
 import { log } from './ui/log.js';
 import {
     ALIGNMENT_SHOW_INTERSECTION_MARKERS,
@@ -159,12 +159,12 @@ initCanvasInteraction({ render: () => render() });
 function ensureGhostForConsole(tagId) {
     if (store.ghostState[tagId]) return true;
     const comp = store.labState && store.labState.components && store.labState.components[tagId];
-    const mp = measPose(comp || {});
-    if (!comp || !isBreadboardIntent(comp) || (mp.x === undefined && mp.y === undefined)) return false;
+    const dp = drawPose(comp || {});
+    if (!comp || !isBreadboardIntent(comp) || (dp.x === undefined && dp.y === undefined)) return false;
     store.ghostState[tagId] = {
-        x: mp.x,
-        y: mp.y,
-        rotation: typeof mp.rotation === 'number' ? mp.rotation : 0
+        x: dp.x,
+        y: dp.y,
+        rotation: typeof dp.rotation === 'number' ? dp.rotation : 0
     };
     return true;
 }

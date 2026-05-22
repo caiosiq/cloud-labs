@@ -9,9 +9,9 @@ import {
 } from './config.js';
 import {
     componentPresence,
+    drawPose,
     isBreadboardIntent,
     isStoredComponent,
-    measPose,
     PRESENCE_BREADBOARD,
     PRESENCE_STORAGE,
 } from './component-model.js';
@@ -25,13 +25,13 @@ export function isPlacedRegion(x, y) {
 }
 
 /**
- * @returns {string[]} human-readable warnings when measured pose disagrees with presence intent
+ * @returns {string[]} human-readable warnings when committed pose disagrees with presence intent
  */
 export function collectLayoutWarnings(labState) {
     const warnings = [];
     if (!labState || !labState.components) return warnings;
     for (const [id, comp] of Object.entries(labState.components)) {
-        const p = measPose(comp);
+        const p = drawPose(comp);
         if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') continue;
         const { x, y } = p;
         const pres = componentPresence(comp);

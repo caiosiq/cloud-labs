@@ -29,11 +29,11 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "handler": "return_measurables_for_tag",
         "http": "GET /api/components/{tag_id}/measurables",
     },
-    PrimitiveId.OBSERVE_MEASURABLES: {
+    PrimitiveId.RECORD_MEASURABLES: {
         "kind": PrimitiveKind.ATOMIC,
         "read_only": False,
-        "handler": "observe_measurables_for_tag",
-        "http": "POST /api/components/{tag_id}/measurables/observe",
+        "handler": "record_measurables_for_tag",
+        "http": "POST /api/components/{tag_id}/measurables/record",
     },
     PrimitiveId.MOVE_COMPONENT: {
         "kind": PrimitiveKind.ATOMIC,

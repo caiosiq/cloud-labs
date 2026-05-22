@@ -31,7 +31,7 @@ import {
 } from '../config.js';
 import { mmToPx } from './coordinates.js';
 import { store } from '../state/store.js';
-import { isHeldTag, isOnTableComponent, measPose } from '../component-model.js';
+import { drawPose, isHeldTag, isOnTableComponent } from '../component-model.js';
 import { clipTwoPointLineToLabBounds } from '../geometry/lines.js';
 import { drawAlignmentGuides, drawAlignmentIntersectionMarkers } from './guides.js';
 import { getComponentSize } from './interaction.js';
@@ -534,10 +534,10 @@ export function render() {
 
     if (!store.labState) return;
 
-    // 1. Physical components (measured pose, solid).
+    // 1. Committed components (drawn at intended pose — `tunables.nominal_pose`).
     Object.entries(store.labState.components).forEach(([name, comp]) => {
         if (isOnTableComponent(comp)) {
-            drawComponent(name, measPose(comp), comp.type, 'SOLID');
+            drawComponent(name, drawPose(comp), comp.type, 'SOLID');
         }
     });
 
@@ -553,11 +553,11 @@ export function render() {
         const mode = isPending ? 'PENDING' : (isHeldSteady ? 'HOLDING' : 'GHOST');
         drawComponent(name, pose, type, mode);
 
-        // Drift line: dashed segment from measured pose to ghost (intent) — makes it obvious when
+        // Drift line: dashed segment from committed intent to ghost — makes it obvious when
         // the operator has un-applied edits in the context-panel inputs.
         const physical = store.labState.components[name];
         if (physical && isOnTableComponent(physical)) {
-            const mp = measPose(physical);
+            const mp = drawPose(physical);
             const from = mmToPx(mp.x, mp.y);
             const to = mmToPx(pose.x, pose.y);
             let driftColor = 'rgba(255, 255, 255, 0.2)';

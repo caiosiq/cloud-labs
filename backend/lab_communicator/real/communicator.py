@@ -804,11 +804,11 @@ class RealLabCommunicator(LabCommunicator):
 
         return table_cam_status_snapshot(self, only_cam_id=only_cam_id)
 
-    async def _primitive_observe_measurables(
+    async def _primitive_record_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        from lab_communicator.real.primitives import primitive_observe_measurables
-        return await primitive_observe_measurables(self, tag_id, catalog_meta)
+        from lab_communicator.real.primitives import primitive_record_measurables
+        return await primitive_record_measurables(self, tag_id, catalog_meta)
 
     # --- Storage-intent + is_placed virtual hooks (Phase 2C) ---
     #
