@@ -33,8 +33,11 @@ class PrimitiveId(StrEnum):
 
     MOVE_COMPONENT = "MOVE_COMPONENT"
     MOVE_MOTOR = "MOVE_MOTOR"
+    SET_MOTOR_SETPOINT = "SET_MOTOR_SETPOINT"
     MOTOR_SEND_HOME = "MOTOR_SEND_HOME"
     MOTOR_SET_ZERO = "MOTOR_SET_ZERO"
+    SET_EXPOSURE = "SET_EXPOSURE"
+    APPLY_TUNABLES_PATCH = "APPLY_TUNABLES_PATCH"
     OPTIMIZE = "OPTIMIZE"
     STORE_COMPONENT = "STORE_COMPONENT"
     PLACE_FROM_STORAGE = "PLACE_FROM_STORAGE"
@@ -51,6 +54,22 @@ class PrimitiveId(StrEnum):
     SCAN_ROTATE_IN_PLACE = "SCAN_ROTATE_IN_PLACE"
     CONFIRM_HOLDING_TAG = "CONFIRM_HOLDING_TAG"
 
+    # --- Per-component TELEOP (Phase 8 / universal_component_architecture §16.5) ---
+    #: Acquire the per-component TELEOP lease. Sets ``tunables.teleop_active``
+    #: True for the target and nulls its measurables (Golden Rule). Refused if
+    #: the target is in storage, in motion (BUSY), or already teleoped by
+    #: someone else. Refused lab-wide if ``teleop_safety.require_lab_idle`` is
+    #: configured and the lab isn't IDLE.
+    START_TELEOP = "START_TELEOP"
+    #: Release the per-component TELEOP lease. Idempotent: ending an already-
+    #: released session is not an error (the typical disconnect path).
+    END_TELEOP = "END_TELEOP"
+    #: Push one jog frame: an absolute ``nominal_pose`` and/or
+    #: ``nominal_motor_positions`` for the component currently under TELEOP.
+    #: Each frame also stamps ``tunables.teleop_last_jog_ts`` so the
+    #: stale-lease sweeper can clear abandoned sessions.
+    TELEOP_JOG = "TELEOP_JOG"
+
 
 # Read primitives: not POST /api/command; used by GET routes + `fetch_read_primitive`.
 READ_PRIMITIVE_IDS: frozenset[PrimitiveId] = frozenset(
@@ -64,5 +83,6 @@ READ_PRIMITIVE_IDS: frozenset[PrimitiveId] = frozenset(
 MACRO_PRIMITIVE_IDS: frozenset[PrimitiveId] = frozenset(
     {
         PrimitiveId.MOTOR_SEND_HOME,
+        PrimitiveId.APPLY_TUNABLES_PATCH,
     }
 )

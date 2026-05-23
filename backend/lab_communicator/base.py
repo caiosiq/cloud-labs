@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -74,10 +75,16 @@ from lab_communicator.shared.commits import (
     commit_move_to_breadboard,
     commit_move_to_storage,
     commit_observed_camera_image,
+    commit_observed_measurables,
     commit_optimization_complete,
     commit_pick,
     commit_place_from_hover,
     commit_scan_rotation,
+    commit_teleop_end,
+    commit_teleop_jog,
+    commit_teleop_start,
+    null_measurables_for_targets,
+    sweep_stale_teleop_leases,
 )
 from lab_communicator.shared.motor_state import (
     inject_motor_rotations_into_state,
@@ -89,6 +96,7 @@ from lab_communicator.shared.snapshot import (
     normalize_loaded_state,
 )
 from lab_communicator.shared.state_machine import (
+    refuse_if_any_teleop_active,
     refuse_if_holding,
     refuse_if_holding_other_tag,
     refuse_if_in_storage_quadrant,
@@ -98,6 +106,7 @@ from lab_communicator.shared.state_machine import (
     refuse_if_not_stored,
     refuse_if_status_not_idle,
     refuse_if_stored,
+    refuse_if_teleop_active,
     refuse_if_z_lab_out_of_bounds,
 )
 
@@ -162,9 +171,18 @@ class LabCommunicator:
             "components": {},
             "optimization_step": 0,
             "optimization_run_dir": None,
+            "optimization_target_id": None,
             "holding": empty_holding(),
         }
         self.catalog_map = {}
+        # Phase 8: lazy TELEOP stale-lease sweeper. The thread is started on
+        # the first ``start_teleop`` call (no overhead for processes that
+        # never use teleop). ``_teleop_sweeper_stop`` lets tests tear down
+        # the daemon cleanly between fixtures.
+        self._teleop_sweeper_thread: Optional[threading.Thread] = None
+        self._teleop_sweeper_stop: threading.Event = threading.Event()
+        self._teleop_sweeper_ttl_ms: int = 3000
+        self._teleop_sweeper_tick_ms: int = 500
 
     # ---------------------------------------------------------------
     # Catalog accessors
@@ -260,18 +278,29 @@ class LabCommunicator:
         Template method:
 
         1. Refuse if the tag is unknown to current_state.
-        2. Delegate to :meth:`_primitive_record_measurables`. The hook
+        2. Refuse if the tag is currently in TELEOP (recording would
+           contradict the Golden Rule §3.2: while the operator is jogging,
+           measurables are null; press END_TELEOP first, then RECORD).
+        3. Delegate to :meth:`_primitive_record_measurables`. The hook
            inspects the catalog ``type`` and may capture a camera frame
            (real lab) or a synthetic frame (mock UI demo); on success
            it returns a ``{"path", "source", "cam_id", "format"}`` dict.
-        3. If the hook returned data, commit it under the lock to
+        4. If the hook returned data, commit it under the lock to
            ``measurables.camera_image`` and persist.
-        4. Always return the (possibly updated) saved measurables.
+        5. Always return the (possibly updated) saved measurables.
         """
         with self._state_lock:
             entry = (self.current_state.get("components") or {}).get(tag_id)
         if not isinstance(entry, dict):
             return {}
+        refusal = refuse_if_teleop_active(
+            self.current_state, tag_id, primitive_name="record_measurables"
+        )
+        if refusal:
+            print(
+                f"{self.log_prefix} Refusing record_measurables: {refusal.reason}"
+            )
+            return self.return_measurables_for_tag(tag_id)
 
         catalog_meta = self._catalog_meta_for_tag(tag_id) or {}
         try:
@@ -280,18 +309,30 @@ class LabCommunicator:
             print(f"{self.log_prefix} record_measurables_for_tag failed: {e}")
             captured = None
 
-        if isinstance(captured, dict) and captured.get("path"):
-            with self._state_lock:
-                commit_observed_camera_image(
-                    self.current_state,
-                    tag_id,
-                    path=str(captured["path"]),
-                    source=str(captured.get("source") or ""),
-                    cam_id=int(captured.get("cam_id") or 0),
-                    fmt=str(captured.get("format") or "png"),
-                )
-                self.current_state["last_updated"] = datetime.now().isoformat()
-            self._persist_state()
+        if isinstance(captured, dict):
+            nested = captured.get("measurables")
+            if isinstance(nested, dict):
+                patch = dict(nested)
+            elif captured.get("path"):
+                patch = {
+                    "camera_image": {
+                        "path": str(captured["path"]),
+                        "source": str(captured.get("source") or ""),
+                        "cam_id": int(captured.get("cam_id") or 0),
+                        "format": str(captured.get("format") or "png"),
+                    }
+                }
+            else:
+                patch = {
+                    k: v for k, v in captured.items() if v is not None
+                }
+            if patch:
+                with self._state_lock:
+                    commit_observed_measurables(
+                        self.current_state, tag_id, patch
+                    )
+                    self.current_state["last_updated"] = datetime.now().isoformat()
+                self._persist_state()
         return self.return_measurables_for_tag(tag_id)
 
     async def _primitive_record_measurables(
@@ -326,6 +367,33 @@ class LabCommunicator:
             except Exception:
                 pass
 
+    def _null_measurables_for_targets(
+        self, target_ids: List[str], *, persist: bool = True
+    ) -> None:
+        """Phase 3 / Golden Rule: null measurables for the targeted tags.
+
+        Thin wrapper around
+        :func:`lab_communicator.shared.commits.null_measurables_for_targets`
+        that acquires the state lock, bumps ``last_updated``, and
+        optionally persists. Call this **immediately before**
+        ``_set_status(BUSY)`` / ``_set_status(OPTIMIZING)`` for every
+        motion / optimization primitive — see
+        ``universal_component_architecture.md`` §3.2 ("Golden Rule of
+        Measurables") for the contract.
+
+        ``persist=False`` is for primitives that follow the null with
+        additional state writes (e.g. ``optimize_component`` sets the
+        run dir + step counter in the same cluster); they should make
+        a single ``_persist_state`` call at the cluster boundary.
+        """
+        if not target_ids:
+            return
+        with self._state_lock:
+            null_measurables_for_targets(self.current_state, target_ids)
+            self.current_state["last_updated"] = datetime.now().isoformat()
+        if persist:
+            self._persist_state()
+
     def _set_holding(
         self,
         *,
@@ -359,6 +427,262 @@ class LabCommunicator:
             self.current_state["last_updated"] = datetime.now().isoformat()
         if persist:
             self._persist_state()
+
+    # ---------------------------------------------------------------
+    # Phase 8: per-component TELEOP orchestrators
+    # ---------------------------------------------------------------
+
+    def _teleop_now_ms(self) -> float:
+        """Wall-clock ms used for ``teleop_last_jog_ts`` and sweeper TTL math.
+
+        Kept as a method (not a free function) so tests can monkeypatch
+        a fake clock when verifying the stale-lease sweeper without
+        sleeping for real seconds.
+        """
+        return time.time() * 1000.0
+
+    def _read_teleop_safety(self) -> Tuple[bool, int]:
+        """Pull ``(require_lab_idle, teleop_ttl_ms)`` from the manifest.
+
+        Defensive against unbootstrapped manifests: tests that construct
+        a bare ``LabCommunicator`` get the conservative defaults
+        ``(False, 3000)`` rather than a RuntimeError. The defaults match
+        :class:`LabViewManifest`.
+        """
+        try:
+            from lab_communicator.shared.lab_view_config import get_lab_manifest
+
+            m = get_lab_manifest()
+            return (bool(m.teleop_require_lab_idle), int(m.teleop_ttl_ms))
+        except Exception:
+            return (False, 3000)
+
+    def _refuse_teleop_start(self, target_id: str) -> Optional[str]:
+        """Compose the START_TELEOP refusal ladder. Returns a reason or None.
+
+        Order mirrors §16.5: per-component gates first, then lab-wide
+        gates, then the optional ``require_lab_idle`` knob. Idempotent
+        re-start of an already-leased component is allowed at the
+        orchestrator level (handled before this helper runs), so we
+        only check for *other* components' leases here.
+        """
+        r = refuse_if_not_in_state(self.current_state, target_id, primitive_name="start_teleop")
+        if r:
+            return r.reason
+        r = refuse_if_stored(self.current_state, target_id, primitive_name="start_teleop")
+        if r:
+            return r.reason
+        # One-at-a-time per §16.5: another component already teleoped blocks us.
+        r = refuse_if_any_teleop_active(
+            self.current_state, primitive_name="start_teleop", exclude_tag=target_id
+        )
+        if r:
+            return r.reason
+        require_idle, _ = self._read_teleop_safety()
+        if require_idle:
+            r = refuse_if_status_not_idle(self.current_state, primitive_name="start_teleop")
+            if r:
+                return r.reason
+        else:
+            # Even without ``require_lab_idle``: never start teleop on top
+            # of a heavy primitive owning the same component. BUSY/OPTIMIZING
+            # mean some automated motion is in flight; the operator should
+            # wait for it. (Per §16.5, teleop on a *different* component
+            # while BUSY/OPTIMIZING runs elsewhere is still allowed; we
+            # don't refuse the lab-wide status in that case.)
+            status = self.current_state.get("system_status") or SYSTEM_STATUS_IDLE
+            if status in (SYSTEM_STATUS_BUSY, SYSTEM_STATUS_OPTIMIZING):
+                # If status was set by a primitive that targeted *this* tag,
+                # the per-component motion will null its measurables and a
+                # subsequent jog would race. We can't easily tell whose
+                # status this is from here, so be conservative: refuse on
+                # same-component BUSY by looking at the targets the
+                # primitives stamp. For now, just refuse the lab-wide status
+                # when it's not IDLE/HOLDING. HOLDING is fine -- you can
+                # teleop in-air.
+                return (
+                    f"system_status={status!r}; cannot start_teleop while the "
+                    f"lab is busy. Wait for the current operation to finish."
+                )
+        return None
+
+    async def start_teleop(self, target_id: str) -> None:
+        """Acquire the per-component TELEOP lease for ``target_id``.
+
+        See ``universal_component_architecture.md`` §16.5 for the
+        concurrency policy. Steps:
+
+        1. Refuse via :meth:`_refuse_teleop_start` (storage, other
+           lease, lab-wide knobs, etc).
+        2. If already teleop_active for this tag (idempotent re-start),
+           just re-stamp the timestamp and return. This is the recovery
+           path for a UI that hits "Start teleop" twice after a transient
+           network blip.
+        3. Otherwise commit ``teleop_active=True`` and stamp ts.
+        4. Null measurables (Golden Rule §3.2).
+        5. Lazily start the stale-lease sweeper.
+        6. Persist.
+        """
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+            if isinstance(entry, dict):
+                tun = entry.get("tunables") or {}
+                already = bool(tun.get("teleop_active"))
+            else:
+                already = False
+
+            if not already:
+                reason = self._refuse_teleop_start(target_id)
+                if reason:
+                    raise RuntimeError(reason)
+
+            ok = commit_teleop_start(
+                self.current_state, target_id, now_ms=self._teleop_now_ms()
+            )
+            if not ok:
+                raise RuntimeError(
+                    f"start_teleop: component {target_id!r} disappeared between "
+                    f"refusal check and commit (race)"
+                )
+            self.current_state["last_updated"] = datetime.now().isoformat()
+
+        # Golden Rule §3.2: stale measurables disappear when the part
+        # starts moving (here, when the operator takes the wheel).
+        # Idempotent re-starts also null -- if the operator restarted
+        # teleop, any measurables captured between sessions are stale.
+        self._null_measurables_for_targets([target_id], persist=False)
+        self._maybe_start_teleop_sweeper()
+        self._persist_state()
+
+    async def end_teleop(self, target_id: str) -> None:
+        """Release the TELEOP lease for ``target_id`` (idempotent).
+
+        Idempotent by design: ending a session that's not active is a
+        no-op success. This is the typical disconnect path -- the UI
+        always fires END_TELEOP on page unload, even if the sweeper
+        already cleared the flag. Measurables stay null; the operator
+        records explicitly with RECORD_MEASURABLES.
+        """
+        with self._state_lock:
+            commit_teleop_end(self.current_state, target_id)
+            self.current_state["last_updated"] = datetime.now().isoformat()
+        self._persist_state()
+
+    async def teleop_jog(self, target_id: str, jog: Dict[str, Any]) -> None:
+        """Apply one absolute jog frame to ``target_id``.
+
+        ``jog`` is the validated :class:`TeleopJogParameters` dict (only
+        non-None keys present): ``nominal_pose`` and/or
+        ``nominal_motor_positions``. Refuses if the target isn't currently
+        teleop_active -- jogs require an explicit START_TELEOP first so
+        the operator can't silently move a part they think is idle.
+
+        In Phase 8a the jog updates state-of-intent (``tunables.*``)
+        only; we do not forward to lab_automation hardware. The UI
+        reads back the new ``nominal_pose`` on its next poll and the
+        canvas re-renders. Phase 8b/8c will add hardware forwarding
+        through the same primitive once the UI surface stabilizes.
+        """
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+            if not isinstance(entry, dict):
+                raise RuntimeError(
+                    f"teleop_jog: {target_id!r} not found in lab state."
+                )
+            tun = entry.get("tunables") or {}
+            if not bool(tun.get("teleop_active")):
+                raise RuntimeError(
+                    f"teleop_jog: {target_id!r} is not in TELEOP; "
+                    f"call START_TELEOP first."
+                )
+            ok = commit_teleop_jog(
+                self.current_state,
+                target_id,
+                now_ms=self._teleop_now_ms(),
+                nominal_pose=jog.get("nominal_pose"),
+                nominal_motor_positions=jog.get("nominal_motor_positions"),
+            )
+            if not ok:
+                raise RuntimeError(
+                    f"teleop_jog: commit failed for {target_id!r} "
+                    f"(state changed under us?)"
+                )
+            self.current_state["last_updated"] = datetime.now().isoformat()
+        self._persist_state()
+
+    def _maybe_start_teleop_sweeper(self) -> None:
+        """Lazily start the daemon thread that clears stale TELEOP leases.
+
+        Idempotent (the second call is a no-op). Reads the TTL from the
+        manifest at start time; later changes to the manifest only take
+        effect after :meth:`stop_teleop_sweeper` + a new START_TELEOP.
+        A TTL of 0 disables the sweeper entirely (operator must always
+        END_TELEOP explicitly).
+        """
+        if self._teleop_sweeper_thread is not None and self._teleop_sweeper_thread.is_alive():
+            return
+        _, ttl_ms = self._read_teleop_safety()
+        if ttl_ms <= 0:
+            return
+        self._teleop_sweeper_ttl_ms = int(ttl_ms)
+        self._teleop_sweeper_stop.clear()
+        t = threading.Thread(
+            target=self._teleop_sweeper_loop,
+            name="teleop-sweeper",
+            daemon=True,
+        )
+        self._teleop_sweeper_thread = t
+        t.start()
+
+    def stop_teleop_sweeper(self, *, join_timeout_s: float = 1.0) -> None:
+        """Stop the stale-lease sweeper (used by tests / shutdown).
+
+        No-op if the sweeper isn't running. Joining with a small timeout
+        prevents test teardown from hanging if the thread is mid-sleep.
+        """
+        self._teleop_sweeper_stop.set()
+        t = self._teleop_sweeper_thread
+        if t is not None and t.is_alive():
+            t.join(timeout=join_timeout_s)
+        self._teleop_sweeper_thread = None
+
+    def _teleop_sweeper_loop(self) -> None:
+        """Background loop: every ``_teleop_sweeper_tick_ms`` ms, sweep stale leases.
+
+        Each tick acquires the state lock briefly to call
+        :func:`sweep_stale_teleop_leases`; cleared tags are logged.
+        Persists once per tick *only* if anything was cleared, so the
+        common "no stale leases" case does zero disk I/O.
+        """
+        tick_s = max(0.05, float(self._teleop_sweeper_tick_ms) / 1000.0)
+        while not self._teleop_sweeper_stop.is_set():
+            try:
+                with self._state_lock:
+                    cleared = sweep_stale_teleop_leases(
+                        self.current_state,
+                        now_ms=self._teleop_now_ms(),
+                        ttl_ms=float(self._teleop_sweeper_ttl_ms),
+                    )
+                    if cleared:
+                        self.current_state["last_updated"] = (
+                            datetime.now().isoformat()
+                        )
+                if cleared:
+                    print(
+                        f"{self.log_prefix} teleop sweeper cleared stale leases: "
+                        f"{cleared}"
+                    )
+                    try:
+                        self._persist_state()
+                    except Exception as e:  # noqa: BLE001 -- sweeper must not die
+                        print(
+                            f"{self.log_prefix} teleop sweeper persist failed: {e}"
+                        )
+            except Exception as e:  # noqa: BLE001 -- sweeper must not die
+                print(f"{self.log_prefix} teleop sweeper tick failed: {e}")
+            # Use the event's wait() so stop_teleop_sweeper() wakes us
+            # immediately instead of blocking for the full tick.
+            self._teleop_sweeper_stop.wait(timeout=tick_s)
 
     # ---------------------------------------------------------------
     # Persistence + post-snapshot hooks (subclasses override)
@@ -598,6 +922,12 @@ class LabCommunicator:
         if refusal:
             print(f"{self.log_prefix} Refusing motor move: {refusal.reason}")
             return
+        refusal = refuse_if_teleop_active(
+            current_snapshot, target_id, primitive_name="move motor"
+        )
+        if refusal:
+            print(f"{self.log_prefix} Refusing motor move: {refusal.reason}")
+            return
 
         if not self._motor_catalog_ok(target_id, motor_id):
             mids = (self._catalog_meta_for_tag(target_id) or {}).get("motor_ids") or []
@@ -607,6 +937,7 @@ class LabCommunicator:
             )
             return
 
+        self._null_measurables_for_targets([target_id], persist=False)
         self._set_status(SYSTEM_STATUS_BUSY)
         try:
             await self._primitive_move_motor(target_id, motor_id, float(distance))
@@ -667,6 +998,80 @@ class LabCommunicator:
             f"zero reference set (software)."
         )
 
+    async def set_motor_setpoint(
+        self, target_id: str, motor_id: int, angle_deg: float
+    ) -> None:
+        """Commit ``tunables.nominal_motor_positions[motor_id]`` and jog hardware to match.
+
+        Computes ``delta = angle_deg - tracked_angle`` and delegates the
+        relative move to :meth:`move_motor` when ``|delta|`` is non-trivial.
+        When already at the setpoint, only the tunable intent is updated.
+        """
+        if not self._motor_catalog_ok(target_id, motor_id):
+            print(
+                f"{self.log_prefix} set_motor_setpoint: invalid tag or "
+                f"motor_id for {target_id} m{motor_id}"
+            )
+            return
+        angle = float(angle_deg)
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+            if isinstance(entry, dict):
+                tun = entry.setdefault("tunables", {})
+                if isinstance(tun, dict):
+                    nmp = tun.setdefault("nominal_motor_positions", {})
+                    if isinstance(nmp, dict):
+                        nmp[str(int(motor_id))] = angle
+                self.current_state["last_updated"] = datetime.now().isoformat()
+        self._persist_state()
+
+        cur = motor_rot.get_angle(target_id, motor_id)
+        delta = angle - cur
+        if abs(delta) < 1e-9:
+            print(
+                f"{self.log_prefix} Motor {motor_id} on {target_id}: "
+                f"setpoint {angle:g}° (intent only, already at θ)."
+            )
+            return
+        await self.move_motor(target_id, motor_id, delta)
+
+    async def set_exposure_time_ms(self, target_id: str, exposure_time_ms: float) -> None:
+        """Commit ``tunables.exposure_time_ms`` and forward to table-cam when applicable."""
+        exp_ms = float(exposure_time_ms)
+        if exp_ms <= 0:
+            print(f"{self.log_prefix} set_exposure_time_ms: invalid {exp_ms}")
+            return
+
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+            if isinstance(entry, dict):
+                tun = entry.setdefault("tunables", {})
+                if isinstance(tun, dict):
+                    tun["exposure_time_ms"] = exp_ms
+                self.current_state["last_updated"] = datetime.now().isoformat()
+        self._persist_state()
+
+        try:
+            from lab_communicator.shared.catalog_schema import resolve_cam_id_for_tag
+
+            row = self._catalog_meta_for_tag(target_id) or {}
+            cam_id = resolve_cam_id_for_tag(row)
+        except Exception:
+            cam_id = None
+
+        if cam_id is not None:
+            exp_s = exp_ms / 1000.0
+            ok, msg = self.table_cam_send_vexp(int(cam_id), exp_s)
+            print(
+                f"{self.log_prefix} set_exposure_time_ms {target_id}: "
+                f"{exp_ms:g} ms (cam {cam_id}) ok={ok} {msg}"
+            )
+        else:
+            print(
+                f"{self.log_prefix} set_exposure_time_ms {target_id}: "
+                f"{exp_ms:g} ms (intent only, no cam_id)"
+            )
+
     async def _primitive_motor_set_zero(self, target_id: str, motor_id: int) -> None:
         """Hardware step for :meth:`motor_set_zero` (default no-op).
 
@@ -716,6 +1121,7 @@ class LabCommunicator:
         for refusal in (
             refuse_if_not_in_state(snapshot, target_id, primitive_name="move"),
             refuse_if_stored(snapshot, target_id, primitive_name="move"),
+            refuse_if_teleop_active(snapshot, target_id, primitive_name="move"),
         ):
             if refusal:
                 print(f"{self.log_prefix} Refusing move: {refusal.reason}")
@@ -757,6 +1163,12 @@ class LabCommunicator:
         if refusal:
             print(f"{self.log_prefix} Refusing store: {refusal.reason}")
             return
+        refusal = refuse_if_teleop_active(
+            snapshot, target_id, primitive_name="store"
+        )
+        if refusal:
+            print(f"{self.log_prefix} Refusing store: {refusal.reason}")
+            return
 
         slot = self._allocate_storage_slot(target_id)
         if slot is None:
@@ -787,6 +1199,12 @@ class LabCommunicator:
             snapshot = self.current_state
 
         refusal = refuse_if_not_stored(
+            snapshot, target_id, primitive_name="place_from_storage"
+        )
+        if refusal:
+            print(f"{self.log_prefix} Refusing place_from_storage: {refusal.reason}")
+            return
+        refusal = refuse_if_teleop_active(
             snapshot, target_id, primitive_name="place_from_storage"
         )
         if refusal:
@@ -1026,7 +1444,8 @@ class LabCommunicator:
            images subdirectory and returns its basename for the UI;
            mock returns ``None``).
         4. Status OPTIMIZING + reset ``optimization_step`` +
-           ``optimization_run_dir = run_dir_basename``.
+           ``optimization_run_dir = run_dir_basename`` +
+           ``optimization_target_id = target_id``.
         5. Build the ``progress_callback(step)`` closure and pass it
            into :meth:`_primitive_optimize_component` along with target / strategy /
            params. The hook is free to call the callback as many
@@ -1061,13 +1480,21 @@ class LabCommunicator:
         if refusal:
             print(f"{self.log_prefix} Refusing optimize: {refusal.reason}")
             return
+        refusal = refuse_if_teleop_active(
+            snapshot, target_id, primitive_name="optimize"
+        )
+        if refusal:
+            print(f"{self.log_prefix} Refusing optimize: {refusal.reason}")
+            return
 
         run_dir_basename = self._primitive_prepare_optimization_run(target_id, strategy_name)
 
         with self._state_lock:
+            null_measurables_for_targets(self.current_state, [target_id])
             self.current_state["system_status"] = SYSTEM_STATUS_OPTIMIZING
             self.current_state["optimization_step"] = 0
             self.current_state["optimization_run_dir"] = run_dir_basename
+            self.current_state["optimization_target_id"] = target_id
             self.current_state["last_updated"] = datetime.now().isoformat()
         self._persist_state()
 
@@ -1119,6 +1546,7 @@ class LabCommunicator:
                 self.current_state["system_status"] = SYSTEM_STATUS_IDLE
                 self.current_state["optimization_step"] = 0
                 self.current_state["optimization_run_dir"] = None
+                self.current_state["optimization_target_id"] = None
                 self.current_state["last_updated"] = datetime.now().isoformat()
             self._persist_state()
             print(
@@ -1207,6 +1635,7 @@ class LabCommunicator:
         exiting_storage: bool = False,
     ) -> None:
         """Shared engine: BUSY → ``_primitive_move_component`` → BREADBOARD commit → IDLE."""
+        self._null_measurables_for_targets([target_id], persist=False)
         self._set_status(SYSTEM_STATUS_BUSY)
         actual: Optional[LabPose] = None
         try:
@@ -1239,6 +1668,7 @@ class LabCommunicator:
         slot_j: int,
     ) -> None:
         """Shared engine: BUSY → ``_primitive_move_component`` → STORAGE commit → IDLE."""
+        self._null_measurables_for_targets([target_id], persist=False)
         self._set_status(SYSTEM_STATUS_BUSY)
         actual: Optional[LabPose] = None
         try:
@@ -1341,6 +1771,7 @@ class LabCommunicator:
             refuse_if_holding(snapshot, primitive_name="pick"),
             refuse_if_stored(snapshot, target_id, primitive_name="pick"),
             refuse_if_not_in_state(snapshot, target_id, primitive_name="pick"),
+            refuse_if_teleop_active(snapshot, target_id, primitive_name="pick"),
         ):
             if refusal:
                 print(f"{self.log_prefix} Refusing pick: {refusal.reason}")
@@ -1356,6 +1787,10 @@ class LabCommunicator:
             rotation=float(pose_dict.get("rotation", 0.0)),
         )
 
+        # NOTE: nulling measurables must happen *after* reading pose_dict
+        # above — PICK uses measurables.pose to seed `commanded`. By the
+        # time we null, we've already extracted the values we need.
+        self._null_measurables_for_targets([target_id], persist=False)
         self._set_status(SYSTEM_STATUS_BUSY)
         try:
             settled_z = await self._primitive_pick_component(target_id, commanded, params)
@@ -1420,6 +1855,7 @@ class LabCommunicator:
         for refusal in (
             refuse_if_not_holding(snapshot, primitive_name="hover"),
             refuse_if_holding_other_tag(snapshot, target_id, primitive_name="hover"),
+            refuse_if_teleop_active(snapshot, target_id, primitive_name="hover"),
         ):
             if refusal:
                 print(f"{self.log_prefix} Refusing hover: {refusal.reason}")
@@ -1446,6 +1882,7 @@ class LabCommunicator:
 
         commanded = LabPose(x=tx, y=ty, z=tz, rotation=trot)
 
+        self._null_measurables_for_targets([target_id], persist=False)
         self._set_status(SYSTEM_STATUS_BUSY)
         try:
             actual = await self._primitive_hover_component(target_id, commanded, speed)
@@ -1506,6 +1943,9 @@ class LabCommunicator:
             refuse_if_holding_other_tag(
                 snapshot, target_id, primitive_name="place_from_hover"
             ),
+            refuse_if_teleop_active(
+                snapshot, target_id, primitive_name="place_from_hover"
+            ),
         ):
             if refusal:
                 print(f"{self.log_prefix} Refusing place_from_hover: {refusal.reason}")
@@ -1523,6 +1963,7 @@ class LabCommunicator:
 
         commanded = LabPose(x=tx, y=ty, z=0.0, rotation=trot)
 
+        self._null_measurables_for_targets([target_id], persist=False)
         self._set_status(SYSTEM_STATUS_BUSY)
         try:
             await self._primitive_place_from_hover(target_id, commanded, target_pose)
@@ -1627,6 +2068,16 @@ class LabCommunicator:
                 return
             mode = "placed"
 
+        teleop_busy = refuse_if_teleop_active(
+            snapshot, target_id, primitive_name="scan_rotate_in_place"
+        )
+        if teleop_busy:
+            print(
+                f"{self.log_prefix} Refusing scan_rotate_in_place: "
+                f"{teleop_busy.reason}"
+            )
+            return
+
         # --- Param validation ------------------------------------------
         params = params or {}
         try:
@@ -1675,6 +2126,9 @@ class LabCommunicator:
             self._persist_state()
 
         # --- BUSY → hook → final commit + status flip ------------------
+        # Read of `cur_pose` (placed mode) / `held.nominal_pose` (held
+        # mode) is done above. Now safe to null measurables.
+        self._null_measurables_for_targets([target_id], persist=False)
         self._set_status(SYSTEM_STATUS_BUSY)
         final_status = (
             SYSTEM_STATUS_HOLDING if mode == "held" else SYSTEM_STATUS_IDLE
@@ -1802,11 +2256,7 @@ class LabCommunicator:
         raise NotImplementedError
 
     def fetch_table_cam_preview_jpeg(self, cam_id: int = 1) -> Optional[bytes]:
-        """Latest JPEG for ``/api/table-cam/preview`` when implemented."""
-        return None
-
-    def get_cobyla_reference_png_bytes(self) -> Optional[bytes]:
-        """PNG of the stored cobyla reference, or ``None`` if unset."""
+        """Latest JPEG for per-component ``telemetry/preview`` when implemented."""
         return None
 
     def refresh_pose_from_camera(self, preserve_tag_ids: Optional[List[str]] = None) -> None:

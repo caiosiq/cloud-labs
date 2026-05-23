@@ -1,6 +1,23 @@
 /** Mutable application state (single source for lab UI). */
 export const store = {
     labState: null,
+    /**
+     * Ghost (canvas-truth) pose per tag. Each entry is
+     * ``{x, y, rotation, source?}`` where ``source`` (Phase 8b) tags
+     * the *authority* driving this ghost:
+     *
+     *   - ``undefined`` — normal user-edited ghost (committed intent
+     *     or a current canvas drag). The default everywhere.
+     *   - ``'teleop'``  — the per-component TELEOP lease is held;
+     *     canvas/render paints the ghost in cyan and adds a TELEOP
+     *     label. Synced from ``comp.tunables.teleop_active`` by the
+     *     lab-state poll (see ``state/lab-state.js``); the field is
+     *     a UI hint, not a source of truth.
+     *
+     * Render code keys off this field for visual treatment;
+     * interaction code keys off ``comp.tunables.teleop_active`` for
+     * behavior (drag emits jog frames vs. one MOVE_COMPONENT).
+     */
     ghostState: {},
     draggingComponent: null,
     /** Lab mm pose of the dragged component at mousedown (for Shift = H/V axis lock). */
@@ -31,29 +48,22 @@ export const store = {
     optimizationData: [],
     isRecording: false,
     currentRecipeSteps: [],
+    /**
+     * Catalog rows keyed by ``tag_id``. Populated by
+     * ``fetchCatalogMap()`` at boot from ``GET /api/catalog``. After
+     * Phase 5, each row carries a ``capabilities`` block (tunables /
+     * measurables / telemetry / primitives) that drives the symmetric
+     * per-component viewer in Phase 7 — see
+     * ``frontend/js/ui/component-viewer.js``.
+     */
     catalogMap: {},
-    selectedTableCam: 1,
-    /** Per CAM (1/2): CONNECT lifecycle (lazy cloud recorder + mock parity). */
-    tableCamConnected: { 1: false, 2: false },
-    /** Optimistic / in-flight CONNECT (grey "Connecting" button). */
-    tableCamConnecting: { 1: false, 2: false },
-    /** STREAM_ON semantics per CAM — drives `/api/table-cam/stream`. */
-    tableCamLive: { 1: false, 2: false },
-    /** Optimistic live toggle in flight (reconcile on server response). */
-    tableCamLivePending: { 1: false, 2: false },
-    /** Capture in progress (Still + "Capturing…" shown immediately). */
-    tableCamCapturePending: { 1: false, 2: false },
-    /** From GET /api/table-cam/status: real | mock | none */
-    tableCamHardware: { 1: 'none', 2: 'none' },
-    tableCamLastError: { 1: null, 2: null },
-    tableCamRecorderAlive: true,
-    tableCamRecorderVariant: 'cloudlab',
-    /** Seconds; live VEXP + capture exposure */
-    tableCamExposure: 0.02,
-    /** Per CAM: Object URL from last PNG capture (`URL.createObjectURL`) */
-    tableCamLastBlobUrl: { 1: null, 2: null },
-    /** Object URL for Cobyla reference preview image (revoked when clearing/updating). */
-    cobylaRefPreviewObjectUrl: null,
+    /** Default camera exposure (seconds) for COBYLA/NEWTON when command omits `exposure`. */
+    defaultCameraExposureSec: 0.02,
+    // Phase 9d removed the table-cam dock and its store fields.
+    // Phase 9a deleted the legacy Cobyla-reference preview object URL
+    // (the field tracked the URL.createObjectURL handle for the dropped
+    // red-bordered preview slot); the per-component camera viewer reads
+    // the latest captured PNG from measurables.camera_image instead.
     /** From GET /api/layout-conflicts */
     layoutIssues: [],
     /** From GET /api/storage-grid (inventory cell overlay) */
@@ -68,6 +78,12 @@ export const store = {
      * and HOLDING → IDLE transitions immediately swap the in-air controls.
      */
     contextPanelStatusSnapshot: null,
+    /**
+     * JSON snapshot of the selected component's tunables + measurables.
+     * When this changes, the context panel re-renders so read-only widgets
+     * and primitive regions (e.g. TELEOP) stay in sync without re-clicking.
+     */
+    contextPanelDataSnapshot: null,
     /** STORED part id when "Drag from storage" mode is active (only that part can be dragged to place). */
     dragFromStorageTag: null,
     /** Ghost pose snapshot at mousedown when starting a drag-from-storage move (for cancel/revert). */

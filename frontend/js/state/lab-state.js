@@ -11,7 +11,7 @@
  *      `drawPose()` falls back to `measurables.pose` defensively for legacy state files.
  *   2. **Context panel state snapshots** — re-render the side panel on placement / holding edges
  *      but ignore the transient BUSY phase so the panel doesn't flicker mid-command.
- *   3. **Auxiliary cross-feature side effects** — optimization overlay, table-cam highlight,
+ *   3. **Auxiliary cross-feature side effects** — optimization preview overlay,
  *      session reconciliation, layout conflict refresh.
  *
  * The function is intentionally long because it encodes a tricky finite-state-machine over the
@@ -28,6 +28,7 @@ import {
     isHeldTag,
     isHoldingState,
     isOnTableComponent,
+    shouldRenderOnCanvas,
 } from '../component-model.js';
 import { showErrorModal } from '../ui/modals.js';
 import { maybeTriggerSessionReconciliation } from '../ui/session-reconciliation.js';
@@ -36,12 +37,6 @@ import {
     updateLayoutConflictModal,
     updateLayoutWarningBanner,
 } from '../ui/layout-conflicts.js';
-import {
-    clearTableCamError,
-    restoreTableCamPanelVisuals,
-    updateTableCamMockPreviewChrome,
-} from '../table-cam/panel.js';
-
 let _deps = {
     placementUiLabel: () => 'PLACED',
     updateContextPanel: () => {},
@@ -50,6 +45,46 @@ let _deps = {
 };
 
 let _pollTimerId = null;
+
+/**
+ * Resolve which component tag is currently being optimized.
+ *
+ * Primary source: ``labState.optimization_target_id`` (set by the
+ * backend during ``OPTIMIZE`` — Phase 9b). Fallback: scan
+ * ``store.pendingActions`` for an in-flight ``OPTIMIZE`` command.
+ *
+ * @param {object | null | undefined} labState
+ * @returns {string | null}
+ */
+function resolveOptimizationTargetId(labState) {
+    if (!labState || typeof labState !== 'object') return null;
+    const direct = labState.optimization_target_id;
+    if (typeof direct === 'string' && direct) return direct;
+    for (const [tag, action] of store.pendingActions) {
+        if (action === 'OPTIMIZE') return tag;
+    }
+    return null;
+}
+
+function resetOptimizationFeedPreview() {
+    const preview = document.getElementById('optimization-feed-preview');
+    const img = document.getElementById('optimization-feed-img');
+    const placeholder = document.getElementById('optimization-feed-placeholder');
+    if (preview) {
+        preview.style.border = '1px solid var(--border-color)';
+        preview.style.backgroundColor = '#0f1115';
+        preview.style.boxShadow = '';
+    }
+    if (img) {
+        img.src = '';
+        img.style.display = 'none';
+    }
+    if (placeholder) {
+        placeholder.style.display = 'flex';
+        placeholder.innerHTML =
+            'Runs during OPTIMIZE — per-component optimization stream.';
+    }
+}
 
 /**
  * @param {{
@@ -121,7 +156,7 @@ export async function fetchLabState() {
             }
 
             Object.entries(store.labState.components).forEach(([name, comp]) => {
-                if (isOnTableComponent(comp)) {
+                if (shouldRenderOnCanvas(name, comp)) {
                     const dp = drawPose(comp);
                     const hasPose = dp && Object.keys(dp).length > 0;
                     // First load: initialize from drawPose (intent first, measured fallback).
@@ -183,6 +218,18 @@ export async function fetchLabState() {
             });
 
             if (shouldSync) store.forceGhostSync = false;
+
+            // Phase 8b: sync ``ghost.source`` from ``tunables.teleop_active``.
+            Object.entries(store.labState.components).forEach(([name, comp]) => {
+                const ghost = store.ghostState[name];
+                if (!ghost || typeof ghost !== 'object') return;
+                const teleopActive = !!(comp && comp.tunables && comp.tunables.teleop_active);
+                if (teleopActive) {
+                    ghost.source = 'teleop';
+                } else if (ghost.source === 'teleop') {
+                    delete ghost.source;
+                }
+            });
         }
 
         // Rebuild context panel when EITHER the selected component's placement label OR the
@@ -204,7 +251,14 @@ export async function fetchLabState() {
                 store.contextPanelStatusSnapshot != null &&
                 store.contextPanelStatusSnapshot !== statusKey &&
                 rawStatus !== 'BUSY';
-            if (placementChanged || statusChanged) {
+            const dataKey = JSON.stringify({
+                tunables: compCtx.tunables || {},
+                measurables: compCtx.measurables || {},
+            });
+            const dataChanged =
+                store.contextPanelDataSnapshot != null &&
+                store.contextPanelDataSnapshot !== dataKey;
+            if (placementChanged || statusChanged || dataChanged) {
                 if (placementChanged && isOnTableComponent(compCtx) && !store.isDragging) {
                     const dp = drawPose(compCtx);
                     store.ghostState[selCtx] = { ...dp };
@@ -214,6 +268,7 @@ export async function fetchLabState() {
                 }
                 _deps.updateContextPanel(selCtx);
                 _deps.updateMotorAngleLabels(selCtx);
+                store.contextPanelDataSnapshot = dataKey;
             }
         }
         // Only snapshot stable states so a transient BUSY in-between doesn't "use up" the real
@@ -244,16 +299,7 @@ export async function fetchLabState() {
                 if (optOverlay) optOverlay.style.display = 'none';
                 store.isOptimizingFeedActive = false;
 
-                // Revert table-cam preview to latest capture vs live MJPEG vs placeholder.
-                const tableCamPreview = document.getElementById('table-cam-preview');
-                if (tableCamPreview) {
-                    tableCamPreview.style.border = '1px solid var(--border-color)';
-                    tableCamPreview.style.backgroundColor = '#0f1115';
-                    tableCamPreview.style.boxShadow = '';
-                }
-
-                restoreTableCamPanelVisuals();
-                updateTableCamMockPreviewChrome();
+                resetOptimizationFeedPreview();
             }
         } else if (store.labState.system_status === 'OPTIMIZING') {
             store.isOptimizing = true;
@@ -268,38 +314,38 @@ export async function fetchLabState() {
                 optStepText.innerText = `OPTIMIZING (Step ${store.labState.optimization_step || 0})${runBit}`;
             }
 
-            // Highlight the table-cam preview while optimizing — visual cue that the optimizer
-            // owns the camera. The actual feed swap happens below.
-            const tableCamPreview = document.getElementById('table-cam-preview');
-            if (tableCamPreview) {
-                console.log(`[UI] OPTIMIZING -> highlighting table-cam-preview (step=${store.labState.optimization_step || 0})`);
-                tableCamPreview.style.border = '2px solid #22c55e';
-                tableCamPreview.style.backgroundColor = '#0b2a19';
-                tableCamPreview.style.boxShadow = '0 0 0 3px rgba(34,197,94,0.25)';
+            const feedPreview = document.getElementById('optimization-feed-preview');
+            if (feedPreview) {
+                feedPreview.style.border = '2px solid #22c55e';
+                feedPreview.style.backgroundColor = '#0b2a19';
+                feedPreview.style.boxShadow = '0 0 0 3px rgba(34,197,94,0.25)';
             }
 
             if (!store.isOptimizingFeedActive) {
                 store.isOptimizingFeedActive = true;
-                const tableCamImg = document.getElementById('table-cam-img');
-                const tableCamPlaceholder = document.getElementById('table-cam-placeholder');
+                const feedImg = document.getElementById('optimization-feed-img');
+                const feedPlaceholder = document.getElementById('optimization-feed-placeholder');
+                const optTarget = resolveOptimizationTargetId(store.labState);
 
-                if (tableCamImg) {
-                    // Drop the old captured image immediately so the user sees the new feed switch.
-                    tableCamImg.src = '';
-                    tableCamImg.style.display = 'none';
-                    console.log('[UI] switching table-cam to optimization-feed stream...');
-                    if (tableCamPlaceholder) {
-                        tableCamPlaceholder.style.display = 'flex';
+                if (feedImg && optTarget) {
+                    feedImg.src = '';
+                    feedImg.style.display = 'none';
+                    if (feedPlaceholder) {
+                        feedPlaceholder.style.display = 'flex';
                         const runBit2 = store.labState.optimization_run_dir
                             ? `<br><span style="font-size:9px;opacity:0.85">${store.labState.optimization_run_dir}</span>`
                             : '';
-                        tableCamPlaceholder.innerHTML = `<span class="material-icons-round" style="font-size: 18px; margin-bottom: 2px;">auto_awesome</span><div>Optimizing... (Step ${store.labState.optimization_step || 0})${runBit2}</div>`;
+                        feedPlaceholder.innerHTML = `<span class="material-icons-round" style="font-size: 18px; margin-bottom: 2px;">auto_awesome</span><div>Optimizing... (Step ${store.labState.optimization_step || 0})${runBit2}</div>`;
                     }
 
-                    tableCamImg.src = `/api/optimization-feed/stream?t=${Date.now()}`;
-                    tableCamImg.style.display = 'block';
-                    if (tableCamPlaceholder) tableCamPlaceholder.style.display = 'none';
-                    clearTableCamError();
+                    feedImg.src =
+                        `/api/components/${encodeURIComponent(optTarget)}/telemetry/optimization-stream?t=${Date.now()}`;
+                    feedImg.style.display = 'block';
+                    if (feedPlaceholder) feedPlaceholder.style.display = 'none';
+                } else if (feedImg && !optTarget) {
+                    console.warn(
+                        '[UI] OPTIMIZING but optimization_target_id unknown — skipping feed swap',
+                    );
                 }
             }
 

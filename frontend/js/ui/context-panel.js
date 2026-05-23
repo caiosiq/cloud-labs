@@ -6,8 +6,8 @@
  *   1. Placement state: PLACED | STORED | INVENTORY (`placementUiLabel`).
  *   2. System status:   IDLE | HOLDING (`holding` + `unconfirmed`).
  *
- * It owns the "in-air manipulation" sub-section, motor controls, scan-rotate, and the various
- * STORED affordances (drag-from-storage, place-from-storage, recenter).
+ * Read-only capability panels and per-primitive forms live in ``component-popup.js`` /
+ * ``frontend/js/primitives/``.
  *
  * Dependencies that are still in `app-main.js` (the canvas `render()` plus the
  * `fetchLabState` call site after observing measurables) are injected at boot via
@@ -17,23 +17,27 @@ import { store } from '../state/store.js';
 import { log } from './log.js';
 import { sendCommand } from '../api/commands.js';
 import { showParameterModal } from './modals.js';
-import { isStorageRegion } from '../storage-region.js';
 import {
     getHolding,
-    isHeldTag,
     isHoldingState,
     isHoldingUnconfirmed,
+    isChromeComponent,
     isOffTableComponent,
-    isOnTableComponent,
     isStoredComponent,
     measPose,
 } from '../component-model.js';
-import { fetchLabState } from '../state/lab-state.js';
+import { renderComponentPopup } from './component-popup.js';
 
 const PRIMITIVE_DEV_HINTS =
     typeof window !== 'undefined' &&
     typeof window.location !== 'undefined' &&
     /(?:^|[?&])dev=1(?:&|$)/.test(window.location.search || '');
+
+// Phase 7 superseded the hand-built ``renderMeasurablesReceipt`` from
+// Phase 4; the symmetric per-component viewer in
+// ``frontend/js/ui/component-viewer.js`` now renders MEASURABLES (and
+// TUNABLES + TELEMETRY + PRIMITIVES) from the catalog's
+// ``capabilities`` block via the widget registry.
 
 // DOM refs (resolved lazily so we don't need DI for elements that exist at boot anyway).
 function refs() {
@@ -114,6 +118,7 @@ export function clearSelectionAndHideContextPanel() {
     store.selectedComponent = null;
     store.contextPanelStateSnapshot = null;
     store.contextPanelStatusSnapshot = null;
+    store.contextPanelDataSnapshot = null;
     store.dragFromStorageTag = null;
     store.dragFromStorageStartPose = null;
     const r = refs();
@@ -192,357 +197,19 @@ export function updateHoldingBanner() {
     }
 }
 
-// --- Motor commands ---
-
-async function moveMotor(targetId, motorId, dist) {
-    await sendCommand({
-        action: 'MOVE_MOTOR',
-        target_id: targetId,
-        parameters: { motor_id: motorId, distance: dist },
-    });
-}
-
-async function motorSendHome(targetId, motorId) {
-    await sendCommand({
-        action: 'MOTOR_SEND_HOME',
-        target_id: targetId,
-        parameters: { motor_id: motorId },
-    });
-}
-
-async function motorSetZero(targetId, motorId) {
-    await sendCommand({
-        action: 'MOTOR_SET_ZERO',
-        target_id: targetId,
-        parameters: { motor_id: motorId },
-    });
-}
-
-/** Refresh tracked motor angle labels from lab-state (pose.motor_rotations). */
+/** Refresh tracked motor angle labels in primitive UI regions. */
 export function updateMotorAngleLabels(tagId) {
     if (!tagId || !store.labState || !store.labState.components) return;
     const comp = store.labState.components[tagId];
     if (!comp) return;
     const mr = (measPose(comp).motor_rotations) || {};
-    const mids = store.catalogMap[tagId] && store.catalogMap[tagId].motor_ids;
-    if (!mids || !mids.length) return;
-    mids.forEach((mid) => {
-        const el = document.getElementById(`ctx-motor-angle-${mid}`);
-        if (!el) return;
+    document.querySelectorAll(`[data-motor-angle^="${tagId}:"]`).forEach((el) => {
+        const mid = (el.dataset.motorAngle || '').split(':')[1];
+        if (!mid) return;
         const v = mr[String(mid)];
         const n = (v !== undefined && v !== null && Number.isFinite(Number(v))) ? Number(v) : 0;
-        el.textContent = `θ ${n.toFixed(2)}`;
+        el.textContent = `θ ${n.toFixed(2)}°`;
     });
-}
-
-// --- Scan-rotate sub-panel ---
-
-/**
- * Build the Scan-Rotate In Place sub-panel (θ_min, θ_max, deg/s, Start).
- * The UI is identical regardless of whether the component is currently held or placed — the
- * backend decides which `lab_automation` function to call based on `system_status` at dispatch
- * time (see new_primitives.md §7 and labautomation_new_primitives.md §2.4).
- *
- * `contextHint` ("held" | "placed") only tweaks the helper text.
- */
-function buildScanRotateSubPanel(tagId, { contextHint = 'held' } = {}) {
-    const scan = document.createElement('div');
-    scan.style.marginTop = '12px';
-    scan.style.paddingTop = '10px';
-    scan.style.borderTop = '1px dashed #2a2e36';
-    const scanHdr = document.createElement('div');
-    scanHdr.style.fontSize = '10px';
-    scanHdr.style.color = '#94a3b8';
-    scanHdr.style.fontWeight = '600';
-    scanHdr.style.marginBottom = '6px';
-    scanHdr.textContent = 'SCAN ROTATE IN PLACE';
-    scan.appendChild(scanHdr);
-
-    const hint = document.createElement('p');
-    hint.style.fontSize = '10px';
-    hint.style.color = '#94a3b8';
-    hint.style.lineHeight = '1.4';
-    hint.style.margin = '0 0 6px 0';
-    hint.innerHTML = contextHint === 'placed'
-        ? 'Briefly grips the part with the robot arm, sweeps \u03b8, then releases it back at the same XY at the new rotation. Works regardless of whether the component has a motor.'
-        : 'Rotates the held part in-air while XY + Z stay locked at the hover pose.';
-    scan.appendChild(hint);
-
-    const scanGrid = document.createElement('div');
-    scanGrid.style.display = 'grid';
-    scanGrid.style.gridTemplateColumns = '1fr 1fr 1fr';
-    scanGrid.style.gap = '6px';
-    const scanTMin = document.createElement('input');
-    scanTMin.type = 'number';
-    scanTMin.className = 'coord-input';
-    scanTMin.placeholder = 'θ min°';
-    scanTMin.value = '-45';
-    const scanTMax = document.createElement('input');
-    scanTMax.type = 'number';
-    scanTMax.className = 'coord-input';
-    scanTMax.placeholder = 'θ max°';
-    scanTMax.value = '45';
-    const scanSpd = document.createElement('input');
-    scanSpd.type = 'number';
-    scanSpd.className = 'coord-input';
-    scanSpd.placeholder = 'deg/s';
-    scanSpd.value = '30';
-    scanGrid.appendChild(scanTMin);
-    scanGrid.appendChild(scanTMax);
-    scanGrid.appendChild(scanSpd);
-    scan.appendChild(scanGrid);
-
-    const bScan = document.createElement('button');
-    bScan.type = 'button';
-    bScan.className = 'btn btn-secondary';
-    bScan.style.marginTop = '6px';
-    bScan.style.fontSize = '11px';
-    bScan.style.width = '100%';
-    bScan.innerHTML =
-        '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">rotate_right</span> Start scan rotate';
-    bScan.onclick = async () => {
-        const tmin = parseFloat(scanTMin.value);
-        const tmax = parseFloat(scanTMax.value);
-        const spd = parseFloat(scanSpd.value);
-        if (![tmin, tmax, spd].every(Number.isFinite) || !(spd > 0)) {
-            log('Invalid scan params (need numbers; speed > 0).', 'error');
-            return;
-        }
-        await sendCommand({
-            action: 'SCAN_ROTATE_IN_PLACE',
-            target_id: tagId,
-            parameters: {
-                theta_min: tmin,
-                theta_max: tmax,
-                speed_deg_per_s: spd,
-                axis: 'z',
-            },
-        });
-    };
-    scan.appendChild(bScan);
-    return scan;
-}
-
-// --- In-air manipulation sub-section ---
-
-/**
- * Render the in-air manipulation section (Pick / Hover / Place-from-hover /
- * Scan-rotate / Confirm) in the context panel. Behavior depends on the
- * current HOLDING state (see new_primitives.md §6):
- *
- *  - IDLE & selected part is on-table:  show Pick button.
- *  - HOLDING_UNCONFIRMED:                show confirm button + lock message.
- *  - HOLDING & selected is held tag:     show Hover form + Place + Scan.
- *  - HOLDING & selected is NOT held:     disable ctx-move-btn with notice.
- */
-function renderInAirControlsForContext(name, comp, placementState) {
-    document.querySelectorAll('.ctx-in-air').forEach((el) => el.remove());
-
-    const { ctxX, ctxY, ctxRot, ctxMoveBtn, ctxStrategies } = refs();
-
-    const labState = store.labState || {};
-    const holding = isHoldingState(labState);
-    const unconfirmed = isHoldingUnconfirmed(labState);
-    const held = getHolding(labState).tag_id;
-    const selectedIsHeld = isHeldTag(name, labState);
-
-    const section = document.createElement('div');
-    section.className = 'ctx-in-air';
-    section.style.marginTop = '14px';
-    section.style.paddingTop = '10px';
-    section.style.borderTop = '1px solid #2a2e36';
-
-    const header = document.createElement('div');
-    header.style.fontSize = '10px';
-    header.style.color = '#94a3b8';
-    header.style.fontWeight = '600';
-    header.style.marginBottom = '6px';
-    header.textContent = 'IN-AIR MANIPULATION';
-    section.appendChild(header);
-
-    if (unconfirmed) {
-        const p = document.createElement('p');
-        p.style.fontSize = '10px';
-        p.style.color = '#fca5a5';
-        p.style.lineHeight = '1.4';
-        p.style.margin = '0 0 8px 0';
-        p.innerHTML =
-            'Gripper reports closed on startup. Select the tag physically in the gripper and click <strong>Confirm held tag</strong>. All other commands are blocked until confirmed.';
-        section.appendChild(p);
-
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn btn-primary';
-        btn.style.width = '100%';
-        btn.style.fontSize = '11px';
-        btn.innerHTML =
-            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">verified</span> Confirm held tag: ' +
-            name;
-        btn.onclick = () =>
-            sendCommand({ action: 'CONFIRM_HOLDING_TAG', target_id: name, parameters: {} });
-        section.appendChild(btn);
-        if (ctxStrategies && ctxStrategies.parentNode) ctxStrategies.parentNode.appendChild(section);
-        // Block regular move while unconfirmed.
-        if (ctxMoveBtn) {
-            ctxMoveBtn.disabled = true;
-            ctxMoveBtn.title = 'Disabled while HOLDING is unconfirmed.';
-        }
-        return;
-    }
-
-    if (holding && !selectedIsHeld) {
-        const p = document.createElement('p');
-        p.style.fontSize = '10px';
-        p.style.color = '#c4b5fd';
-        p.style.lineHeight = '1.4';
-        p.style.margin = '0 0 4px 0';
-        p.innerHTML =
-            `Robot is currently holding <strong>${held || '<tag>'}</strong>. ` +
-            'Release it (Place from hover) before interacting with another part.';
-        section.appendChild(p);
-        if (ctxStrategies && ctxStrategies.parentNode) ctxStrategies.parentNode.appendChild(section);
-        if (ctxMoveBtn) {
-            ctxMoveBtn.disabled = true;
-            ctxMoveBtn.title = `Disabled: robot is holding ${held || 'another part'}.`;
-        }
-        return;
-    }
-
-    // From here on, the regular move button is re-enabled.
-    if (ctxMoveBtn) {
-        ctxMoveBtn.disabled = false;
-        ctxMoveBtn.title = '';
-    }
-
-    if (holding && selectedIsHeld) {
-        // Hide the generic Move button — use Hover / Place-from-hover instead.
-        if (ctxMoveBtn) ctxMoveBtn.style.display = 'none';
-
-        const hld = getHolding(labState);
-        // Default safe hover height is 40 mm above the breadboard surface; reuse the held part's
-        // current z when known so the user doesn't have to re-enter it every action.
-        const currentZ =
-            (hld.nominal_pose && Number.isFinite(Number(hld.nominal_pose.z)))
-                ? Number(hld.nominal_pose.z)
-                : 40.0;
-
-        const zRow = document.createElement('div');
-        zRow.style.marginBottom = '8px';
-        const zLabel = document.createElement('label');
-        zLabel.style.fontSize = '10px';
-        zLabel.style.color = '#94a3b8';
-        zLabel.style.display = 'block';
-        zLabel.style.marginBottom = '4px';
-        zLabel.textContent = 'Z CLEARANCE (mm above table)';
-        zLabel.title =
-            'Height of the component\'s base above the breadboard surface. ' +
-            '0 = on the table, 40 = default safe hover height.';
-        zRow.appendChild(zLabel);
-        const zInp = document.createElement('input');
-        zInp.type = 'number';
-        zInp.id = 'ctx-z';
-        zInp.step = '0.5';
-        zInp.className = 'coord-input';
-        zInp.style.width = '100%';
-        zInp.value = currentZ.toFixed(1);
-        zRow.appendChild(zInp);
-        section.appendChild(zRow);
-
-        const btnRow = document.createElement('div');
-        btnRow.style.display = 'flex';
-        btnRow.style.flexDirection = 'column';
-        btnRow.style.gap = '6px';
-
-        const bHover = document.createElement('button');
-        bHover.type = 'button';
-        bHover.className = 'btn btn-secondary';
-        bHover.style.fontSize = '11px';
-        bHover.style.width = '100%';
-        bHover.innerHTML =
-            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">open_with</span> Hover to X/Y/Rot/Z';
-        bHover.onclick = async () => {
-            const tx = parseFloat(ctxX.value);
-            const ty = parseFloat(ctxY.value);
-            const trot = parseFloat(ctxRot.value);
-            const tz = parseFloat(zInp.value);
-            if (![tx, ty, trot, tz].every(Number.isFinite)) {
-                log('Invalid coordinates for HOVER (need x, y, rotation, z).', 'error');
-                return;
-            }
-            await sendCommand({
-                action: 'HOVER',
-                target_id: name,
-                parameters: { target_x: tx, target_y: ty, rotation: trot, z: tz },
-            });
-        };
-        btnRow.appendChild(bHover);
-
-        const bPlace = document.createElement('button');
-        bPlace.type = 'button';
-        bPlace.className = 'btn btn-primary';
-        bPlace.style.fontSize = '11px';
-        bPlace.style.width = '100%';
-        bPlace.innerHTML =
-            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">south_east</span> Place from hover';
-        bPlace.onclick = async () => {
-            const tx = parseFloat(ctxX.value);
-            const ty = parseFloat(ctxY.value);
-            const trot = parseFloat(ctxRot.value);
-            if (![tx, ty, trot].every(Number.isFinite)) {
-                log('Invalid coordinates.', 'error');
-                return;
-            }
-            if (isStorageRegion(tx, ty)) {
-                log('Place target must be outside the storage quadrant.', 'error');
-                return;
-            }
-            await sendCommand({
-                action: 'PLACE_FROM_HOVER',
-                target_id: name,
-                parameters: { target_x: tx, target_y: ty, rotation: trot },
-            });
-        };
-        btnRow.appendChild(bPlace);
-
-        section.appendChild(btnRow);
-
-        section.appendChild(buildScanRotateSubPanel(name, { contextHint: 'held' }));
-
-        if (ctxStrategies && ctxStrategies.parentNode) ctxStrategies.parentNode.appendChild(section);
-        return;
-    }
-
-    // IDLE path: expose PICK for on-table parts + Scan Rotate (placed-mode).
-    if (comp && isOnTableComponent(comp) && placementState !== 'STORED') {
-        const p = document.createElement('p');
-        p.style.fontSize = '10px';
-        p.style.color = '#94a3b8';
-        p.style.lineHeight = '1.4';
-        p.style.margin = '0 0 6px 0';
-        p.innerHTML =
-            '<strong>Pick</strong> closes the gripper on this part and lifts to a safe Z (→ HOLDING). ' +
-            'Then use <strong>Hover</strong> to re-pose mid-air, <strong>Place from hover</strong> to set down. ' +
-            '<strong>Scan rotate</strong> sweeps θ in place — the robot decides whether to rotate it in-air or on the table.';
-        section.appendChild(p);
-
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn btn-secondary';
-        btn.style.fontSize = '11px';
-        btn.style.width = '100%';
-        btn.innerHTML =
-            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">pan_tool</span> Pick up (start HOLDING)';
-        btn.onclick = () =>
-            sendCommand({ action: 'PICK_COMPONENT', target_id: name, parameters: {} });
-        section.appendChild(btn);
-
-        // Placed-mode scan-rotate: same user intent (sweep θ at constant rate), but the backend
-        // dispatches to `scan_rotate_placed_cloudlab` in lab_automation instead of the held-mode
-        // function.
-        section.appendChild(buildScanRotateSubPanel(name, { contextHint: 'placed' }));
-
-        if (ctxStrategies && ctxStrategies.parentNode) ctxStrategies.parentNode.appendChild(section);
-    }
 }
 
 // --- Main: updateContextPanel ---
@@ -592,105 +259,61 @@ export function updateContextPanel(name) {
 
     contextPanel.style.display = 'block';
 
+    const chromeOnly = isChromeComponent(name);
+    const tablePoseSection = document.getElementById('ctx-table-pose-section');
+    const tableMotionSection = document.getElementById('ctx-table-motion-section');
+    if (tablePoseSection) tablePoseSection.style.display = 'none';
+    if (tableMotionSection) tableMotionSection.style.display = 'none';
+
     document.querySelectorAll('.ctx-dynamic-storage').forEach((el) => el.remove());
 
     const placementState = placementUiLabel(comp);
-    ctxX.value = pose.x.toFixed(1);
-    ctxY.value = pose.y.toFixed(1);
-    ctxRot.value = (pose.rotation || 0).toFixed(1);
+    if (pose && Number.isFinite(pose.x)) {
+        ctxX.value = pose.x.toFixed(1);
+        ctxY.value = pose.y.toFixed(1);
+        ctxRot.value = (pose.rotation || 0).toFixed(1);
+    } else {
+        ctxX.value = '';
+        ctxY.value = '';
+        ctxRot.value = '';
+    }
 
     if (ctxRecordSlot) {
         ctxRecordSlot.innerHTML = '';
         const wrap = document.createElement('div');
-        wrap.style.borderTop = '1px solid #2a2e36';
-        wrap.style.paddingTop = '10px';
-        wrap.style.marginTop = '4px';
-        const h = document.createElement('div');
-        h.style.fontSize = '10px';
-        h.style.color = '#94a3b8';
-        h.style.fontWeight = '600';
-        h.style.marginBottom = '6px';
-        h.textContent = 'MEASURABLES: SAVED VS OBSERVE';
-        wrap.appendChild(h);
-        const p = document.createElement('p');
-        p.style.fontSize = '9px';
-        p.style.color = '#64748b';
-        p.style.lineHeight = '1.35';
-        p.style.margin = '0 0 8px 0';
-        p.innerHTML =
-            'Coordinates above are <strong>intent</strong> (ghost). The UI polls <strong>saved</strong> measurables via lab state. <strong>Record</strong> asks the lab to take a fresh measurement (e.g. camera → <code style="color:#94a3b8;">camera_image</code>).';
-        wrap.appendChild(p);
+        wrap.style.marginTop = chromeOnly ? '0' : '8px';
+        if (chromeOnly) {
+            const hint = document.createElement('p');
+            hint.style.fontSize = '9px';
+            hint.style.color = '#64748b';
+            hint.style.lineHeight = '1.35';
+            hint.style.margin = '0 0 8px 0';
+            hint.textContent =
+                'Fixed bench component — not placed on the table. Use the chrome bar above the canvas for quick access.';
+            wrap.appendChild(hint);
+        }
+        wrap.appendChild(
+            renderComponentPopup(name, {
+                placementState,
+                checkCollision: _checkCollision,
+                render: _render,
+                updateContextPanel,
+                showParameterModal,
+            }),
+        );
         if (PRIMITIVE_DEV_HINTS) {
             const dev = document.createElement('div');
             dev.style.fontSize = '9px';
             dev.style.color = '#475569';
-            dev.style.marginBottom = '6px';
+            dev.style.marginTop = '6px';
             dev.innerHTML =
-                'Dev: <code>RECORD_MEASURABLES</code> · <code>POST /api/components/{tag}/measurables/record</code>';
+                'Dev: <code>POST /api/components/{tag}/measurables/record</code>';
             wrap.appendChild(dev);
-        }
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.alignItems = 'center';
-        row.style.flexWrap = 'wrap';
-        row.style.gap = '8px';
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn btn-secondary';
-        btn.style.fontSize = '11px';
-        btn.style.padding = '6px 10px';
-        btn.innerHTML =
-            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">photo_camera</span> Record measurables';
-        const status = document.createElement('span');
-        status.style.fontSize = '10px';
-        status.style.color = '#94a3b8';
-        btn.onclick = async () => {
-            status.textContent = '…';
-            btn.disabled = true;
-            try {
-                const r = await fetch(
-                    `/api/components/${encodeURIComponent(name)}/measurables/record`,
-                    { method: 'POST' },
-                );
-                const data = await r.json().catch(() => ({}));
-                if (!r.ok) {
-                    const det = data.detail !== undefined ? data.detail : r.status;
-                    const msg = typeof det === 'string' ? det : JSON.stringify(det);
-                    log(`Record failed: ${msg}`, 'error');
-                    status.textContent = 'Failed';
-                    return;
-                }
-                status.textContent = 'OK';
-                const ci = data.measurables && data.measurables.camera_image;
-                if (ci && typeof ci === 'object' && ci.path) {
-                    const base = String(ci.path).replace(/^.*[/\\\\]/, '');
-                    status.textContent = `OK · ${base}`;
-                }
-                await fetchLabState();
-                updateContextPanel(name);
-            } catch (e) {
-                log(`Record error: ${e && e.message ? e.message : e}`, 'error');
-                status.textContent = 'Error';
-            } finally {
-                btn.disabled = false;
-            }
-        };
-        row.appendChild(btn);
-        row.appendChild(status);
-        wrap.appendChild(row);
-        const lu = store.labState && store.labState.last_updated;
-        if (lu) {
-            const luEl = document.createElement('div');
-            luEl.style.fontSize = '9px';
-            luEl.style.color = '#64748b';
-            luEl.style.marginTop = '6px';
-            luEl.textContent = `Lab state last_updated: ${lu}`;
-            wrap.appendChild(luEl);
         }
         ctxRecordSlot.appendChild(wrap);
     }
 
-    if (placementState === 'STORED') {
+    if (!chromeOnly && placementState === 'STORED') {
         if (ctxMoveBtn) ctxMoveBtn.style.display = 'none';
         const hint = document.createElement('div');
         hint.className = 'ctx-dynamic-storage';
@@ -701,256 +324,22 @@ export function updateContextPanel(name) {
         hint.innerHTML =
             'Stored in Q3 at <strong>cell center</strong> and <strong>0°</strong> by default. Use <strong>Drag from storage</strong> or set X/Y/Rot and <strong>Place from storage</strong>.';
         if (selectedCompProperties) selectedCompProperties.appendChild(hint);
-    } else {
+    } else if (!chromeOnly) {
         if (ctxMoveBtn) ctxMoveBtn.style.display = 'flex';
     }
 
     if (ctxStrategies) {
         ctxStrategies.innerHTML = '';
-        if (placementState !== 'STORED' && store.availableStrategies) {
-            Object.entries(store.availableStrategies).forEach(([stratKey, strat]) => {
-                const btn = document.createElement('button');
-                btn.className = 'btn btn-secondary';
-                btn.style.width = '100%';
-                btn.style.marginBottom = '4px';
-                btn.style.fontSize = '10px';
-                btn.style.padding = '6px';
-                btn.style.textAlign = 'left';
-                btn.innerHTML = `<span class="material-icons-round" style="font-size: 12px; vertical-align: middle;">settings_suggest</span> ${strat.name}`;
-                btn.onclick = () => showParameterModal(stratKey, strat);
-                ctxStrategies.appendChild(btn);
-            });
-        }
+        ctxStrategies.style.display = 'none';
     }
-
-    if (placementState === 'PLACED' && ctxMoveBtn && ctxMoveBtn.parentNode) {
-        const row = document.createElement('div');
-        row.className = 'ctx-dynamic-storage';
-        row.style.marginTop = '10px';
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'btn btn-secondary';
-        b.style.fontSize = '11px';
-        b.style.width = '100%';
-        b.innerHTML = '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">inventory_2</span> Move to storage (auto pack)';
-        b.onclick = () =>
-            sendCommand({ action: 'STORE_COMPONENT', target_id: name, parameters: {} });
-        row.appendChild(b);
-        ctxMoveBtn.parentNode.insertBefore(row, ctxMoveBtn.nextSibling);
-    }
-
-    if (placementState === 'STORED' && ctxMoveBtn && ctxMoveBtn.parentNode) {
-        const rowPlace = document.createElement('div');
-        rowPlace.className = 'ctx-dynamic-storage';
-        rowPlace.style.marginTop = '10px';
-        rowPlace.style.display = 'flex';
-        rowPlace.style.flexDirection = 'column';
-        rowPlace.style.gap = '6px';
-
-        const bPlace = document.createElement('button');
-        bPlace.type = 'button';
-        bPlace.className = 'btn btn-primary';
-        bPlace.style.fontSize = '11px';
-        bPlace.style.width = '100%';
-        bPlace.innerHTML =
-            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">north_east</span> Place from storage';
-        bPlace.onclick = async () => {
-            store.dragFromStorageTag = null;
-            store.dragFromStorageStartPose = null;
-            const tx = parseFloat(ctxX.value);
-            const ty = parseFloat(ctxY.value);
-            const trot = parseFloat(ctxRot.value);
-            if (!Number.isFinite(tx) || !Number.isFinite(ty) || !Number.isFinite(trot)) {
-                log('Invalid coordinates.', 'error');
-                return;
-            }
-            if (isStorageRegion(tx, ty)) {
-                log('Target must be outside the configured storage (inventory) rectangle.', 'error');
-                return;
-            }
-            await sendCommand({
-                action: 'PLACE_FROM_STORAGE',
-                target_id: name,
-                parameters: { target_x: tx, target_y: ty, rotation: trot },
-            });
-        };
-        rowPlace.appendChild(bPlace);
-
-        const bRecenter = document.createElement('button');
-        bRecenter.type = 'button';
-        bRecenter.className = 'btn btn-secondary';
-        bRecenter.style.fontSize = '11px';
-        bRecenter.style.width = '100%';
-        bRecenter.title = 'Robot moves part to cell center at 0° (standard storage pose).';
-        bRecenter.innerHTML =
-            '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">center_focus_strong</span> Re-center in cell (0°)';
-        bRecenter.onclick = () => {
-            store.dragFromStorageTag = null;
-            store.dragFromStorageStartPose = null;
-            void sendCommand({ action: 'RECENTER_IN_STORAGE', target_id: name, parameters: {} });
-        };
-        rowPlace.appendChild(bRecenter);
-
-        const bDragFs = document.createElement('button');
-        bDragFs.type = 'button';
-        bDragFs.className = 'btn btn-secondary';
-        bDragFs.style.fontSize = '11px';
-        bDragFs.style.width = '100%';
-        bDragFs.title =
-            'Only this part can be dragged until you place or cancel. Release on the breadboard to confirm placement.';
-        if (store.dragFromStorageTag === name) {
-            bDragFs.disabled = true;
-            bDragFs.style.opacity = '0.95';
-            bDragFs.innerHTML =
-                '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">pan_tool</span> Drag mode — pull on canvas';
-            rowPlace.appendChild(bDragFs);
-            const bCancelDrag = document.createElement('button');
-            bCancelDrag.type = 'button';
-            bCancelDrag.className = 'btn btn-secondary';
-            bCancelDrag.style.fontSize = '10px';
-            bCancelDrag.style.width = '100%';
-            bCancelDrag.textContent = 'Cancel drag-from-storage mode';
-            bCancelDrag.onclick = () => {
-                store.dragFromStorageTag = null;
-                store.dragFromStorageStartPose = null;
-                log('Drag from storage mode cancelled.', 'info');
-                _render();
-                updateContextPanel(name);
-            };
-            rowPlace.appendChild(bCancelDrag);
-        } else {
-            bDragFs.innerHTML =
-                '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">touch_app</span> Drag from storage';
-            bDragFs.onclick = () => {
-                store.dragFromStorageTag = name;
-                log('Drag mode: only this part can be dragged. Pull it onto the breadboard, release, then confirm.', 'info');
-                _render();
-                updateContextPanel(name);
-            };
-            rowPlace.appendChild(bDragFs);
-        }
-
-        ctxMoveBtn.parentNode.insertBefore(rowPlace, ctxMoveBtn.nextSibling);
-    }
-
-    // --- Motor Controls ---
-    const existingMotor = document.getElementById('ctx-motor-controls');
-    if (existingMotor) existingMotor.remove();
-
-    if (
-        placementState !== 'STORED' &&
-        store.catalogMap[name] &&
-        store.catalogMap[name].motor_ids &&
-        store.catalogMap[name].motor_ids.length > 0 &&
-        ctxStrategies && ctxStrategies.parentNode
-    ) {
-        const motorSection = document.createElement('div');
-        motorSection.id = 'ctx-motor-controls';
-        motorSection.style.marginTop = '12px';
-        motorSection.style.paddingTop = '12px';
-        motorSection.style.borderTop = '1px solid #2a2e36';
-
-        motorSection.innerHTML = '<div style="font-size:11px; color:#94a3b8; margin-bottom:8px; font-weight:600;">MOTOR CONTROL (Relative) — θ = server-tracked cumulative angle</div>';
-
-        store.catalogMap[name].motor_ids.forEach((mid) => {
-            const block = document.createElement('div');
-            block.style.marginBottom = '10px';
-
-            const row = document.createElement('div');
-            row.style.display = 'flex';
-            row.style.alignItems = 'center';
-            row.style.flexWrap = 'wrap';
-            row.style.gap = '8px';
-
-            const label = document.createElement('span');
-            label.textContent = `M${mid}`;
-            label.style.fontSize = '12px';
-            label.style.color = '#cbd5e1';
-            label.style.minWidth = '28px';
-
-            const angleSpan = document.createElement('span');
-            angleSpan.id = `ctx-motor-angle-${mid}`;
-            angleSpan.style.fontSize = '11px';
-            angleSpan.style.color = '#94a3b8';
-            angleSpan.style.fontFamily = 'ui-monospace, monospace';
-            angleSpan.textContent = 'θ —';
-
-            const input = document.createElement('input');
-            input.type = 'number';
-            input.value = '100';
-            input.style.width = '56px';
-            input.style.fontSize = '12px';
-            input.style.padding = '6px 8px';
-            input.style.background = '#0f1115';
-            input.style.border = '1px solid #2a2e36';
-            input.style.color = '#fff';
-            input.style.borderRadius = '4px';
-            input.title = 'Step Size';
-
-            const btnRev = document.createElement('button');
-            btnRev.className = 'btn btn-secondary';
-            btnRev.style.padding = '6px 10px';
-            btnRev.style.fontSize = '12px';
-            btnRev.style.width = 'auto';
-            btnRev.innerHTML = '<span class="material-icons-round" style="font-size:14px">remove</span>';
-            btnRev.title = 'Jog Backward';
-            btnRev.onclick = () => moveMotor(name, mid, -parseFloat(input.value));
-
-            const btnFwd = document.createElement('button');
-            btnFwd.className = 'btn btn-secondary';
-            btnFwd.style.padding = '6px 10px';
-            btnFwd.style.fontSize = '12px';
-            btnFwd.style.width = 'auto';
-            btnFwd.innerHTML = '<span class="material-icons-round" style="font-size:14px">add</span>';
-            btnFwd.title = 'Jog Forward';
-            btnFwd.onclick = () => moveMotor(name, mid, parseFloat(input.value));
-
-            row.appendChild(label);
-            row.appendChild(angleSpan);
-            row.appendChild(btnRev);
-            row.appendChild(input);
-            row.appendChild(btnFwd);
-            block.appendChild(row);
-
-            const row2 = document.createElement('div');
-            row2.style.display = 'flex';
-            row2.style.gap = '8px';
-            row2.style.marginTop = '4px';
-            row2.style.paddingLeft = '36px';
-
-            const btnHome = document.createElement('button');
-            btnHome.type = 'button';
-            btnHome.className = 'btn btn-secondary';
-            btnHome.style.padding = '4px 10px';
-            btnHome.style.fontSize = '10px';
-            btnHome.style.width = 'auto';
-            btnHome.textContent = 'Send to home';
-            btnHome.title = 'Move motor by −θ so tracked angle becomes 0';
-            btnHome.onclick = () => motorSendHome(name, mid);
-
-            const btnZero = document.createElement('button');
-            btnZero.type = 'button';
-            btnZero.className = 'btn btn-secondary';
-            btnZero.style.padding = '4px 10px';
-            btnZero.style.fontSize = '10px';
-            btnZero.style.width = 'auto';
-            btnZero.textContent = 'Set 0';
-            btnZero.title = 'Define current position as θ = 0 (no move)';
-            btnZero.onclick = () => motorSetZero(name, mid);
-
-            row2.appendChild(btnHome);
-            row2.appendChild(btnZero);
-            block.appendChild(row2);
-
-            motorSection.appendChild(block);
-        });
-
-        ctxStrategies.parentNode.appendChild(motorSection);
-    }
-
-    renderInAirControlsForContext(name, comp, placementState);
 
     store.contextPanelStateSnapshot = placementState;
     const hld = getHolding(store.labState);
     store.contextPanelStatusSnapshot = `${(store.labState && store.labState.system_status) || 'IDLE'}|${hld.tag_id || ''}|${hld.requires_operator_confirm ? '1' : '0'}`;
+    if (comp) {
+        store.contextPanelDataSnapshot = JSON.stringify({
+            tunables: comp.tunables || {},
+            measurables: comp.measurables || {},
+        });
+    }
 }

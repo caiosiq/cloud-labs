@@ -1,9 +1,9 @@
 """Pydantic command bodies for POST /api/command (discriminated by action)."""
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, Literal, Union
+from typing import Annotated, Any, Dict, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 # --- Shared parameter shapes ---
 
@@ -50,6 +50,23 @@ class MoveMotorParameters(BaseModel):
     distance: float
 
 
+class SetMotorSetpointParameters(BaseModel):
+    motor_id: int
+    angle_deg: float
+
+
+class SetExposureParameters(BaseModel):
+    exposure_time_ms: float = Field(..., gt=0.0)
+
+
+class ApplyTunablesPatchParameters(BaseModel):
+    """Partial tunables dict; macro applies fields in fixed order (see macros module)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    patch: Dict[str, Any] = Field(default_factory=dict)
+
+
 class MotorIdParameters(BaseModel):
     motor_id: int
 
@@ -73,6 +90,24 @@ class MoveMotorBody(BaseModel):
     action: Literal["MOVE_MOTOR"]
     target_id: str = Field(..., min_length=1)
     parameters: MoveMotorParameters
+
+
+class SetMotorSetpointBody(BaseModel):
+    action: Literal["SET_MOTOR_SETPOINT"]
+    target_id: str = Field(..., min_length=1)
+    parameters: SetMotorSetpointParameters
+
+
+class SetExposureBody(BaseModel):
+    action: Literal["SET_EXPOSURE"]
+    target_id: str = Field(..., min_length=1)
+    parameters: SetExposureParameters
+
+
+class ApplyTunablesPatchBody(BaseModel):
+    action: Literal["APPLY_TUNABLES_PATCH"]
+    target_id: str = Field(..., min_length=1)
+    parameters: ApplyTunablesPatchParameters = Field(default_factory=ApplyTunablesPatchParameters)
 
 
 class MotorSendHomeBody(BaseModel):
@@ -184,10 +219,77 @@ class ConfirmHoldingTagBody(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
+# --- Per-component TELEOP bodies (Phase 8 / §16.5) ----------------------------
+
+
+class TeleopJogParameters(BaseModel):
+    """One jog frame: an absolute nominal_pose and/or nominal_motor_positions.
+
+    At least one of ``nominal_pose`` / ``nominal_motor_positions`` must be
+    provided. Frames are *absolute* (not deltas) so the protocol is
+    idempotent under packet loss: dropping a frame just means the next
+    frame lands slightly later.
+
+    ``frame_id`` is an optional client-side sequence number for debugging
+    and frame-drop accounting; the server never reorders frames by it
+    (arrival order wins).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    nominal_pose: Optional[Dict[str, float]] = None
+    nominal_motor_positions: Optional[Dict[str, float]] = None
+    frame_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _at_least_one_target(self) -> "TeleopJogParameters":
+        if self.nominal_pose is None and self.nominal_motor_positions is None:
+            raise ValueError(
+                "TELEOP_JOG requires at least one of nominal_pose / "
+                "nominal_motor_positions"
+            )
+        if self.nominal_pose is not None:
+            allowed = {"x", "y", "rotation", "z"}
+            extras = set(self.nominal_pose.keys()) - allowed
+            if extras:
+                raise ValueError(
+                    f"TELEOP_JOG nominal_pose has unknown keys: {sorted(extras)}; "
+                    f"allowed: {sorted(allowed)}"
+                )
+        return self
+
+
+class StartTeleopBody(BaseModel):
+    """Acquire the per-component TELEOP lease for ``target_id``."""
+
+    action: Literal["START_TELEOP"]
+    target_id: str = Field(..., min_length=1)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EndTeleopBody(BaseModel):
+    """Release the per-component TELEOP lease for ``target_id`` (idempotent)."""
+
+    action: Literal["END_TELEOP"]
+    target_id: str = Field(..., min_length=1)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TeleopJogBody(BaseModel):
+    """Push one jog frame to the component currently under TELEOP."""
+
+    action: Literal["TELEOP_JOG"]
+    target_id: str = Field(..., min_length=1)
+    parameters: TeleopJogParameters
+
+
 ValidatedCommand = Annotated[
     Union[
         MoveComponentBody,
         MoveMotorBody,
+        SetMotorSetpointBody,
+        SetExposureBody,
+        ApplyTunablesPatchBody,
         MotorSendHomeBody,
         MotorSetZeroBody,
         OptimizeBody,
@@ -204,6 +306,9 @@ ValidatedCommand = Annotated[
         PlaceFromHoverBody,
         ScanRotateInPlaceBody,
         ConfirmHoldingTagBody,
+        StartTeleopBody,
+        EndTeleopBody,
+        TeleopJogBody,
     ],
     Field(discriminator="action"),
 ]

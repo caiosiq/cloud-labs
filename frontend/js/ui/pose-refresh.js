@@ -17,14 +17,12 @@ import { isOnTableComponent } from '../component-model.js';
 import { fetchLaserLines } from './laser-lines-panel.js';
 
 let _fetchLabState = async () => {};
-let _checkVideoStatus = () => {};
 
 /**
- * @param {{ fetchLabState: () => Promise<void>, checkVideoStatus: () => void }} deps
+ * @param {{ fetchLabState: () => Promise<void> }} deps
  */
 export function initPoseRefresh(deps) {
     if (deps && typeof deps.fetchLabState === 'function') _fetchLabState = deps.fetchLabState;
-    if (deps && typeof deps.checkVideoStatus === 'function') _checkVideoStatus = deps.checkVideoStatus;
 }
 
 /** Collect tag ids eligible for simulated / camera pose refresh (on layout canvas). */
@@ -224,5 +222,4 @@ export async function runLabPoseRefresh() {
     store.forceGhostSync = true;
     await fetchLaserLines();
     await _fetchLabState();
-    _checkVideoStatus();
 }

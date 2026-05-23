@@ -49,6 +49,18 @@ class LabViewManifest:
     reconciliation_position_mm: float = 2.0
     reconciliation_yaw_deg: float = 5.0
     reconciliation_stale_warning_hours: float = 168.0
+    #: Phase 8 (§16.5) per-component TELEOP safety knobs.
+    #:
+    #: - ``teleop_require_lab_idle``: when ``True``, ``START_TELEOP``
+    #:   refuses unless the lab's ``system_status`` is IDLE. Default
+    #:   ``False`` keeps per-component concurrency permissive (operator
+    #:   can teleop component A while OPTIMIZE is running on B).
+    #: - ``teleop_ttl_ms``: stale-lease TTL. If no ``TELEOP_JOG`` frame
+    #:   arrives for a component within this window, the sweeper auto-
+    #:   clears its ``teleop_active`` flag. Default 3000ms. Set to 0 to
+    #:   disable the sweeper (only explicit ``END_TELEOP`` ends a session).
+    teleop_require_lab_idle: bool = False
+    teleop_ttl_ms: int = 3000
 
     def as_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
@@ -59,6 +71,10 @@ class LabViewManifest:
                 "position_mm": self.reconciliation_position_mm,
                 "yaw_deg": self.reconciliation_yaw_deg,
                 "stale_warning_hours": self.reconciliation_stale_warning_hours,
+            },
+            "teleop_safety": {
+                "require_lab_idle": self.teleop_require_lab_idle,
+                "teleop_ttl_ms": self.teleop_ttl_ms,
             },
         }
         if self.lab_automation_path:
@@ -207,6 +223,7 @@ def _load_lab_manifest(paths: LabViewPaths, project_root: str) -> LabViewManifes
         )
 
     pos_mm, yaw_deg, stale_h = _session_reconciliation_fields(raw, comm)
+    teleop_idle, teleop_ttl = _teleop_safety_fields(raw)
     return LabViewManifest(
         communicator=comm,
         lab_mode=comm.upper(),
@@ -215,6 +232,8 @@ def _load_lab_manifest(paths: LabViewPaths, project_root: str) -> LabViewManifes
         reconciliation_position_mm=pos_mm,
         reconciliation_yaw_deg=yaw_deg,
         reconciliation_stale_warning_hours=stale_h,
+        teleop_require_lab_idle=teleop_idle,
+        teleop_ttl_ms=teleop_ttl,
     )
 
 
@@ -243,6 +262,36 @@ def _session_reconciliation_fields(
         _float_val(raw, "reconciliation_yaw_deg", def_yaw),
         _float_val(raw, "reconciliation_stale_warning_hours", 168.0),
     )
+
+
+def _teleop_safety_fields(raw: Mapping[str, Any]) -> Tuple[bool, int]:
+    """Parse ``teleop_safety`` block from lab_manifest.
+
+    Phase 8 / §16.5. Block layout::
+
+        "teleop_safety": {
+            "require_lab_idle": false,
+            "teleop_ttl_ms": 3000
+        }
+
+    Both keys are optional with safe defaults. ``teleop_ttl_ms`` of 0
+    disables the stale-lease sweeper.
+    """
+    block = raw.get("teleop_safety")
+    if not isinstance(block, dict):
+        return (False, 3000)
+    require_idle = block.get("require_lab_idle", False)
+    if isinstance(require_idle, str):
+        require_idle = require_idle.strip().lower() in ("1", "true", "yes", "on")
+    else:
+        require_idle = bool(require_idle)
+    try:
+        ttl_ms = int(block.get("teleop_ttl_ms", 3000))
+    except (TypeError, ValueError):
+        ttl_ms = 3000
+    if ttl_ms < 0:
+        ttl_ms = 0
+    return (require_idle, ttl_ms)
 
 
 def _apply_manifest_to_process_env(manifest: LabViewManifest) -> None:

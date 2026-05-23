@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-05-21T13:54:22.274154",
+  "last_updated": "2026-05-22T19:22:49.357487",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -8,8 +8,8 @@
       "tunables": {
         "presence": "breadboard",
         "nominal_pose": {
-          "x": 267.0,
-          "y": -85.8,
+          "x": 336.1571428571428,
+          "y": -89.85714285714283,
           "rotation": 0.0
         },
         "nominal_motor_positions": {},
@@ -19,15 +19,17 @@
         },
         "placement": {
           "mode": "MANUAL"
-        }
+        },
+        "teleop_active": false,
+        "teleop_last_jog_ts": null
       },
       "measurables": {
         "pose": {
-          "x": 267.0,
-          "y": -85.8,
+          "x": 336.2108655157657,
+          "y": -90.01962999462906,
           "rotation": 0.0
         },
-        "last_optimization_score": 0.99,
+        "last_optimization_score": null,
         "last_optimized_pose": null,
         "camera_image": null
       }
@@ -38,8 +40,8 @@
       "tunables": {
         "presence": "breadboard",
         "nominal_pose": {
-          "x": 200.0,
-          "y": 191.42857142857144,
+          "x": 204.85714285714283,
+          "y": 330.7142857142857,
           "rotation": 0.0
         },
         "nominal_motor_positions": {},
@@ -49,20 +51,14 @@
         },
         "placement": {
           "mode": "MANUAL"
-        }
+        },
+        "teleop_active": false,
+        "teleop_last_jog_ts": null
       },
       "measurables": {
-        "pose": {
-          "x": 199.72616778257978,
-          "y": 191.78041637398417,
-          "rotation": 0.0
-        },
-        "last_optimization_score": 0.99,
-        "last_optimized_pose": {
-          "x": -221.00418470877685,
-          "y": 304.5333807278503,
-          "rotation": 680.7747230668006
-        },
+        "pose": null,
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
         "camera_image": null
       }
     },
@@ -116,21 +112,21 @@
           "slot": null
         },
         "placement": {
-          "mode": "MANUAL"
+          "mode": "NEWTON"
         }
       },
       "measurables": {
         "pose": {
-          "x": 305.35347625564566,
-          "y": 67.81516170852301,
-          "rotation": -0.1158568083062308,
-          "motor_rotations": {
-            "1": 0.0,
-            "3": 0.0
-          }
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": -0.5574263532812447
         },
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
+        "last_optimization_score": 0.99,
+        "last_optimized_pose": {
+          "x": 0.0,
+          "y": 0.0,
+          "rotation": -0.5574263532812447
+        },
         "camera_image": null
       }
     },
@@ -140,8 +136,8 @@
       "tunables": {
         "presence": "breadboard",
         "nominal_pose": {
-          "x": 125.37142857142857,
-          "y": 395.61428571428564,
+          "x": -111.77142857142859,
+          "y": 388.47142857142853,
           "rotation": 45.0
         },
         "nominal_motor_positions": {},
@@ -155,8 +151,8 @@
       },
       "measurables": {
         "pose": {
-          "x": 125.51178910115522,
-          "y": 395.3753995419038,
+          "x": -111.67820016387772,
+          "y": 388.0386088922051,
           "rotation": 45.0
         },
         "last_optimization_score": null,
@@ -297,6 +293,30 @@
         },
         "camera_image": null
       }
+    },
+    "tag_99": {
+      "id": "cam_table_top",
+      "type": "OPTICAL_CAMERA",
+      "tunables": {
+        "presence": "off_table",
+        "exposure_time_ms": 50.0,
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        },
+        "teleop_active": false,
+        "teleop_last_jog_ts": null
+      },
+      "measurables": {
+        "pose": null,
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
     }
   },
   "holding": {
@@ -305,5 +325,6 @@
     "requires_operator_confirm": false
   },
   "optimization_step": 0,
-  "optimization_run_dir": null
+  "optimization_run_dir": null,
+  "optimization_target_id": null
 }

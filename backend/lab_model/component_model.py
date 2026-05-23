@@ -29,6 +29,15 @@ def default_tunables() -> Dict[str, Any]:
         "nominal_motor_positions": {},
         "storage": {"in_storage": False, "slot": None},
         "placement": {"mode": "MANUAL"},
+        # Phase 8: per-component TELEOP. ``teleop_active`` is the boolean
+        # gate every other primitive checks via
+        # ``refuse_if_teleop_active``; ``teleop_last_jog_ts`` is a Unix
+        # millisecond timestamp written by every TELEOP_JOG and read by
+        # the stale-lease sweeper in ``LabCommunicator``. See §16.5 of
+        # ``universal_component_architecture.md`` for the per-component
+        # concurrency policy.
+        "teleop_active": False,
+        "teleop_last_jog_ts": None,
     }
 
 
@@ -135,3 +144,33 @@ def placement_mode(entry: Dict[str, Any]) -> str:
     if isinstance(m, str) and m:
         return m.upper()
     return "MANUAL"
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: per-component TELEOP accessors
+# ---------------------------------------------------------------------------
+
+def is_teleop_active(entry: Dict[str, Any]) -> bool:
+    """True iff this component is in an active TELEOP session.
+
+    Defensive null-handling at every layer: an entry without a tunables
+    dict (legacy state, deleted-then-re-added component) is treated as
+    not in teleop. The flag is per-component; the top-level
+    ``system_status`` reflects this via ``SYSTEM_STATUS_TELEOP`` only as
+    an informational summary (§16.5).
+    """
+    tun = (entry or {}).get("tunables")
+    if not isinstance(tun, dict):
+        return False
+    return bool(tun.get("teleop_active"))
+
+
+def teleop_last_jog_ts(entry: Dict[str, Any]) -> Optional[float]:
+    """Return the Unix-ms timestamp of the last TELEOP_JOG frame, or ``None``."""
+    tun = (entry or {}).get("tunables")
+    if not isinstance(tun, dict):
+        return None
+    ts = tun.get("teleop_last_jog_ts")
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    return None

@@ -71,7 +71,6 @@ class MockLabCommunicator(LabCommunicator):
         from lab_communicator.mock.persistence import read_state
         self.current_state = read_state(self.state_file)
 
-        self._cobyla_reference_bgr = None  # optional BGR ndarray for UI / parity with real
         # Dev flag: simulate boot-time gripper-closed reconciliation (see new_primitives.md #6.3).
         self._mock_gripper_closed_on_boot = (
             os.getenv("MOCK_GRIPPER_CLOSED_ON_BOOT", "").strip().lower()
@@ -398,61 +397,6 @@ class MockLabCommunicator(LabCommunicator):
     # stepwise sweep and the per-step + final state commits through
     # ``commit_scan_rotation``. ``confirm_holding_tag`` and the
     # holding-state housekeeping it runs are inherited the same way.
-
-    def set_cobyla_reference_from_png_bytes(self, data: bytes) -> Tuple[bool, str]:
-        """Same API as real lab; mock optimize does not use it, but UI can test the flow."""
-        if not data or len(data) < 8:
-            return False, "empty body"
-        try:
-            from PIL import Image
-            import numpy as np
-        except ImportError:
-            return False, "Pillow and numpy required (pip install Pillow numpy)"
-        try:
-            pil = Image.open(BytesIO(data))
-            pil.load()
-            rgb = np.array(pil.convert("RGB"))
-        except Exception as e:
-            return False, f"could not decode PNG: {e}"
-        if rgb.ndim != 3 or rgb.shape[2] != 3:
-            return False, "decoded image must have 3 channels"
-        bgr = rgb[:, :, ::-1].copy()
-        self._cobyla_reference_bgr = bgr
-        h, w = bgr.shape[:2]
-        print(f"[MOCK LAB] Cobyla reference image set ({w}x{h} BGR)")
-        return True, f"stored {w}x{h} BGR reference (mock)"
-
-    def clear_cobyla_reference(self) -> None:
-        self._cobyla_reference_bgr = None
-        print("[MOCK LAB] Cobyla reference image cleared")
-
-    def get_cobyla_reference_status(self) -> Dict[str, Any]:
-        ref = self._cobyla_reference_bgr
-        if ref is None:
-            return {"available": True, "set": False}
-        h, w = ref.shape[:2]
-        return {
-            "available": True,
-            "set": True,
-            "width": int(w),
-            "height": int(h),
-            "channels": int(ref.shape[2]),
-        }
-
-    def get_cobyla_reference_png_bytes(self) -> Optional[bytes]:
-        ref = self._cobyla_reference_bgr
-        if ref is None:
-            return None
-        try:
-            from PIL import Image
-            import numpy as np
-        except ImportError:
-            return None
-        rgb = ref[:, :, ::-1]
-        img = Image.fromarray(np.ascontiguousarray(rgb))
-        buf = BytesIO()
-        img.save(buf, format="PNG", compress_level=6)
-        return buf.getvalue()
 
     def get_video_feed_status(self) -> Dict[str, Any]:
         return {"connected": True, "source": "/api/video-feed/stream"}
@@ -794,8 +738,40 @@ class MockLabCommunicator(LabCommunicator):
         img.save(buf, format="PNG", compress_level=6)
         return buf.getvalue()
 
-    def get_video_stream(self):
+    def get_video_stream(self, fps: int = 10):
+        """Mock overhead / table-top MJPEG (fixed bench camera)."""
         import time
+
+        import cv2  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
+
+        fps = max(4, min(int(fps), 30))
+        sleep_dur = 1.0 / fps
         while True:
-            yield b''
-            break
+            frame = np.zeros((360, 480, 3), dtype=np.uint8)
+            cv2.putText(
+                frame,
+                "Mock table-top / overhead",
+                (16, 140),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (120, 200, 255),
+                2,
+            )
+            cv2.putText(
+                frame,
+                f"tag_99 cam_table_top @ {fps}fps",
+                (16, 180),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (150, 150, 170),
+                1,
+            )
+            ret, buf = cv2.imencode(".jpg", frame)
+            if ret:
+                yield (
+                    b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                    + buf.tobytes()
+                    + b"\r\n"
+                )
+            time.sleep(sleep_dur)

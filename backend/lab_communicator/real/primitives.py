@@ -479,11 +479,12 @@ async def primitive_optimize_component(
             "video_exposure": _exp,
             "capture_exposure": _exp,
         }
-        with communicator._cobyla_ref_lock:
-            ref_copy = (
-                None if communicator._cobyla_reference_bgr is None
-                else communicator._cobyla_reference_bgr.copy()
-            )
+        from lab_communicator.real.optimization import load_cobyla_reference_bgr_from_state
+
+        ref_copy = load_cobyla_reference_bgr_from_state(
+            communicator,
+            camera_number=int(params.get("camera_number", 1)),
+        )
         if ref_copy is not None:
             try:
                 sig = inspect.signature(CobylaAlignmentStrategy_cloudlab.__init__)
@@ -493,7 +494,7 @@ async def primitive_optimize_component(
                 cobyla_kw["reference_image"] = ref_copy
         else:
             print(
-                "[REAL LAB] COBYLA: no reference image set via UI; "
+                "[REAL LAB] COBYLA: no reference from measurables.camera_image; "
                 "strategy will use its own fallback if any."
             )
 

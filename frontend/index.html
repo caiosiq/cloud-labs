@@ -268,9 +268,69 @@
             background-image: 
                 radial-gradient(circle at 50% 50%, #1a1d24 0%, var(--bg-dark) 100%);
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             overflow: hidden;
+            gap: 0;
+        }
+
+        #bench-chrome-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            width: min(1000px, calc(100% - 24px));
+            max-width: 100%;
+            padding: 8px 10px;
+            margin: 8px 12px 0;
+            box-sizing: border-box;
+            background: rgba(24, 27, 33, 0.92);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            flex-shrink: 0;
+        }
+        #bench-chrome-bar[hidden] {
+            display: none !important;
+        }
+        .bench-chrome-bar__label {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-right: 4px;
+        }
+        .bench-chrome-bar__btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            padding: 5px 10px;
+            border-radius: 5px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: border-color 0.12s ease, background 0.12s ease;
+        }
+        .bench-chrome-bar__btn:hover {
+            border-color: #64748b;
+            color: var(--text-primary);
+        }
+        .bench-chrome-bar__btn--active {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.12);
+            color: #93c5fd;
+        }
+        .bench-chrome-bar__icon {
+            font-size: 16px !important;
+        }
+        .bench-chrome-bar__name {
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         #canvas-wrapper {
@@ -517,7 +577,7 @@
         <div id="layout-warnings" style="display: none; margin: 0 16px 10px; padding: 8px 10px; font-size: 11px; color: #fcd34d; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; line-height: 1.35;"></div>
 
         <div class="section-header">
-            <span>Optical Components</span>
+            <span>Lab components</span>
         </div>
         <div id="component-list" class="sidebar-component-list">
             <!-- Placed components will appear here -->
@@ -543,6 +603,7 @@
 
     <!-- MAIN CANVAS AREA -->
     <div id="main-content">
+        <div id="bench-chrome-bar" role="toolbar" aria-label="Fixed bench components" hidden></div>
         <div id="canvas-wrapper">
             <canvas id="optical-table" width="1000" height="700"></canvas>
         </div>
@@ -583,7 +644,7 @@
                 </button>
             </div>
             
-            <div style="margin-top: 12px;">
+            <div id="ctx-table-pose-section" style="margin-top: 12px;">
                 <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">POSITION (mm)</label>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                     <input type="number" id="ctx-x" placeholder="X" class="coord-input">
@@ -597,7 +658,7 @@
 
             <div id="ctx-record-slot"></div>
 
-            <div style="margin-top: 20px;">
+            <div id="ctx-table-motion-section" style="margin-top: 20px;">
                 <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 8px;">OPTIMIZATION STRATEGIES</label>
                 <div id="ctx-strategies"></div>
             </div>
@@ -623,22 +684,11 @@
     <!-- RIGHT SIDEBAR (Recipes & Monitor) -->
     <div id="sidebar-right">
         <div id="sidebar-right-pinned">
-        <!-- Live Feed Section -->
-        <div style="height: 200px; background: black; position: relative; border-bottom: 1px solid var(--border-color);">
-             <img id="live-video-img" src="/api/video-feed/stream" style="width: 100%; height: 100%; object-fit: cover; display: none;" onerror="this.style.display='none'; document.getElementById('video-placeholder').style.display='flex';">
-             <div id="video-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #64748b;">
-                <span class="material-icons-round" style="font-size: 32px; margin-bottom: 8px;">videocam_off</span>
-                <span style="font-size: 12px;">No Camera Connection</span>
-                <span id="video-status" style="font-size: 10px; margin-top: 4px; color: #ef4444;">● OFFLINE</span>
-            </div>
-            <div style="position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 4px; font-size: 10px; color: white;">LIVE FEED</div>
-            
-            <!-- FPS Control -->
-            <div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.6); padding: 4px 6px; border-radius: 4px; display: flex; align-items: center; gap: 6px;">
-                <label for="fps-input" style="color: #cbd5e1; font-size: 10px; font-weight: 500;">FPS</label>
-                <input type="number" id="fps-input" value="10" min="1" max="60" style="width: 32px; background: rgba(255,255,255,0.1); border: 1px solid #475569; color: white; font-size: 10px; padding: 2px; text-align: center; border-radius: 3px;">
-            </div>
-        </div>
+        <!--
+            Phase 9c: lab-wide LIVE FEED pane removed. Ceiling / gripper
+            MJPEG is available via each camera component's telemetry
+            widgets in the symmetric component panel (Phase 7).
+        -->
 
         <!-- System Monitor -->
         <div style="height: 150px; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
@@ -653,14 +703,13 @@
         </div>
 
         <div id="sidebar-right-scroll">
-        <!-- Table cam: lazy connect + live / capture (real + mock) -->
+        <!-- Optimization preview (Phase 9d — replaces deprecated table-cam dock) -->
         <style>
-            /* Same viewport for latest capture vs Cobyla ref so stills scale identically for A/B */
-            #table-cam-section {
-                --cam-still-preview-height: 200px;
+            #optimization-feed-section {
+                --optimization-preview-height: 200px;
             }
-            #table-cam-section .cam-still-preview-slot {
-                height: var(--cam-still-preview-height);
+            #optimization-feed-section .optimization-feed-slot {
+                height: var(--optimization-preview-height);
                 margin: 0 12px 10px;
                 border-radius: 6px;
                 box-sizing: border-box;
@@ -669,140 +718,11 @@
                 justify-content: center;
                 overflow: hidden;
                 position: relative;
+                background: #0f1115;
+                border: 1px solid var(--border-color);
+                transition: border-color 160ms ease, box-shadow 160ms ease;
             }
-            #table-cam-section .table-cam-toolbar-row { gap: 6px; align-items: center; flex-wrap: wrap; }
-            /* Single connect toggle */
-            #table-cam-section .table-cam-connect-toggle {
-                flex: 1;
-                min-width: 140px;
-                justify-content: center;
-                gap: 6px;
-                font-weight: 600;
-                letter-spacing: 0.02em;
-                transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-                display: inline-flex;
-                align-items: center;
-            }
-            #table-cam-section .table-cam-connect-toggle--connected {
-                background: linear-gradient(180deg, #15803d 0%, #166534 100%);
-                border-color: #22c55e;
-                color: #ecfdf5;
-            }
-            #table-cam-section .table-cam-connect-toggle--connected:hover {
-                filter: brightness(1.06);
-                color: #fff;
-            }
-            #table-cam-section .table-cam-connect-toggle--disconnected {
-                background: var(--bg-secondary);
-                border-color: #4b5563;
-                color: #9ca3af;
-            }
-            #table-cam-section .table-cam-connect-toggle--disconnected:hover {
-                border-color: #6b7280;
-                color: #e5e7eb;
-            }
-            #table-cam-section .table-cam-connect-toggle--connecting {
-                background: #374151;
-                border-color: #6b7280;
-                color: #d1d5db;
-                cursor: wait;
-                opacity: 0.92;
-            }
-            #table-cam-section .table-cam-connect-toggle--connecting:hover {
-                filter: none;
-                color: #d1d5db;
-            }
-            #table-cam-section .table-cam-action-btn.table-cam-live-btn--pending {
-                opacity: 0.75;
-                cursor: wait;
-            }
-            #table-cam-preview .table-cam-preview-loading {
-                position: absolute;
-                inset: 0;
-                z-index: 3;
-                display: none;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 8px;
-                background: rgba(15, 17, 21, 0.82);
-                color: var(--text-muted);
-                font-size: 12px;
-                text-align: center;
-                padding: 12px;
-                box-sizing: border-box;
-            }
-            #table-cam-preview .table-cam-preview-loading--visible {
-                display: flex;
-            }
-            #table-cam-preview .table-cam-preview-loading .table-cam-spinner {
-                width: 28px;
-                height: 28px;
-                border: 3px solid rgba(148, 163, 184, 0.25);
-                border-top-color: #94a3b8;
-                border-radius: 50%;
-                animation: table-cam-spin 0.75s linear infinite;
-            }
-            @keyframes table-cam-spin {
-                to { transform: rotate(360deg); }
-            }
-            /* Live + Capture pill buttons — same chassis */
-            #table-cam-section .table-cam-action-btn {
-                font-size: 11px;
-                padding: 5px 10px;
-                min-width: 0;
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
-            }
-            #table-cam-section .table-cam-action-btn.table-cam-live-btn--streaming {
-                background: rgba(34, 197, 94, 0.14);
-                border-color: #22c55e;
-                color: #86efac;
-            }
-            #table-cam-section .table-cam-action-btn.table-cam-live-btn--streaming:hover {
-                filter: brightness(1.08);
-            }
-            #table-cam-section .table-cam-action-btn:disabled {
-                opacity: 0.45;
-                cursor: not-allowed;
-            }
-            /* Preview frame: MOCK-only accents so live vs snapshot are obvious */
-            #table-cam-preview.table-cam-preview--mock-live {
-                border-color: #0891b2;
-                box-shadow: inset 0 0 0 1px rgba(8, 145, 178, 0.35), 0 0 14px rgba(8, 145, 178, 0.12);
-            }
-            #table-cam-preview.table-cam-preview--mock-capture {
-                border-color: #a855f7;
-                box-shadow: inset 0 0 0 1px rgba(168, 85, 247, 0.35), 0 0 14px rgba(168, 85, 247, 0.08);
-            }
-            #table-cam-preview.table-cam-preview--mock-neutral {
-                border-color: var(--border-color);
-                box-shadow: none;
-            }
-            #table-cam-mode-chip {
-                position: absolute;
-                top: 6px;
-                left: 6px;
-                font-size: 9px;
-                font-weight: 700;
-                letter-spacing: 0.06em;
-                text-transform: uppercase;
-                padding: 3px 7px;
-                border-radius: 4px;
-                pointer-events: none;
-                display: none;
-                z-index: 2;
-            }
-            #table-cam-mode-chip.mode-live {
-                background: rgba(8, 145, 178, 0.9);
-                color: #ecfeff;
-            }
-            #table-cam-mode-chip.mode-capture {
-                background: rgba(126, 34, 206, 0.92);
-                color: #faf5ff;
-            }
-            #table-cam-preview .table-cam-preview-stage {
+            #optimization-feed-preview .optimization-feed-stage {
                 position: absolute;
                 inset: 0;
                 display: flex;
@@ -811,107 +731,37 @@
                 padding: 4px;
                 box-sizing: border-box;
             }
-            #table-cam-preview .table-cam-preview-stage img {
+            #optimization-feed-preview .optimization-feed-stage img {
                 max-width: 100%;
                 max-height: 100%;
                 object-fit: contain;
             }
-            #table-cam-preview .table-cam-preview-stage #table-cam-placeholder {
+            #optimization-feed-placeholder {
                 max-width: 100%;
                 padding: 8px 12px;
                 line-height: 1.45;
-            }
-            #table-cam-error.table-cam-message-bar {
-                display: none;
-                margin: 0 12px 10px;
-                padding: 8px 10px;
-                border-radius: 6px;
-                font-size: 11px;
-                line-height: 1.45;
-                color: #fecaca;
-                background: rgba(127, 29, 29, 0.35);
-                border: 1px solid rgba(248, 113, 113, 0.45);
-                box-sizing: border-box;
-                word-break: break-word;
+                color: var(--text-muted);
+                font-size: 12px;
+                text-align: center;
             }
         </style>
-        <div id="table-cam-section" style="border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
-            <div class="section-header">Table cam capture</div>
-            <div id="table-cam-mock-hint" style="display: none; padding: 0 12px 6px; font-size: 10px; color: var(--text-muted); line-height: 1.35;">
-                Mock mode: <strong style="color:#22d3ee;">Live</strong> preview uses a teal frame + animated stream imagery; <strong style="color:#c084fc;">Still</strong> uses a violet frame + your latest capture (mock graphic until you Capture); press <strong>Capture</strong> for a fresh still.
+        <div id="optimization-feed-section" style="border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
+            <div class="section-header">
+                <span>Optimization preview</span>
             </div>
-            <div id="table-cam-real-hint" style="display: none; padding: 0 12px 6px; font-size: 10px; color: var(--text-muted); line-height: 1.35;">
-                Real lab: use <strong>Live (s)</strong> for fast preview (try 0.01–0.03). <strong>Cap (s)</strong> applies only to Capture. Restart backend after recorder updates.
-            </div>
-            <div class="sidebar-right-toolbar table-cam-toolbar-row" style="padding-top: 4px;">
-                <span style="font-size: 11px; color: var(--text-secondary); flex-shrink: 0;">Camera</span>
-                <button id="table-cam-btn-1" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-sel" style="font-size: 11px; padding: 4px 8px;">CAM 1</button>
-                <button id="table-cam-btn-2" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-sel" style="font-size: 11px; padding: 4px 8px;">CAM 2</button>
-            </div>
-            <div class="sidebar-right-toolbar table-cam-toolbar-row" style="padding-top: 4px;">
-                <button id="table-cam-link-toggle" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-connect-toggle table-cam-connect-toggle--disconnected" title="Toggle SDK session (releases camera when off)">
-                    <span id="table-cam-link-dot" class="material-icons-round" style="font-size: 14px;">link_off</span>
-                    <span id="table-cam-link-toggle-label">Disconnected</span>
-                </button>
-            </div>
-            <div class="sidebar-right-toolbar table-cam-toolbar-row" style="padding-top: 4px;">
-                <button id="table-cam-live-btn" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-action-btn" title="Toggle live preview (STREAM_ON) vs still / last capture">
-                    <span id="table-cam-live-btn-icon" class="material-icons-round" style="font-size: 15px;">videocam</span>
-                    <span id="table-cam-live-btn-label">Live</span>
-                </button>
-                <button id="table-cam-capture-btn" type="button" class="btn btn-secondary btn--sidebar-inline table-cam-action-btn" title="Single still capture (CAP pipeline)">
-                    <span class="material-icons-round" style="font-size: 15px;">camera_alt</span>
-                    Capture
-                </button>
-                <label style="font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto;" title="Exposure in seconds (live + capture). Max FPS is roughly 1/exp (e.g. 0.007 s ≈ 140 FPS). Lower = faster preview but darker.">
-                    Exp (s)
-                    <input id="table-cam-exposure" type="number" value="0.02" min="0.001" max="30" step="0.005" style="width: 56px; font-size: 11px; padding: 4px 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
-                </label>
-            </div>
-            <div style="padding: 4px 12px 2px; font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Latest capture</div>
-            <div id="table-cam-preview" class="table-cam-preview--mock-neutral cam-still-preview-slot" style="background: #0f1115; border: 1px solid var(--border-color); transition: border-color 160ms ease, box-shadow 160ms ease;">
-                <span id="table-cam-mode-chip" class="table-cam-mode-chip" aria-hidden="true"></span>
-                <div class="table-cam-preview-stage">
-                    <img id="table-cam-img" src="" alt="Table cam" style="display: none;">
-                    <div id="table-cam-placeholder" style="color: var(--text-muted); font-size: 12px; text-align: center;">Connect to enable Live or Capture.</div>
-                    <div id="table-cam-preview-loading" class="table-cam-preview-loading" aria-hidden="true">
-                        <div class="table-cam-spinner" aria-hidden="true"></div>
-                        <span id="table-cam-preview-loading-text">Loading…</span>
-                    </div>
+            <p style="padding: 0 12px 6px; margin: 0; font-size: 10px; color: var(--text-muted); line-height: 1.35;">
+                Camera live view, capture, and COBYLA reference: use each camera tag in the component panel
+                (<code>RECORD_MEASURABLES</code>, telemetry widgets).
+            </p>
+            <div id="optimization-feed-preview" class="optimization-feed-slot">
+                <div class="optimization-feed-stage">
+                    <img id="optimization-feed-img" src="" alt="Optimization stream" style="display: none;">
+                    <div id="optimization-feed-placeholder">Runs during OPTIMIZE — per-component optimization stream.</div>
                 </div>
-                <!-- Optimization Feed Overlay -->
                 <div id="optimization-overlay" style="display: none; position: absolute; bottom: 8px; left: 8px; background: rgba(0, 255, 0, 0.15); border: 1px solid #22c55e; padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #22c55e; font-weight: bold; align-items: center; gap: 4px; backdrop-filter: blur(4px);">
                     <span class="material-icons-round" style="font-size: 14px;">auto_awesome</span>
                     <span id="optimization-step-text">OPTIMIZING (Step 0)</span>
                 </div>
-            </div>
-            <div id="table-cam-error" class="table-cam-message-bar" role="alert" aria-live="polite"></div>
-
-            <div style="padding: 4px 12px 2px; font-size: 10px; color: #f87171; text-transform: uppercase; letter-spacing: 0.04em;">Cobyla reference — stored for OPTIMIZE (COBYLA)</div>
-            <div id="cobyla-ref-preview-wrap" class="cam-still-preview-slot" style="border: 1px solid #ef4444; box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.2), 0 0 0 1px rgba(239, 68, 68, 0.35); background: #0a0c10;">
-                <img id="cobyla-ref-preview-img" src="" alt="Cobyla reference" style="max-width: 100%; max-height: 100%; object-fit: contain; display: none;">
-                <div id="cobyla-ref-placeholder" style="color: var(--text-muted); font-size: 11px; text-align: center; padding: 12px; line-height: 1.45;">No reference stored.<br><span style="font-size: 10px; opacity: 0.9;">Set from <strong>Latest capture</strong> above, or load a PNG you saved earlier.</span></div>
-            </div>
-
-            <div class="sidebar-right-toolbar">
-                <button id="table-cam-cobyla-ref-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 4px 8px;" title="Stores whatever is shown in Latest capture as the server-side Cobyla reference (does not replace Latest capture)">
-                    <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">bookmark_add</span> Set ref
-                </button>
-                <button id="table-cam-cobyla-clear-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 4px 8px;">
-                    Clear ref
-                </button>
-            </div>
-            <div class="sidebar-right-toolbar">
-                <button id="cobyla-ref-save-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 4px 8px;" disabled title="Download the stored reference as PNG">
-                    <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">download</span> Save ref
-                </button>
-                <button id="cobyla-ref-load-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 4px 8px;" title="Upload a PNG to set the Cobyla reference">
-                    <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">upload</span> Load ref
-                </button>
-                <input type="file" id="cobyla-ref-file-input" accept="image/png,.png" style="display: none;" aria-hidden="true">
-            </div>
-            <div style="padding: 0 12px 10px;">
-                <span id="cobyla-ref-status" style="font-size: 10px; color: var(--text-muted); display: block; line-height: 1.35;">Cobyla ref: …</span>
             </div>
         </div>
 

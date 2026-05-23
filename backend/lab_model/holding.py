@@ -27,6 +27,17 @@ SYSTEM_STATUS_IDLE = "IDLE"
 SYSTEM_STATUS_BUSY = "BUSY"
 SYSTEM_STATUS_OPTIMIZING = "OPTIMIZING"
 SYSTEM_STATUS_HOLDING = "HOLDING"
+#: Phase 8 per-component TELEOP.
+#:
+#: Informational status reported at the top level when *any* component
+#: in ``state['components']`` has ``tunables.teleop_active == True``.
+#: Per §16.5 of ``universal_component_architecture.md`` per-component
+#: concurrency is allowed by default -- TELEOP does *not* block
+#: optimization on a different component -- so the actual gate is the
+#: per-component ``teleop_active`` field, not this status. The status
+#: exists only so the UI / API consumers can spot "something is being
+#: teleoped somewhere" at a glance.
+SYSTEM_STATUS_TELEOP = "TELEOP"
 
 DEFAULT_HOVER_Z_MM = 40.0
 """Default safe clearance height (mm above table) used by mock PICK / HOVER defaults."""

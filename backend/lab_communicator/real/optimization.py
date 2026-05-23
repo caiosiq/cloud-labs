@@ -17,9 +17,8 @@ Three sub-areas, all tied to the COBYLA / Newton optimizers in
 * **Cobyla reference image cache** -- the operator can upload a
   reference image (PNG bytes) before kicking off a Cobyla alignment;
   this module stores it, provides a status probe, and re-encodes it
-  back to PNG for download. Functions: :func:`set_cobyla_reference_from_png_bytes`,
-  :func:`clear_cobyla_reference`, :func:`get_cobyla_reference_status`,
-  :func:`get_cobyla_reference_png_bytes`.
+  Phase 9d: COBYLA reads the reference from ``measurables.camera_image`` on
+  the catalog camera tag (via :func:`load_cobyla_reference_bgr_from_state`).
 
 * **Cloudlab Newton place-UI hook** -- ``NewtonPlacementStrategy_cloudlab``
   exposes a ``progress_callback`` so cloud-labs can update the canvas
@@ -296,93 +295,100 @@ def monitor_optimization_dir(communicator: "RealLabCommunicator") -> None:
 
 
 # ---------------------------------------------------------------------------
-# Cobyla reference image cache
+# COBYLA reference from recorded measurables (Phase 9d)
 # ---------------------------------------------------------------------------
 
-def set_cobyla_reference_from_png_bytes(
-    communicator: "RealLabCommunicator", data: bytes
-) -> Tuple[bool, str]:
-    """Decode PNG bytes to BGR (OpenCV) and store for the next COBYLA optimize run.
-
-    Returns ``(ok, message)``. Failure modes (each with a human-friendly
-    message): empty body, missing cv2, undecodable PNG, decoded image
-    that isn't reshapable to a 3-channel BGR. Holds
-    ``_cobyla_ref_lock`` only for the dict swap, not for the decode.
-    """
+def _decode_png_bytes_to_bgr(data: bytes) -> Optional[Any]:
+    """Decode PNG bytes to a BGR ``numpy`` array, or ``None`` on failure."""
     if not data or len(data) < 8:
-        return False, "empty body"
+        return None
     try:
         import cv2
     except ImportError:
-        return False, "cv2 not installed"
+        return None
     import numpy as np
 
     arr = np.frombuffer(data, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
     if img is None:
-        return False, "could not decode PNG"
+        return None
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     elif img.ndim == 3 and img.shape[2] == 4:
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
     if img.ndim != 3 or img.shape[2] != 3:
-        return False, "decoded image must be BGR with 3 channels"
-    with communicator._cobyla_ref_lock:
-        communicator._cobyla_reference_bgr = img.copy()
-    h, w = img.shape[:2]
-    print(f"[REAL LAB] Cobyla reference image set ({w}x{h} BGR)")
-    return True, f"stored {w}x{h} BGR reference"
-
-
-def clear_cobyla_reference(communicator: "RealLabCommunicator") -> None:
-    """Drop any stored cobyla reference image."""
-    with communicator._cobyla_ref_lock:
-        communicator._cobyla_reference_bgr = None
-    print("[REAL LAB] Cobyla reference image cleared")
-
-
-def get_cobyla_reference_status(
-    communicator: "RealLabCommunicator",
-) -> Dict[str, Any]:
-    """Probe-style status dict for the UI's "is a reference set?" badge.
-
-    Always returns ``available: True`` when this backend is loaded; the
-    field exists so cloud-labs can distinguish "no real backend / not
-    available" from "real backend, no reference uploaded yet".
-    """
-    with communicator._cobyla_ref_lock:
-        ref = communicator._cobyla_reference_bgr
-    if ref is None:
-        return {"available": True, "set": False}
-    h, w = ref.shape[:2]
-    return {
-        "available": True,
-        "set": True,
-        "width": int(w),
-        "height": int(h),
-        "channels": int(ref.shape[2]),
-    }
-
-
-def get_cobyla_reference_png_bytes(
-    communicator: "RealLabCommunicator",
-) -> Optional[bytes]:
-    """Re-encode the stored reference back to PNG bytes (for download).
-
-    Returns ``None`` when no reference is set or when the encode fails
-    (cv2 returns ``ok=False``). Holds the lock only long enough to
-    snapshot the array reference; the actual encode runs unlocked.
-    """
-    import cv2
-
-    with communicator._cobyla_ref_lock:
-        ref = communicator._cobyla_reference_bgr
-        if ref is None:
-            return None
-        ok, buf = cv2.imencode(".png", ref)
-    if not ok:
         return None
-    return buf.tobytes()
+    return img
+
+
+def load_cobyla_reference_bgr_from_state(
+    communicator: "RealLabCommunicator",
+    *,
+    camera_number: int = 1,
+) -> Optional[Any]:
+    """Load the COBYLA reference BGR image from ``measurables.camera_image``.
+
+    Phase 9d replaces the legacy side-channel ``_cobyla_reference_bgr``
+    cache. The operator workflow is:
+
+      1. ``RECORD_MEASURABLES`` on the gripper camera (e.g. ``tag_22``).
+      2. ``OPTIMIZE`` with strategy COBYLA and matching ``camera_number``.
+
+    Returns ``None`` when no suitable recorded image exists (strategy
+    may fall back to its own default).
+    """
+    from lab_communicator.shared.catalog_schema import find_tag_id_for_cam_id
+
+    cam_id = int(camera_number)
+    tag_id = find_tag_id_for_cam_id(communicator.catalog_map or {}, cam_id)
+    if not tag_id:
+        print(
+            f"[REAL LAB] COBYLA: no catalog tag for camera_number={cam_id}"
+        )
+        return None
+
+    with communicator._state_lock:
+        entry = (communicator.current_state.get("components") or {}).get(tag_id)
+    if not isinstance(entry, dict):
+        print(f"[REAL LAB] COBYLA: tag {tag_id!r} not in lab state")
+        return None
+
+    ci = (entry.get("measurables") or {}).get("camera_image")
+    if not isinstance(ci, dict):
+        print(
+            f"[REAL LAB] COBYLA: no measurables.camera_image on {tag_id!r} "
+            f"(run RECORD_MEASURABLES on that camera first)"
+        )
+        return None
+
+    path = ci.get("path")
+    if not isinstance(path, str) or not path:
+        print(f"[REAL LAB] COBYLA: camera_image.path empty on {tag_id!r}")
+        return None
+
+    abs_path = os.path.abspath(path)
+    if not os.path.isfile(abs_path):
+        print(f"[REAL LAB] COBYLA: camera image file missing: {abs_path}")
+        return None
+
+    try:
+        with open(abs_path, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        print(f"[REAL LAB] COBYLA: could not read {abs_path}: {e}")
+        return None
+
+    img = _decode_png_bytes_to_bgr(data)
+    if img is None:
+        print(f"[REAL LAB] COBYLA: could not decode reference at {abs_path}")
+        return None
+
+    h, w = img.shape[:2]
+    print(
+        f"[REAL LAB] COBYLA reference from {tag_id!r} measurables.camera_image "
+        f"({w}x{h} BGR)"
+    )
+    return img
 
 
 # ---------------------------------------------------------------------------

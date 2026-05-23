@@ -1,4 +1,16 @@
-"""Join ``component_library.json`` + ``active_catalog.json`` into UI / scan rows."""
+"""Join ``component_library.json`` + ``active_catalog.json`` into UI / scan rows.
+
+As of Phase 5 (universal_component_architecture.md §13), ``component_library.json``
+may be either:
+
+- the **legacy** top-level array of component dicts (pre-migration), or
+- the **v1** ``{schema_version: 1, components: {tag_id: {...}}}`` object
+  with a per-component ``capabilities`` block.
+
+This module hides the shape difference: callers always receive a list of
+row dicts. The dual-shape parsing + §15.1 validation lives in
+:mod:`lab_communicator.shared.catalog_schema`.
+"""
 
 from __future__ import annotations
 
@@ -6,17 +18,8 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from lab_communicator.shared.catalog_schema import load_component_library_rows
 from lab_communicator.shared.lab_view_config import LabViewPaths, get_lab_view_paths_optional
-
-
-def _load_json_list(path: str, label: str) -> List[Dict[str, Any]]:
-    if not os.path.isfile(path):
-        raise FileNotFoundError(f"{label} not found: {path}")
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, list):
-        raise ValueError(f"{label} must be a JSON array: {path}")
-    return [x for x in data if isinstance(x, dict)]
 
 
 def library_by_tag(library_path: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
@@ -24,7 +27,7 @@ def library_by_tag(library_path: Optional[str] = None) -> Dict[str, Dict[str, An
     catalog_path = library_path or (lp.component_library_json if lp else "")
     if not catalog_path:
         raise RuntimeError("lab_view not bootstrapped")
-    rows = _load_json_list(catalog_path, "component_library.json")
+    rows = load_component_library_rows(catalog_path)
     by_tag: Dict[str, Dict[str, Any]] = {}
     for row in rows:
         tid = row.get("tag_id")

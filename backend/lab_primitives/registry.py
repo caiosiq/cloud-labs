@@ -45,6 +45,25 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "read_only": False,
         "handler": "move_motor",
     },
+    PrimitiveId.SET_MOTOR_SETPOINT: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "set_motor_setpoint",
+    },
+    PrimitiveId.SET_EXPOSURE: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "set_exposure_time_ms",
+    },
+    PrimitiveId.APPLY_TUNABLES_PATCH: {
+        "kind": PrimitiveKind.MACRO,
+        "read_only": False,
+        "handler": "apply_tunables_patch",
+        "macro_expands_to": [
+            PrimitiveId.SET_EXPOSURE,
+            PrimitiveId.SET_MOTOR_SETPOINT,
+        ],
+    },
     PrimitiveId.MOTOR_SEND_HOME: {
         "kind": PrimitiveKind.MACRO,
         "read_only": False,
@@ -120,5 +139,24 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "kind": PrimitiveKind.ATOMIC,
         "read_only": False,
         "handler": "confirm_holding_tag",
+    },
+    # --- Per-component TELEOP (Phase 8 / §16.5) ---
+    PrimitiveId.START_TELEOP: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "start_teleop",
+        "http": "POST /api/components/{tag_id}/teleop/start",
+    },
+    PrimitiveId.END_TELEOP: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "end_teleop",
+        "http": "POST /api/components/{tag_id}/teleop/end",
+    },
+    PrimitiveId.TELEOP_JOG: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "teleop_jog",
+        "http": "POST /api/components/{tag_id}/telemetry/jog",
     },
 }

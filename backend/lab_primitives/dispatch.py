@@ -8,19 +8,23 @@ from fastapi import BackgroundTasks
 from pydantic import ValidationError
 
 from lab_communicator.base import LabCommunicator
-from lab_model.motor_rotation_store import get_angle
 
 from .ids import READ_PRIMITIVE_IDS, PrimitiveId
+from .macros.apply_tunables_patch import run_apply_tunables_patch
+from .macros.motor_send_home import run_motor_send_home
 from .schemas import (
     AffirmPlacedBody,
+    ApplyTunablesPatchBody,
     ConfirmHoldingTagBody,
+    EndTeleopBody,
     HoverBody,
     MoveComponentBody,
     MotorSendHomeBody,
     MotorSetZeroBody,
     MoveMotorBody,
-    MoveMotorParameters,
     OptimizeBody,
+    SetExposureBody,
+    SetMotorSetpointBody,
     PickComponentBody,
     PlaceFromHoverBody,
     PlaceFromStorageBody,
@@ -30,8 +34,10 @@ from .schemas import (
     RepackStorageBody,
     ScanBody,
     ScanRotateInPlaceBody,
+    StartTeleopBody,
     StoreComponentBody,
     TagQuery,
+    TeleopJogBody,
     COMMAND_ADAPTER,
 )
 
@@ -54,6 +60,9 @@ def _log_primitive(
 ValidatedCommand = Union[
     MoveComponentBody,
     MoveMotorBody,
+    SetMotorSetpointBody,
+    SetExposureBody,
+    ApplyTunablesPatchBody,
     MotorSendHomeBody,
     MotorSetZeroBody,
     OptimizeBody,
@@ -70,6 +79,9 @@ ValidatedCommand = Union[
     PlaceFromHoverBody,
     ScanRotateInPlaceBody,
     ConfirmHoldingTagBody,
+    StartTeleopBody,
+    EndTeleopBody,
+    TeleopJogBody,
 ]
 
 
@@ -122,24 +134,6 @@ def parse_command_payload(payload: Dict[str, Any]) -> ValidatedCommand:
     return COMMAND_ADAPTER.validate_python(raw)
 
 
-async def _macro_motor_send_home(lab: LabCommunicator, cmd: MotorSendHomeBody) -> None:
-    """
-    Tracked cumulative angle → ``MOVE_MOTOR`` by ``-angle`` (same semantics as mock/real
-    ``motor_send_home``, but routed through the atomic primitive so the stack is visible).
-    """
-    tid = cmd.target_id
-    mid = cmd.parameters.motor_id
-    cur = get_angle(tid, mid)
-    if abs(cur) < 1e-12:
-        return
-    child = MoveMotorBody(
-        action="MOVE_MOTOR",
-        target_id=tid,
-        parameters=MoveMotorParameters(motor_id=mid, distance=-cur),
-    )
-    await _invoke_atomic(lab, child, macro_parent="MOTOR_SEND_HOME")
-
-
 async def _invoke_atomic(
     lab: LabCommunicator,
     cmd: ValidatedCommand,
@@ -154,6 +148,17 @@ async def _invoke_atomic(
         _log_primitive("MOVE_MOTOR", cmd.target_id, macro_parent=macro_parent)
         p = cmd.parameters
         await lab.move_motor(cmd.target_id, p.motor_id, p.distance)
+    elif isinstance(cmd, SetMotorSetpointBody):
+        _log_primitive("SET_MOTOR_SETPOINT", cmd.target_id, macro_parent=macro_parent)
+        p = cmd.parameters
+        await lab.set_motor_setpoint(cmd.target_id, p.motor_id, p.angle_deg)
+    elif isinstance(cmd, SetExposureBody):
+        _log_primitive("SET_EXPOSURE", cmd.target_id, macro_parent=macro_parent)
+        await lab.set_exposure_time_ms(
+            cmd.target_id, cmd.parameters.exposure_time_ms
+        )
+    elif isinstance(cmd, ApplyTunablesPatchBody):
+        raise RuntimeError("APPLY_TUNABLES_PATCH must be handled by macro path")
     elif isinstance(cmd, MotorSendHomeBody):
         raise RuntimeError("MOTOR_SEND_HOME must be handled by _macro_motor_send_home")
     elif isinstance(cmd, MotorSetZeroBody):
@@ -204,6 +209,15 @@ async def _invoke_atomic(
     elif isinstance(cmd, ConfirmHoldingTagBody):
         _log_primitive("CONFIRM_HOLDING_TAG", cmd.target_id, macro_parent=macro_parent)
         await lab.confirm_holding_tag(cmd.target_id)
+    elif isinstance(cmd, StartTeleopBody):
+        _log_primitive("START_TELEOP", cmd.target_id, macro_parent=macro_parent)
+        await lab.start_teleop(cmd.target_id)
+    elif isinstance(cmd, EndTeleopBody):
+        _log_primitive("END_TELEOP", cmd.target_id, macro_parent=macro_parent)
+        await lab.end_teleop(cmd.target_id)
+    elif isinstance(cmd, TeleopJogBody):
+        _log_primitive("TELEOP_JOG", cmd.target_id, macro_parent=macro_parent)
+        await lab.teleop_jog(cmd.target_id, cmd.parameters.model_dump(exclude_none=True))
     else:
         raise NotImplementedError(type(cmd))
 
@@ -212,7 +226,11 @@ async def execute_validated_command(lab: LabCommunicator, cmd: ValidatedCommand)
     """Await one command (used by recipe executor). Macros expand into atomic steps."""
     if isinstance(cmd, MotorSendHomeBody):
         _log_primitive("MOTOR_SEND_HOME", cmd.target_id)
-        await _macro_motor_send_home(lab, cmd)
+        await run_motor_send_home(lab, cmd)
+        return
+    if isinstance(cmd, ApplyTunablesPatchBody):
+        _log_primitive("APPLY_TUNABLES_PATCH", cmd.target_id)
+        await run_apply_tunables_patch(lab, cmd)
         return
     await _invoke_atomic(lab, cmd)
 
@@ -236,6 +254,33 @@ def schedule_validated_command(
         return {
             "status": "accepted",
             "message": f"Motor {p.motor_id} on {cmd.target_id} moving by {p.distance}",
+        }
+
+    if isinstance(cmd, SetMotorSetpointBody):
+        p = cmd.parameters
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": (
+                f"Motor {p.motor_id} on {cmd.target_id}: setpoint {p.angle_deg:g}°"
+            ),
+        }
+
+    if isinstance(cmd, SetExposureBody):
+        p = cmd.parameters
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": (
+                f"Exposure for {cmd.target_id} set to {p.exposure_time_ms:g} ms"
+            ),
+        }
+
+    if isinstance(cmd, ApplyTunablesPatchBody):
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": f"Tunables patch queued for {cmd.target_id}",
         }
 
     if isinstance(cmd, MotorSendHomeBody):

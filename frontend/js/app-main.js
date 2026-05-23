@@ -31,18 +31,15 @@ import {
     initLaserLinesPanelDeps,
 } from './ui/laser-lines-panel.js';
 import { initPoseRefresh, runLabPoseRefresh } from './ui/pose-refresh.js';
-import { checkVideoStatus, initVideoFeed } from './video-feed.js';
-import { initCobylaReference } from './cobyla-reference.js';
-import {
-    getTableCamExposureSeconds,
-    initTableCamPanel,
-} from './table-cam/panel.js';
+import { getTableCamExposureSeconds } from './camera-exposure.js';
 import {
     executeSendCommand,
     initCommands,
     sendCommand,
 } from './api/commands.js';
+import { endTeleopBeacon } from './api/teleop.js';
 import { fetchLabState, initLabState, startLabStatePolling } from './state/lab-state.js';
+import { initBenchChromeBar } from './ui/bench-chrome-bar.js';
 import { initUpdateUI, updateUI } from './ui/updateUI.js';
 import {
     clearSelectionAndHideContextPanel,
@@ -96,11 +93,6 @@ const recipeEditorSave = document.getElementById('recipe-editor-save');
 const recipeEditorCancel = document.getElementById('recipe-editor-cancel');
 const recIndicator = document.getElementById('rec-indicator');
 
-// Video Panel Elements (Right Sidebar)
-const videoImg = document.getElementById('live-video-img');
-const videoPlaceholder = document.getElementById('video-placeholder');
-const videoStatus = document.getElementById('video-status');
-
 
 // --- Module wiring ---
 
@@ -129,7 +121,6 @@ initRecipes({
 initLaserLinesPanelDeps({ render: () => render() });
 initPoseRefresh({
     fetchLabState: () => fetchLabState(),
-    checkVideoStatus: () => checkVideoStatus(),
 });
 initCommands({
     render: () => render(),
@@ -140,6 +131,12 @@ initLabState({
     updateContextPanel: (tagId) => updateContextPanel(tagId),
     updateMotorAngleLabels: (tagId) => updateMotorAngleLabels(tagId),
     updateUI: () => updateUI(),
+});
+initBenchChromeBar({
+    onSelect: (tagId) => {
+        updateContextPanel(tagId);
+        render();
+    },
 });
 initUpdateUI({
     placementUiLabel,
@@ -273,9 +270,31 @@ function init() {
     
     initAlignmentDockTools();
     initLaserLinesPanel();
-    initVideoFeed({ videoImg, videoPlaceholder, videoStatus });
-    const { tableCamImg } = initTableCamPanel();
-    initCobylaReference({ tableCamImg });
+    // Phase 9c removed the lab-wide LIVE FEED pane.
+    // Phase 9d removed the table-cam dock; cameras live in the component panel.
+
+    // Phase 8b: best-effort END_TELEOP on browser unload. Walks
+    // ``store.labState.components`` (last known snapshot) and fires a
+    // sendBeacon for every tag whose ``tunables.teleop_active`` was
+    // True. Without this, a closed tab would leave the lease dangling
+    // until the server's stale-lease sweeper (TTL ~3 s by default) ran;
+    // the beacon brings that down to "before the page is gone".
+    //
+    // We listen on BOTH pagehide (Safari-friendly, fires on bfcache
+    // restore too) AND beforeunload so the path is covered across
+    // browsers. The handler must stay synchronous-ish and tiny --
+    // sendBeacon hands the request to the OS and returns immediately.
+    const fireTeleopEndBeacons = () => {
+        const comps = store.labState && store.labState.components;
+        if (!comps) return;
+        Object.entries(comps).forEach(([tagId, comp]) => {
+            if (comp && comp.tunables && comp.tunables.teleop_active) {
+                endTeleopBeacon(tagId);
+            }
+        });
+    };
+    window.addEventListener('pagehide', fireTeleopEndBeacons);
+    window.addEventListener('beforeunload', fireTeleopEndBeacons);
 }
 
 // --- Command Console (ES module `js/command-console.js`): dependency injection ---

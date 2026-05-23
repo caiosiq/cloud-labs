@@ -128,6 +128,7 @@ def normalize_loaded_state(
     - ``optimization_step`` coerced to int (older snapshots stored it
       as a string).
     - ``optimization_run_dir`` defaulted to ``None`` when absent.
+    - ``optimization_target_id`` defaulted to ``None`` when absent.
     - ``last_updated`` refreshed.
 
     All other top-level keys from the snapshot are preserved verbatim.
@@ -138,6 +139,8 @@ def normalize_loaded_state(
     out["optimization_step"] = int(out.get("optimization_step", 0) or 0)
     if "optimization_run_dir" not in out:
         out["optimization_run_dir"] = None
+    if "optimization_target_id" not in out:
+        out["optimization_target_id"] = None
     out["holding"] = empty_holding()
     out["last_updated"] = datetime.now().isoformat()
     return out

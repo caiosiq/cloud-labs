@@ -15,7 +15,12 @@ import { DANGER_RADIUS_MM } from '../config.js';
 import { mmToPx, pxToMm } from './coordinates.js';
 import { store } from '../state/store.js';
 import { log } from '../ui/log.js';
-import { drawPose, isBreadboardIntent, isStoredComponent } from '../component-model.js';
+import {
+    drawPose,
+    isBreadboardIntent,
+    isStoredComponent,
+    shouldRenderOnCanvas,
+} from '../component-model.js';
 import { isPlacedRegion, regionMoveBlocked } from '../storage-region.js';
 import { bindGuideDrawListeners } from './guides.js';
 import {
@@ -33,9 +38,70 @@ import {
     updateContextPanel,
 } from '../ui/context-panel.js';
 import { confirmPlaceFromStorageDrag, sendCommand } from '../api/commands.js';
+import { teleopJog } from '../api/teleop.js';
 
 /** Degrees per wheel tick while dragging a component. */
 const ROTATION_WHEEL_STEP_DEG = 2.5;
+
+// Phase 8b: TELEOP drag throttle. The backend stale-lease sweeper TTL
+// defaults to 3000 ms so any rate above ~1 Hz keeps the lease alive; we
+// aim for a smooth-feeling ~15 fps. Frames are absolute (not deltas) so
+// drops between throttled sends are self-healing — the next frame just
+// carries the latest pose.
+const TELEOP_DRAG_FRAME_MIN_INTERVAL_MS = 1000 / 15;
+
+/**
+ * Per-tag throttle state for canvas-driven TELEOP jogs.
+ *
+ *   tagId -> { lastSentMs: number, frameId: number }
+ */
+const _teleopDragThrottle = new Map();
+
+/**
+ * True when the lab state says ``tagId`` currently holds the TELEOP lease.
+ * Centralized so the drag handlers can stay readable.
+ */
+function isTagInTeleop(tagId) {
+    if (!tagId || !store.labState || !store.labState.components) return false;
+    const comp = store.labState.components[tagId];
+    return !!(comp && comp.tunables && comp.tunables.teleop_active);
+}
+
+/**
+ * Emit one TELEOP_JOG frame for ``tagId`` at the *current* ghost pose,
+ * respecting the throttle. Returns the in-flight promise (or ``null`` if
+ * the throttle skipped this frame).
+ */
+function emitTeleopJogFrame(tagId, { force = false } = {}) {
+    const ghost = store.ghostState[tagId];
+    if (!ghost) return null;
+    const now = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now()
+        : Date.now();
+    const state = _teleopDragThrottle.get(tagId) || { lastSentMs: 0, frameId: 0 };
+    if (!force && now - state.lastSentMs < TELEOP_DRAG_FRAME_MIN_INTERVAL_MS) {
+        return null;
+    }
+    state.lastSentMs = now;
+    state.frameId += 1;
+    _teleopDragThrottle.set(tagId, state);
+    return teleopJog(
+        tagId,
+        {
+            nominal_pose: {
+                x: Number(ghost.x) || 0,
+                y: Number(ghost.y) || 0,
+                rotation: Number(ghost.rotation) || 0,
+            },
+            frame_id: state.frameId,
+        },
+    );
+}
+
+/** Drop the throttle bookkeeping for ``tagId`` (called on mouseup / end). */
+function resetTeleopDragThrottle(tagId) {
+    if (tagId) _teleopDragThrottle.delete(tagId);
+}
 
 let _render = () => {};
 
@@ -124,6 +190,8 @@ export function checkCollision(targetId, x, y, opts = {}) {
 
 function getComponentAtPosition(canvasX, canvasY) {
     for (const [name, pose] of Object.entries(store.ghostState)) {
+        const physical = store.labState?.components?.[name];
+        if (!physical || !shouldRenderOnCanvas(name, physical)) continue;
         const p = mmToPx(pose.x, pose.y);
         const dx = canvasX - p.x;
         const dy = canvasY - p.y;
@@ -278,6 +346,14 @@ function onMouseMove(canvas, e) {
     store.ghostState[store.draggingComponent].y = snapped.y;
 
     _render();
+
+    // Phase 8b: while teleop owns the lease for this tag, stream the drag
+    // as absolute jog frames (throttled to ~15 fps). The MOVE_COMPONENT
+    // path in onMouseUp is the non-teleop "commit at release" UX; during
+    // teleop the operator gets continuous updates instead.
+    if (isTagInTeleop(store.draggingComponent)) {
+        emitTeleopJogFrame(store.draggingComponent);
+    }
 }
 
 function onWheel(e) {
@@ -296,6 +372,12 @@ function onWheel(e) {
 
         _render();
         updateContextPanel(store.draggingComponent);
+
+        // Phase 8b: wheel ticks during a teleop drag also push absolute
+        // jog frames (same throttle as mousemove).
+        if (isTagInTeleop(store.draggingComponent)) {
+            emitTeleopJogFrame(store.draggingComponent);
+        }
     }
 }
 
@@ -305,6 +387,22 @@ async function onMouseUp(_canvas, _e) {
         resetDragAlignmentSticky();
         const dc = store.draggingComponent;
         const current = store.ghostState[dc];
+
+        // Phase 8b TELEOP path: drag releases send one final force-flush
+        // jog (in case the throttle skipped the last few frames) and
+        // skip the MOVE_COMPONENT confirm modal entirely. Collision
+        // detection is also bypassed here -- the operator "live drove"
+        // every pixel of the trajectory and owns avoidance through
+        // their eyes; reverting at release would discard their work.
+        if (isTagInTeleop(dc)) {
+            await emitTeleopJogFrame(dc, { force: true });
+            resetTeleopDragThrottle(dc);
+            store.draggingComponent = null;
+            store.dragComponentStartLab = null;
+            _render();
+            return;
+        }
+
         const labSt = placementUiLabel(store.labState.components[dc]);
         const isDragFromStoragePlace =
             store.dragFromStorageTag === dc && labSt === 'STORED';

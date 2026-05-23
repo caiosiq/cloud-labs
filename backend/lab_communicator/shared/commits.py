@@ -26,7 +26,7 @@ Architectural rule (``communicator_refactor.md`` §5.1): pure stdlib
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from lab_model.component_model import (
     PLACEMENT_MODE_HOVER,
@@ -379,6 +379,78 @@ def commit_optimization_complete(
             }
 
 
+def null_measurables_for_targets(
+    state: Dict[str, Any],
+    target_ids: List[str],
+) -> None:
+    """Phase 3 / Golden Rule: null measurables for the listed targets.
+
+    Called on BUSY/OPTIMIZING entry for every motion primitive (see
+    ``universal_component_architecture.md`` §3.2 "Golden Rule of
+    Measurables"). The intent: while a component is in motion or
+    being teleoperated, its ``measurables.*`` (pose, motor encoder
+    readback, camera image, optimization score/pose) do not reflect
+    physical reality and must be advertised as ``null`` to every
+    consumer. The motion primitive's own commit helper repopulates
+    ``measurables.pose`` (commanded pose) on completion; the
+    high-fidelity readback is only available after an explicit
+    ``RECORD_MEASURABLES`` primitive.
+
+    Implementation notes:
+
+    - We keep ``measurables`` itself as a dict (not ``None``) so
+      every downstream consumer that does
+      ``(comp.get("measurables") or {}).get("pose")`` keeps working;
+      only the leaf fields flip to ``None``.
+    - ``measurables.pose`` is set to ``None`` rather than ``{}`` so
+      :func:`inject_motor_rotations_into_state` skips the motor
+      injection (the ``isinstance(pose, dict)`` guard there). Motor
+      rotations are part of the readback, so they should disappear
+      from the polled state too.
+    - Tunables (intent) are untouched — that's the canvas-truth
+      pose and stays stable across motion.
+    """
+    components = state.get("components") or {}
+    if not isinstance(components, dict):
+        return
+    for tag_id in target_ids:
+        if not isinstance(tag_id, str) or not tag_id:
+            continue
+        entry = components.get(tag_id)
+        if not isinstance(entry, dict):
+            continue
+        meas = entry.setdefault("measurables", {})
+        if not isinstance(meas, dict):
+            continue
+        meas["pose"] = None
+        meas["camera_image"] = None
+        meas["last_optimization_score"] = None
+        meas["last_optimized_pose"] = None
+
+
+def commit_observed_measurables(
+    state: Dict[str, Any],
+    tag_id: str,
+    observed: Dict[str, Any],
+) -> None:
+    """Merge a partial measurables dict after ``RECORD_MEASURABLES``.
+
+    Keys follow catalog ``capabilities.measurables`` field names
+    (``camera_image``, ``motor_rotations``, ``last_optimization_score``, …).
+    ``None`` values are skipped so callers can omit fields they did not
+    observe.
+    """
+    if not observed:
+        return
+    components = state.setdefault("components", {})
+    entry = components.setdefault(tag_id, {})
+    meas = entry.setdefault("measurables", default_measurables())
+    for key, val in observed.items():
+        if val is None:
+            continue
+        meas[key] = val
+
+
 def commit_observed_camera_image(
     state: Dict[str, Any],
     tag_id: str,
@@ -406,6 +478,152 @@ def commit_observed_camera_image(
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 8: per-component TELEOP commit helpers
+# ---------------------------------------------------------------------------
+
+def commit_teleop_start(
+    state: Dict[str, Any],
+    tag_id: str,
+    *,
+    now_ms: float,
+) -> bool:
+    """Mark ``tag_id`` as actively teleoperated. Returns True on success.
+
+    Sets ``tunables.teleop_active = True`` and stamps
+    ``tunables.teleop_last_jog_ts = now_ms``. The orchestrator separately
+    nulls measurables (§3.2 Golden Rule). Returns ``False`` when the
+    component entry is missing -- the orchestrator should already have
+    refused via ``refuse_if_not_in_state`` before reaching this helper,
+    so a ``False`` return is exceptional and the orchestrator surfaces
+    it as a primitive failure.
+    """
+    components = state.get("components") or {}
+    if not isinstance(components, dict):
+        return False
+    entry = components.get(tag_id)
+    if not isinstance(entry, dict):
+        return False
+    tun = entry.setdefault("tunables", default_tunables())
+    tun["teleop_active"] = True
+    tun["teleop_last_jog_ts"] = float(now_ms)
+    return True
+
+
+def commit_teleop_end(
+    state: Dict[str, Any],
+    tag_id: str,
+) -> None:
+    """Release the TELEOP lease for ``tag_id`` (idempotent).
+
+    Clears ``tunables.teleop_active`` and ``tunables.teleop_last_jog_ts``.
+    Measurables stay null -- the operator records an explicit
+    ``RECORD_MEASURABLES`` primitive when they want a confirmed readback.
+    A missing component entry is a no-op.
+    """
+    components = state.get("components") or {}
+    if not isinstance(components, dict):
+        return
+    entry = components.get(tag_id)
+    if not isinstance(entry, dict):
+        return
+    tun = entry.get("tunables")
+    if isinstance(tun, dict):
+        tun["teleop_active"] = False
+        tun["teleop_last_jog_ts"] = None
+
+
+def commit_teleop_jog(
+    state: Dict[str, Any],
+    tag_id: str,
+    *,
+    now_ms: float,
+    nominal_pose: Optional[Dict[str, float]] = None,
+    nominal_motor_positions: Optional[Dict[str, float]] = None,
+) -> bool:
+    """Apply one jog frame: merge absolute pose / motor targets, stamp ts.
+
+    Pose and motor positions are *merged* not replaced, so a frame that
+    sends only ``{"x": 10.5}`` updates x without clobbering y / rotation.
+    Motor positions are keyed by motor id as a string (matching how
+    ``inject_motor_rotations_into_state`` produces them on read).
+
+    Returns ``True`` on success, ``False`` if the entry is missing or
+    not currently teleop_active (the orchestrator handles the refusal
+    side; this helper enforces the contract that jogs can't write to a
+    non-leased component).
+    """
+    components = state.get("components") or {}
+    if not isinstance(components, dict):
+        return False
+    entry = components.get(tag_id)
+    if not isinstance(entry, dict):
+        return False
+    tun = entry.get("tunables")
+    if not isinstance(tun, dict) or not tun.get("teleop_active"):
+        return False
+
+    if nominal_pose:
+        cur_pose = tun.get("nominal_pose")
+        if not isinstance(cur_pose, dict):
+            cur_pose = {}
+        for k, v in nominal_pose.items():
+            try:
+                cur_pose[k] = float(v)
+            except (TypeError, ValueError):
+                continue
+        tun["nominal_pose"] = cur_pose
+
+    if nominal_motor_positions:
+        cur_motors = tun.get("nominal_motor_positions")
+        if not isinstance(cur_motors, dict):
+            cur_motors = {}
+        for k, v in nominal_motor_positions.items():
+            try:
+                cur_motors[str(k)] = float(v)
+            except (TypeError, ValueError):
+                continue
+        tun["nominal_motor_positions"] = cur_motors
+
+    tun["teleop_last_jog_ts"] = float(now_ms)
+    return True
+
+
+def sweep_stale_teleop_leases(
+    state: Dict[str, Any],
+    *,
+    now_ms: float,
+    ttl_ms: float,
+) -> List[str]:
+    """Clear ``teleop_active`` for components whose last jog is older than TTL.
+
+    Returns the list of tag ids whose lease was cleared (caller logs).
+    The TTL is wall-clock; a component with no ``teleop_last_jog_ts``
+    (e.g. legacy state) but ``teleop_active=True`` is cleared
+    immediately on the assumption it was orphaned by a pre-Phase-8
+    state file. ``ttl_ms <= 0`` disables the sweep (no-op).
+    """
+    if ttl_ms <= 0:
+        return []
+    components = state.get("components") or {}
+    if not isinstance(components, dict):
+        return []
+    cleared: List[str] = []
+    cutoff = float(now_ms) - float(ttl_ms)
+    for tag_id, entry in components.items():
+        if not isinstance(entry, dict):
+            continue
+        tun = entry.get("tunables")
+        if not isinstance(tun, dict) or not tun.get("teleop_active"):
+            continue
+        ts = tun.get("teleop_last_jog_ts")
+        if not isinstance(ts, (int, float)) or float(ts) < cutoff:
+            tun["teleop_active"] = False
+            tun["teleop_last_jog_ts"] = None
+            cleared.append(tag_id)
+    return cleared
+
+
 __all__ = [
     "commit_pick",
     "commit_hover",
@@ -415,5 +633,11 @@ __all__ = [
     "commit_move_to_storage",
     "commit_affirm_placed",
     "commit_observed_camera_image",
+    "commit_observed_measurables",
     "commit_optimization_complete",
+    "null_measurables_for_targets",
+    "commit_teleop_start",
+    "commit_teleop_end",
+    "commit_teleop_jog",
+    "sweep_stale_teleop_leases",
 ]

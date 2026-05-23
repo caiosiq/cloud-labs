@@ -29,10 +29,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from lab_model.component_model import PRESENCE_BREADBOARD, is_stored
+from lab_model.component_model import (
+    PRESENCE_BREADBOARD,
+    is_stored,
+    is_teleop_active,
+)
 from lab_model.holding import (
     SYSTEM_STATUS_HOLDING,
     SYSTEM_STATUS_IDLE,
+    SYSTEM_STATUS_TELEOP,
     held_tag,
     is_holding,
 )
@@ -275,6 +280,69 @@ def refuse_if_status_not_idle(
     return ok()
 
 
+def refuse_if_teleop_active(
+    current_state: Dict[str, Any],
+    target_id: str,
+    *,
+    primitive_name: str = "operation",
+) -> RefusalResult:
+    """Refuse when ``target_id`` is currently in an active TELEOP session.
+
+    Phase 8 (§16.5). Per-component TELEOP runs in its own concurrency
+    lane: it does *not* set ``system_status=BUSY``, and it does *not*
+    block primitives on other components. But every primitive that
+    mutates *this* component's pose/measurables must refuse while
+    teleop owns the lease, otherwise an automated MOVE_COMPONENT
+    would race the operator's manual jog.
+
+    Used by ``move_component``, ``move_motor``, ``optimize_component``,
+    ``pick_component``, ``hover_component``, ``place_from_hover``,
+    ``store_component``, ``place_from_storage``, ``record_measurables``.
+    The operator can resolve via explicit ``END_TELEOP`` or by waiting
+    out the TTL sweeper.
+    """
+    components = current_state.get("components") or {}
+    entry = components.get(target_id) if isinstance(components, dict) else None
+    if isinstance(entry, dict) and is_teleop_active(entry):
+        return refuse(
+            f"{target_id} is in TELEOP; cannot {primitive_name}. "
+            f"End teleop first (or wait for the lease to expire)."
+        )
+    return ok()
+
+
+def refuse_if_any_teleop_active(
+    current_state: Dict[str, Any],
+    *,
+    primitive_name: str = "operation",
+    exclude_tag: Optional[str] = None,
+) -> RefusalResult:
+    """Refuse when *any* component (other than ``exclude_tag``) is in TELEOP.
+
+    Phase 8 (§16.5). Used by primitives that affect the entire lab
+    state -- ``home_all`` style sweeps, ``REPACK_STORAGE`` (which
+    rearranges many slots), or ``SCAN`` (which iterates over many
+    components). These must wait until no operator is actively
+    teleoping anything. The ``exclude_tag`` escape hatch lets the
+    teleop primitives themselves call this helper without self-
+    referring (e.g. ``START_TELEOP`` on tag X is fine even if tag X
+    happens to already be teleop_active -- that's a no-op idempotent
+    case handled by the caller).
+    """
+    components = current_state.get("components") or {}
+    if not isinstance(components, dict):
+        return ok()
+    for tag, entry in components.items():
+        if exclude_tag is not None and tag == exclude_tag:
+            continue
+        if isinstance(entry, dict) and is_teleop_active(entry):
+            return refuse(
+                f"{tag} is in TELEOP; cannot {primitive_name} while another "
+                f"component is being teleoped. End teleop first."
+            )
+    return ok()
+
+
 __all__ = [
     "RefusalResult",
     "ok",
@@ -288,6 +356,9 @@ __all__ = [
     "refuse_if_z_lab_out_of_bounds",
     "refuse_if_not_on_breadboard",
     "refuse_if_status_not_idle",
+    "refuse_if_teleop_active",
+    "refuse_if_any_teleop_active",
     "SYSTEM_STATUS_HOLDING",
     "SYSTEM_STATUS_IDLE",
+    "SYSTEM_STATUS_TELEOP",
 ]

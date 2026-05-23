@@ -67,9 +67,9 @@ The root route rewrites **`js/main.js?v=…`** in the served HTML with a startup
 |------|------|
 | **`js/main.js`** | Entry: **`import './bootstrap.js'`** only. |
 | **`js/bootstrap.js`** | **`fetch('/api/lab-layout')`** → **`applyLabLayoutFromApiDoc`** → dynamic **`import('./app-main.js')`**; shows an error banner if layout load fails (check **`LAB_VIEW_PATH`**). |
-| **`js/app-main.js`** | Main UI: DOM hooks, **`fetch`** polling, canvas draw/interaction, sidebars (components, context, recipes, library), modals, video / table-cam / Cobyla UI, **`init()`**, and assignment of **`window.__commandConsoleDeps`**. |
+| **`js/app-main.js`** | Main UI: DOM hooks, **`fetch`** polling, canvas draw/interaction, sidebars (components, context, recipes, library), modals, optimization preview, **`init()`**, and assignment of **`window.__commandConsoleDeps`**. |
 | **`js/config.js`** | Canvas size; mutable lab bounds, danger radius, and breadboard grid fields set from **`/api/lab-layout`** (reasonable defaults until applied); **`POLLING_INTERVAL`**. |
-| **`js/state/store.js`** | Single mutable **`store`** object: `labState`, `ghostState`, `catalogMap`, selection, optimization flags, recipe recording buffers, table-cam selection, etc. |
+| **`js/state/store.js`** | Single mutable **`store`** object: `labState`, `ghostState`, `catalogMap`, selection, optimization flags, recipe recording buffers, etc. |
 | **`js/canvas/coordinates.js`** | **`mmToPx`** / **`pxToMm`** for the lab frame (origin at table center, +Y up on screen). |
 | **`js/command-console.js`** | Console UI loop; depends on **`command-parse.js`**, **`command-api.js`**, **`command-complete.js`**. |
 
@@ -156,37 +156,18 @@ Previously **mock** defaulted this feature **on** and **real** **off**; both com
 
 ### Table cameras (CAM1 / CAM2)
 
-Real benches use the **`lab_automation`** recorder subprocesses (`recorder_cam_laser_align_cloudlab.py` on ports **9999** / **10000**). The UI talks to them only through the FastAPI layer.
+Real benches use the **`lab_automation`** recorder subprocesses (`recorder_cam_laser_align_cloudlab.py` on ports **9999** / **10000**). The UI reaches them through **per-component** routes on each catalog camera tag (e.g. `cam_gripper_1` → `tag_22`):
 
-**Right sidebar controls**
+| Need | Where |
+|------|--------|
+| Live MJPEG | Component panel → **`telemetry.stream`** → `GET /api/components/{tag_id}/telemetry/stream` |
+| Polled JPEG preview | **`telemetry.preview`** → `GET /api/components/{tag_id}/telemetry/preview` |
+| Still PNG + COBYLA reference | **`RECORD_MEASURABLES`** on the camera tag → `measurables.camera_image` |
+| Optimizer live view | Right sidebar **Optimization preview** during `OPTIMIZE` → `GET /api/components/{tag_id}/telemetry/optimization-stream` |
 
-| Control | Behavior |
-|--------|-----------|
-| **Connected** | **`POST /api/table-cam/{1\|2}/connect`** — opens SDK session (`CONNECT`) |
-| **Live / Still** | **`POST /api/table-cam/{id}/live`** — `STREAM_ON` / `STREAM_OFF` |
-| **Capture** | **`GET /api/table-cam/capture?cam_id=&exposure=`** — still PNG (`CAP`); stops live first |
-| **Exp (s)** | **`POST /api/table-cam/{id}/vexp`** — exposure for live + capture (default **0.02** s) |
+Preview tuning still lives in **`table_cam_preview.json`** inside **`LAB_VIEW_PATH`** (`scale`, `jpeg_quality`, `target_fps`, `max_inflight_requests`). Restart the backend after changing recorder-related fields.
 
-**Live preview (low latency)**
-
-The UI does **not** use browser MJPEG for the table cam anymore. It **polls** **`GET /api/table-cam/preview?cam_id=`**, which returns a single JPEG from the recorder’s latest cached frame (`GET_JPEG` over a reused TCP connection). Tuning lives in **`table_cam_preview.json`** inside **`LAB_VIEW_PATH`**:
-
-| Field | Role |
-|--------|------|
-| **`scale`** | Recorder resize before JPEG (default **0.75**) |
-| **`jpeg_quality`** | JPEG quality 40–95 (default **72**) |
-| **`target_fps`** | UI poll target (default **144**) |
-| **`max_inflight_requests`** | Parallel preview fetches (default **3**) |
-
-**`GET /api/table-cam/status`** includes **`preview_config`** so the browser picks up these values without a separate config file.
-
-**Legacy / debug:** **`GET /api/table-cam/stream`** remains a multipart MJPEG generator for compatibility; the main UI uses **`/preview`** only.
-
-**Performance notes**
-
-- Lower **Exp (s)** reduces exposure time and raises the camera’s achievable frame rate (roughly **1 / exposure** as an upper bound); the monitor refresh rate does not by itself increase sensor FPS.
-- The recorder live loop drains only a **small** number of queued SDK frames per iteration so brief events (e.g. blocking the beam) are less likely to be discarded before publish.
-- Restart the **backend** after changing **`scale`** / **`jpeg_quality`** in **`table_cam_preview.json`** (recorder CLI args are set at spawn).
+Lab-wide **`/api/table-cam/*`** routes were removed in Phase 9d; **`LabCommunicator.table_cam_*`** helpers remain for the per-component telemetry layer.
 
 ---
 
@@ -230,7 +211,7 @@ where **`phase`** is **`"ghost"`** or **`"physical"`**, matching the semantics a
 
 Copy/paste guidance and the call-site logic live in **`backend/lab_communicator/real/optimization.py`** and **`backend/lab_communicator/real/primitives.py`** (`primitive_optimize_component` is where the strategy is built and `_cloudlab_progress_callback` is wired in).
 
-### Optimization step counter and table-cam label
+### Optimization step counter and optimization preview
 
 `optimization_step` in lab state is advanced from a background watcher. In **REAL** mode each optimization run uses a **dedicated subfolder** under **`Camera_Images/`** (name like `opt_<YYYYMMDD_HHMMSS>_<NEWTON|COBYLA>`). The communicator watches **that folder** for the current run so successive optimizations do not overwrite PNGs. Lab state also exposes **`optimization_run_dir`** (folder basename) while optimizing. Strategies in **`lab_automation`** must accept an **`output_dir`** (or alias—see **`update_lab.md`**) and write frames there; filenames should still include a **`stepNN`** pattern (e.g. `test_step02.png`) when possible so the step index is unambiguous.
 
@@ -323,25 +304,13 @@ The `backend-simple/` folder holds small lab-related Python snippets with **rela
 | GET | `/api/laser-line` | Legacy single-line coefficients `{ a, b, source, … }` |
 | GET | `/api/laser-lines` | All overlays from **`laser_lines.json`** |
 | PATCH | `/api/laser-lines/{line_id}` | Adjust a line in **`laser_lines.json`** |
-| GET | `/api/video-feed/status` | Stream availability + source URL |
-| GET | `/api/video-feed/stream` | MJPEG (real) or static mock SVG |
-| GET | `/api/optimization-feed/stream` | Optimization MJPEG when supported |
-| GET | `/api/table-cam/status` | Per-camera connected/streaming/hardware; includes **`preview_config`** |
-| POST | `/api/table-cam/{1\|2}/connect` | Open camera session |
-| POST | `/api/table-cam/{1\|2}/disconnect` | Release session |
-| POST | `/api/table-cam/{1\|2}/live` | Body `{ "enabled": true\|false }` — live preview on/off |
-| POST | `/api/table-cam/{1\|2}/vexp` | Body `{ "exposure": seconds }` |
-| POST | `/api/table-cam/{1\|2}/vgain` | Body `{ "gain": number }` |
-| GET | `/api/table-cam/preview?cam_id=1\|2` | Single JPEG frame (polled live preview) |
-| GET | `/api/table-cam/stream?cam_id=1\|2` | Legacy MJPEG multipart stream |
-| GET | `/api/table-cam/capture?cam_id=1\|2&exposure=` | Single PNG still |
+| GET | `/api/components/{tag_id}/telemetry/optimization-stream` | Optimizer iteration MJPEG during `OPTIMIZE` (tag must match `optimization_target_id`) |
+| GET | `/api/components/{tag_id}/telemetry/stream` | Per-component MJPEG (cameras; replaces legacy `/api/video-feed/stream`) |
+| GET | `/api/components/{tag_id}/telemetry/preview` | Single JPEG frame (polled live preview) |
+| GET | `/api/components/{tag_id}/telemetry/capture` | Single PNG still (when declared in catalog) |
 | GET | `/api/session-reconciliation/offers` | Tags eligible to restore from last checkpoint |
 | POST | `/api/session-reconciliation/apply` | Apply checkpoint tunables/measurables for given tag ids |
 | POST | `/api/session-reconciliation/save` | Write checkpoint now |
-| GET | `/api/cobyla-reference-image` | PNG bytes of the stored reference (**404** if none); used by the UI red “Cobyla reference” preview and **Save ref to file** |
-| POST | `/api/cobyla-reference-image` | Body: PNG bytes → stored as **`CobylaAlignmentStrategy.reference_image`** (BGR) for the next COBYLA run |
-| GET | `/api/cobyla-reference-image/status` | Whether a reference is set (+ size); includes **`lab_mode`** |
-| DELETE | `/api/cobyla-reference-image` | Clear stored reference |
 | GET/POST | `/api/recipes`, `/api/recipes/{id}/play`, `/api/recipes/{id}/golden`, `/api/recipes/{id}/compare` | Recipe CRUD, play, golden, drift report |
 | GET/POST | `/api/states`, `/api/states/save`, `/api/states/load` | List / save / load snapshots under **`{LAB_VIEW_PATH}/states/`** |
 | GET | `/api/debug/ghost-state`, `/api/debug/golden-states` | Debug aggregates |
@@ -408,7 +377,7 @@ Set `LAB_MODE=REAL` and a valid `LAB_AUTOMATION_PATH` so `from lab_automation...
 ## Typical workflow
 
 1. **Add parts** — Open the catalog, **Request** items; in mock this updates state quickly; in real lab this ties to your automation policy.
-2. **Place and align** — Drag on the canvas or use the **floating component controls**; confirm moves; run **Optimize** with strategy parameters. For **Cobyla**, use **Latest capture** for new table-cam frames, then **Set Cobyla reference** to store that frame as the server reference (shown in the separate **red-bordered** preview so you can keep capturing). **Save ref to file** / **Load ref from file** reuses a PNG for testing without recapturing on hardware.
+2. **Place and align** — Drag on the canvas or use the **floating component controls**; confirm moves; run **Optimize** with strategy parameters. For **Cobyla**, run **`RECORD_MEASURABLES`** on the gripper camera tag first so the optimizer reads the latest **`measurables.camera_image`** as its reference.
 3. **Record a recipe** — Toggle record, perform actions, save; play back from the sidebar.
 4. **Drift / golden** — After a good run, a golden file may exist; use **Debug** or `GET /api/recipes/{id}/compare` to compare poses to the current lab state.
 5. **Snapshots** — Use **Save / Load state** to persist JSON under **`{LAB_VIEW_PATH}/states/`**.

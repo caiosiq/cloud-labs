@@ -3,7 +3,7 @@
  *
  * This is the single entry-point that every poll tick calls after mirroring `store.labState`. It
  * is intentionally side-effect-heavy: it updates the system status badge, rebuilds the inventory
- * sidebar from scratch, refreshes the table-cam chrome and motor labels, runs the layout-warning
+ * sidebar from scratch, refreshes motor labels, runs the layout-warning
  * banner sync, and finally requests a canvas redraw.
  *
  * Callbacks for the still-in-app-main pieces (context panel, holding banner, motor labels, the
@@ -11,16 +11,18 @@
  */
 import { store } from '../state/store.js';
 import {
+    catalogDeclaresTablePose,
+    getCatalogRow,
     getHolding,
+    isChromeComponent,
     isHeldTag,
     isOnTableComponent,
     isOptimizedPlacement,
     isStoredComponent,
 } from '../component-model.js';
+import { refreshBenchChromeBar } from './bench-chrome-bar.js';
 import { getComponentIcon } from './icons.js';
 import { updateLayoutWarningBanner } from './layout-conflicts.js';
-import { syncTableCamMockHint, updateTableCamMockPreviewChrome } from '../table-cam/panel.js';
-
 let _deps = {
     placementUiLabel: () => 'PLACED',
     updateContextPanel: () => {},
@@ -106,14 +108,17 @@ export function updateUI() {
         let displayType = comp.type;
         let unknownTag = false;
 
-        if (store.catalogMap[comp.id]) {
-            displayName = store.catalogMap[comp.id].name;
+        const catalogRow = getCatalogRow(name) || getCatalogRow(comp.id);
+        if (catalogRow && catalogRow.name) {
+            displayName = catalogRow.name;
         } else {
             displayName = `Unknown (${comp.id})`;
             unknownTag = true;
         }
 
         const icon = getComponentIcon(comp.type);
+        const chrome = isChromeComponent(name);
+        const onCanvas = catalogDeclaresTablePose(name) && isOnTableComponent(comp);
 
         // Sidebar status-dot priority ladder (highest wins):
         //   1. HOLDING (this tag is in the gripper right now)   — purple
@@ -132,16 +137,20 @@ export function updateUI() {
             statusDot = `<div class="status-dot optimized" title="Optimized (${_deps.placementUiLabel(comp)})"></div>`;
         } else if (isStoredComponent(comp)) {
             statusDot = `<div class="status-dot stored" title="Stored (Q3)"></div>`;
+        } else if (chrome) {
+            statusDot = `<div class="status-dot inventory" style="background:#0ea5e9;box-shadow:0 0 6px rgba(14,165,233,0.45);" title="Fixed bench (chrome bar)"></div>`;
         } else {
             statusDot = `<div class="status-dot ${isPlaced ? 'placed' : 'inventory'}" title="${_deps.placementUiLabel(comp)}"></div>`;
         }
 
+        const roleBadge = chrome
+            ? '<span style="font-size:9px;color:#38bdf8;margin-right:4px;" title="Chrome bar">FIXED</span>'
+            : onCanvas
+              ? ''
+              : '<span style="font-size:9px;color:#94a3b8;margin-right:4px;">OFF TABLE</span>';
+
         let motorBadge = '';
-        if (
-            store.catalogMap[comp.id] &&
-            store.catalogMap[comp.id].motor_ids &&
-            store.catalogMap[comp.id].motor_ids.length > 0
-        ) {
+        if (catalogRow && catalogRow.motor_ids && catalogRow.motor_ids.length > 0) {
             motorBadge = `<span class="material-icons-round" style="font-size: 12px; color: #f59e0b; margin-right: 4px;" title="Motorized">settings_input_component</span>`;
         }
 
@@ -149,7 +158,7 @@ export function updateUI() {
             <div class="comp-icon material-icons-round">${icon}</div>
             <div class="comp-info">
                 <span class="comp-name" style="${unknownTag ? 'color: #f59e0b;' : ''}">${displayName}</span>
-                <span class="comp-meta">${motorBadge}${displayType.replace('OPTICAL_', '')} • ${comp.id}</span>
+                <span class="comp-meta">${roleBadge}${motorBadge}${displayType.replace('OPTICAL_', '')} • ${name}</span>
             </div>
             ${statusDot}
         `;
@@ -163,8 +172,7 @@ export function updateUI() {
         componentList.appendChild(card);
     });
 
-    syncTableCamMockHint();
-    updateTableCamMockPreviewChrome();
+    refreshBenchChromeBar();
     _deps.updateMotorAngleLabels(store.selectedComponent);
     updateLayoutWarningBanner();
     _deps.render();

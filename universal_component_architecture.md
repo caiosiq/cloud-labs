@@ -1113,21 +1113,134 @@ known-good base.
 
 ## Phase 9 — Sunset deprecated endpoints
 
-**Why:** Cleanup. After Phase 7, the old endpoints have no callers
-inside cloud-labs; they can be removed.
+**Reality check (post-Phase-8b audit):** the original Phase 9 entry
+claimed "the old endpoints have no callers inside cloud-labs" — that
+was wrong. The four legacy route families (`/api/video-feed/*`,
+`/api/table-cam/*`, `/api/cobyla-reference-image/*`,
+`/api/optimization-feed/*`) still drove four live UI panels in the
+frontend (top-row video, table-cam panel, Cobyla reference manager,
+OPTIMIZING feed swap), and `frontend/js/cobyla-reference.js` was never
+deleted in Phase 7. The phase is therefore split into four sub-phases
+in dependency order. Risks vary by sub-phase; the original "Low" was
+only correct for 9a.
+
+### Phase 9a — Cobyla reference image (✅ done)
+
+**Why:** Smallest blast radius and the only sub-phase whose product
+question was already resolved (Q3: the reference becomes "the latest
+recorded `measurables.camera_image` on the relevant camera
+component").
 
 **Files touched:**
 
-- Remove `/api/video-feed/*`, `/api/table-cam/*`,
-  `/api/cobyla-reference-image/*`, `/api/optimization-feed/*` from
-  `backend/main.py`.
-- Remove `frontend/js/cobyla-reference.js` (already deleted in Phase 7;
-  this is the route side).
-- The Cobyla reference image concept becomes "the latest recorded
-  `measurables.camera_image` on the relevant camera component" —
-  documented in Phase 7's component-viewer.
+- `backend/main.py` — removed the 4 `/api/cobyla-reference-image*`
+  routes (GET / POST / GET status / DELETE). Replaced with a comment
+  block explaining the migration target and what 9d still owes.
+- `frontend/js/cobyla-reference.js` — deleted (~230 lines).
+- `frontend/js/app-main.js` — dropped the `initCobylaReference` import
+  and call site.
+- `frontend/js/state/store.js` — dropped the
+  `cobylaRefPreviewObjectUrl` field.
+- `frontend/index.html` — removed the entire Cobyla reference panel
+  (preview slot, 4 buttons, file input, status line).
+- `README.md` — dropped the 4 route rows.
 
-**Risk:** Low.
+**Completed in Phase 9d:** in-process Cobyla reference helpers removed;
+COBYLA reads `measurables.camera_image` via
+`load_cobyla_reference_bgr_from_state`.
+
+**Risk:** Low. No optimizer code changed; UI surface clearly marked
+DEPRECATED before removal; the workflow ("`RECORD_MEASURABLES` on the
+camera, then OPTIMIZE") is already shipped (Phase 4).
+
+### Phase 9b — Optimization feed migration (✅ done)
+
+**Why:** `frontend/js/state/lab-state.js` swapped the table-cam preview
+to the lab-wide `/api/optimization-feed/stream` whenever
+`system_status == OPTIMIZING`. Phase 9b moves this to a per-component
+route scoped to the tag currently under `OPTIMIZE`.
+
+**Decision:** Keep the "OPTIMIZING swaps the preview" UX. The feed
+shows optimizer iteration thumbnails (not the live camera MJPEG), so
+re-pointing at `/api/components/{tag}/telemetry/stream` would have
+been a behavior regression. Instead we added a dedicated
+`telemetry/optimization-stream` channel on the optimizing component.
+
+**Files touched:**
+
+- `backend/lab_communicator/base.py` — stamp
+  `optimization_target_id` on `OPTIMIZE` entry; clear on finalize.
+- `backend/lab_communicator/shared/snapshot.py` — default
+  `optimization_target_id` to `None` in session reconciliation.
+- `backend/main.py` — added
+  `GET /api/components/{tag_id}/telemetry/optimization-stream`;
+  removed legacy `GET /api/optimization-feed/stream`.
+- `frontend/js/state/lab-state.js` — bind the table-cam `<img>` to
+  the per-component URL using `optimization_target_id` (with
+  `pendingActions` fallback).
+- `README.md` — route table updated.
+
+**Risk:** Low–medium. One UX path; no state-machine changes beyond
+the new top-level field.
+
+### Phase 9c — Top-row live video (✅ done)
+
+**Why:** `frontend/js/video-feed.js` + the top-row `<img>` element in
+`index.html` polled `/api/video-feed/{status,stream}`. These predated
+the per-component telemetry model and were already marked DEPRECATED
+in the UI.
+
+**Decision:** Drop the top-row slot entirely. No overhead-camera
+catalog entry exists yet (ceiling hardware on REAL uses a separate
+code path from gripper table cams), and Phase 7 already exposes
+MJPEG via each camera component's `telemetry.stream` widget in the
+symmetric panel. Re-pointing the slot at a gripper cam would have
+changed semantics; adding a synthetic overhead tag was deferred.
+
+**Files touched:**
+
+- `backend/main.py` — removed `GET /api/video-feed/{status,stream}`.
+- `frontend/js/video-feed.js` — deleted.
+- `frontend/js/app-main.js` — dropped init wiring.
+- `frontend/js/ui/pose-refresh.js` — removed post-refresh video poll.
+- `frontend/index.html` — removed the 200px LIVE FEED pane.
+- `README.md` — route table updated.
+
+**Carry-over:** `LabCommunicator.get_video_stream` on REAL remains for
+when an overhead camera is added to the catalog (likely as a dedicated
+component with `telemetry.stream` in Phase 9d or a follow-up).
+
+**Risk:** Medium (visible UI change). Operators use the component panel
+for live camera streams instead.
+
+### Phase 9d — Table-cam panel + Cobyla optimizer migration ✅ Done
+
+**Removed:**
+
+- Nine lab-wide ``/api/table-cam/*`` HTTP routes from ``backend/main.py``.
+- ``frontend/js/table-cam/`` (panel.js, api.js, preview-engine.js) and
+  the deprecated table-cam dock in ``frontend/index.html``.
+- In-process ``lab.set_cobyla_reference_*`` / ``get_cobyla_reference_*``
+  helpers on mock/real communicators and ``base.py``.
+
+**Kept:**
+
+- ``LabCommunicator.table_cam_*`` methods — still used by per-component
+  ``/api/components/{tag_id}/telemetry/*`` routes.
+- Slim **Optimization preview** sidebar slot (``#optimization-feed-img``)
+  bound to ``telemetry/optimization-stream`` during OPTIMIZE.
+
+**Optimizer migration:**
+
+- COBYLA reads reference BGR via
+  ``load_cobyla_reference_bgr_from_state`` from the catalog camera tag's
+  ``measurables.camera_image`` (after ``RECORD_MEASURABLES``).
+
+**Operator workflow:** use each camera tag in the component panel for
+live view, capture, and reference; run OPTIMIZE from the command console
+or context panel. Default exposure for COBYLA/NEWTON comes from
+``getTableCamExposureSeconds()`` (selected tag's ``exposure_time_ms`` or
+``store.defaultCameraExposureSec``).
 
 ## Phase ordering rationale
 
@@ -1167,11 +1280,13 @@ browser mid-teleop, the component stays `teleop_active: true` forever.
 Server-side TTL with heartbeat? Auto-clear after N seconds of no jog
 frames? Decide before Phase 8.
 
-**Q3. Cobyla reference image.** Today it's a side-channel global blob
-served via dedicated routes. Under the new model it should be either
-(a) a measurable on the camera that captured it, or (b) a tunable on
-the *target component* ("here is the image I expect to see"). Decide
-before Phase 9.
+**Q3. Cobyla reference image.** ✅ Resolved in Phase 9a: the reference
+is "the latest recorded `measurables.camera_image` on the relevant
+camera component". No dedicated tunable or side-channel blob; the
+operator workflow is `RECORD_MEASURABLES` on the camera, then OPTIMIZE.
+The HTTP setter routes were removed in 9a; the optimizer-side wiring
+(reading from `measurables.camera_image` instead of an injected
+ndarray) was completed in Phase 9d.
 
 **Q4. Recipe / golden state migration.** Recipes today snapshot
 measurables; under the new model golden files should snapshot

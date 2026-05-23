@@ -18,13 +18,17 @@ from .protocol import LabPrimitiveSurface
 from .registry import PRIMITIVE_REGISTRY
 from .schemas import (
     ConfirmHoldingTagBody,
+    EndTeleopBody,
     HoverBody,
     MoveComponentBody,
     PickComponentBody,
     PlaceFromHoverBody,
     RecordMeasurablesBody,
     ScanRotateInPlaceBody,
+    StartTeleopBody,
     TagQuery,
+    TeleopJogBody,
+    TeleopJogParameters,
 )
 
 __all__ = [
@@ -41,6 +45,10 @@ __all__ = [
     "PlaceFromHoverBody",
     "ScanRotateInPlaceBody",
     "ConfirmHoldingTagBody",
+    "StartTeleopBody",
+    "EndTeleopBody",
+    "TeleopJogBody",
+    "TeleopJogParameters",
     "LabPrimitiveSurface",
     "parse_command_payload",
     "execute_validated_command",

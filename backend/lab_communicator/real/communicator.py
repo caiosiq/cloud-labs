@@ -141,9 +141,69 @@ class RealLabCommunicator(LabCommunicator):
         super().__init__()
 
         print("[REAL LAB] Initializing OpticalExperiment...")
-        # Initialize the experiment manager
-        self.experiment = OpticalExperiment(mock=False)
+        # Initialize the experiment manager.
+        #
+        # Phase 5 of ``universal_component_architecture.md`` (§16.4 / §17.1):
+        # cloud-labs owns the catalog and passes it to ``lab_automation``
+        # at construction time so the hardware side never imports cloud-labs.
+        # The kwarg is *opt-in* on the lab_automation side -- if the
+        # installed version doesn't recognize ``catalog=``, we fall back
+        # to the legacy zero-arg constructor so this commit can land
+        # before the matching lab_automation PR.
+        catalog_doc = self._load_catalog_for_lab_automation()
+        try:
+            import inspect  # noqa: PLC0415
+
+            sig = inspect.signature(OpticalExperiment.__init__)
+            if "catalog" in sig.parameters and catalog_doc is not None:
+                self.experiment = OpticalExperiment(mock=False, catalog=catalog_doc)
+                print(
+                    f"[REAL LAB] Passed catalog to OpticalExperiment "
+                    f"(schema_version={catalog_doc.get('schema_version')}, "
+                    f"{len(catalog_doc.get('components') or {})} components)"
+                )
+            else:
+                if catalog_doc is not None:
+                    print(
+                        "[REAL LAB] OpticalExperiment.__init__ does not accept "
+                        "'catalog=' yet; falling back to legacy constructor. "
+                        "Update lab_automation per CLOUDLAB_CONTRACT.md."
+                    )
+                self.experiment = OpticalExperiment(mock=False)
+        except Exception as exc:  # pragma: no cover -- defensive
+            print(f"[REAL LAB] Catalog passthrough failed ({exc!r}); using legacy constructor.")
+            self.experiment = OpticalExperiment(mock=False)
         self.experiment.initialize_robot()
+
+    @staticmethod
+    def _load_catalog_for_lab_automation() -> Optional[Dict[str, Any]]:
+        """Read the active lab_view catalog as a v1 doc for lab_automation.
+
+        Returns ``None`` if the bundle is not bootstrapped (unit test paths)
+        or the file is still in legacy array shape -- in which case the
+        hardware side keeps its own hardcoded defaults. Once the migration
+        script has run on the active bundle, this returns the full
+        ``{schema_version, components}`` document.
+        """
+        try:
+            from lab_communicator.shared.lab_view_config import (  # noqa: PLC0415
+                get_lab_view_paths_optional,
+            )
+            from lab_communicator.shared.catalog_schema import (  # noqa: PLC0415
+                is_v1_object_shape,
+            )
+
+            paths = get_lab_view_paths_optional()
+            if paths is None:
+                return None
+            with open(paths.component_library_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if is_v1_object_shape(data):
+                return data
+            return None
+        except Exception as exc:
+            print(f"[REAL LAB] _load_catalog_for_lab_automation skipped: {exc!r}")
+            return None
 
         # Cache of OpticalComponent objects: { "tag_22": OpticalComponent(...) }
         self.component_map: Dict[str, OpticalComponent] = {}
@@ -161,10 +221,6 @@ class RealLabCommunicator(LabCommunicator):
         # now picks the commit shape (BREADBOARD vs STORAGE) directly,
         # so ``_primitive_move_component`` does not need to peek at any side-channel
         # state to know what to do.
-
-        # CobylaAlignmentStrategy_cloudlab.reference_image (BGR ndarray, same family as table-cam / capture_image)
-        self._cobyla_ref_lock = threading.Lock()
-        self._cobyla_reference_bgr: Optional[Any] = None  # np.ndarray when set
 
         # Tags intentionally in storage (tag_id -> {i,j}); persisted under lab_view/stored_intent.json
         self._stored_intent: Dict[str, Dict[str, int]] = {}
@@ -441,43 +497,6 @@ class RealLabCommunicator(LabCommunicator):
         is the no-op default on base.
         """
         self._rebuild_stored_intent_from_lab_state(components)
-
-    def set_cobyla_reference_from_png_bytes(self, data: bytes) -> Tuple[bool, str]:
-        """Decode PNG bytes to BGR and store for the next COBYLA optimize run.
-
-        Thin wrapper -- body in
-        :func:`lab_communicator.real.optimization.set_cobyla_reference_from_png_bytes`.
-        """
-        from lab_communicator.real.optimization import (
-            set_cobyla_reference_from_png_bytes,
-        )
-        return set_cobyla_reference_from_png_bytes(self, data)
-
-    def clear_cobyla_reference(self) -> None:
-        """Drop any stored cobyla reference image.
-
-        Thin wrapper -- body in :func:`lab_communicator.real.optimization.clear_cobyla_reference`.
-        """
-        from lab_communicator.real.optimization import clear_cobyla_reference
-        clear_cobyla_reference(self)
-
-    def get_cobyla_reference_status(self) -> Dict[str, Any]:
-        """Status dict for the UI's cobyla-reference badge.
-
-        Thin wrapper -- body in
-        :func:`lab_communicator.real.optimization.get_cobyla_reference_status`.
-        """
-        from lab_communicator.real.optimization import get_cobyla_reference_status
-        return get_cobyla_reference_status(self)
-
-    def get_cobyla_reference_png_bytes(self) -> Optional[bytes]:
-        """Re-encode the stored reference back to PNG bytes (download).
-
-        Thin wrapper -- body in
-        :func:`lab_communicator.real.optimization.get_cobyla_reference_png_bytes`.
-        """
-        from lab_communicator.real.optimization import get_cobyla_reference_png_bytes
-        return get_cobyla_reference_png_bytes(self)
 
     def _tag_id_for_component(self, comp: Any) -> Optional[str]:
         """Reverse-lookup ``OpticalComponent`` -> tag id.

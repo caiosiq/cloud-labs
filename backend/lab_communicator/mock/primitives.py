@@ -211,29 +211,70 @@ async def primitive_record_measurables(
 ) -> Optional[Dict[str, Any]]:
     """Mock hardware step for ``record_measurables_for_tag``.
 
-    For ``OPTICAL_CAMERA`` tags only: render a synthetic PNG (via
-    :meth:`MockLabCommunicator.capture_table_cam`) into the mock's
-    capture directory and return the metadata for the orchestrator to
-    merge into ``measurables.camera_image``. All other tag types fall
-    through with ``None``; the orchestrator returns saved measurables
-    verbatim.
+    Fills every measurable declared in the catalog ``capabilities`` block
+    so the UI can exercise ImageViewer, MotorRotationsReadout, etc.
+    Returns ``{"measurables": {field: value, ...}}`` for the orchestrator.
     """
-    if (catalog_meta or {}).get("type") != "OPTICAL_CAMERA":
+    from lab_communicator.shared.catalog_schema import resolve_cam_id_for_tag
+    from lab_model import motor_rotation_store as motor_rot
+
+    caps = (catalog_meta or {}).get("capabilities") or {}
+    meas_decl = (caps.get("measurables") or {}) if isinstance(caps, dict) else {}
+    if not isinstance(meas_decl, dict) or not meas_decl:
         return None
-    png = communicator.capture_table_cam(1, exposure=0.2)
-    if not png:
+
+    observed: Dict[str, Any] = {}
+    saved = communicator.return_measurables_for_tag(tag_id) or {}
+    comp_type = str((catalog_meta or {}).get("type") or "")
+
+    if "camera_image" in meas_decl and comp_type == "OPTICAL_CAMERA":
+        cam_id = resolve_cam_id_for_tag(catalog_meta) or 1
+        if not communicator._table_cam_connected.get(int(cam_id)):
+            communicator.table_cam_connect(int(cam_id))
+        exp_ms = 200.0
+        tun = communicator.return_tunables_for_tag(tag_id) or {}
+        if isinstance(tun.get("exposure_time_ms"), (int, float)):
+            exp_ms = float(tun["exposure_time_ms"])
+        png = communicator.capture_table_cam(int(cam_id), exposure=exp_ms / 1000.0)
+        if png:
+            cap_dir = communicator._camera_captures_dir()
+            os.makedirs(cap_dir, exist_ok=True)
+            out_path = os.path.join(cap_dir, f"{tag_id}_last.png")
+            with open(out_path, "wb") as f:
+                f.write(png)
+            observed["camera_image"] = {
+                "path": out_path,
+                "source": "mock_table_cam",
+                "cam_id": int(cam_id),
+                "format": "png",
+            }
+
+    motor_ids = (catalog_meta or {}).get("motor_ids") or []
+    if "motor_rotations" in meas_decl and motor_ids:
+        mr = motor_rot.get_rotations_for_motor_ids(tag_id, list(motor_ids))
+        observed["motor_rotations"] = {str(k): float(v) for k, v in mr.items()}
+
+    if "last_optimization_score" in meas_decl:
+        score = saved.get("last_optimization_score")
+        observed["last_optimization_score"] = (
+            float(score) if score is not None else round(random.uniform(0.85, 0.99), 3)
+        )
+
+    if "pose" in meas_decl:
+        pose = (saved.get("pose") or {}) if isinstance(saved.get("pose"), dict) else {}
+        if not pose:
+            tun = communicator.return_tunables_for_tag(tag_id) or {}
+            np = (tun.get("nominal_pose") or {}) if isinstance(tun.get("nominal_pose"), dict) else {}
+            pose = {
+                "x": float(np.get("x", 0.0)),
+                "y": float(np.get("y", 0.0)),
+                "rotation": float(np.get("rotation", 0.0)),
+            }
+        observed["pose"] = dict(pose)
+
+    if not observed:
         return None
-    cap_dir = communicator._camera_captures_dir()
-    os.makedirs(cap_dir, exist_ok=True)
-    out_path = os.path.join(cap_dir, f"{tag_id}_last.png")
-    with open(out_path, "wb") as f:
-        f.write(png)
-    return {
-        "path": out_path,
-        "source": "mock_table_cam",
-        "cam_id": 1,
-        "format": "png",
-    }
+    return {"measurables": observed}
 
 
 # ---------------------------------------------------------------------------

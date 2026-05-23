@@ -1,3 +1,5 @@
+import { store } from './state/store.js';
+
 /**
  * Client-side accessors for tunables vs measurables.
  *
@@ -74,6 +76,50 @@ export function isStoredComponent(c) {
 export function isOnTableComponent(c) {
     const p = componentPresence(c);
     return p === PRESENCE_BREADBOARD || p === PRESENCE_STORAGE;
+}
+
+/**
+ * Catalog row for a tag (``store.catalogMap`` is keyed by ``tag_id``).
+ * @param {string} tagId
+ * @returns {object | null}
+ */
+export function getCatalogRow(tagId) {
+    if (!tagId || !store?.catalogMap) return null;
+    return store.catalogMap[tagId] || store.catalogMap[tagId.replace(/^tag_/, '')] || null;
+}
+
+/** Declares ``tunables.nominal_pose`` (TablePose) — drawable / draggable on canvas. */
+export function catalogDeclaresTablePose(tagId) {
+    const row = getCatalogRow(tagId);
+    if (!row || !row.capabilities || !row.capabilities.tunables) return false;
+    return Object.prototype.hasOwnProperty.call(row.capabilities.tunables, 'nominal_pose');
+}
+
+/**
+ * Fixed bench component: has tunables but no table pose (chrome bar, not canvas).
+ * @param {string} tagId
+ */
+export function isChromeComponent(tagId) {
+    const row = getCatalogRow(tagId);
+    if (!row || !row.capabilities || !row.capabilities.tunables) return false;
+    const tun = row.capabilities.tunables;
+    const keys = Object.keys(tun);
+    if (!keys.length) return false;
+    return !catalogDeclaresTablePose(tagId);
+}
+
+/** Whether this in-lab component should be drawn on the optical table canvas. */
+export function shouldRenderOnCanvas(tagId, comp) {
+    return isOnTableComponent(comp) && catalogDeclaresTablePose(tagId);
+}
+
+/** Chrome-bar tags currently in lab state. */
+export function listChromeComponentTags(labState) {
+    if (!labState || !labState.components) return [];
+    return Object.keys(labState.components).filter((tagId) => {
+        const comp = labState.components[tagId];
+        return comp && isChromeComponent(tagId);
+    });
 }
 
 export function isBreadboardIntent(c) {

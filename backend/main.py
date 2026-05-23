@@ -49,10 +49,14 @@ from lab_primitives import (
     HoverBody,
     MoveComponentBody,
     PickComponentBody,
+    EndTeleopBody,
     PlaceFromHoverBody,
     PrimitiveId,
     RecordMeasurablesBody,
     ScanRotateInPlaceBody,
+    StartTeleopBody,
+    TeleopJogBody,
+    TeleopJogParameters,
     execute_validated_command,
     fetch_read_primitive,
     parse_command_payload,
@@ -108,6 +112,14 @@ def _persist_session_checkpoint_on_shutdown() -> None:
 @asynccontextmanager
 async def _app_lifespan(_: FastAPI):
     yield
+    # Phase 8 teardown: stop the TELEOP stale-lease sweeper thread (if it
+    # ever started) before persisting the session checkpoint, so the
+    # checkpoint reflects a quiesced state instead of one mid-sweep.
+    try:
+        if lab is not None:
+            lab.stop_teleop_sweeper()
+    except Exception:
+        pass
     _persist_session_checkpoint_on_shutdown()
 
 
@@ -381,6 +393,357 @@ async def post_component_record_measurables(tag_id: str):
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=validation_error_detail(e))
     return {"status": "ok", "measurables": meas}
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — per-component telemetry routes
+#
+# Catalog entries declare their telemetry channels (e.g. ``stream``,
+# ``preview``) with direct URLs that include a ``{tag_id}`` token (see
+# universal_component_architecture.md §13.2 and §16.6). These routes
+# resolve those URLs for a given tag, validate the channel against the
+# component's declared ``capabilities.telemetry`` block, and delegate to
+# the existing ``LabCommunicator`` MJPEG / single-frame helpers.
+#
+# Lab-wide ``/api/table-cam/*`` was removed in Phase 9d; use these routes.
+# ``/api/video-feed/*`` was removed in Phase 9c; live MJPEG is available
+# via ``/api/components/{tag_id}/telemetry/stream`` on camera components.
+# ``/api/optimization-feed/*`` was removed in Phase 9b.
+# ---------------------------------------------------------------------------
+
+
+def _telemetry_lookup(tag_id: str, channel: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Resolve ``(catalog_row, channel_descriptor)`` for a per-tag telemetry route.
+
+    Raises a precise HTTPException for every "no" path:
+    - 503 if lab is not initialized.
+    - 404 if the tag is not in the catalog.
+    - 404 if the channel is not declared on the component.
+    """
+    from lab_communicator.shared.catalog_schema import telemetry_channel  # noqa: PLC0415
+
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    catalog_row = (lab.catalog_map or {}).get(tag_id)
+    if not isinstance(catalog_row, dict):
+        raise HTTPException(status_code=404, detail=f"Unknown tag {tag_id!r}")
+    desc = telemetry_channel(catalog_row, channel)
+    if desc is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Component {tag_id!r} does not declare telemetry channel {channel!r}",
+        )
+    return catalog_row, desc
+
+
+def _resolve_cam_id_or_400(catalog_row: Dict[str, Any], tag_id: str) -> int:
+    from lab_communicator.shared.catalog_schema import resolve_cam_id_for_tag  # noqa: PLC0415
+
+    cam_id = resolve_cam_id_for_tag(catalog_row)
+    if cam_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Component {tag_id!r} declares a camera telemetry channel but no "
+                f"underlying cam_id could be resolved. Add ``cam_id`` to the catalog row "
+                f"or rename ``id`` to follow the ``cam_gripper_N`` convention."
+            ),
+        )
+    return cam_id
+
+
+@app.get("/api/components/{tag_id}/telemetry/stream")
+async def get_component_telemetry_stream(tag_id: str, fps: int = 18):
+    """Per-component MJPEG telemetry stream (Phase 6 / §13.2 ``stream`` channel).
+
+    Delegates to ``lab.get_table_cam_stream(cam_id, fps)`` for OPTICAL_CAMERA
+    tags. Returns ``multipart/x-mixed-replace`` MJPEG for catalog-driven
+    clients (Phase 6 / §13.2).
+    """
+    from lab_communicator.shared.catalog_schema import resolve_telemetry_stream_backend
+
+    catalog_row, _desc = _telemetry_lookup(tag_id, "stream")
+    backend = resolve_telemetry_stream_backend(catalog_row)
+    try:
+        if backend == "overhead":
+            gen = lab.get_video_stream(int(fps))
+        elif backend == "table_cam":
+            cam_id = _resolve_cam_id_or_400(catalog_row, tag_id)
+            gen = lab.get_table_cam_stream(int(cam_id), int(fps))
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Component {tag_id!r} declares telemetry.stream but no "
+                    f"table_cam or overhead backend could be resolved."
+                ),
+            )
+    except NotImplementedError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail="Telemetry streaming is unavailable for this lab backend.",
+        ) from exc
+    return StreamingResponse(
+        gen,
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/components/{tag_id}/telemetry/preview")
+async def get_component_telemetry_preview(tag_id: str, exposure: float = 0.2):
+    """Per-component single-frame telemetry preview (Phase 6 / §13.2 ``preview`` channel).
+
+    Single JPEG/PNG response suitable for ``JPEGPoll`` widgets. Cheaper
+    than the MJPEG stream when the UI only wants a periodic snapshot
+    (e.g. a context-panel thumbnail polled at ``default_fps`` from the
+    catalog). Delegates to ``lab.capture_table_cam(cam_id, exposure)``.
+    """
+    from lab_communicator.shared.catalog_schema import resolve_telemetry_stream_backend
+
+    catalog_row, _desc = _telemetry_lookup(tag_id, "preview")
+    if resolve_telemetry_stream_backend(catalog_row) == "overhead":
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                f"telemetry.preview is not supported for overhead camera {tag_id!r}; "
+                f"use telemetry.stream (MJPEG) instead."
+            ),
+        )
+    cam_id = _resolve_cam_id_or_400(catalog_row, tag_id)
+    try:
+        png_bytes = lab.capture_table_cam(int(cam_id), float(exposure))
+    except NotImplementedError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail="Telemetry preview is unavailable for this lab backend.",
+        ) from exc
+    if not png_bytes:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Lab returned an empty preview for cam {cam_id}. Is the camera "
+                f"connected? Mock mode requires the table cam to be opened first."
+            ),
+        )
+    return Response(content=png_bytes, media_type="image/png")
+
+
+@app.get("/api/components/{tag_id}/telemetry/optimization-stream")
+async def get_component_optimization_stream(tag_id: str, fps: int = 5):
+    """Per-component optimization MJPEG stream (Phase 9b).
+
+    Serves optimizer iteration thumbnails (the same payload as the
+    legacy ``/api/optimization-feed/stream`` route). During an active
+    ``OPTIMIZE`` run, ``tag_id`` must match
+    ``lab_state.optimization_target_id``; otherwise the route returns
+    **409**. In REAL mode delegates to ``lab.get_optimization_stream``;
+    MOCK returns the static ``mock_feed.svg`` placeholder.
+    """
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    catalog_row = (lab.catalog_map or {}).get(tag_id)
+    if not isinstance(catalog_row, dict):
+        raise HTTPException(status_code=404, detail=f"Unknown tag {tag_id!r}")
+
+    state = lab.get_lab_state()
+    active_target = state.get("optimization_target_id")
+    sys_status = state.get("system_status")
+    if sys_status == "OPTIMIZING" and active_target and tag_id != active_target:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Component {tag_id!r} is not the active optimization target "
+                f"({active_target!r})"
+            ),
+        )
+
+    stream_headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Accel-Buffering": "no",
+    }
+    if LAB_MODE == "REAL" and hasattr(lab, "get_optimization_stream"):
+        return StreamingResponse(
+            lab.get_optimization_stream(fps=fps),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+            headers=stream_headers,
+        )
+    return FileResponse(
+        os.path.join(frontend_path, "mock_feed.svg"),
+        headers=stream_headers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 — per-component TELEOP (universal_component_architecture.md §16.5)
+#
+# Three routes drive a single component's "in-air manual mode":
+#
+#   POST /api/components/{tag_id}/teleop/start
+#       Acquire the per-component TELEOP lease. Nulls the component's
+#       measurables (Golden Rule §3.2) and stamps a TTL timestamp so the
+#       LabCommunicator's stale-lease sweeper can recover from a browser
+#       crash without an explicit END_TELEOP.
+#   POST /api/components/{tag_id}/teleop/end
+#       Release the lease (idempotent — UI fires this on page unload).
+#   POST /api/components/{tag_id}/telemetry/jog
+#       One absolute jog frame: nominal_pose and/or nominal_motor_positions.
+#       Frames are absolute, not deltas, so frame loss is self-healing.
+#
+# All three reuse the standard dispatch pipeline (``execute_validated_command``)
+# so logging, validation, and per-primitive bookkeeping match the rest of
+# the API. We return a synchronous 200 from each — these primitives are
+# cheap (state mutations, no hardware blocking calls in Phase 8a) and the
+# operator needs the ack before sending the next frame.
+# ---------------------------------------------------------------------------
+
+
+def _refuse_teleop_if_lab_down(tag_id: str) -> Dict[str, Any]:
+    """Pre-flight check shared by all three TELEOP routes.
+
+    Returns the catalog row on success; raises 404/503 on failure.
+    Centralizes the "is the lab booted and does the tag exist?" check so
+    each route stays one-statement-thin.
+    """
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    catalog_row = (lab.catalog_map or {}).get(tag_id)
+    if not isinstance(catalog_row, dict):
+        raise HTTPException(status_code=404, detail=f"Unknown tag {tag_id!r}")
+    return catalog_row
+
+
+@app.post("/api/components/{tag_id}/teleop/start")
+async def post_component_teleop_start(tag_id: str):
+    """Acquire the per-component TELEOP lease for ``tag_id``.
+
+    Sets ``tunables.teleop_active=True`` and stamps ``teleop_last_jog_ts``.
+    Nulls measurables per §3.2 Golden Rule. Refusals (BUSY/OPTIMIZING with
+    the strict-quiet manifest knob, another component already teleoped,
+    stored part) bubble up as 409 ``Conflict``.
+    """
+    _refuse_teleop_if_lab_down(tag_id)
+    try:
+        cmd = StartTeleopBody(action="START_TELEOP", target_id=tag_id)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=validation_error_detail(e))
+    try:
+        await execute_validated_command(lab, cmd)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {
+        "status": "ok",
+        "message": f"TELEOP started for {tag_id}",
+        "tunables": fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id),
+    }
+
+
+@app.post("/api/components/{tag_id}/teleop/end")
+async def post_component_teleop_end(tag_id: str):
+    """Release the per-component TELEOP lease for ``tag_id`` (idempotent).
+
+    Always returns 200 — ending an already-released session is a success.
+    This is the typical browser-unload path; the UI fires END on
+    ``beforeunload`` and the server may or may not have already swept the
+    stale lease.
+    """
+    _refuse_teleop_if_lab_down(tag_id)
+    cmd = EndTeleopBody(action="END_TELEOP", target_id=tag_id)
+    try:
+        await execute_validated_command(lab, cmd)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {
+        "status": "ok",
+        "message": f"TELEOP ended for {tag_id}",
+        "tunables": fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id),
+    }
+
+
+@app.post("/api/components/{tag_id}/telemetry/jog")
+async def post_component_telemetry_jog(tag_id: str, request: Request):
+    """One absolute jog frame for the component currently under TELEOP.
+
+    Body shape (validated by :class:`TeleopJogParameters`)::
+
+        {
+          "nominal_pose": {"x": 12.3, "y": 4.5, "rotation": 30.0},
+          "nominal_motor_positions": {"1": 45.0},
+          "frame_id": 42
+        }
+
+    At least one of ``nominal_pose`` / ``nominal_motor_positions`` is
+    required; ``frame_id`` is optional client metadata.
+
+    Refusals:
+
+    - 404 — unknown tag.
+    - 409 — tag is not in TELEOP (must START first).
+    - 422 — malformed body.
+    - 503 — lab not initialized.
+    """
+    _refuse_teleop_if_lab_down(tag_id)
+    try:
+        raw_body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=422, detail="Body must be JSON.")
+    if not isinstance(raw_body, dict):
+        raise HTTPException(status_code=422, detail="Body must be a JSON object.")
+    try:
+        params = TeleopJogParameters.model_validate(raw_body)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=validation_error_detail(e))
+
+    cmd = TeleopJogBody(action="TELEOP_JOG", target_id=tag_id, parameters=params)
+    try:
+        await execute_validated_command(lab, cmd)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {
+        "status": "ok",
+        "frame_id": params.frame_id,
+        "tunables": fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id),
+    }
+
+
+@app.get("/api/components/{tag_id}/camera-image")
+async def get_component_camera_image(tag_id: str):
+    """Stream the PNG referenced by ``measurables.camera_image.path`` for one tag.
+
+    Returns **404** when no image is currently recorded (e.g. after a motion
+    nulled measurables per Phase 3 of ``universal_component_architecture.md``
+    — the operator must POST to ``.../measurables/record`` to regenerate it).
+    Path is read from saved lab state, not from the request, so there is no
+    user-controlled path traversal vector; the on-disk file is still checked
+    for existence + supported format as defense-in-depth.
+    """
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    state = lab.get_lab_state()
+    entry = (state.get("components") or {}).get(tag_id)
+    if not isinstance(entry, dict):
+        raise HTTPException(status_code=404, detail=f"Unknown tag {tag_id}")
+    ci = (entry.get("measurables") or {}).get("camera_image")
+    if not isinstance(ci, dict):
+        raise HTTPException(status_code=404, detail="No camera image recorded")
+    path = ci.get("path")
+    if not isinstance(path, str) or not path:
+        raise HTTPException(status_code=404, detail="No camera image path")
+    abs_path = os.path.abspath(path)
+    if not os.path.isfile(abs_path):
+        raise HTTPException(status_code=404, detail="Camera image file missing")
+    fmt = str(ci.get("format") or "png").lower()
+    media_by_fmt = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+    if fmt not in media_by_fmt:
+        raise HTTPException(status_code=400, detail=f"Unsupported camera image format {fmt!r}")
+    return FileResponse(abs_path, media_type=media_by_fmt[fmt])
 
 
 @app.get("/api/lab-state")
@@ -814,278 +1177,48 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
 
     return schedule_validated_command(lab, cmd, background_tasks)
 
-# --- Video feeds + table camera HTTP surface ---
+# --------------------------------------------------------------------------
+# Lab-wide ``/api/table-cam/*`` HTTP surface removed in Phase 9d.
+#
+# Table camera capture, preview, stream, connect/disconnect, and exposure/gain
+# are served per catalog tag via ``/api/components/{tag_id}/telemetry/*`` and
+# component commands (``RECORD_MEASURABLES``, tunables). ``LabCommunicator``
+# table_cam_* methods remain for those routes.
+# --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# Cobyla reference image — HTTP surface removed in Phase 9a.
+#
+# The four ``/api/cobyla-reference-image*`` routes (GET, POST, GET /status,
+# DELETE) were the legacy side-channel for the COBYLA strategy's reference
+# ndarray. They were deleted per :doc:`universal_component_architecture` §9a.
+#
+# Resolution of open question Q3: under the universal-component model, the
+# reference image is "the latest recorded ``measurables.camera_image`` on
+# the relevant camera component" (see §13.2). The operator workflow is now:
+#
+#   1. ``RECORD_MEASURABLES`` on the camera component (shipped in Phase 4).
+#   2. The optimizer reads the freshest ``measurables.camera_image`` from
+#      that camera at OPTIMIZE time.
+#
+# Step (2) — the optimizer-side migration — completed in Phase 9d:
+# ``load_cobyla_reference_bgr_from_state`` reads ``measurables.camera_image``
+# on the catalog camera tag at OPTIMIZE time.
+# --------------------------------------------------------------------------
 
 
-class TableCamLiveBody(BaseModel):
-    enabled: bool = True
-
-
-class TableCamExposureBody(BaseModel):
-    exposure: float = Field(..., gt=5e-4, le=30.0)
-
-
-class TableCamGainBody(BaseModel):
-    gain: float = Field(..., gt=0, le=512.0)
-
-
-@app.get("/api/table-cam/capture")
-async def table_cam_capture(
-    cam_id: int = 1,
-    exposure: float = Query(
-        0.2,
-        ge=0.001,
-        le=30.0,
-        description="Exposure (seconds) for both video and capture; passed to table-cam pipeline.",
-    ),
-):
-    """Capture one PNG from table recorder camera (1 or 2). Real: hardware; MOCK: synthetic image for UI/testing."""
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if not hasattr(lab, "capture_table_cam"):
-        raise HTTPException(status_code=503, detail="Table cam capture not available (real lab only)")
-    if cam_id not in (1, 2):
-        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
-    data = lab.capture_table_cam(cam_id, exposure=float(exposure))
-    if data is None:
-        raise HTTPException(status_code=503, detail="Capture failed or table cams not available")
-    return Response(content=data, media_type="image/png")
-
-
-def _table_cam_api_payload(cam_id: int, ok: bool, detail: str) -> Dict[str, Any]:
-    """Merge per-camera status into table-cam JSON responses."""
-    out: Dict[str, Any] = {"ok": ok, "detail": detail, "cam_id": cam_id}
-    if hasattr(lab, "get_table_cam_status"):
-        try:
-            snap = lab.get_table_cam_status(only_cam_id=cam_id)
-            out["state"] = snap
-            cam = (snap.get("cameras") or {}).get(str(cam_id))
-            if cam:
-                out["camera"] = cam
-        except Exception as e:
-            out["state_error"] = str(e)
-    return out
-
-
-@app.get("/api/table-cam/status")
-async def table_cam_http_status(cam_id: Optional[int] = None):
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if not hasattr(lab, "get_table_cam_status"):
-        raise HTTPException(status_code=503, detail="Table cam status not available")
-    only = cam_id if cam_id in (1, 2) else None
-    snap = lab.get_table_cam_status(only_cam_id=only)
-    if cam_id is not None:
-        if cam_id not in (1, 2):
-            raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
-        return {"cam_id": cam_id, "camera": (snap.get("cameras") or {}).get(str(cam_id)), **snap}
-    return snap
-
-
-@app.post("/api/table-cam/{cam_id}/connect")
-async def table_cam_http_connect(cam_id: int):
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if cam_id not in (1, 2):
-        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
-    ok, msg = lab.table_cam_connect(cam_id)
-    if not ok:
-        return JSONResponse(
-            status_code=400,
-            content=_table_cam_api_payload(cam_id, False, msg),
-        )
-    return _table_cam_api_payload(cam_id, True, msg)
-
-
-@app.post("/api/table-cam/{cam_id}/disconnect")
-async def table_cam_http_disconnect(cam_id: int):
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if cam_id not in (1, 2):
-        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
-    ok, msg = lab.table_cam_disconnect(cam_id)
-    if not ok:
-        return JSONResponse(
-            status_code=400,
-            content=_table_cam_api_payload(cam_id, False, msg),
-        )
-    return _table_cam_api_payload(cam_id, True, msg)
-
-
-@app.post("/api/table-cam/{cam_id}/live")
-async def table_cam_http_live(cam_id: int, body: TableCamLiveBody):
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if cam_id not in (1, 2):
-        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
-    ok, msg = lab.table_cam_live_set(cam_id, bool(body.enabled))
-    if not ok:
-        return JSONResponse(
-            status_code=400,
-            content=_table_cam_api_payload(cam_id, False, msg),
-        )
-    out = _table_cam_api_payload(cam_id, True, msg)
-    out["enabled"] = body.enabled
-    return out
-
-
-@app.post("/api/table-cam/{cam_id}/vexp")
-async def table_cam_http_vexp(cam_id: int, body: TableCamExposureBody):
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if cam_id not in (1, 2):
-        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
-    ok, msg = lab.table_cam_send_vexp(cam_id, float(body.exposure))
-    if not ok:
-        raise HTTPException(status_code=400, detail=msg)
-    return {"ok": True, "detail": msg}
-
-
-@app.post("/api/table-cam/{cam_id}/vgain")
-async def table_cam_http_vgain(cam_id: int, body: TableCamGainBody):
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if cam_id not in (1, 2):
-        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
-    ok, msg = lab.table_cam_send_vgain(cam_id, float(body.gain))
-    if not ok:
-        raise HTTPException(status_code=400, detail=msg)
-    return {"ok": True, "detail": msg}
-
-
-@app.get("/api/table-cam/preview")
-async def table_cam_http_preview(cam_id: int = 1):
-    """Single JPEG frame for low-latency polled live preview (replaces MJPEG in UI)."""
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if cam_id not in (1, 2):
-        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
-    if not hasattr(lab, "fetch_table_cam_preview_jpeg"):
-        raise HTTPException(status_code=503, detail="Table cam preview not available")
-    data = lab.fetch_table_cam_preview_jpeg(int(cam_id))
-    if not data:
-        raise HTTPException(status_code=503, detail="No preview frame available")
-    return Response(
-        content=data,
-        media_type="image/jpeg",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
-
-
-@app.get("/api/table-cam/stream")
-async def table_cam_http_stream(cam_id: int = 1, fps: int = 30):
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if cam_id not in (1, 2):
-        raise HTTPException(status_code=400, detail="cam_id must be 1 or 2")
-    try:
-        gen = lab.get_table_cam_stream(int(cam_id), int(fps))
-    except NotImplementedError as exc:
-        raise HTTPException(
-            status_code=501,
-            detail="table cam streaming is unavailable for this lab backend.",
-        ) from exc
-    return StreamingResponse(
-        gen,
-        media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-@app.get("/api/cobyla-reference-image")
-async def cobyla_reference_image_get():
-    """Return the stored Cobyla reference as PNG (for UI preview and download)."""
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if not hasattr(lab, "get_cobyla_reference_png_bytes"):
-        raise HTTPException(status_code=503, detail="Cobyla reference preview not available")
-    data = lab.get_cobyla_reference_png_bytes()
-    if not data:
-        raise HTTPException(status_code=404, detail="No Cobyla reference set")
-    return Response(content=data, media_type="image/png")
-
-
-@app.post("/api/cobyla-reference-image")
-async def cobyla_reference_image_upload(request: Request):
-    """
-    Store a PNG as CobylaAlignmentStrategy.reference_image (BGR ndarray, same class of image as table-cam capture).
-    Body: raw PNG bytes, Content-Type image/png recommended.
-    """
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if not hasattr(lab, "set_cobyla_reference_from_png_bytes"):
-        raise HTTPException(status_code=503, detail="Cobyla reference storage not available")
-    body = await request.body()
-    ok, msg = lab.set_cobyla_reference_from_png_bytes(body)
-    if not ok:
-        raise HTTPException(status_code=400, detail=msg)
-    return {"status": "success", "message": msg}
-
-
-@app.get("/api/cobyla-reference-image/status")
-async def cobyla_reference_image_status():
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if not hasattr(lab, "get_cobyla_reference_status"):
-        raise HTTPException(status_code=503, detail="Cobyla reference status not available")
-    out = dict(lab.get_cobyla_reference_status())
-    out["lab_mode"] = LAB_MODE
-    return out
-
-
-@app.delete("/api/cobyla-reference-image")
-async def cobyla_reference_image_clear():
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-    if hasattr(lab, "clear_cobyla_reference"):
-        lab.clear_cobyla_reference()
-    return {"status": "success", "message": "Cobyla reference cleared"}
-
-
-@app.get("/api/video-feed/status")
-async def get_video_status():
-    """Check if the live feed is available"""
-    return lab.get_video_feed_status()
-
-@app.get("/api/video-feed/stream")
-async def get_video_stream(fps: int = 10):
-    """
-    Returns a mock image or real stream
-    """
-    # print(f"[{datetime.now().strftime('%H:%M:%S')}] Request: GET /api/video-feed/stream") # Optional: uncomment to log video requests
-    
-    if LAB_MODE == "REAL":
-        return StreamingResponse(
-            lab.get_video_stream(fps=fps), 
-            media_type="multipart/x-mixed-replace; boundary=frame"
-        )
-    else:
-        # Serve the SVG directly instead of redirecting
-        return FileResponse(os.path.join(frontend_path, "mock_feed.svg"))
-
-
-@app.get("/api/optimization-feed/stream")
-async def get_optimization_feed_stream(fps: int = 5):
-    """
-    Returns an MJPEG stream of the optimization images.
-    """
-    if LAB_MODE == "REAL" and hasattr(lab, "get_optimization_stream"):
-        return StreamingResponse(
-            lab.get_optimization_stream(fps=fps), 
-            media_type="multipart/x-mixed-replace; boundary=frame"
-        )
-    else:
-        # Serve the SVG directly instead of redirecting
-        return FileResponse(os.path.join(frontend_path, "mock_feed.svg"))
+# --------------------------------------------------------------------------
+# Video feed — HTTP surface removed in Phase 9c.
+#
+# The legacy ``GET /api/video-feed/{status,stream}`` lab-wide routes
+# backed the deprecated top-row LIVE FEED pane. That UI was removed;
+# ceiling / gripper MJPEG is now accessed through each camera
+# component's ``telemetry.stream`` widget in the symmetric panel
+# (``GET /api/components/{tag_id}/telemetry/stream``).
+#
+# ``LabCommunicator.get_video_stream`` / ``get_video_feed_status`` remain
+# on the real backend for internal / future overhead-camera wiring.
+# --------------------------------------------------------------------------
 
 
 # --- Recipe Endpoints ---
