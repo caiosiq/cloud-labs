@@ -172,7 +172,7 @@ class LabCommunicator:
                 commit_teleop_session_pose,
             )
 
-            final_pose = self._teleop_live_pose.get_pose(tag_id)
+            final_pose = self.get_teleop_live_pose(tag_id)
             if final_pose:
                 commit_teleop_session_pose(self.current_state, tag_id, final_pose)
             commit_teleop_command_idle(self.current_state, tag_id)
@@ -180,7 +180,27 @@ class LabCommunicator:
         self._persist_state()
 
     def get_teleop_live_pose(self, tag_id: str) -> Optional[Dict[str, Any]]:
+        return self._teleop_live_get_pose(tag_id)
+
+    def _teleop_live_start(self, tag_id: str, initial_pose: Dict[str, Any]) -> None:
+        self._teleop_live_pose.start_session(tag_id, initial_pose)
+
+    def _teleop_live_get_pose(self, tag_id: str) -> Optional[Dict[str, Any]]:
         return self._teleop_live_pose.get_pose(tag_id)
+
+    def _teleop_live_set_goto(
+        self,
+        tag_id: str,
+        target: Dict[str, Any],
+        speed: Dict[str, Any],
+    ) -> None:
+        self._teleop_live_pose.set_goto(tag_id, target, speed)
+
+    def _teleop_live_stop_sync(self, tag_id: str) -> None:
+        self._teleop_live_pose.stop_session(tag_id)
+
+    async def _teleop_live_stop(self, tag_id: str) -> None:
+        self._teleop_live_stop_sync(tag_id)
 
     # ---------------------------------------------------------------
     # Catalog accessors
@@ -209,6 +229,20 @@ class LabCommunicator:
         Phase 2A unified both backends on a dict).
         """
         return self.catalog_map.get(tag_id)
+
+    def _ensure_fixture_components(self) -> None:
+        """Seed fixed-instrument catalog rows into ``current_state['components']``."""
+        from lab_model.state.fixture_seed import ensure_fixture_components_in_state
+
+        rows = self.get_catalog()
+        if not rows:
+            return
+        with self._state_lock:
+            changed = ensure_fixture_components_in_state(self.current_state, rows)
+            if changed:
+                self.current_state["last_updated"] = datetime.now().isoformat()
+        if changed:
+            self._persist_state()
 
     def _catalog_tag_ids(self) -> Set[str]:
         """Set of tag ids known to the catalog (used by snapshot merge)."""
@@ -408,6 +442,7 @@ class LabCommunicator:
         channel: str,
         backend: str,
         cam_id: Optional[int],
+        profile: str = "default",
     ) -> Tuple[bool, str]:
         if backend == "overhead":
             return True, "ok"
@@ -415,7 +450,7 @@ class LabCommunicator:
             ok, msg = self.table_cam_connect(int(cam_id))
             if not ok:
                 return False, msg
-            return self.table_cam_live_set(int(cam_id), True)
+            return self.table_cam_live_set(int(cam_id), True, profile=profile)
         return False, f"unsupported live feed backend {backend!r}"
 
     async def _primitive_end_live_feed(
@@ -716,6 +751,12 @@ class LabCommunicator:
         from lab_model.tunables import exposure_time_ms as exposure_tunable
 
         await exposure_tunable.apply(self, target_id, float(exposure_time_ms))
+
+    async def set_output_power_mw(self, target_id: str, output_power_mw: float) -> None:
+        """Commit ``tunables.output_power_mw`` (see ``lab_model.tunables.output_power_mw``)."""
+        from lab_model.tunables import output_power_mw as laser_tunable
+
+        await laser_tunable.apply(self, target_id, float(output_power_mw))
 
     async def _primitive_motor_set_zero(self, target_id: str, motor_id: int) -> None:
         """Hardware step for :meth:`motor_set_zero` (default no-op).
@@ -1114,7 +1155,9 @@ class LabCommunicator:
     def table_cam_disconnect(self, cam_id: int) -> Tuple[bool, str]:
         return False, "table cam lifecycle is not available for this backend"
 
-    def table_cam_live_set(self, cam_id: int, enabled: bool) -> Tuple[bool, str]:
+    def table_cam_live_set(
+        self, cam_id: int, enabled: bool, *, profile: str = "default"
+    ) -> Tuple[bool, str]:
         return False, "table cam lifecycle is not available for this backend"
 
     def table_cam_send_vexp(self, cam_id: int, exposure_s: float) -> Tuple[bool, str]:

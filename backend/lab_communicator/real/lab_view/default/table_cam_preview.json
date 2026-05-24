@@ -1,8 +1,15 @@
 {
   "version": 1,
-  "description": "Table camera live preview: recorder JPEG scale/quality and UI poll rate.",
+  "description": "Table camera live preview: default + TeleOp fast profile (Phase 7).",
   "scale": 0.3,
   "jpeg_quality": 40,
   "target_fps": 144,
-  "max_inflight_requests": 5
+  "max_inflight_requests": 5,
+  "teleop": {
+    "scale": 0.25,
+    "jpeg_quality": 50,
+    "poll_fps": 20,
+    "fetch_timeout_s": 0.08,
+    "stream_drain_frames": 12
+  }
 }

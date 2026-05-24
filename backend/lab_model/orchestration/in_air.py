@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from lab_model.domain.component import resolve_pick_table_pose
 from lab_model.domain.holding import (
     DEFAULT_HOVER_Z_MM,
     SYSTEM_STATUS_BUSY,
@@ -47,12 +48,12 @@ async def run_pick_component(
 
     with host._state_lock:
         entry = (host.current_state.get("components") or {}).get(target_id) or {}
-    pose_dict = ((entry.get("measurables") or {}).get("pose") or {})
+    pick_xy = resolve_pick_table_pose(entry)
     commanded = LabPose(
-        x=float(pose_dict.get("x", 0.0)),
-        y=float(pose_dict.get("y", 0.0)),
+        x=pick_xy["x"],
+        y=pick_xy["y"],
         z=0.0,
-        rotation=float(pose_dict.get("rotation", 0.0)),
+        rotation=pick_xy["rotation"],
     )
 
     host._null_measurables_for_targets([target_id], persist=False)

@@ -199,16 +199,18 @@ export function getHolding(labState) {
     };
 }
 
-/** ``true`` when the lab reports ``system_status === "HOLDING"``. */
+/** ``true`` when the gripper is holding a part (including during TELEOP). */
 export function isHoldingState(labState) {
-    return !!(labState && labState.system_status === SYSTEM_STATUS_HOLDING);
+    if (!labState) return false;
+    if (labState.system_status === SYSTEM_STATUS_HOLDING) return true;
+    // START_TELEOP sets system_status to TELEOP while holding.tag_id stays set.
+    return !!getHolding(labState).tag_id;
 }
 
 /** ``true`` when the given tag is the one currently in the gripper. */
 export function isHeldTag(tagId, labState) {
-    if (!isHoldingState(labState)) return false;
-    const h = getHolding(labState);
-    return !!(tagId && h.tag_id === tagId);
+    if (!tagId || !labState) return false;
+    return getHolding(labState).tag_id === tagId;
 }
 
 /** ``true`` when HOLDING but tag is unknown / unconfirmed (UI must lock). */

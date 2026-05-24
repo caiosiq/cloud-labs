@@ -23,8 +23,13 @@ mirror in ``CLOUDLAB_CONTRACT.md``.
 from __future__ import annotations
 
 import json
+import logging
 import os
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
+
+_LOG = logging.getLogger(__name__)
+_LEGACY_CAM_GRIPPER_WARNED = False
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +132,10 @@ _MOTOR_WORKFLOW_PRIMITIVES = (
 
 _CAMERA_TUNABLE_PRIMITIVES = (
     "SET_EXPOSURE",
+)
+
+_LASER_TUNABLE_PRIMITIVES = (
+    "SET_LASER_OUTPUT",
 )
 
 _PLACEMENT_PRIMITIVES = (
@@ -279,8 +288,10 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
         },
         "live_pose": {
             "widget": "LivePosePoll",
-            "url": f"/api/components/{_TAG_TOKEN}/telemetry/live-pose",
-            "default_fps": 20,
+            "transport": "websocket",
+            "url": f"/api/components/{_TAG_TOKEN}/teleop/session",
+            "default_hz": 50,
+            "default_fps": 50,
         },
     }
     measurables: Dict[str, Any] = {}
@@ -309,6 +320,21 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
         if tag_id:
             url_stream = f"/api/components/{_TAG_TOKEN}/telemetry/stream"
             live_feed["stream"] = {"widget": "MJPEGViewer", "url": url_stream}
+
+    if comp_type == "LASER_SOURCE":
+        tunables["output_power_mw"] = {
+            "widget": "FloatRange",
+            "min": 0.0,
+            "max": 100.0,
+            "default": 0.0,
+            "unit": "mW",
+        }
+        measurables["output_power_readback_mw"] = {
+            "widget": "NumberBadge",
+            "format": ".2f",
+            "unit": "mW",
+        }
+        primitives.extend(list(_LASER_TUNABLE_PRIMITIVES))
 
     primitives.extend(list(_MANIPULATION_PRIMITIVES))
     primitives.extend(list(_UNIVERSAL_PRIMITIVES))
@@ -535,22 +561,161 @@ def telemetry_channel(
     return live_feed_channel(catalog_row, channel)
 
 
+# ---------------------------------------------------------------------------
+# Hardware binding (Phase 2 — catalog → bench driver)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class HardwareBinding:
+    """Resolved hardware attachment for a catalog component row."""
+
+    backend: str
+    recorder_cam_id: Optional[int] = None
+    recorder_port: Optional[int] = None
+    device_index: Optional[int] = None
+    role: Optional[str] = None
+    preview_profile: Optional[str] = None
+
+
+def _binding_from_dict(raw: Dict[str, Any]) -> HardwareBinding:
+    backend = str(raw.get("backend") or "none").strip().lower()
+    rec_id = raw.get("recorder_cam_id")
+    if rec_id is None:
+        rec_id = raw.get("cam_id")
+    if isinstance(rec_id, str) and rec_id.isdigit():
+        rec_id = int(rec_id)
+    if not isinstance(rec_id, int):
+        rec_id = None
+    port = raw.get("recorder_port")
+    if isinstance(port, str) and port.isdigit():
+        port = int(port)
+    if not isinstance(port, int):
+        port = None
+    dev = raw.get("device_index")
+    if isinstance(dev, str) and dev.isdigit():
+        dev = int(dev)
+    if not isinstance(dev, int):
+        dev = None
+    role = raw.get("role")
+    role_s = str(role).strip() if role is not None else None
+    profile = raw.get("preview_profile")
+    profile_s = str(profile).strip() if profile is not None else None
+    return HardwareBinding(
+        backend=backend,
+        recorder_cam_id=rec_id,
+        recorder_port=port,
+        device_index=dev,
+        role=role_s,
+        preview_profile=profile_s,
+    )
+
+
+def resolve_hardware_binding(
+    catalog_row: Optional[Dict[str, Any]],
+) -> Optional[HardwareBinding]:
+    """Resolve ``properties.hardware_binding`` (or legacy catalog hints).
+
+    Priority:
+
+    1. Explicit ``properties.hardware_binding`` object.
+    2. ``properties.stream_source == overhead`` → OpenCV overhead USB.
+    3. Legacy ``cam_gripper_N`` slug → ``recorder_tcp`` (deprecated).
+    """
+    global _LEGACY_CAM_GRIPPER_WARNED  # noqa: PLW0603
+
+    if not isinstance(catalog_row, dict):
+        return None
+
+    props = catalog_row.get("properties") or {}
+    if isinstance(props, dict):
+        raw = props.get("hardware_binding")
+        if isinstance(raw, dict) and raw.get("backend"):
+            return _binding_from_dict(raw)
+        if props.get("stream_source") == "overhead":
+            dev = props.get("device_index")
+            if isinstance(dev, str) and dev.isdigit():
+                dev = int(dev)
+            if not isinstance(dev, int):
+                dev = 0
+            return HardwareBinding(
+                backend="opencv_usb",
+                device_index=dev,
+                role="table_overview",
+            )
+
+    cid = catalog_row.get("id")
+    if isinstance(cid, str) and cid.startswith("cam_gripper_"):
+        suffix = cid[len("cam_gripper_") :]
+        if suffix.isdigit():
+            if not _LEGACY_CAM_GRIPPER_WARNED:
+                _LEGACY_CAM_GRIPPER_WARNED = True
+                _LOG.warning(
+                    "Catalog row id=%r uses deprecated cam_gripper_N slug; "
+                    "add properties.hardware_binding (recorder_tcp).",
+                    cid,
+                )
+            return HardwareBinding(
+                backend="recorder_tcp",
+                recorder_cam_id=int(suffix),
+            )
+
+    raw_cam = catalog_row.get("cam_id")
+    if raw_cam is None and isinstance(props, dict):
+        raw_cam = props.get("cam_id")
+    if isinstance(raw_cam, int):
+        return HardwareBinding(backend="recorder_tcp", recorder_cam_id=raw_cam)
+    if isinstance(raw_cam, str) and raw_cam.isdigit():
+        return HardwareBinding(backend="recorder_tcp", recorder_cam_id=int(raw_cam))
+
+    return None
+
+
+def catalog_declared_primitives(catalog_row: Optional[Dict[str, Any]]) -> List[str]:
+    """Primitive id strings declared on a catalog row."""
+    if not isinstance(catalog_row, dict):
+        return []
+    caps = normalize_capabilities(catalog_row.get("capabilities") or {})
+    prims = caps.get("primitives") or []
+    return [str(p) for p in prims if isinstance(p, str)]
+
+
+def catalog_is_fixed_instrument(catalog_row: Optional[Dict[str, Any]]) -> bool:
+    """True for bench-fixed components (cameras, lasers) — not arm-scanned optics."""
+    if not isinstance(catalog_row, dict):
+        return False
+    props = catalog_row.get("properties") or {}
+    if isinstance(props, dict) and props.get("fixture") is True:
+        return True
+    if isinstance(props, dict) and props.get("stream_source") == "overhead":
+        return True
+    binding = resolve_hardware_binding(catalog_row)
+    if binding is None:
+        return False
+    comp_type = str(catalog_row.get("type") or "")
+    if comp_type in ("OPTICAL_CAMERA", "CEILING_CAMERA", "LASER_SOURCE"):
+        return True
+    if binding.backend in ("recorder_tcp", "opencv_usb", "overhead"):
+        return True
+    return False
+
+
 def resolve_cam_id_for_tag(catalog_row: Optional[Dict[str, Any]]) -> Optional[int]:
     """Resolve the hardware ``cam_id`` for a catalog row, or ``None``.
 
-    Two sources, in priority order:
+    Priority:
 
-    1. Explicit ``cam_id`` field on the row (or under ``properties.cam_id``)
-       — catalogs may carry this for non-gripper cameras.
-    2. The ``cam_gripper_N`` naming convention on ``id`` (``cam_gripper_1``
-       → 1, ``cam_gripper_2`` → 2). Matches the mock + real bundles
-       through Phase 5.
-
-    Returning ``None`` lets callers raise a precise 4xx ("no underlying
-    cam_id resolvable") rather than guessing.
+    1. ``hardware_binding.recorder_cam_id`` (``recorder_tcp`` backend).
+    2. Explicit ``cam_id`` on the row or under ``properties``.
+    3. Deprecated ``cam_gripper_N`` slug on ``id``.
     """
     if not isinstance(catalog_row, dict):
         return None
+
+    binding = resolve_hardware_binding(catalog_row)
+    if binding is not None and binding.backend == "recorder_tcp":
+        if binding.recorder_cam_id is not None:
+            return int(binding.recorder_cam_id)
 
     raw = catalog_row.get("cam_id")
     if raw is None:
@@ -563,12 +728,10 @@ def resolve_cam_id_for_tag(catalog_row: Optional[Dict[str, Any]]) -> Optional[in
         return int(raw)
 
     cid = catalog_row.get("id")
-    if isinstance(cid, str):
-        # ``cam_gripper_1`` / ``cam_gripper_2`` convention.
-        if cid.startswith("cam_gripper_"):
-            suffix = cid[len("cam_gripper_"):]
-            if suffix.isdigit():
-                return int(suffix)
+    if isinstance(cid, str) and cid.startswith("cam_gripper_"):
+        suffix = cid[len("cam_gripper_") :]
+        if suffix.isdigit():
+            return int(suffix)
     return None
 
 
@@ -587,6 +750,20 @@ def resolve_telemetry_stream_backend(catalog_row: Optional[Dict[str, Any]]) -> s
     """How to serve ``telemetry.stream`` for this tag: ``table_cam``, ``overhead``, or ``none``."""
     if not isinstance(catalog_row, dict):
         return "none"
+
+    binding = resolve_hardware_binding(catalog_row)
+    if binding is not None:
+        if binding.backend == "recorder_tcp":
+            return "table_cam"
+        if binding.backend in ("opencv_usb", "overhead"):
+            props = catalog_row.get("properties") or {}
+            if isinstance(props, dict) and props.get("stream_source") == "overhead":
+                return "overhead"
+            if binding.role in ("table_overview", "inventory_stereo_left", "inventory_stereo_right"):
+                return "overhead"
+            if binding.backend == "overhead":
+                return "overhead"
+
     props = catalog_row.get("properties") or {}
     if isinstance(props, dict) and props.get("stream_source") == "overhead":
         return "overhead"
@@ -608,6 +785,9 @@ def find_tag_id_for_cam_id(
     for tag_id, row in catalog_map.items():
         if not isinstance(row, dict):
             continue
+        binding = resolve_hardware_binding(row)
+        if binding is not None and binding.recorder_cam_id == want:
+            return str(tag_id)
         if resolve_cam_id_for_tag(row) == want:
             return str(tag_id)
     return None

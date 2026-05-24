@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from lab_model.catalog.schema import resolve_cam_id_for_tag
+from lab_model.catalog.schema import resolve_cam_id_for_tag, resolve_hardware_binding
 from lab_model.primitives.ids import PrimitiveId
 
 from ._commit import commit_tunable_value
@@ -25,6 +25,14 @@ async def apply(bridge: Any, tag_id: str, exposure_time_ms: float) -> None:
     commit_tunable_value(bridge, tag_id, "exposure_time_ms", exp_ms)
 
     row = (bridge._catalog_meta_for_tag(tag_id) if hasattr(bridge, "_catalog_meta_for_tag") else None) or {}
+    binding = resolve_hardware_binding(row)
+    if binding is not None and binding.backend in ("opencv_usb", "overhead"):
+        print(
+            f"{bridge.log_prefix} set_exposure_time_ms {tag_id}: "
+            f"{exp_ms:g} ms (intent only, overhead USB)"
+        )
+        return
+
     cam_id = resolve_cam_id_for_tag(row)
     if cam_id is not None:
         exp_s = exp_ms / 1000.0

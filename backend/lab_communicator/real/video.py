@@ -47,6 +47,39 @@ if TYPE_CHECKING:
     from lab_communicator.real.communicator import RealLabCommunicator
 
 
+def _experiment(communicator: "RealLabCommunicator"):
+    return getattr(communicator, "experiment", None)
+
+
+def _registry_camera_for_tag(communicator: "RealLabCommunicator", tag_id: str):
+    exp = _experiment(communicator)
+    if exp is not None and hasattr(exp, "get_camera_component"):
+        return exp.get_camera_component(str(tag_id))
+    return None
+
+
+def _registry_camera_for_recorder_cam(communicator: "RealLabCommunicator", cam_id: int):
+    exp = _experiment(communicator)
+    if exp is not None and hasattr(exp, "find_tag_id_for_recorder_cam"):
+        tag_id = exp.find_tag_id_for_recorder_cam(int(cam_id))
+        if tag_id:
+            return exp.get_camera_component(tag_id)
+    return None
+
+
+def _sync_table_cam_flags_from_component(
+    communicator: "RealLabCommunicator",
+    cam_id: int,
+    comp: Any,
+) -> None:
+    if comp is None:
+        return
+    if hasattr(comp, "is_connected"):
+        communicator._table_cam_connected[cam_id] = bool(comp.is_connected)  # noqa: SLF001
+    if hasattr(comp, "is_streaming"):
+        communicator._table_cam_streaming[cam_id] = bool(comp.is_streaming)  # noqa: SLF001
+
+
 def _table_cam_use_mock_env() -> bool:
     return os.getenv("TABLE_CAM_USE_MOCK", "").strip().lower() in (
         "1",
@@ -333,6 +366,12 @@ def start_recorder_processes(communicator: "RealLabCommunicator") -> None:
                     str(preview_cfg.scale),
                     "--jpeg-quality",
                     str(preview_cfg.jpeg_quality),
+                    "--teleop-scale",
+                    str(preview_cfg.teleop_scale),
+                    "--teleop-jpeg-quality",
+                    str(preview_cfg.teleop_jpeg_quality),
+                    "--teleop-stream-drain",
+                    str(preview_cfg.teleop_stream_drain_frames),
                 ]
             )
         except Exception as e:
@@ -472,16 +511,23 @@ def get_video_stream(communicator: "RealLabCommunicator", fps: int = 10):
     import numpy as np
 
     camera = None
-    if communicator.experiment and hasattr(communicator.experiment, "ceiling_cam1"):
+    registry_cam = _registry_camera_for_tag(communicator, "tag_99")
+    if registry_cam is not None:
+        camera = registry_cam
+    elif communicator.experiment and hasattr(communicator.experiment, "ceiling_cam1"):
         camera = communicator.experiment.ceiling_cam1
 
     sleep_duration = 1.0 / max(1, min(fps, 60))
 
     while True:
         frame = None
-        if camera:
+        if camera is not None:
             try:
-                frame = camera.get_frame()
+                frame = (
+                    camera.get_frame()
+                    if hasattr(camera, "get_frame")
+                    else None
+                )
             except Exception as e:
                 print(f"[REAL LAB] Camera stream error: {e}")
                 frame = None
@@ -638,8 +684,12 @@ def table_cam_connect(
             _set_table_cam_error(communicator, cam_id, msg)
             return False, msg
 
+        registry_cam = _registry_camera_for_recorder_cam(communicator, cam_id)
         print(f"[REAL LAB] table_cam_connect cam{cam_id} …", flush=True)
-        ok, msg = connect_cam_cloudlab(cam_id)
+        if registry_cam is not None:
+            ok, msg = registry_cam.connect()
+        else:
+            ok, msg = connect_cam_cloudlab(cam_id)
         if not ok:
             communicator._table_cam_connected[cam_id] = False  # noqa: SLF001
             communicator._table_cam_hardware[cam_id] = "none"  # noqa: SLF001
@@ -648,12 +698,15 @@ def table_cam_connect(
             return False, msg
 
         parsed = _parse_status_kv(msg)
-        communicator._table_cam_connected[cam_id] = bool(  # noqa: SLF001
-            parsed.get("connected", True)
-        )
-        communicator._table_cam_streaming[cam_id] = bool(  # noqa: SLF001
-            parsed.get("streaming", False)
-        )
+        if registry_cam is not None:
+            _sync_table_cam_flags_from_component(communicator, cam_id, registry_cam)
+        else:
+            communicator._table_cam_connected[cam_id] = bool(  # noqa: SLF001
+                parsed.get("connected", True)
+            )
+            communicator._table_cam_streaming[cam_id] = bool(  # noqa: SLF001
+                parsed.get("streaming", False)
+            )
         hw = str(parsed.get("hardware", "real" if not communicator._table_cam_recorder_mock else "mock"))  # noqa: SLF001
         communicator._table_cam_hardware[cam_id] = hw  # noqa: SLF001
         _set_table_cam_error(communicator, cam_id, None)
@@ -694,7 +747,11 @@ def table_cam_disconnect(
             return False, msg
 
         _close_preview_jpeg_sock(cam_id)
-        ok, msg = disconnect_cam_cloudlab(cam_id)
+        registry_cam = _registry_camera_for_recorder_cam(communicator, cam_id)
+        if registry_cam is not None:
+            ok, msg = registry_cam.disconnect()
+        else:
+            ok, msg = disconnect_cam_cloudlab(cam_id)
         if not ok:
             _set_table_cam_error(communicator, cam_id, msg)
             print(f"[REAL LAB] table_cam_disconnect cam{cam_id} FAILED: {msg}", flush=True)
@@ -704,10 +761,35 @@ def table_cam_disconnect(
         return True, msg or "ok"
 
 
+def _preview_profile_for_cam(
+    communicator: "RealLabCommunicator", cam_id: int
+) -> str:
+    profiles = getattr(communicator, "_table_cam_stream_profile", None) or {}
+    return str(profiles.get(int(cam_id), "default"))
+
+
+def _preview_timeout_for_cam(
+    communicator: "RealLabCommunicator", cam_id: int
+) -> float:
+    try:
+        from lab_communicator.shared.lab_view_config import (  # noqa: PLC0415
+            load_table_cam_preview_config,
+        )
+
+        prof = load_table_cam_preview_config().profile(
+            _preview_profile_for_cam(communicator, cam_id)
+        )
+        return float(prof.get("fetch_timeout_s", 0.45))
+    except Exception:
+        return 0.08 if _preview_profile_for_cam(communicator, cam_id) == "teleop" else 0.45
+
+
 def table_cam_live_set(
     communicator: "RealLabCommunicator",
     cam_id: int,
     enabled: bool,
+    *,
+    profile: str = "default",
 ) -> Tuple[bool, str]:
     if cam_id not in (1, 2):
         return False, "cam_id must be 1 or 2"
@@ -732,9 +814,20 @@ def table_cam_live_set(
                 "cannot import recorder_capture_helpers_cloudlab (upgrade lab_automation)",
             )
         if enabled:
-            ok, msg = stream_on_cloudlab(cam_id)
+            prof = "teleop" if str(profile).strip().lower() == "teleop" else "default"
+            communicator._table_cam_stream_profile[cam_id] = prof  # noqa: SLF001
+            registry_cam = _registry_camera_for_recorder_cam(communicator, cam_id)
+            if registry_cam is not None:
+                ok, msg = registry_cam.stream_on(profile=prof)
+            else:
+                ok, msg = stream_on_cloudlab(cam_id, profile=prof)
         else:
-            ok, msg = stream_off_cloudlab(cam_id)
+            communicator._table_cam_stream_profile[cam_id] = "default"  # noqa: SLF001
+            registry_cam = _registry_camera_for_recorder_cam(communicator, cam_id)
+            if registry_cam is not None:
+                ok, msg = registry_cam.stream_off()
+            else:
+                ok, msg = stream_off_cloudlab(cam_id)
         if not ok:
             communicator._table_cam_streaming[cam_id] = False  # noqa: SLF001
             _set_table_cam_error(communicator, cam_id, msg)
@@ -744,12 +837,17 @@ def table_cam_live_set(
             )
             return False, msg
         parsed = _parse_status_kv(msg)
-        communicator._table_cam_streaming[cam_id] = bool(  # noqa: SLF001
-            parsed.get("streaming", enabled)
-        )
+        registry_cam = _registry_camera_for_recorder_cam(communicator, cam_id)
+        if registry_cam is not None:
+            _sync_table_cam_flags_from_component(communicator, cam_id, registry_cam)
+        else:
+            communicator._table_cam_streaming[cam_id] = bool(  # noqa: SLF001
+                parsed.get("streaming", enabled)
+            )
         _set_table_cam_error(communicator, cam_id, None)
         print(
-            f"[REAL LAB] table_cam_live_set cam{cam_id} enabled={enabled} OK ({msg})",
+            f"[REAL LAB] table_cam_live_set cam{cam_id} enabled={enabled} "
+            f"profile={communicator._table_cam_stream_profile.get(cam_id, 'default')} OK ({msg})",
             flush=True,
         )
         return True, msg or "ok"
@@ -771,6 +869,9 @@ def table_cam_send_vexp(
         return True, "legacy recorder ignores vexp shim"
     if not communicator._table_cam_connected.get(cam_id):
         return False, "camera not connected"
+    registry_cam = _registry_camera_for_recorder_cam(communicator, cam_id)
+    if registry_cam is not None:
+        return registry_cam.set_exposure_s(float(exposure_s))
     try:
         from lab_automation.managers.recorder_capture_helpers_cloudlab import (  # noqa: PLC0415
             set_vexp_cloudlab,
@@ -845,10 +946,15 @@ def get_table_cam_stream(
     cam_id: int,
     fps: int = 30,
 ):
-    """MJPEG bytes for ``GET /api/table-cam/stream`` (cloudlabs recorder)."""
-    fps = max(8, min(int(fps), 45))
+    """MJPEG bytes for ``GET /api/components/{tag_id}/telemetry/stream``."""
+    prof = _preview_profile_for_cam(communicator, cam_id)
+    cap_fps = 45 if prof == "teleop" else 30
+    fps = max(8, min(int(fps), cap_fps))
+    if prof == "teleop" and fps < 20:
+        fps = 20
     frame_interval = 1.0 / fps
     next_frame_at = time.monotonic()
+    timeout_s = _preview_timeout_for_cam(communicator, cam_id)
     allow_placeholder = bool(getattr(communicator, "_table_cam_recorder_mock", False))
 
     while True:
@@ -883,7 +989,7 @@ def get_table_cam_stream(
                     fetch_preview_jpeg_cloudlab,
                 )
 
-                payload = fetch_preview_jpeg_cloudlab(cam_id, timeout_s=0.45)
+                payload = fetch_preview_jpeg_cloudlab(cam_id, timeout_s=timeout_s)
                 if payload and len(payload) > 800:
                     frame_bytes = payload
                 elif payload and allow_placeholder:
@@ -937,12 +1043,21 @@ def fetch_table_cam_preview_jpeg(
     if not communicator._table_cam_streaming.get(cam_id):
         return _mjpeg_status_frame("LIVE OFF", "Enable Live")
 
+    timeout_s = _preview_timeout_for_cam(communicator, cam_id)
+    registry_cam = _registry_camera_for_recorder_cam(communicator, cam_id)
+    if registry_cam is not None:
+        payload = registry_cam.fetch_preview_jpeg(timeout_s=timeout_s)
+        if payload and len(payload) > 800:
+            return payload
+        if payload and allow_placeholder:
+            return payload
+
     try:
         from lab_automation.managers.recorder_capture_helpers_cloudlab import (  # noqa: PLC0415
             fetch_preview_jpeg_cloudlab,
         )
 
-        payload = fetch_preview_jpeg_cloudlab(cam_id, timeout_s=0.12)
+        payload = fetch_preview_jpeg_cloudlab(cam_id, timeout_s=timeout_s)
         if payload and len(payload) > 800:
             return payload
         if payload and allow_placeholder:
@@ -959,6 +1074,43 @@ def fetch_table_cam_preview_jpeg(
 # ---------------------------------------------------------------------------
 # Single-shot capture
 # ---------------------------------------------------------------------------
+
+def capture_overhead_cam(
+    communicator: "RealLabCommunicator",
+    exposure: float = 0.2,
+) -> Optional[bytes]:
+    """Capture one PNG still from the table-overview camera (``tag_99`` registry)."""
+    exp = _experiment(communicator)
+    if exp is not None and hasattr(exp, "capture_still_for_tag"):
+        png = exp.capture_still_for_tag("tag_99", exposure_s=float(exposure))
+        if png:
+            return png
+
+    registry_cam = _registry_camera_for_tag(communicator, "tag_99")
+    if registry_cam is not None:
+        return registry_cam.capture_still_png(float(exposure))
+
+    import cv2  # noqa: PLC0415
+
+    _ = float(exposure)
+    camera = None
+    if exp is not None and hasattr(exp, "ceiling_cam1"):
+        camera = exp.ceiling_cam1
+    if camera is None:
+        print("[REAL LAB] capture_overhead_cam: no tag_99 registry or ceiling_cam1")
+        return None
+    try:
+        frame = camera.get_frame()
+    except Exception as exc:
+        print(f"[REAL LAB] capture_overhead_cam failed: {exc!r}")
+        return None
+    if frame is None:
+        return None
+    ok, buffer = cv2.imencode(".png", frame)
+    if not ok:
+        return None
+    return buffer.tobytes()
+
 
 def capture_table_cam(
     communicator: "RealLabCommunicator",
@@ -984,6 +1136,12 @@ def capture_table_cam(
         return None
 
     exp = float(exposure)
+    registry_cam = _registry_camera_for_recorder_cam(communicator, cam_id)
+    if registry_cam is not None:
+        png = registry_cam.capture_still_png(exp)
+        _sync_table_cam_flags_from_component(communicator, cam_id, registry_cam)
+        return png
+
     import cv2  # noqa: PLC0415
     import tempfile
     import os as _os

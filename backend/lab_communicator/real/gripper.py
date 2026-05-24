@@ -32,12 +32,15 @@ that violate the layered rules. ``lab_model`` is fine.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from lab_model.domain.holding import (
     DEFAULT_HOVER_Z_MM,
     SYSTEM_STATUS_HOLDING,
+    clear_holding,
     held_tag,
+    is_holding,
+    requires_operator_confirm,
     set_holding,
 )
 
@@ -116,6 +119,65 @@ def get_gripper_status(communicator: "RealLabCommunicator") -> Dict[str, Any]:
     }
 
 
+def gripper_probe_available(gripper: Dict[str, Any]) -> bool:
+    """True when a real closed/open signal was returned (not the unavailable default)."""
+    source = str((gripper or {}).get("source") or "")
+    return "unavailable" not in source.lower()
+
+
+def _marker_id_from_cloud_tag(tag_id: str) -> Optional[int]:
+    try:
+        from lab_automation.components.manipulable import marker_id_from_tag_id
+
+        return int(marker_id_from_tag_id(str(tag_id)))
+    except Exception:
+        return None
+
+
+def sync_experiment_holding_from_cloud_state(
+    communicator: "RealLabCommunicator",
+) -> None:
+    """Align ``OpticalExperiment.is_physically_holding`` with gripper + cloud state."""
+    exp = getattr(communicator, "experiment", None)
+    if exp is None:
+        return
+
+    try:
+        gripper = get_gripper_status(communicator)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[REAL LAB] sync_experiment_holding: gripper probe failed: {exc!r}")
+        return
+
+    if not gripper_probe_available(gripper):
+        return
+
+    closed = bool(gripper.get("closed"))
+    with communicator._state_lock:
+        state = communicator.current_state
+        if not closed:
+            if is_holding(state) and held_tag(state):
+                print(
+                    "[REAL LAB] Gripper open but cloud-labs reports confirmed "
+                    "HOLDING — clearing cloud holding to match hardware."
+                )
+                clear_holding(state)
+                state["last_updated"] = datetime.now().isoformat()
+                try:
+                    communicator._persist_state()
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[REAL LAB] holding sync persist failed: {exc!r}")
+            exp.is_physically_holding = False
+            exp._holding_tag_id = None
+            return
+
+        exp.is_physically_holding = True
+        tag = held_tag(state)
+        if tag and not requires_operator_confirm(state):
+            exp._holding_tag_id = _marker_id_from_cloud_tag(tag)
+        else:
+            exp._holding_tag_id = None
+
+
 def reconcile_holding_on_boot(communicator: "RealLabCommunicator") -> None:
     """Boot-time HOLDING reconciliation (see ``new_primitives.md`` §6.3).
 
@@ -165,3 +227,5 @@ def reconcile_holding_on_boot(communicator: "RealLabCommunicator") -> None:
             requires_operator_confirm_flag=True,
         )
         communicator.current_state["last_updated"] = datetime.now().isoformat()
+
+    sync_experiment_holding_from_cloud_state(communicator)

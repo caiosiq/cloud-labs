@@ -92,6 +92,88 @@ def validate_communicator_backend(communicator_id: str) -> None:
         )
 
 
+def audit_primitive_handlers(
+    communicator_cls: type,
+    *,
+    label: str = "LabCommunicator",
+) -> List[Dict[str, Any]]:
+    """Return a per-primitive report: registry handler vs class method."""
+    from lab_model.primitives.ids import PrimitiveKind
+
+    rows: List[Dict[str, Any]] = []
+    for pid, meta in PRIMITIVE_REGISTRY.items():
+        kind = meta.get("kind")
+        handler = meta.get("handler")
+        row: Dict[str, Any] = {
+            "primitive": pid.value,
+            "kind": kind.value if kind is not None else None,
+            "handler": handler,
+            "status": "ok",
+            "detail": "",
+        }
+        if kind == PrimitiveKind.MACRO:
+            row["status"] = "macro"
+            row["detail"] = "expanded in dispatch, not direct handler"
+        elif handler is None:
+            row["status"] = "stub"
+            row["detail"] = "no LabCommunicator handler (intentional stub)"
+        else:
+            fn = getattr(communicator_cls, str(handler), None)
+            if fn is None or not callable(fn):
+                row["status"] = "missing"
+                row["detail"] = f"{label} has no callable {handler!r}"
+            else:
+                row["detail"] = f"{label}.{handler}"
+        rows.append(row)
+    return rows
+
+
+def audit_real_hardware_hooks(real_cls: type) -> List[Dict[str, Any]]:
+    """Report ``_primitive_*`` hooks on ``RealLabCommunicator``."""
+    from lab_communicator.base import LabCommunicator
+
+    expected = (
+        "_primitive_move_component",
+        "_primitive_move_motor",
+        "_primitive_prepare_optimization_run",
+        "_primitive_optimize_component",
+        "_primitive_finalize_optimization_run",
+        "_primitive_add_component_to_state",
+        "_primitive_record_measurables",
+        "_primitive_pick_component",
+        "_primitive_hover_component",
+        "_primitive_place_from_hover",
+        "_primitive_scan_rotate_in_place",
+        "_primitive_prepare_teleop",
+        "_primitive_start_live_feed",
+        "_primitive_end_live_feed",
+    )
+    rows: List[Dict[str, Any]] = []
+    for name in expected:
+        on_real = getattr(real_cls, name, None)
+        on_base = getattr(LabCommunicator, name, None)
+        if on_real is None:
+            status = "missing"
+        elif on_real is on_base:
+            status = "base_default"
+        else:
+            status = "real_override"
+        rows.append({"hook": name, "status": status})
+    return rows
+
+
+def assert_primitive_handlers_wired(communicator_cls: type, *, label: str = "LabCommunicator") -> None:
+    """Raise :class:`PlatformIntegrityError` when any atomic handler is missing."""
+    missing = [
+        r
+        for r in audit_primitive_handlers(communicator_cls, label=label)
+        if r["status"] == "missing"
+    ]
+    if missing:
+        lines = ", ".join(f"{r['primitive']}→{r['handler']}" for r in missing)
+        raise PlatformIntegrityError(f"Missing primitive handlers on {label}: {lines}")
+
+
 def export_platform_registries() -> Dict[str, Any]:
     """JSON-serializable snapshot of tunable/measurable/primitive registries."""
     from lab_model import measurables as _measurables  # noqa: F401

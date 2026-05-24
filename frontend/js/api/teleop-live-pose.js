@@ -1,5 +1,6 @@
 /**
- * High-rate TeleOp live pose polling (separate from /api/lab-state).
+ * High-rate TeleOp live pose polling — HTTP fallback when WebSocket session
+ * is unavailable (see ``api/teleop-session-ws.js``).
  */
 import { store } from '../state/store.js';
 

@@ -2,7 +2,8 @@
  * `LivePosePoll` — telemetry widget for TeleOp hardware pose (§14.3).
  *
  * Displays ``current_pose`` (``getTeleopCurrentPose``) updated by the session-wide
- * poll in ``teleop-session.js`` / ``api/teleop-live-pose.js``. Repaints
+ * poll in ``teleop-session.js`` / ``api/teleop-session-ws.js`` (HTTP fallback:
+ * ``api/teleop-live-pose.js``). Repaints
  * while mounted so the readout tracks high-rate updates without rebuilding
  * the whole context panel.
  */
@@ -40,11 +41,13 @@ function paintPose(card, tagId, descriptor) {
     meta.style.fontSize = '9px';
     meta.style.marginTop = '4px';
     meta.style.fontFamily = 'ui-monospace, monospace';
-    const url = resolveTokens(descriptor && descriptor.url, { tagId });
-    const fps = Number(descriptor && descriptor.default_fps) > 0
-        ? Number(descriptor.default_fps)
+    const transport = String(descriptor && descriptor.transport || '').toLowerCase();
+    const fps = Number(descriptor && (descriptor.default_fps || descriptor.default_hz)) > 0
+        ? Number(descriptor.default_fps || descriptor.default_hz)
         : 20;
-    meta.textContent = `${url || 'live-pose'}  \u2022  ${fps} fps`;
+    const url = resolveTokens(descriptor && descriptor.url, { tagId });
+    const label = transport === 'websocket' || transport === 'ws' ? 'ws session' : (url || 'live-pose');
+    meta.textContent = `${label}  \u2022  ${fps} fps`;
     body.appendChild(meta);
 }
 

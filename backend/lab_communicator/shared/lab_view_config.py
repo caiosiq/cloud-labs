@@ -90,6 +90,11 @@ class TableCamPreviewConfig:
     jpeg_quality: int = 72
     target_fps: int = 144
     max_inflight_requests: int = 3
+    teleop_scale: float = 0.25
+    teleop_jpeg_quality: int = 50
+    teleop_poll_fps: int = 20
+    teleop_fetch_timeout_s: float = 0.08
+    teleop_stream_drain_frames: int = 12
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -97,6 +102,29 @@ class TableCamPreviewConfig:
             "jpeg_quality": self.jpeg_quality,
             "target_fps": self.target_fps,
             "max_inflight_requests": self.max_inflight_requests,
+            "teleop_scale": self.teleop_scale,
+            "teleop_jpeg_quality": self.teleop_jpeg_quality,
+            "teleop_poll_fps": self.teleop_poll_fps,
+            "teleop_fetch_timeout_s": self.teleop_fetch_timeout_s,
+            "teleop_stream_drain_frames": self.teleop_stream_drain_frames,
+        }
+
+    def profile(self, name: str) -> Dict[str, Any]:
+        """Resolved tuning for ``default`` or ``teleop`` live-feed profile."""
+        if str(name).strip().lower() == "teleop":
+            return {
+                "scale": self.teleop_scale,
+                "jpeg_quality": self.teleop_jpeg_quality,
+                "poll_fps": self.teleop_poll_fps,
+                "fetch_timeout_s": self.teleop_fetch_timeout_s,
+                "stream_drain_frames": self.teleop_stream_drain_frames,
+            }
+        return {
+            "scale": self.scale,
+            "jpeg_quality": self.jpeg_quality,
+            "poll_fps": min(30, self.target_fps),
+            "fetch_timeout_s": 0.45,
+            "stream_drain_frames": 6,
         }
 
 
@@ -453,6 +481,28 @@ def _table_cam_preview_from_mapping(doc: Mapping[str, Any]) -> TableCamPreviewCo
             v = default
         return max(lo, min(hi, v))
 
+    teleop = doc.get("teleop") if isinstance(doc.get("teleop"), Mapping) else {}
+
+    def _teleop_float(key: str, default: float, lo: float, hi: float) -> float:
+        if key in teleop:
+            try:
+                v = float(teleop.get(key, default))
+            except (TypeError, ValueError):
+                v = default
+            return max(lo, min(hi, v))
+        flat = f"teleop_{key}"
+        return _float(flat, default, lo, hi)
+
+    def _teleop_int(key: str, default: int, lo: int, hi: int) -> int:
+        if key in teleop:
+            try:
+                v = int(teleop.get(key, default))
+            except (TypeError, ValueError):
+                v = default
+            return max(lo, min(hi, v))
+        flat = f"teleop_{key}"
+        return _int(flat, default, lo, hi)
+
     return TableCamPreviewConfig(
         scale=_float("scale", _DEFAULT_TABLE_CAM_PREVIEW.scale, 0.1, 1.0),
         jpeg_quality=_int(
@@ -464,6 +514,27 @@ def _table_cam_preview_from_mapping(doc: Mapping[str, Any]) -> TableCamPreviewCo
             _DEFAULT_TABLE_CAM_PREVIEW.max_inflight_requests,
             1,
             8,
+        ),
+        teleop_scale=_teleop_float(
+            "scale", _DEFAULT_TABLE_CAM_PREVIEW.teleop_scale, 0.05, 1.0
+        ),
+        teleop_jpeg_quality=_teleop_int(
+            "jpeg_quality", _DEFAULT_TABLE_CAM_PREVIEW.teleop_jpeg_quality, 30, 95
+        ),
+        teleop_poll_fps=_teleop_int(
+            "poll_fps", _DEFAULT_TABLE_CAM_PREVIEW.teleop_poll_fps, 8, 60
+        ),
+        teleop_fetch_timeout_s=_teleop_float(
+            "fetch_timeout_s",
+            _DEFAULT_TABLE_CAM_PREVIEW.teleop_fetch_timeout_s,
+            0.02,
+            1.0,
+        ),
+        teleop_stream_drain_frames=_teleop_int(
+            "stream_drain_frames",
+            _DEFAULT_TABLE_CAM_PREVIEW.teleop_stream_drain_frames,
+            1,
+            48,
         ),
     )
 

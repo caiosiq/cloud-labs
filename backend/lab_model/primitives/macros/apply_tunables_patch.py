@@ -34,6 +34,12 @@ async def run_apply_tunables_patch(
     if exp is not None:
         await exposure_tunable.apply(lab, tid, float(exp))
 
+    laser_pwr = patch.get("output_power_mw")
+    if laser_pwr is not None:
+        from lab_model.tunables import output_power_mw as laser_tunable
+
+        await laser_tunable.apply(lab, tid, float(laser_pwr))
+
     # --- Step 2: motor setpoints ---
     motors = patch.get("nominal_motor_positions")
     if isinstance(motors, dict):

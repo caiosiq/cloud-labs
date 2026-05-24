@@ -143,6 +143,7 @@ class LiveFeedHost(StateHost, Protocol):
         channel: str,
         backend: str,
         cam_id: Optional[int],
+        profile: str = "default",
     ) -> tuple[bool, str]: ...
 
     async def _primitive_end_live_feed(

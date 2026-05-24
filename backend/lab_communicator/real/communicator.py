@@ -84,7 +84,7 @@ except ImportError as e:
     LAB_LIB_AVAILABLE = False
 
 try:
-    from lab_automation.managers.recorder_capture_helpers import activate_cam_and_capture
+    from lab_automation.managers.recorder_capture_helpers_cloudlab import activate_cam_and_capture
     RECORDER_CAPTURE_AVAILABLE = True
 except ImportError:
     activate_cam_and_capture = None
@@ -175,38 +175,14 @@ class RealLabCommunicator(LabCommunicator):
             self.experiment = OpticalExperiment(mock=False)
         self.experiment.initialize_robot()
 
-    @staticmethod
-    def _load_catalog_for_lab_automation() -> Optional[Dict[str, Any]]:
-        """Read the active lab_view catalog as a v1 doc for lab_automation.
-
-        Returns ``None`` if the bundle is not bootstrapped (unit test paths)
-        or the file is still in legacy array shape -- in which case the
-        hardware side keeps its own hardcoded defaults. Once the migration
-        script has run on the active bundle, this returns the full
-        ``{schema_version, components}`` document.
-        """
-        try:
-            from lab_communicator.shared.lab_view_config import (  # noqa: PLC0415
-                get_lab_view_paths_optional,
-            )
-            from lab_model.catalog.schema import (  # noqa: PLC0415
-                is_v1_object_shape,
-            )
-
-            paths = get_lab_view_paths_optional()
-            if paths is None:
-                return None
-            with open(paths.component_library_json, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if is_v1_object_shape(data):
-                return data
-            return None
-        except Exception as exc:
-            print(f"[REAL LAB] _load_catalog_for_lab_automation skipped: {exc!r}")
-            return None
-
-        # Cache of OpticalComponent objects: { "tag_22": OpticalComponent(...) }
-        self.component_map: Dict[str, OpticalComponent] = {}
+        # Cache synced from ``experiment.registry`` manipulables (Phase 8).
+        self.component_map: Dict[str, Any] = {}
+        self._sync_component_map_from_registry()
+        self._hardware_teleop_tags: set[str] = set()
+        self._hardware_teleop_was_executing: Dict[str, bool] = {}
+        self._teleop_estop_tags: set[str] = set()
+        self._teleop_start_params: Dict[str, Any] = {}
+        self._table_cam_stream_profile: Dict[int, str] = {1: "default", 2: "default"}
 
         # ``HOVER_PLACEHOLDER_STATE`` was deleted in Phase 2B of the
         # communicator refactor: MockLabCommunicator now serves the
@@ -233,6 +209,9 @@ class RealLabCommunicator(LabCommunicator):
         # threads so any HOLDING_UNCONFIRMED is visible on the very first
         # GET /api/lab-state that the UI issues.
         self._reconcile_holding_on_boot()
+        from lab_communicator.real.gripper import sync_experiment_holding_from_cloud_state
+
+        sync_experiment_holding_from_cloud_state(self)
         self._recorder_procs: List[subprocess.Popen] = []
         self._use_cloudlab_table_recorder = False
         self._table_cam_recorder_mock = False
@@ -266,6 +245,36 @@ class RealLabCommunicator(LabCommunicator):
         # Start a background thread to monitor optimization steps reliably
         self._opt_monitor_thread = threading.Thread(target=self._monitor_optimization_dir, daemon=True)
         self._opt_monitor_thread.start()
+
+    @staticmethod
+    def _load_catalog_for_lab_automation() -> Optional[Dict[str, Any]]:
+        """Read the active lab_view catalog as a v1 doc for lab_automation.
+
+        Returns ``None`` if the bundle is not bootstrapped (unit test paths)
+        or the file is still in legacy array shape -- in which case the
+        hardware side keeps its own hardcoded defaults. Once the migration
+        script has run on the active bundle, this returns the full
+        ``{schema_version, components}`` document.
+        """
+        try:
+            from lab_communicator.shared.lab_view_config import (  # noqa: PLC0415
+                get_lab_view_paths_optional,
+            )
+            from lab_model.catalog.schema import (  # noqa: PLC0415
+                is_v1_object_shape,
+            )
+
+            paths = get_lab_view_paths_optional()
+            if paths is None:
+                return None
+            with open(paths.component_library_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if is_v1_object_shape(data):
+                return data
+            return None
+        except Exception as exc:
+            print(f"[REAL LAB] _load_catalog_for_lab_automation skipped: {exc!r}")
+            return None
 
     def _camera_images_base_dir(self) -> str:
         """Canonical Camera_Images root for new optimization run folders.
@@ -452,6 +461,22 @@ class RealLabCommunicator(LabCommunicator):
     # motor-rotation injection on read) is shared in
     # ``lab_communicator.base`` + ``lab_model.state.snapshot``.
 
+    def get_manipulable(self, tag_id: str) -> Any:
+        """Registry manipulable for ``tag_id`` (falls back to ``component_map``)."""
+        exp = getattr(self, "experiment", None)
+        if exp is not None and hasattr(exp, "get_manipulable"):
+            found = exp.get_manipulable(str(tag_id))
+            if found is not None:
+                return found
+        return self.component_map.get(str(tag_id))
+
+    def _sync_component_map_from_registry(self) -> None:
+        """Mirror ``experiment.registry.manipulables()`` into ``component_map``."""
+        exp = getattr(self, "experiment", None)
+        if exp is None or not hasattr(exp, "list_manipulables"):
+            return
+        self.component_map = {m.tag_id: m for m in exp.list_manipulables()}
+
     def _apply_loaded_pose_to_hardware(
         self, tag_id: str, lab_pose: LabPose, *, is_placed: bool
     ) -> None:
@@ -472,7 +497,7 @@ class RealLabCommunicator(LabCommunicator):
         ``inventory_location`` is owned elsewhere in ``lab_automation``
         (see ``labautomation_new_primitives.md`` ?5).
         """
-        comp = self.component_map.get(tag_id)
+        comp = self.get_manipulable(tag_id)
         if not comp:
             # Missing from map, skip; UI will still render but the
             # robot won't know about this part.
@@ -655,7 +680,7 @@ class RealLabCommunicator(LabCommunicator):
         field, the forward transform produces the same z_robot the robot
         is already at -- no vertical motion.
         """
-        comp = self.component_map.get(tag_id)
+        comp = self.get_manipulable(tag_id)
         for name in ("compute_intent_hover_z_lab", "get_intent_hover_z_lab"):
             fn = getattr(self.experiment, name, None)
             if callable(fn) and comp is not None:
@@ -776,6 +801,12 @@ class RealLabCommunicator(LabCommunicator):
 
         return capture_table_cam(self, cam_id, exposure)
 
+    def capture_overhead_cam(self, exposure: float = 0.2):
+        """Capture one still from the table-overview USB camera. Returns PNG bytes or ``None``."""
+        from lab_communicator.real.video import capture_overhead_cam
+
+        return capture_overhead_cam(self, exposure)
+
     def table_cam_connect(self, cam_id: int) -> Tuple[bool, str]:
         from lab_communicator.real.video import table_cam_connect
 
@@ -786,10 +817,12 @@ class RealLabCommunicator(LabCommunicator):
 
         return table_cam_disconnect(self, cam_id)
 
-    def table_cam_live_set(self, cam_id: int, enabled: bool) -> Tuple[bool, str]:
+    def table_cam_live_set(
+        self, cam_id: int, enabled: bool, *, profile: str = "default"
+    ) -> Tuple[bool, str]:
         from lab_communicator.real.video import table_cam_live_set
 
-        return table_cam_live_set(self, cam_id, enabled)
+        return table_cam_live_set(self, cam_id, enabled, profile=profile)
 
     def table_cam_send_vexp(self, cam_id: int, exposure_s: float) -> Tuple[bool, str]:
         from lab_communicator.real.video import table_cam_send_vexp
@@ -844,7 +877,7 @@ class RealLabCommunicator(LabCommunicator):
         self._stored_intent_remove(target_id)
 
     def _apply_is_placed_flag(self, target_id: str, value: bool) -> None:
-        cobj = self.component_map.get(target_id)
+        cobj = self.get_manipulable(target_id)
         if cobj is not None:
             cobj.is_placed = bool(value)
 
@@ -882,12 +915,149 @@ class RealLabCommunicator(LabCommunicator):
         from lab_communicator.real.gripper import get_gripper_status
         return get_gripper_status(self)
 
-    # ``_holding_placeholder_log`` and the ``HOVER_PLACEHOLDER_STATE``
-    # branch were deleted in Phase 2B of the communicator refactor:
-    # ``MockLabCommunicator`` is now the canonical UI-exercise backend
-    # (matched to real's contract via shared orchestrator + commits).
-    # Nothing references the helper anymore -- the dispatch tag in
-    # logs has been replaced by the per-orchestrator ``log_prefix``.
+    def _hardware_set_laser_output_power_mw(
+        self, tag_id: str, power_mw: float
+    ) -> Tuple[bool, str]:
+        exp = getattr(self, "experiment", None)
+        if exp is None:
+            return False, "experiment unavailable"
+        laser = exp.get_laser_component(tag_id) if hasattr(exp, "get_laser_component") else None
+        if laser is None:
+            return False, f"no laser component for {tag_id!r}"
+        return laser.set_output_power_mw(float(power_mw))
+
+    def _hardware_read_laser_output_power_mw(self, tag_id: str) -> Optional[float]:
+        exp = getattr(self, "experiment", None)
+        if exp is None:
+            return None
+        laser = exp.get_laser_component(tag_id) if hasattr(exp, "get_laser_component") else None
+        if laser is None:
+            return None
+        return laser.read_output_power_mw()
+
+    async def confirm_holding_tag(self, tag_id: str) -> None:
+        await super().confirm_holding_tag(tag_id)
+        from lab_communicator.real.gripper import sync_experiment_holding_from_cloud_state
+
+        sync_experiment_holding_from_cloud_state(self)
+
+    # --- TeleOp hardware bridge (Phase 6) ---
+
+    async def _primitive_prepare_teleop(self, target_id: str) -> Tuple[bool, str]:
+        """Enter lab_automation ``LiveControlSession`` (table Rz or held pose3d)."""
+        if not LAB_LIB_AVAILABLE:
+            return False, "lab_automation not available"
+        if not getattr(self, "experiment", None):
+            return False, "OpticalExperiment not initialized"
+        if self.get_manipulable(target_id) is None:
+            return False, f"unknown component {target_id!r} (rescan first)"
+
+        from lab_communicator.real.teleop_bridge import start_hardware_session
+        from lab_communicator.shared.util import optional_float
+        from lab_automation.utils.clearance import validate_safe_z_optional
+
+        params = dict(getattr(self, "_teleop_start_params", {}) or {})
+        safe_z_raw = optional_float(params, "safe_z")
+        safe_z = None
+        if safe_z_raw is not None:
+            try:
+                safe_z = validate_safe_z_optional(
+                    float(safe_z_raw), label="teleop safe_z"
+                )
+            except ValueError as exc:
+                return False, str(exc)
+
+        def _enter() -> None:
+            start_hardware_session(self, target_id, safe_z=safe_z)
+
+        try:
+            await asyncio.to_thread(_enter)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[REAL LAB] teleop prepare failed for {target_id}: {exc!r}")
+            return False, str(exc)
+
+        self._hardware_teleop_tags.add(target_id)
+        self._hardware_teleop_was_executing[target_id] = False
+        print(f"[REAL LAB] TELEOP hardware session ready for {target_id}")
+        return True, "ok"
+
+    def _teleop_live_start(self, tag_id: str, initial_pose: Dict[str, Any]) -> None:
+        if tag_id in self._hardware_teleop_tags:
+            return
+        super()._teleop_live_start(tag_id, initial_pose)
+
+    def _teleop_live_get_pose(self, tag_id: str) -> Optional[Dict[str, Any]]:
+        if tag_id in self._hardware_teleop_tags:
+            from lab_communicator.real.teleop_bridge import read_hardware_live_pose
+
+            return read_hardware_live_pose(self, tag_id)
+        return super()._teleop_live_get_pose(tag_id)
+
+    def get_teleop_live_pose(self, tag_id: str) -> Optional[Dict[str, Any]]:
+        if tag_id in self._hardware_teleop_tags and tag_id not in self._teleop_estop_tags:
+            from lab_communicator.real.teleop_bridge import check_gripper_slip_during_teleop
+
+            slip = check_gripper_slip_during_teleop(self, tag_id)
+            if slip:
+                self._teleop_estop_sync(tag_id, slip)
+                return None
+
+        pose = super().get_teleop_live_pose(tag_id)
+        if tag_id in self._hardware_teleop_tags and pose is not None:
+            was = self._hardware_teleop_was_executing.get(tag_id, False)
+            now = bool(pose.get("executing"))
+            if was and not now:
+                self._on_teleop_motion_idle(tag_id)
+            self._hardware_teleop_was_executing[tag_id] = now
+        return pose
+
+    def _teleop_estop_sync(self, tag_id: str, reason: str) -> None:
+        """Stop hardware TeleOp and mark session failed (gripper slip / safety)."""
+        if tag_id in self._teleop_estop_tags:
+            return
+        self._teleop_estop_tags.add(tag_id)
+        print(f"[REAL LAB] TELEOP estop for {tag_id}: {reason}")
+        self._teleop_live_stop_sync(tag_id)
+        from lab_model.state.commits import commit_teleop_start_failed
+
+        with self._state_lock:
+            commit_teleop_start_failed(self.current_state, tag_id, error=reason)
+            self.current_state["last_updated"] = datetime.now().isoformat()
+        try:
+            self._persist_state()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[REAL LAB] teleop estop persist failed: {exc!r}")
+        self._teleop_estop_tags.discard(tag_id)
+
+    def _teleop_live_set_goto(
+        self,
+        tag_id: str,
+        target: Dict[str, Any],
+        speed: Dict[str, Any],
+    ) -> None:
+        if tag_id in self._hardware_teleop_tags:
+            from lab_communicator.real.teleop_bridge import enqueue_hardware_goto
+
+            enqueue_hardware_goto(self, tag_id, target, speed)
+            self._hardware_teleop_was_executing[tag_id] = True
+            return
+        super()._teleop_live_set_goto(tag_id, target, speed)
+
+    def _teleop_live_stop_sync(self, tag_id: str) -> None:
+        if tag_id in self._hardware_teleop_tags:
+            from lab_communicator.real.teleop_bridge import stop_hardware_session
+
+            stop_hardware_session(self)
+            self._hardware_teleop_tags.discard(tag_id)
+            self._hardware_teleop_was_executing.pop(tag_id, None)
+            return
+        super()._teleop_live_stop_sync(tag_id)
+
+    async def _teleop_live_stop(self, tag_id: str) -> None:
+        if tag_id in self._hardware_teleop_tags:
+            await asyncio.to_thread(self._teleop_live_stop_sync, tag_id)
+            return
+        await super()._teleop_live_stop(tag_id)
 
     # --- In-air manipulation hooks (Phase 2B; see new_primitives.md) ---
 

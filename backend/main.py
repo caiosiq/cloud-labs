@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Query, Body
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Query, Body, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -424,6 +424,16 @@ async def post_component_record_measurables(tag_id: str):
 # ---------------------------------------------------------------------------
 
 
+def _catalog_row_or_404(tag_id: str) -> Dict[str, Any]:
+    """Return the catalog row for ``tag_id`` or raise 404/503."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    catalog_row = (lab.catalog_map or {}).get(tag_id)
+    if not isinstance(catalog_row, dict):
+        raise HTTPException(status_code=404, detail=f"Unknown tag {tag_id!r}")
+    return catalog_row
+
+
 def _telemetry_lookup(tag_id: str, channel: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Resolve ``(catalog_row, channel_descriptor)`` for a per-tag telemetry route.
 
@@ -449,16 +459,23 @@ def _telemetry_lookup(tag_id: str, channel: str) -> Tuple[Dict[str, Any], Dict[s
 
 
 def _resolve_cam_id_or_400(catalog_row: Dict[str, Any], tag_id: str) -> int:
-    from lab_model.catalog.schema import resolve_cam_id_for_tag  # noqa: PLC0415
+    from lab_model.catalog.schema import (  # noqa: PLC0415
+        resolve_cam_id_for_tag,
+        resolve_hardware_binding,
+    )
 
     cam_id = resolve_cam_id_for_tag(catalog_row)
     if cam_id is None:
+        binding = resolve_hardware_binding(catalog_row)
+        hint = (
+            f"backend={binding.backend!r}" if binding else "no hardware_binding"
+        )
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Component {tag_id!r} declares a camera telemetry channel but no "
-                f"underlying cam_id could be resolved. Add ``cam_id`` to the catalog row "
-                f"or rename ``id`` to follow the ``cam_gripper_N`` convention."
+                f"Component {tag_id!r} declares a table_cam telemetry channel but no "
+                f"recorder cam_id could be resolved ({hint}). "
+                f"Add properties.hardware_binding with backend recorder_tcp."
             ),
         )
     return cam_id
@@ -520,17 +537,34 @@ async def get_component_telemetry_stream(tag_id: str, fps: int = 18):
 
 @app.get("/api/components/{tag_id}/telemetry/preview")
 async def get_component_telemetry_preview(tag_id: str, exposure: float = 0.2):
-    """Per-component single-frame telemetry preview (Phase 6 / §13.2 ``preview`` channel).
+    """Per-component single-frame telemetry preview (``JPEGPoll`` / fast TeleOp poll).
 
-    Single JPEG/PNG response suitable for ``JPEGPoll`` widgets. Cheaper
-    than the MJPEG stream when the UI only wants a periodic snapshot
-    (e.g. a context-panel thumbnail polled at ``default_fps`` from the
-    catalog). Delegates to ``lab.capture_table_cam(cam_id, exposure)``.
+    When live feed is active on a table recorder, returns the latest **JPEG**
+    from the preview ring buffer (fast). Otherwise falls back to full ``CAP``
+    still capture (slow, used by ``RECORD_MEASURABLES`` contract).
     """
-    from lab_model.catalog.schema import resolve_telemetry_stream_backend
+    from lab_model.catalog.schema import (
+        live_feed_channel,
+        resolve_telemetry_stream_backend,
+    )
+    from lab_model.domain.component import is_live_feed_active
 
-    catalog_row, _desc = _telemetry_lookup(tag_id, "preview")
-    if resolve_telemetry_stream_backend(catalog_row) == "overhead":
+    catalog_row = _catalog_row_or_404(tag_id)
+    # JPEGPoll declares ``live_feed.stream`` with url ``.../telemetry/preview`` —
+    # there is no separate ``preview`` catalog channel.
+    if (
+        live_feed_channel(catalog_row, "stream") is None
+        and resolve_telemetry_stream_backend(catalog_row) == "none"
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Component {tag_id!r} does not declare live_feed.stream "
+                f"or a resolvable preview backend."
+            ),
+        )
+    backend = resolve_telemetry_stream_backend(catalog_row)
+    if backend == "overhead":
         raise HTTPException(
             status_code=501,
             detail=(
@@ -539,6 +573,17 @@ async def get_component_telemetry_preview(tag_id: str, exposure: float = 0.2):
             ),
         )
     cam_id = _resolve_cam_id_or_400(catalog_row, tag_id)
+    comp = ((lab.current_state or {}).get("components") or {}).get(tag_id)
+    if isinstance(comp, dict) and is_live_feed_active(comp, "stream"):
+        try:
+            jpeg = lab.fetch_table_cam_preview_jpeg(int(cam_id))
+        except NotImplementedError as exc:
+            raise HTTPException(
+                status_code=501,
+                detail="Telemetry preview is unavailable for this lab backend.",
+            ) from exc
+        if jpeg:
+            return Response(content=jpeg, media_type="image/jpeg")
     try:
         png_bytes = lab.capture_table_cam(int(cam_id), float(exposure))
     except NotImplementedError as exc:
@@ -764,7 +809,11 @@ async def post_component_telemetry_goto(tag_id: str, request: Request):
 
 @app.get("/api/components/{tag_id}/telemetry/live-pose")
 async def get_component_telemetry_live_pose(tag_id: str):
-    """High-rate live pose for TeleOp (in-memory; not in lab_state JSON)."""
+    """High-rate live pose for TeleOp (in-memory; not in lab_state JSON).
+
+    Deprecated hot path — prefer ``WS /api/components/{tag_id}/teleop/session``.
+    Kept for debug clients and HTTP fallback.
+    """
     _refuse_teleop_if_lab_down(tag_id)
     from lab_model.domain.component import is_teleop_ready
 
@@ -779,6 +828,21 @@ async def get_component_telemetry_live_pose(tag_id: str):
     if pose is None:
         raise HTTPException(status_code=503, detail="Live pose unavailable.")
     return {"status": "ok", "pose": pose}
+
+
+@app.websocket("/api/components/{tag_id}/teleop/session")
+async def ws_component_teleop_session(websocket: WebSocket, tag_id: str):
+    """Duplex TeleOp session: server-push pose @ ~50 Hz; client ``goto`` / ``ping``."""
+    if lab is None:
+        await websocket.close(code=1013, reason="Lab not initialized")
+        return
+    catalog_row = (lab.catalog_map or {}).get(tag_id)
+    if not isinstance(catalog_row, dict):
+        await websocket.close(code=4404, reason=f"Unknown tag {tag_id!r}")
+        return
+    from lab_model.orchestration.teleop_session_ws import run_teleop_session_websocket
+
+    await run_teleop_session_websocket(websocket, lab, tag_id)
 
 
 @app.post("/api/components/{tag_id}/telemetry/live-feed/start")

@@ -2,15 +2,19 @@
  * Shared chrome for per-primitive UI regions in the component popup.
  */
 
-export function primitiveRegion(primitiveId, title) {
+export function primitiveRegion(primitiveId, title, opts = {}) {
     const section = document.createElement('div');
     section.className = 'prim-region';
     section.dataset.primitive = primitiveId;
+    if (opts.accent === 'teleop') section.classList.add('prim-region--teleop');
+    if (opts.accent === 'live-feed') section.classList.add('prim-region--live-feed');
+    if (opts.active) section.classList.add('prim-region--session-active');
     section.style.marginTop = '10px';
     section.style.paddingTop = '10px';
     section.style.borderTop = '1px solid #2a2e36';
 
     const header = document.createElement('div');
+    header.className = 'prim-region__title';
     header.style.fontSize = '10px';
     header.style.color = '#94a3b8';
     header.style.fontWeight = '600';
@@ -41,6 +45,28 @@ export function runButton(label, iconName) {
         btn.textContent = label;
     }
     return btn;
+}
+
+/** Accent start button for telemetry sessions (TeleOp / live feed). */
+export function sessionStartButton(kind, label, iconName) {
+    const btn = runButton(label, iconName);
+    btn.classList.remove('btn-primary');
+    btn.classList.add(kind === 'live-feed' ? 'btn-live-feed' : 'btn-teleop');
+    return btn;
+}
+
+/** Accent end button shown while a telemetry session is active. */
+export function sessionEndButton(kind, label, iconName) {
+    const btn = secondaryButton(label, iconName);
+    btn.classList.add(kind === 'live-feed' ? 'btn-live-feed-end' : 'btn-teleop-end');
+    return btn;
+}
+
+export function sessionHint(text) {
+    const el = document.createElement('div');
+    el.className = 'prim-session-hint';
+    el.textContent = text;
+    return el;
 }
 
 export function secondaryButton(label, iconName) {

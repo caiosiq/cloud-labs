@@ -4,7 +4,11 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
-from lab_model.catalog.schema import resolve_cam_id_for_tag, resolve_telemetry_stream_backend
+from lab_model.catalog.schema import (
+    resolve_hardware_binding,
+    resolve_cam_id_for_tag,
+    resolve_telemetry_stream_backend,
+)
 
 from .registry import register_measurable
 
@@ -26,11 +30,19 @@ async def observe(
             exp_ms = float(tun["exposure_time_ms"])
 
     exposure_s = exp_ms / 1000.0
+    binding = resolve_hardware_binding(catalog_meta)
     stream_backend = resolve_telemetry_stream_backend(catalog_meta)
-    if stream_backend == "overhead" and hasattr(bridge, "capture_overhead_cam"):
-        png = bridge.capture_overhead_cam(exposure=exposure_s)
-        cam_id = 0
-        mock_source = "mock_overhead_cam"
+    if stream_backend == "overhead" or (
+        binding is not None and binding.backend in ("opencv_usb", "overhead")
+    ):
+        if hasattr(bridge, "capture_overhead_cam"):
+            png = bridge.capture_overhead_cam(exposure=exposure_s)
+            cam_id = int(binding.device_index if binding and binding.device_index is not None else 0)
+            mock_source = "mock_overhead_cam"
+        else:
+            png = None
+            cam_id = 0
+            mock_source = "overhead_unavailable"
     else:
         cam_id = resolve_cam_id_for_tag(catalog_meta) or 1
         if hasattr(bridge, "table_cam_connect"):

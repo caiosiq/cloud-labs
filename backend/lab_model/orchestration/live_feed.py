@@ -9,6 +9,7 @@ from lab_model.catalog.schema import (
     resolve_cam_id_for_tag,
     resolve_telemetry_stream_backend,
 )
+from lab_model.domain.component import is_teleop_active, is_teleop_ready
 from lab_model.state.commits import commit_live_feed_end, commit_live_feed_start, end_all_live_feed_channels
 from lab_model.state.state_machine import refuse_if_not_in_state
 
@@ -20,6 +21,15 @@ def _resolve_backend(catalog_meta: Dict[str, Any]) -> tuple[str, Optional[str], 
     resource_id = str(catalog_meta.get("id") or "")
     cam_id = resolve_cam_id_for_tag(catalog_meta)
     return backend, resource_id or None, cam_id
+
+
+def _resolve_live_feed_profile(host: LiveFeedHost, target_id: str) -> str:
+    """Use fast recorder preview when TeleOp session is active + ready."""
+    with host._state_lock:
+        entry = (host.current_state.get("components") or {}).get(target_id)
+        if isinstance(entry, dict) and is_teleop_active(entry) and is_teleop_ready(entry):
+            return "teleop"
+    return "default"
 
 
 async def run_start_live_feed(host: LiveFeedHost, target_id: str, *, channel: str = "stream") -> None:
@@ -45,8 +55,14 @@ async def run_start_live_feed(host: LiveFeedHost, target_id: str, *, channel: st
         print(f"{host.log_prefix} Refusing start_live_feed: no stream backend for {target_id}")
         return
 
+    profile = _resolve_live_feed_profile(host, target_id)
+
     ok, msg = await host._primitive_start_live_feed(
-        target_id, channel=channel, backend=backend, cam_id=cam_id
+        target_id,
+        channel=channel,
+        backend=backend,
+        cam_id=cam_id,
+        profile=profile,
     )
     if not ok:
         print(f"{host.log_prefix} start_live_feed hardware failed: {msg}")
@@ -65,7 +81,7 @@ async def run_start_live_feed(host: LiveFeedHost, target_id: str, *, channel: st
         )
         host.current_state["last_updated"] = datetime.now().isoformat()
     host._persist_state()
-    print(f"{host.log_prefix} Live feed ON for {target_id} ({channel}, {backend})")
+    print(f"{host.log_prefix} Live feed ON for {target_id} ({channel}, {backend}, profile={profile})")
 
 
 async def run_end_live_feed(host: LiveFeedHost, target_id: str, *, channel: str = "stream") -> None:

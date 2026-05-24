@@ -108,7 +108,13 @@
       "height_mm": 60,
       "properties": {
         "resolution": "1920x1080",
-        "fov": 60
+        "fov": 60,
+        "hardware_binding": {
+          "backend": "recorder_tcp",
+          "recorder_cam_id": 1,
+          "recorder_port": 9999
+        },
+        "vision_device_index": 1
       },
       "capabilities": {
         "statecontrol": {
@@ -167,8 +173,9 @@
           },
           "live_feed": {
             "stream": {
-              "widget": "MJPEGViewer",
-              "url": "/api/components/{tag_id}/telemetry/stream"
+              "widget": "JPEGPoll",
+              "url": "/api/components/{tag_id}/telemetry/preview",
+              "default_fps": 20
             }
           }
         },
@@ -201,7 +208,13 @@
       "height_mm": 60,
       "properties": {
         "resolution": "1920x1080",
-        "fov": 60
+        "fov": 60,
+        "hardware_binding": {
+          "backend": "recorder_tcp",
+          "recorder_cam_id": 2,
+          "recorder_port": 10000
+        },
+        "vision_device_index": 2
       },
       "capabilities": {
         "statecontrol": {
@@ -956,6 +969,103 @@
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO"
+        ]
+      }
+    },
+    "tag_99": {
+      "id": "cam_table_top",
+      "type": "OPTICAL_CAMERA",
+      "name": "Table-top camera",
+      "tag_id": "tag_99",
+      "size": {
+        "width": 62,
+        "height": 62
+      },
+      "height_mm": 60,
+      "properties": {
+        "stream_source": "overhead",
+        "resolution": "1920x1080",
+        "hardware_binding": {
+          "backend": "opencv_usb",
+          "device_index": 0,
+          "role": "table_overview"
+        }
+      },
+      "capabilities": {
+        "statecontrol": {
+          "tunables": {
+            "exposure_time_ms": {
+              "widget": "FloatRange",
+              "min": 10.0,
+              "max": 1000.0,
+              "default": 50.0,
+              "unit": "ms"
+            }
+          },
+          "measurables": {
+            "camera_image": {
+              "widget": "ImageViewer",
+              "format": "png"
+            }
+          }
+        },
+        "telemetry": {
+          "teleop": {},
+          "live_feed": {
+            "stream": {
+              "widget": "MJPEGViewer",
+              "url": "/api/components/{tag_id}/telemetry/stream"
+            }
+          }
+        },
+        "primitives": [
+          "SET_EXPOSURE",
+          "RECORD_MEASURABLES",
+          "START_LIVE_FEED",
+          "END_LIVE_FEED"
+        ]
+      }
+    },
+    "tag_50": {
+      "id": "laser_main",
+      "type": "LASER_SOURCE",
+      "name": "Main Laser",
+      "tag_id": "tag_50",
+      "size": {
+        "width": 48,
+        "height": 48
+      },
+      "height_mm": 80,
+      "properties": {
+        "fixture": true,
+        "max_power_mw": 100.0
+      },
+      "capabilities": {
+        "statecontrol": {
+          "tunables": {
+            "output_power_mw": {
+              "widget": "FloatRange",
+              "min": 0.0,
+              "max": 100.0,
+              "default": 0.0,
+              "unit": "mW"
+            }
+          },
+          "measurables": {
+            "output_power_readback_mw": {
+              "widget": "NumberBadge",
+              "format": ".2f",
+              "unit": "mW"
+            }
+          }
+        },
+        "telemetry": {
+          "teleop": {},
+          "live_feed": {}
+        },
+        "primitives": [
+          "SET_LASER_OUTPUT",
+          "RECORD_MEASURABLES"
         ]
       }
     }

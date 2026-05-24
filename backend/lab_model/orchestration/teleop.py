@@ -191,15 +191,15 @@ class TeleopController:
             host.current_state["last_updated"] = datetime.now().isoformat()
 
         if prep_ok and initial_pose is not None:
-            host._teleop_live_pose.start_session(target_id, initial_pose)
+            host._teleop_live_start(target_id, initial_pose)
         host._persist_state()
         if not prep_ok:
             print(f"{host.log_prefix} TELEOP setup refused for {target_id}: {prep_msg}")
 
     async def end(self, target_id: str) -> None:
         host = self._host
-        final_pose = host._teleop_live_pose.get_pose(target_id)
-        host._teleop_live_pose.stop_session(target_id)
+        final_pose = host._teleop_live_get_pose(target_id)
+        await host._teleop_live_stop(target_id)
         with host._state_lock:
             if final_pose:
                 commit_teleop_session_pose(host.current_state, target_id, final_pose)
@@ -238,7 +238,7 @@ class TeleopController:
             cmd = (entry.get("telemetry") or {}).get("teleop", {}).get("command") or {}
             goto_target = cmd.get("target") or target_pose
             goto_speed = cmd.get("speed") or speed
-        host._teleop_live_pose.set_goto(target_id, goto_target, goto_speed)
+        host._teleop_live_set_goto(target_id, goto_target, goto_speed)
         host._persist_state()
 
     async def jog(self, target_id: str, jog: Dict[str, Any]) -> None:
@@ -283,12 +283,12 @@ class TeleopController:
                         host.current_state["last_updated"] = datetime.now().isoformat()
                 if cleared:
                     for tag_id in cleared:
-                        final_pose = host._teleop_live_pose.get_pose(tag_id)
+                        final_pose = host._teleop_live_get_pose(tag_id)
                         if final_pose:
                             commit_teleop_session_pose(
                                 host.current_state, tag_id, final_pose
                             )
-                        host._teleop_live_pose.stop_session(tag_id)
+                        host._teleop_live_stop_sync(tag_id)
                     print(
                         f"{host.log_prefix} teleop sweeper cleared stale leases: "
                         f"{cleared}"

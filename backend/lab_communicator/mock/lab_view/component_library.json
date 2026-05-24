@@ -145,8 +145,9 @@
           },
           "live_feed": {
             "stream": {
-              "widget": "MJPEGViewer",
-              "url": "/api/components/{tag_id}/telemetry/stream"
+              "widget": "JPEGPoll",
+              "url": "/api/components/{tag_id}/telemetry/preview",
+              "default_fps": 20
             }
           }
         },
@@ -967,6 +968,49 @@
           "RECORD_MEASURABLES",
           "START_LIVE_FEED",
           "END_LIVE_FEED"
+        ]
+      }
+    },
+    "tag_50": {
+      "id": "laser_main",
+      "type": "LASER_SOURCE",
+      "name": "Main Laser",
+      "tag_id": "tag_50",
+      "size": {
+        "width": 48,
+        "height": 48
+      },
+      "height_mm": 80,
+      "properties": {
+        "fixture": true,
+        "max_power_mw": 100.0
+      },
+      "capabilities": {
+        "statecontrol": {
+          "tunables": {
+            "output_power_mw": {
+              "widget": "FloatRange",
+              "min": 0.0,
+              "max": 100.0,
+              "default": 0.0,
+              "unit": "mW"
+            }
+          },
+          "measurables": {
+            "output_power_readback_mw": {
+              "widget": "NumberBadge",
+              "format": ".2f",
+              "unit": "mW"
+            }
+          }
+        },
+        "telemetry": {
+          "teleop": {},
+          "live_feed": {}
+        },
+        "primitives": [
+          "SET_LASER_OUTPUT",
+          "RECORD_MEASURABLES"
         ]
       }
     }

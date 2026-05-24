@@ -36,9 +36,8 @@ from lab_model.domain.component import (
     PRESENCE_BREADBOARD,
     PRESENCE_OFF_TABLE,
     PRESENCE_STORAGE,
-    default_measurables,
-    default_tunables,
     is_on_table,
+    new_component_entry,
 )
 from lab_model.domain.storage_region import is_storage_region
 
@@ -60,8 +59,8 @@ def initialize_state(
 
     - ``catalog_map`` -- ``{tag_id_str: catalog_row_dict}``, used by every
       Z-frame transform and motor-id validation downstream.
-    - ``component_map`` -- ``{tag_id_str: OpticalComponent}``, the
-      lab_automation-side handle for every part the robot might touch.
+    - ``component_map`` -- ``{tag_id_str: ManipulableOptic}``, synced from
+      ``experiment.registry`` after each scan (Phase 8).
     - ``current_state['components']`` -- the cloud-labs snapshot. For
       every catalog row we emit a component entry with ``tunables``
       (presence, nominal_pose, storage flag, placement mode) and
@@ -101,60 +100,37 @@ def initialize_state(
         catalog = merged_catalog_rows()
     except Exception as e:
         print(f"[REAL LAB] Error loading lab_view catalog bundle: {e}. Cannot scan.")
+        communicator._ensure_fixture_components()
         return
 
     communicator.catalog_map = {
         item.get("tag_id"): item for item in catalog if isinstance(item.get("tag_id"), str)
     }
 
-    # Build OpticalComponent objects for everything in catalog. The
-    # OpticalComponent class lives in ``lab_automation`` -- imported via
-    # the communicator module so this file doesn't have a hard dep on
-    # the optional ``lab_automation`` install.
-    from lab_communicator.real import communicator as _real_comm  # noqa: PLC0415
-    OpticalComponent = _real_comm.OpticalComponent
-
-    components_to_scan = []
-    for item in catalog:
-        tag_id_str = item.get("tag_id")  # e.g. "tag_22"
-        if not tag_id_str:
-            continue
-
-        # Extract numeric ID from "tag_22" -> 22.
-        try:
-            numeric_id = int(tag_id_str.replace("tag_", ""))
-        except ValueError:
-            print(f"[REAL LAB] Warning: Invalid tag format {tag_id_str}")
-            continue
-
-        # height_mm is optional in the catalog (older rows may not have it).
-        # Only forward it to OpticalComponent when it's well-formed; the
-        # Z-frame transform falls back to DEFAULT_COMPONENT_HEIGHT_MM
-        # otherwise (see ``real/coordinate_frames.py``).
-        hkw: Dict[str, Any] = {}
-        raw_h = item.get("height_mm")
-        if raw_h is not None:
-            try:
-                hkw["height_mm"] = float(raw_h)
-            except (TypeError, ValueError):
-                pass
-        comp = OpticalComponent(
-            name=item.get("name", tag_id_str), tag_id=numeric_id, **hkw
+    # Scan registry manipulables (Phase 8 — no parallel OpticalComponent dict).
+    manipulables = list(communicator.experiment.list_manipulables())
+    if not manipulables:
+        print("[REAL LAB] Warning: registry has no manipulables; check catalog passthrough.")
+    else:
+        communicator.experiment.scan_components_cloudlab(
+            manipulables, force_rescan=True
         )
-        components_to_scan.append(comp)
-        communicator.component_map[tag_id_str] = comp
-
-    # Physical scan -- camera-driven via lab_automation.
-    communicator.experiment.scan_components_cloudlab(
-        components_to_scan, force_rescan=True
-    )
+    communicator._sync_component_map_from_registry()
 
     # Build the new components block off-lock, then swap.
     new_components: Dict[str, Any] = {}
 
     for item in catalog:
         tag_id = item.get("tag_id")
-        comp = communicator.component_map.get(tag_id)
+        if not tag_id:
+            continue
+
+        from lab_model.catalog.schema import catalog_is_fixed_instrument  # noqa: PLC0415
+
+        if catalog_is_fixed_instrument(item):
+            continue
+
+        comp = communicator.get_manipulable(tag_id)
         # ``current_location`` is the canonical "where is this part now"
         # field after Stage C (fixing.md §5, §7 item 2).
         # ``scan_components_cloudlab`` populates it directly; we do not
@@ -215,28 +191,23 @@ def initialize_state(
             slot = None
             print(f"  presence: off_table (pose {pose})")
 
-        tun = default_tunables()
-        tun["presence"] = presence
-        tun["nominal_pose"] = (
+        nominal_pose = (
             dict(pose)
             if presence != PRESENCE_OFF_TABLE
             else {"x": 0.0, "y": 0.0, "rotation": 0.0}
         )
-        tun["storage"] = {
-            "in_storage": presence == PRESENCE_STORAGE,
-            "slot": slot,
-        }
-        tun["placement"] = {"mode": placement_mode}
-        meas = default_measurables()
-        meas["pose"] = dict(pose)
-
-        entry = {
-            "id": tag_id,
-            "type": item.get("type", "OPTICAL_MIRROR"),
-            "tunables": tun,
-            "measurables": meas,
-        }
+        entry = new_component_entry(
+            tag_id,
+            item.get("type", "OPTICAL_MIRROR"),
+            presence=presence,
+            nominal_pose=nominal_pose,
+            meas_pose=dict(pose),
+            placement_mode=placement_mode,
+            in_storage=(presence == PRESENCE_STORAGE),
+            slot=slot,
+        )
         new_components[tag_id] = entry
+        tun = entry["statecontrol"]["tunables"]
         print(
             f"  entry keys: {list(entry.keys())}, "
             f"tunables.nominal_pose: {tun.get('nominal_pose')}"
@@ -247,6 +218,10 @@ def initialize_state(
         new_components,
         preserve_frozen,
     )
+
+    from lab_model.state.fixture_seed import merge_fixture_components  # noqa: PLC0415
+
+    merged_components = merge_fixture_components(merged_components, catalog)
 
     with communicator._state_lock:
         communicator.current_state["components"] = merged_components
@@ -269,14 +244,16 @@ def initialize_state(
         [
             c
             for c in merged_components.values()
-            if (c.get("tunables") or {}).get("presence") == PRESENCE_BREADBOARD
+            if (c.get("statecontrol") or {}).get("tunables", c.get("tunables") or {}).get("presence")
+            == PRESENCE_BREADBOARD
         ]
     )
     n_st = len(
         [
             c
             for c in merged_components.values()
-            if (c.get("tunables") or {}).get("presence") == PRESENCE_STORAGE
+            if (c.get("statecontrol") or {}).get("tunables", c.get("tunables") or {}).get("presence")
+            == PRESENCE_STORAGE
         ]
     )
     print(f"[REAL LAB] Scan complete. breadboard={n_bb}, storage={n_st}.")

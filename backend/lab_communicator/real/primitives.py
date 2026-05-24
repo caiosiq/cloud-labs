@@ -105,12 +105,21 @@ async def primitive_pick_component(
     ``state["holding"].nominal_pose.z`` and the component's pose
     blocks via :func:`commit_pick`.
     """
-    comp = communicator.component_map.get(target_id)
-    if not comp or not comp.current_location:
+    comp = communicator.get_manipulable(target_id)
+    exp = communicator.experiment
+    if not comp or exp is None:
+        raise RuntimeError(f"[REAL LAB] PICK: {target_id} not in component registry.")
+
+    exp.sync_component_location_from_initial_scan(comp)
+    if not (comp.current_location or comp.inventory_location):
         raise RuntimeError(
-            f"[REAL LAB] no robot current_location for {target_id}; "
-            f"rescan or check catalog."
+            f"[REAL LAB] no scan pose for {target_id}; "
+            f"run scan/rescan before pick."
         )
+
+    from lab_communicator.real.teleop_bridge import warn_if_lab_hardware_pose_diverged
+
+    warn_if_lab_hardware_pose_diverged(communicator, target_id, commanded)
 
     safe_z = optional_float(params, "safe_z")
     await asyncio.to_thread(
@@ -136,7 +145,7 @@ async def primitive_hover_component(
     verbatim (robot precision exceeds top-camera-through-gripper
     measurement noise).
     """
-    comp = communicator.component_map.get(target_id)
+    comp = communicator.get_manipulable(target_id)
     if not comp:
         raise RuntimeError(f"[REAL LAB] HOVER: {target_id} not in component_map.")
 
@@ -175,7 +184,7 @@ async def primitive_place_from_hover(
     # when ``lab_automation`` isn't on the path (mock-only test runs).
     from lab_automation.managers.experiment_manager import find_angle
 
-    comp = communicator.component_map.get(target_id)
+    comp = communicator.get_manipulable(target_id)
     if not comp:
         raise RuntimeError(
             f"[REAL LAB] PLACE_FROM_HOVER: {target_id} not in component_map."
@@ -241,7 +250,7 @@ async def primitive_scan_rotate_in_place(
         # lacked the helper).
         return
 
-    comp = communicator.component_map.get(target_id)
+    comp = communicator.get_manipulable(target_id)
     kwargs: Dict[str, Any] = dict(
         component=comp,
         theta_min=theta_min,
@@ -288,7 +297,7 @@ async def primitive_move_component(
     Returns ``None`` -- robot precision exceeds top-camera so the
     orchestrator commits the commanded pose verbatim.
     """
-    comp = communicator.component_map.get(target_id)
+    comp = communicator.get_manipulable(target_id)
     if comp is None:
         raise RuntimeError(
             f"[REAL LAB] primitive_move_component: {target_id} not in map."
@@ -387,7 +396,7 @@ async def primitive_optimize_component(
         NewtonPlacementStrategy_cloudlab,
     )
 
-    comp = communicator.component_map.get(target_id)
+    comp = communicator.get_manipulable(target_id)
     if comp is None:
         raise RuntimeError(
             f"[REAL LAB] primitive_optimize_component: {target_id} not in map."

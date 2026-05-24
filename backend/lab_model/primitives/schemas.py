@@ -59,6 +59,10 @@ class SetExposureParameters(BaseModel):
     exposure_time_ms: float = Field(..., gt=0.0)
 
 
+class SetLaserOutputParameters(BaseModel):
+    output_power_mw: float = Field(..., ge=0.0)
+
+
 class ApplyTunablesPatchParameters(BaseModel):
     """Partial tunables dict; macro applies fields in fixed order (see macros module)."""
 
@@ -102,6 +106,12 @@ class SetExposureBody(BaseModel):
     action: Literal["SET_EXPOSURE"]
     target_id: str = Field(..., min_length=1)
     parameters: SetExposureParameters
+
+
+class SetLaserOutputBody(BaseModel):
+    action: Literal["SET_LASER_OUTPUT"]
+    target_id: str = Field(..., min_length=1)
+    parameters: SetLaserOutputParameters
 
 
 class ApplyTunablesPatchBody(BaseModel):
@@ -342,6 +352,7 @@ ValidatedCommand = Annotated[
         MoveMotorBody,
         SetMotorSetpointBody,
         SetExposureBody,
+        SetLaserOutputBody,
         ApplyTunablesPatchBody,
         MotorSendHomeBody,
         MotorSetZeroBody,

@@ -13,6 +13,7 @@
  * instead of throwing, so rate-limited canvas loops stay simple.
  */
 import { log } from '../ui/log.js';
+import { isTeleopWsConnected, teleopGotoViaWs } from './teleop-session-ws.js';
 
 async function _parseBody(response) {
     try {
@@ -92,6 +93,13 @@ export async function endTeleop(tagId) {
 export async function teleopGoto(tagId, body, opts) {
     if (!tagId) return { ok: false, error: 'tagId required' };
     const silent = opts && opts.silent;
+    if (isTeleopWsConnected(tagId)) {
+        const wsResult = await teleopGotoViaWs(tagId, body || {});
+        if (wsResult.ok) {
+            if (!silent) log(`TELEOP_GOTO ${tagId} (ws)`, 'info');
+            return wsResult;
+        }
+    }
     try {
         const r = await fetch(`/api/components/${encodeURIComponent(tagId)}/telemetry/goto`, {
             method: 'POST',

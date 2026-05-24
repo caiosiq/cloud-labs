@@ -55,12 +55,18 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "read_only": False,
         "handler": "set_exposure_time_ms",
     },
+    PrimitiveId.SET_LASER_OUTPUT: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "set_output_power_mw",
+    },
     PrimitiveId.APPLY_TUNABLES_PATCH: {
         "kind": PrimitiveKind.MACRO,
         "read_only": False,
         "handler": "apply_tunables_patch",
         "macro_expands_to": [
             PrimitiveId.SET_EXPOSURE,
+            PrimitiveId.SET_LASER_OUTPUT,
             PrimitiveId.SET_MOTOR_SETPOINT,
         ],
     },

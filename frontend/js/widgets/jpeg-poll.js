@@ -42,15 +42,25 @@ export default function JPEGPoll({ tagId, fieldName, descriptor, comp }) {
     img.style.borderRadius = '4px';
     img.style.display = 'block';
     let consecutiveErrors = 0;
+    const errHint = document.createElement('div');
+    errHint.style.color = '#fca5a5';
+    errHint.style.fontSize = '10px';
+    errHint.style.fontStyle = 'italic';
+    errHint.style.display = 'none';
     const refresh = () => {
         img.src = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
     };
     img.onload = () => {
         consecutiveErrors = 0;
         img.style.display = 'block';
+        errHint.style.display = 'none';
     };
     img.onerror = () => {
         consecutiveErrors += 1;
+        if (consecutiveErrors >= 2) {
+            errHint.textContent = `\u2014 preview unavailable (${url})`;
+            errHint.style.display = 'block';
+        }
         if (consecutiveErrors > 3) {
             img.style.display = 'none';
             stop();
@@ -77,6 +87,7 @@ export default function JPEGPoll({ tagId, fieldName, descriptor, comp }) {
     }, 0);
 
     card.appendChild(img);
+    card.appendChild(errHint);
 
     const meta = document.createElement('div');
     meta.style.color = '#475569';

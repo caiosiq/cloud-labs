@@ -24,6 +24,7 @@ from .schemas import (
     MoveMotorBody,
     OptimizeBody,
     SetExposureBody,
+    SetLaserOutputBody,
     SetMotorSetpointBody,
     PickComponentBody,
     PlaceFromHoverBody,
@@ -65,6 +66,7 @@ ValidatedCommand = Union[
     MoveMotorBody,
     SetMotorSetpointBody,
     SetExposureBody,
+    SetLaserOutputBody,
     ApplyTunablesPatchBody,
     MotorSendHomeBody,
     MotorSetZeroBody,
@@ -162,6 +164,9 @@ async def _invoke_atomic(
         await lab.set_exposure_time_ms(
             cmd.target_id, cmd.parameters.exposure_time_ms
         )
+    elif isinstance(cmd, SetLaserOutputBody):
+        _log_primitive("SET_LASER_OUTPUT", cmd.target_id, macro_parent=macro_parent)
+        await lab.set_output_power_mw(cmd.target_id, cmd.parameters.output_power_mw)
     elif isinstance(cmd, ApplyTunablesPatchBody):
         raise RuntimeError("APPLY_TUNABLES_PATCH must be handled by macro path")
     elif isinstance(cmd, MotorSendHomeBody):
@@ -216,6 +221,7 @@ async def _invoke_atomic(
         await lab.confirm_holding_tag(cmd.target_id)
     elif isinstance(cmd, StartTeleopBody):
         _log_primitive("START_TELEOP", cmd.target_id, macro_parent=macro_parent)
+        lab._teleop_start_params = dict(cmd.parameters or {})
         await lab.start_teleop(cmd.target_id)
     elif isinstance(cmd, EndTeleopBody):
         _log_primitive("END_TELEOP", cmd.target_id, macro_parent=macro_parent)
@@ -290,6 +296,16 @@ def schedule_validated_command(
             "status": "accepted",
             "message": (
                 f"Exposure for {cmd.target_id} set to {p.exposure_time_ms:g} ms"
+            ),
+        }
+
+    if isinstance(cmd, SetLaserOutputBody):
+        p = cmd.parameters
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": (
+                f"Laser output for {cmd.target_id} set to {p.output_power_mw:g} mW"
             ),
         }
 

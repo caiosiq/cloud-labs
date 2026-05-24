@@ -272,6 +272,20 @@ def nominal_pose(entry: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+def resolve_pick_table_pose(entry: Dict[str, Any]) -> Dict[str, float]:
+    """XY + rotation for PICK: meas pose when recorded, else tunables nominal (table Z ignored)."""
+    mp = meas_pose(entry)
+    if mp.get("x") is not None or mp.get("y") is not None:
+        src = mp
+    else:
+        src = nominal_pose(entry)
+    return {
+        "x": float(src.get("x", 0.0)),
+        "y": float(src.get("y", 0.0)),
+        "rotation": float(src.get("rotation", 0.0)),
+    }
+
+
 def storage_slot(entry: Dict[str, Any]) -> Optional[Dict[str, int]]:
     sl = get_tunables(entry).get("storage") or {}
     slot = sl.get("slot")

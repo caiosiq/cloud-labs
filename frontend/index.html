@@ -261,6 +261,64 @@
         }
         .btn-secondary:hover { border-color: var(--text-secondary); color: var(--text-primary); }
 
+        /* Telemetry session controls in component popup */
+        .btn-teleop {
+            background-color: #7c3aed;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+        }
+        .btn-teleop:hover { background-color: #6d28d9; }
+
+        .btn-live-feed {
+            background-color: #059669;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.35);
+        }
+        .btn-live-feed:hover { background-color: #047857; }
+
+        .btn-teleop-end {
+            border-color: #7c3aed;
+            color: #c4b5fd;
+        }
+        .btn-teleop-end:hover {
+            border-color: #a78bfa;
+            color: #ede9fe;
+            background: rgba(124, 58, 237, 0.12);
+        }
+
+        .btn-live-feed-end {
+            border-color: #059669;
+            color: #6ee7b7;
+        }
+        .btn-live-feed-end:hover {
+            border-color: #34d399;
+            color: #d1fae5;
+            background: rgba(5, 150, 105, 0.12);
+        }
+
+        .prim-region--teleop .prim-region__title { color: #c4b5fd; }
+        .prim-region--live-feed .prim-region__title { color: #6ee7b7; }
+
+        .prim-region--session-active {
+            margin-left: -4px;
+            padding-left: 8px;
+            border-left: 3px solid transparent;
+        }
+        .prim-region--teleop.prim-region--session-active {
+            border-left-color: #7c3aed;
+        }
+        .prim-region--live-feed.prim-region--session-active {
+            border-left-color: #059669;
+        }
+
+        .prim-session-hint {
+            font-size: 10px;
+            font-style: italic;
+            color: #64748b;
+            padding: 2px 0 6px;
+            line-height: 1.35;
+        }
+
         /* --- Main Content (Center) --- */
         #main-content {
             flex-grow: 1;

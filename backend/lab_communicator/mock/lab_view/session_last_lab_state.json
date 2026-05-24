@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "saved_at": "2026-05-24T01:10:27.013827+00:00",
+  "saved_at": "2026-05-24T19:34:08.842677+00:00",
   "lab_mode": "MOCK",
   "lab_state": {
     "system_status": "IDLE",
-    "last_updated": "2026-05-23T21:03:41.480662",
+    "last_updated": "2026-05-24T15:33:02.702446",
     "components": {
       "tag_9": {
         "id": "tag_9",
@@ -83,7 +83,8 @@
             },
             "placement": {
               "mode": "MANUAL"
-            }
+            },
+            "exposure_time_ms": 200.0
           },
           "measurables": {
             "pose": {
@@ -93,7 +94,12 @@
             },
             "last_optimization_score": null,
             "last_optimized_pose": null,
-            "camera_image": null
+            "camera_image": {
+              "path": "C:\\Users\\CaioV\\OneDrive - Massachusetts Institute of Technology\\UROP - AI Optics\\optics-digital-twin\\backend\\lab_communicator\\mock\\lab_view\\camera_captures\\tag_22_last.png",
+              "source": "mock_table_cam",
+              "cam_id": 1,
+              "format": "png"
+            }
           }
         },
         "telemetry": {
@@ -142,7 +148,8 @@
             },
             "placement": {
               "mode": "MANUAL"
-            }
+            },
+            "exposure_time_ms": 200.0
           },
           "measurables": {
             "pose": {
@@ -253,9 +260,9 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": -415.2,
-              "y": 179.8999999999999,
-              "rotation": 45.0
+              "x": -285.9136213307018,
+              "y": 239.78365379287555,
+              "rotation": 100.0
             },
             "nominal_motor_positions": {},
             "storage": {
@@ -268,9 +275,9 @@
           },
           "measurables": {
             "pose": {
-              "x": -414.8561395085536,
-              "y": 179.43370987738302,
-              "rotation": 45.0
+              "x": -285.9136213307018,
+              "y": 239.78365379287555,
+              "rotation": 100.0
             },
             "last_optimization_score": null,
             "last_optimized_pose": null,
@@ -314,7 +321,7 @@
             "nominal_pose": {
               "x": -161.42857142857144,
               "y": 235.71428571428578,
-              "rotation": 0.0
+              "rotation": 30.0
             },
             "nominal_motor_positions": {
               "1": 15.0,
@@ -329,7 +336,15 @@
             }
           },
           "measurables": {
-            "pose": null,
+            "pose": {
+              "x": -161.42857142857144,
+              "y": 235.71428571428578,
+              "rotation": 30.0,
+              "motor_rotations": {
+                "1": 15.0,
+                "3": 0.0
+              }
+            },
             "last_optimization_score": null,
             "last_optimized_pose": null,
             "camera_image": null
@@ -576,7 +591,12 @@
             "pose": null,
             "last_optimization_score": null,
             "last_optimized_pose": null,
-            "camera_image": null
+            "camera_image": {
+              "path": "C:\\Users\\CaioV\\OneDrive - Massachusetts Institute of Technology\\UROP - AI Optics\\optics-digital-twin\\backend\\lab_communicator\\mock\\lab_view\\camera_captures\\tag_99_last.png",
+              "source": "mock_overhead_cam",
+              "cam_id": 0,
+              "format": "png"
+            }
           }
         },
         "telemetry": {
@@ -585,6 +605,62 @@
             "last_jog_ts": null,
             "ready": false,
             "lease_ts": null,
+            "last_error": null,
+            "mode": null,
+            "command": {
+              "target": null,
+              "speed": {
+                "linear_mm_s": 25.0,
+                "angular_deg_s": 15.0
+              },
+              "phase": "idle"
+            }
+          },
+          "live_feed": {
+            "stream": {
+              "connected": false,
+              "live": false,
+              "backend": "overhead",
+              "resource_id": "cam_table_top",
+              "last_error": null
+            }
+          }
+        }
+      },
+      "tag_50": {
+        "id": "tag_50",
+        "type": "LASER_SOURCE",
+        "statecontrol": {
+          "tunables": {
+            "presence": "off_table",
+            "nominal_pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "rotation": 0.0
+            },
+            "nominal_motor_positions": {},
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            },
+            "placement": {
+              "mode": "MANUAL"
+            },
+            "output_power_mw": 0.0
+          },
+          "measurables": {
+            "pose": null,
+            "last_optimization_score": null,
+            "last_optimized_pose": null,
+            "camera_image": null
+          }
+        },
+        "telemetry": {
+          "teleop": {
+            "active": false,
+            "ready": false,
+            "lease_ts": null,
+            "last_jog_ts": null,
             "last_error": null,
             "mode": null,
             "command": {

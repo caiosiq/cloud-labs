@@ -71,6 +71,7 @@ class MockLabCommunicator(LabCommunicator):
         # which keep the in-memory copy in sync).
         from lab_communicator.mock.persistence import read_state
         self.current_state = read_state(self.state_file)
+        self._ensure_fixture_components()
 
         # Dev flag: simulate boot-time gripper-closed reconciliation (see new_primitives.md #6.3).
         self._mock_gripper_closed_on_boot = (
@@ -79,6 +80,7 @@ class MockLabCommunicator(LabCommunicator):
         )
         self._table_cam_connected = {1: False, 2: False}
         self._table_cam_streaming = {1: False, 2: False}
+        self._table_cam_stream_profile: Dict[int, str] = {1: "default", 2: "default"}
         self._reconcile_holding_on_boot()
 
     def _reconcile_holding_on_boot(self) -> None:
@@ -405,7 +407,7 @@ class MockLabCommunicator(LabCommunicator):
     # holding-state housekeeping it runs are inherited the same way.
 
     def get_video_feed_status(self) -> Dict[str, Any]:
-        return {"connected": True, "source": "/api/video-feed/stream"}
+        return {"connected": True, "source": "/api/components/{tag_id}/telemetry/stream"}
 
     def _camera_captures_dir(self) -> str:
         """Directory mock writes synthetic capture PNGs into.
@@ -430,12 +432,20 @@ class MockLabCommunicator(LabCommunicator):
         self._table_cam_connected[int(cam_id)] = False
         return True, "ok"
 
-    def table_cam_live_set(self, cam_id: int, enabled: bool) -> Tuple[bool, str]:
+    def table_cam_live_set(
+        self, cam_id: int, enabled: bool, *, profile: str = "default"
+    ) -> Tuple[bool, str]:
         if cam_id not in (1, 2):
             return False, "cam_id must be 1 or 2"
         if not self._table_cam_connected.get(int(cam_id)):
             return False, "connect camera first"
         self._table_cam_streaming[int(cam_id)] = bool(enabled)
+        if enabled:
+            self._table_cam_stream_profile[int(cam_id)] = (
+                "teleop" if str(profile).strip().lower() == "teleop" else "default"
+            )
+        else:
+            self._table_cam_stream_profile[int(cam_id)] = "default"
         return True, "ok"
 
     def table_cam_send_vexp(self, cam_id: int, exposure_s: float) -> Tuple[bool, str]:
