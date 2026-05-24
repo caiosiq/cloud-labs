@@ -44,7 +44,7 @@ from lab_model import motor_rotation_store as motor_rot
 bootstrap_lab_view(_project_root)
 motor_rot.configure(get_lab_view_paths().motor_rotations_json)
 
-from lab_primitives import (
+from lab_model.primitives import (
     ConfirmHoldingTagBody,
     HoverBody,
     MoveComponentBody,
@@ -55,6 +55,10 @@ from lab_primitives import (
     RecordMeasurablesBody,
     ScanRotateInPlaceBody,
     StartTeleopBody,
+    StartLiveFeedBody,
+    EndLiveFeedBody,
+    TeleopGotoBody,
+    TeleopGotoParameters,
     TeleopJogBody,
     TeleopJogParameters,
     execute_validated_command,
@@ -332,6 +336,14 @@ async def read_index():
         "Expires": "0",
     })
 
+@app.get("/api/platform/registries")
+async def get_platform_registries():
+    """Tunable/measurable plugins and primitive metadata (for UI tooling)."""
+    from lab_model.platform import export_platform_registries
+
+    return export_platform_registries()
+
+
 @app.get("/api/catalog")
 async def get_component_catalog():
     """
@@ -420,7 +432,7 @@ def _telemetry_lookup(tag_id: str, channel: str) -> Tuple[Dict[str, Any], Dict[s
     - 404 if the tag is not in the catalog.
     - 404 if the channel is not declared on the component.
     """
-    from lab_communicator.shared.catalog_schema import telemetry_channel  # noqa: PLC0415
+    from lab_model.catalog.schema import telemetry_channel  # noqa: PLC0415
 
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
@@ -437,7 +449,7 @@ def _telemetry_lookup(tag_id: str, channel: str) -> Tuple[Dict[str, Any], Dict[s
 
 
 def _resolve_cam_id_or_400(catalog_row: Dict[str, Any], tag_id: str) -> int:
-    from lab_communicator.shared.catalog_schema import resolve_cam_id_for_tag  # noqa: PLC0415
+    from lab_model.catalog.schema import resolve_cam_id_for_tag  # noqa: PLC0415
 
     cam_id = resolve_cam_id_for_tag(catalog_row)
     if cam_id is None:
@@ -460,9 +472,20 @@ async def get_component_telemetry_stream(tag_id: str, fps: int = 18):
     tags. Returns ``multipart/x-mixed-replace`` MJPEG for catalog-driven
     clients (Phase 6 / §13.2).
     """
-    from lab_communicator.shared.catalog_schema import resolve_telemetry_stream_backend
+    from lab_model.catalog.schema import resolve_telemetry_stream_backend
 
     catalog_row, _desc = _telemetry_lookup(tag_id, "stream")
+    from lab_model.domain.component import is_live_feed_active
+
+    comp = ((lab.current_state or {}).get("components") or {}).get(tag_id)
+    if not isinstance(comp, dict) or not is_live_feed_active(comp, "stream"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Live feed is not active for {tag_id!r}. "
+                f"Call START_LIVE_FEED before opening the stream."
+            ),
+        )
     backend = resolve_telemetry_stream_backend(catalog_row)
     try:
         if backend == "overhead":
@@ -504,7 +527,7 @@ async def get_component_telemetry_preview(tag_id: str, exposure: float = 0.2):
     (e.g. a context-panel thumbnail polled at ``default_fps`` from the
     catalog). Delegates to ``lab.capture_table_cam(cam_id, exposure)``.
     """
-    from lab_communicator.shared.catalog_schema import resolve_telemetry_stream_backend
+    from lab_model.catalog.schema import resolve_telemetry_stream_backend
 
     catalog_row, _desc = _telemetry_lookup(tag_id, "preview")
     if resolve_telemetry_stream_backend(catalog_row) == "overhead":
@@ -709,8 +732,90 @@ async def post_component_telemetry_jog(tag_id: str, request: Request):
     return {
         "status": "ok",
         "frame_id": params.frame_id,
-        "tunables": fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id),
+        "telemetry": lab.return_telemetry_for_tag(tag_id),
     }
+
+
+@app.post("/api/components/{tag_id}/telemetry/goto")
+async def post_component_telemetry_goto(tag_id: str, request: Request):
+    """Release-to-go TeleOp: move to ``target_pose`` at ``speed``."""
+    _refuse_teleop_if_lab_down(tag_id)
+    try:
+        raw_body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=422, detail="Body must be JSON.")
+    if not isinstance(raw_body, dict):
+        raise HTTPException(status_code=422, detail="Body must be a JSON object.")
+    try:
+        params = TeleopGotoParameters.model_validate(raw_body)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=validation_error_detail(e))
+
+    cmd = TeleopGotoBody(action="TELEOP_GOTO", target_id=tag_id, parameters=params)
+    try:
+        await execute_validated_command(lab, cmd)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {
+        "status": "ok",
+        "telemetry": lab.return_telemetry_for_tag(tag_id),
+    }
+
+
+@app.get("/api/components/{tag_id}/telemetry/live-pose")
+async def get_component_telemetry_live_pose(tag_id: str):
+    """High-rate live pose for TeleOp (in-memory; not in lab_state JSON)."""
+    _refuse_teleop_if_lab_down(tag_id)
+    from lab_model.domain.component import is_teleop_ready
+
+    state = lab.get_lab_state()
+    entry = (state.get("components") or {}).get(tag_id)
+    if not isinstance(entry, dict) or not is_teleop_ready(entry):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{tag_id!r} is not in an active ready TELEOP session.",
+        )
+    pose = lab.get_teleop_live_pose(tag_id)
+    if pose is None:
+        raise HTTPException(status_code=503, detail="Live pose unavailable.")
+    return {"status": "ok", "pose": pose}
+
+
+@app.post("/api/components/{tag_id}/telemetry/live-feed/start")
+async def post_component_live_feed_start(tag_id: str, channel: str = "stream"):
+    """Connect and start live feed (``START_LIVE_FEED``)."""
+    _refuse_teleop_if_lab_down(tag_id)
+    cmd = StartLiveFeedBody(action="START_LIVE_FEED", target_id=tag_id, channel=channel)
+    try:
+        await execute_validated_command(lab, cmd)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {
+        "status": "ok",
+        "message": f"Live feed started for {tag_id}",
+        "telemetry": lab.return_telemetry_for_tag(tag_id),
+    }
+
+
+@app.post("/api/components/{tag_id}/telemetry/live-feed/end")
+async def post_component_live_feed_end(tag_id: str, channel: str = "all"):
+    """Stop and disconnect live feed (``END_LIVE_FEED``)."""
+    _refuse_teleop_if_lab_down(tag_id)
+    cmd = EndLiveFeedBody(action="END_LIVE_FEED", target_id=tag_id, channel=channel)
+    await execute_validated_command(lab, cmd)
+    return {
+        "status": "ok",
+        "message": f"Live feed ended for {tag_id}",
+        "telemetry": lab.return_telemetry_for_tag(tag_id),
+    }
+
+
+@app.get("/api/components/{tag_id}/telemetry")
+async def get_component_telemetry(tag_id: str):
+    """Return saved telemetry session state (teleop + live_feed)."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    return {"status": "ok", "telemetry": lab.return_telemetry_for_tag(tag_id)}
 
 
 @app.get("/api/components/{tag_id}/camera-image")
@@ -730,7 +835,9 @@ async def get_component_camera_image(tag_id: str):
     entry = (state.get("components") or {}).get(tag_id)
     if not isinstance(entry, dict):
         raise HTTPException(status_code=404, detail=f"Unknown tag {tag_id}")
-    ci = (entry.get("measurables") or {}).get("camera_image")
+    from lab_model.domain.component import get_measurables  # noqa: PLC0415
+
+    ci = get_measurables(entry).get("camera_image")
     if not isinstance(ci, dict):
         raise HTTPException(status_code=404, detail="No camera image recorded")
     path = ci.get("path")
@@ -934,7 +1041,7 @@ async def get_layout_conflicts():
     """Semantic vs geometry issues for inventory modals (PLACED in Q3, STORED off-slot, etc.)."""
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
-    from lab_model.storage_region import analyze_layout_issues
+    from lab_model.domain.storage_region import analyze_layout_issues
 
     state = lab.get_lab_state()
     comps = state.get("components") or {}
@@ -949,7 +1056,7 @@ async def get_layout_conflicts():
 @app.get("/api/storage-grid")
 async def get_storage_grid():
     """Inventory grid dimensions for canvas overlay (must match storage_region constants)."""
-    from lab_model.storage_region import storage_grid_spec
+    from lab_model.domain.storage_region import storage_grid_spec
 
     return storage_grid_spec()
 
@@ -957,7 +1064,7 @@ async def get_storage_grid():
 @app.get("/api/lab-layout")
 async def get_lab_layout():
     """Breadboard/table bounds + storage grid overlay (single source matching ``layout.json``)."""
-    from lab_model.storage_region import storage_grid_spec
+    from lab_model.domain.storage_region import storage_grid_spec
 
     doc = load_layout_document()
     enriched = dict(doc)

@@ -91,9 +91,9 @@ import os
 from typing import Any, Callable, Dict, Optional
 
 from lab_communicator.base import LabCommunicator
-from lab_communicator.shared.catalog_bundle import merged_catalog_maps
+from lab_model.catalog.bundle import merged_catalog_maps
 from lab_communicator.shared.lab_view_config import get_lab_view_paths
-from lab_communicator.shared.snapshot import LabPose
+from lab_model.state.snapshot import LabPose
 
 
 class {class_name}(LabCommunicator):
@@ -223,7 +223,7 @@ def _write_primitives(pkg: Path, module: str, class_name: str) -> None:
 
 Replace sleeps with real hardware / simulation. Do not read or write
 ``communicator.current_state`` here — the base orchestrator owns state
-(see ``backend/tests/test_lab_primitives.py`` CI lints).
+(see ``lab_model.platform`` integrity checks and ``lab_communicator/README.md``).
 """
 
 from __future__ import annotations
@@ -232,10 +232,10 @@ import asyncio
 import random
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
-from lab_model.component_model import PRESENCE_BREADBOARD, new_component_entry
-from lab_model.holding import DEFAULT_HOVER_Z_MM
+from lab_model.domain.component import PRESENCE_BREADBOARD, new_component_entry
+from lab_model.domain.holding import DEFAULT_HOVER_Z_MM
 
-from lab_communicator.shared.snapshot import LabPose
+from lab_model.state.snapshot import LabPose
 
 if TYPE_CHECKING:
     from lab_communicator.{module}.communicator import {class_name}
@@ -488,7 +488,7 @@ def main() -> int:
         "Register your class in lab_communicator/shared/communicator_factory.py "
         f"(add {name!r} to create_communicator)."
     )
-    print("CI guardrails: backend/tests/test_lab_primitives.py")
+    print("CI guardrails: lab_model.platform.validate_platform_integrity()")
     return 0
 
 

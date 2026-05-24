@@ -2,21 +2,8 @@
 export const store = {
     labState: null,
     /**
-     * Ghost (canvas-truth) pose per tag. Each entry is
-     * ``{x, y, rotation, source?}`` where ``source`` (Phase 8b) tags
-     * the *authority* driving this ghost:
-     *
-     *   - ``undefined`` — normal user-edited ghost (committed intent
-     *     or a current canvas drag). The default everywhere.
-     *   - ``'teleop'``  — the per-component TELEOP lease is held;
-     *     canvas/render paints the ghost in cyan and adds a TELEOP
-     *     label. Synced from ``comp.tunables.teleop_active`` by the
-     *     lab-state poll (see ``state/lab-state.js``); the field is
-     *     a UI hint, not a source of truth.
-     *
-     * Render code keys off this field for visual treatment;
-     * interaction code keys off ``comp.tunables.teleop_active`` for
-     * behavior (drag emits jog frames vs. one MOVE_COMPONENT).
+     * Ghost (canvas-truth) pose per tag: ``{x, y, rotation}``.
+     * TeleOp v2 planning uses ``teleopTarget``; hardware truth uses ``teleopLivePose``.
      */
     ghostState: {},
     draggingComponent: null,
@@ -42,6 +29,8 @@ export const store = {
     /** Legacy single-line coeffs for snap fallback / logging (derived from doc). */
     laserLineCoeffs: null,
     previousSystemStatus: 'IDLE',
+    /** Tags that were teleop-ready on the previous lab-state poll (ghost sync on exit). */
+    previousTeleopReadyTags: new Set(),
     forceGhostSync: false,
     isOptimizing: false,
     isOptimizingFeedActive: false,
@@ -99,4 +88,17 @@ export const store = {
     pencilToolActive: false,
     /** One-shot gate for GET /api/session-reconciliation/offers after first IDLE poll. */
     sessionReconciliationFetched: false,
+
+    /** Live hardware pose from TeleOp poll (not lab_state JSON). */
+    teleopLivePose: {},
+    /** Operator target preview while planning a TeleOp goto. */
+    teleopTarget: {},
+    /** Per-tag TeleOp motion speed. */
+    teleopSpeed: {},
+    /**
+     * In-flight motor commands keyed by ``setpoint:tagId:motorId`` or ``jog:tagId:motorId``.
+     */
+    motorActionApply: {},
+    /** Optional render hook set by canvas init. */
+    _teleopLivePoseRender: null,
 };

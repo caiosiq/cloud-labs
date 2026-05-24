@@ -1,4 +1,4 @@
-import { primitiveRegion, runButton } from './shared.js';
+import { primitiveRegion, runButton, afterCommandDispatch } from './shared.js';
 
 export function renderRecordMeasurables(ctx) {
     const { tagId } = ctx;
@@ -29,12 +29,7 @@ export function renderRecordMeasurables(ctx) {
             if (ci && typeof ci === 'object' && ci.path) {
                 status.textContent = `OK · ${String(ci.path).replace(/^.*[/\\\\]/, '')}`;
             }
-            if (typeof ctx.hooks.fetchLabState === 'function') {
-                await ctx.hooks.fetchLabState();
-            }
-            if (typeof ctx.hooks.refreshPanel === 'function') {
-                ctx.hooks.refreshPanel(tagId);
-            }
+            await afterCommandDispatch(ctx.hooks, tagId);
         } catch (e) {
             ctx.hooks.log(`Record error: ${e && e.message ? e.message : e}`, 'error');
             status.textContent = 'Error';

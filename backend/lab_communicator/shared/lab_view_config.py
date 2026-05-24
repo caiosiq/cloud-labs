@@ -55,12 +55,12 @@ class LabViewManifest:
     #:   refuses unless the lab's ``system_status`` is IDLE. Default
     #:   ``False`` keeps per-component concurrency permissive (operator
     #:   can teleop component A while OPTIMIZE is running on B).
-    #: - ``teleop_ttl_ms``: stale-lease TTL. If no ``TELEOP_JOG`` frame
-    #:   arrives for a component within this window, the sweeper auto-
-    #:   clears its ``teleop_active`` flag. Default 3000ms. Set to 0 to
+    #: - ``teleop_ttl_ms``: stale-lease TTL. If the lease is not refreshed
+    #:   within this window (start, ready, jog, or keepalive), the sweeper
+    #:   auto-clears the session. Default 300000ms (5 min). Set to 0 to
     #:   disable the sweeper (only explicit ``END_TELEOP`` ends a session).
     teleop_require_lab_idle: bool = False
-    teleop_ttl_ms: int = 3000
+    teleop_ttl_ms: int = 300_000
 
     def as_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
@@ -271,7 +271,7 @@ def _teleop_safety_fields(raw: Mapping[str, Any]) -> Tuple[bool, int]:
 
         "teleop_safety": {
             "require_lab_idle": false,
-            "teleop_ttl_ms": 3000
+            "teleop_ttl_ms": 300000
         }
 
     Both keys are optional with safe defaults. ``teleop_ttl_ms`` of 0
@@ -279,16 +279,16 @@ def _teleop_safety_fields(raw: Mapping[str, Any]) -> Tuple[bool, int]:
     """
     block = raw.get("teleop_safety")
     if not isinstance(block, dict):
-        return (False, 3000)
+        return (False, 300_000)
     require_idle = block.get("require_lab_idle", False)
     if isinstance(require_idle, str):
         require_idle = require_idle.strip().lower() in ("1", "true", "yes", "on")
     else:
         require_idle = bool(require_idle)
     try:
-        ttl_ms = int(block.get("teleop_ttl_ms", 3000))
+        ttl_ms = int(block.get("teleop_ttl_ms", 300_000))
     except (TypeError, ValueError):
-        ttl_ms = 3000
+        ttl_ms = 300_000
     if ttl_ms < 0:
         ttl_ms = 0
     return (require_idle, ttl_ms)
@@ -358,7 +358,7 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
     if not isinstance(layout_document, dict):
         raise SystemExit(f"[CONFIG] layout.json must contain a JSON object: {paths.layout_json}")
 
-    from lab_model.storage_region import configure_from_layout_document
+    from lab_model.domain.storage_region import configure_from_layout_document
 
     configure_from_layout_document(layout_document)
 
@@ -403,6 +403,19 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
     )
 
     _lab_paths_singleton = paths
+
+    from lab_model import measurables as _measurables  # noqa: F401
+    from lab_model import tunables as _tunables  # noqa: F401
+    from lab_model.catalog.schema import load_component_library_rows
+    from lab_model.platform import validate_communicator_backend, validate_platform_integrity
+
+    try:
+        rows = load_component_library_rows(paths.component_library_json)
+        validate_platform_integrity(rows)
+        validate_communicator_backend(manifest.communicator)
+    except Exception as exc:
+        raise SystemExit(f"[CONFIG] platform integrity check failed: {exc}") from exc
+
     return paths
 
 

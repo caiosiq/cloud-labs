@@ -1,8 +1,8 @@
 /**
  * `MotorRotationsReadout` — measurable widget (§14.2).
  *
- * Read-only display of confirmed motor angles. Source is the lab's
- * ``measurables.motor_rotations`` dict (encoder readback), which goes
+ * Read-only display of confirmed motor angles. Source is
+ * ``measurables.pose.motor_rotations`` (encoder readback), which goes
  * **null** during motion per Phase 3's Golden Rule and is repopulated
  * by ``RECORD_MEASURABLES`` or the next successful primitive commit.
  */

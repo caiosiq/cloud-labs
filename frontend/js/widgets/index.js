@@ -37,32 +37,38 @@
 import TablePose from './table-pose.js';
 import NudgeMotorGroup from './nudge-motor-group.js';
 import FloatRange from './float-range.js';
-import TeleopJog from './teleop-jog.js';
+import TeleopRz from './teleop-rz.js';
+import TeleopPose3d from './teleop-pose3d.js';
 import MotorRotationsReadout from './motor-rotations-readout.js';
+import PoseReadout from './pose-readout.js';
+import StorageSlot from './storage-slot.js';
 import NumberBadge from './number-badge.js';
 import ImageViewer from './image-viewer.js';
 import MJPEGViewer from './mjpeg-viewer.js';
 import JPEGPoll from './jpeg-poll.js';
+import LivePosePoll from './live-pose-poll.js';
 import JsonInspector from './json-inspector.js';
 
 const REGISTRY = Object.freeze({
-    // Tunable widgets (§14.1) -- present subset (rest land with Phase 8+).
+    // Tunable widgets (§14.1).
     TablePose,
     NudgeMotorGroup,
     FloatRange,
-    // Phase 8b: per-component TELEOP toggle + nudge controls. Reads
-    // ``comp.tunables.teleop_active`` to decide whether to show the
-    // jog buttons; mutates state via the dedicated teleop API client.
-    TeleopJog,
+    StorageSlot,
+    // TeleOp v2: per-channel widgets (Rz / Pose3d) in telemetry.teleop.
+    TeleopRz,
+    TeleopPose3d,
 
     // Measurable widgets (§14.2) -- present subset.
     MotorRotationsReadout,
+    PoseReadout,
     NumberBadge,
     ImageViewer,
 
     // Telemetry widgets (§14.3).
     MJPEGViewer,
     JPEGPoll,
+    LivePosePoll,
 
     // Universal fallback (§14.4). Never declared in the catalog; the
     // soft-fallback path swaps it in for unknown widget names.

@@ -1,12 +1,8 @@
 /**
  * `FloatRange` — tunable widget for bounded floats (§14.1).
  *
- * Phase 7 ships **read-only**: shows the current value plus the
- * catalog-declared bounds + unit, and a non-interactive bar
- * visualizing where the value falls in the range. Editing this kind
- * of tunable from the widget is wired in Phase 8, alongside the jog
- * primitive — for now, the operator edits via existing dedicated
- * controls (e.g. the table-cam exposure input).
+ * Read-only display of current value, catalog bounds, and a range bar.
+ * Writes go through the matching write primitive (e.g. SET_EXPOSURE).
  */
 import { widgetCard, widgetTitle, row, fmtNum } from './common.js';
 

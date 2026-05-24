@@ -1,8 +1,8 @@
 # Lab communicator — adapters behind every primitive
 
-This package sits **between** the HTTP-facing vocabulary (`lab_primitives`) and a concrete lab (mock simulator, physical bench, future simulator). Each backend is a **folder** (`mock/`, `real/`, or one you add) that subclasses `LabCommunicator` from `base.py`.
+This package is the **hardware/file bridge** between **`lab_model`** (semantics, primitives, registries) and a concrete lab (mock simulator, physical bench, future simulator). Each backend is a **folder** (`mock/`, `real/`, or one you add) that subclasses `LabCommunicator` from `base.py`.
 
-**Related:** [`../lab_primitives/README.md`](../lab_primitives/README.md) (commands that call into here), [`../lab_model/README.md`](../lab_model/README.md) (tunables / measurables shapes).
+**Related:** [`../lab_model/primitives/README.md`](../lab_model/primitives/README.md) (commands that call into here), [`../lab_model/README.md`](../lab_model/README.md) (tunables / measurables shapes), [`../lab_model/ARCHITECTURE.md`](../lab_model/ARCHITECTURE.md) (platform map).
 
 ---
 
@@ -19,8 +19,8 @@ These are enforced at process startup (`bootstrap_lab_view`). If any are missing
 | File | Role |
 |------|------|
 | **`lab_manifest.json`** | Deployment identity: `communicator` (`mock` \| `real`), optional `lab_automation_path` (project-relative path to the `lab_automation` package for real benches), `session_checkpoint` (default **true** — graceful shutdown snapshot + UI reconciliation). Created with inferred defaults when missing. |
-| **`table_cam_preview.json`** | Live preview: recorder `scale` / `jpeg_quality`, UI `target_fps` / `max_inflight_requests`. |
-| **`layout.json`** | Lab bounds, danger zone, storage grid (`negative_xy`), breadboard spacing — feeds `lab_model.storage_region`. |
+| **`table_cam_preview.json`** | Recorder JPEG tuning for **real** table cams (`scale`, `jpeg_quality`, …). Not a separate UI telemetry channel — live video uses per-tag **`telemetry.live_feed.stream`**. |
+| **`layout.json`** | Lab bounds, danger zone, storage grid (`negative_xy`), breadboard spacing — feeds `lab_model.domain.storage_region`. |
 | **`laser_lines.json`** | Laser overlays (`GET /api/laser-line`, `/api/laser-lines`). |
 | **`component_library.json`** | Full parts catalog keyed by `tag_id`. |
 | **`active_catalog.json`** | `{ "tag_ids": [...] }` — intersection + order for `GET /api/catalog` (`catalog_bundle.py`). |
@@ -110,7 +110,7 @@ backend/lab_communicator/
 └── <your_backend>/            ← add new folders here (see **section 1**)
 ```
 
-**Import boundaries** (CI-enforced in `backend/tests/test_lab_primitives.py`): `shared/` must not import `base.py` or concrete backends; `real/` and `mock/` must not import each other; `base.py` must not import `real/` or `mock/`.
+**Import boundaries:** `shared/` must not import `base.py` or concrete backends; `real/` and `mock/` must not import each other; `base.py` must not import `real/` or `mock/`. `lab_model` must not import `lab_communicator`.
 
 ---
 
@@ -190,7 +190,7 @@ Video routes: **`LAB_MODE == "REAL"`** is what triggers MJPEG from `lab.get_vide
 
 ## 7. Verification
 
-`backend/tests/test_lab_primitives.py` encodes the architectural rules:
+Architectural rules (see `lab_model/ARCHITECTURE.md`):
 
 - Primitive hooks / free functions must not touch `current_state`.
 - No cross-imports between sibling backends.

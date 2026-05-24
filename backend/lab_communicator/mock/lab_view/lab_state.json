@@ -1,321 +1,615 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-05-22T19:22:49.357487",
+  "last_updated": "2026-05-23T21:15:22.591181",
   "components": {
     "tag_9": {
       "id": "tag_9",
       "type": "OPTICAL_FILTER",
-      "tunables": {
-        "presence": "breadboard",
-        "nominal_pose": {
-          "x": 336.1571428571428,
-          "y": -89.85714285714283,
-          "rotation": 0.0
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": 336.1571428571428,
+            "y": -89.85714285714283,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          }
         },
-        "nominal_motor_positions": {},
-        "storage": {
-          "in_storage": false,
-          "slot": null
-        },
-        "placement": {
-          "mode": "MANUAL"
-        },
-        "teleop_active": false,
-        "teleop_last_jog_ts": null
+        "measurables": {
+          "pose": {
+            "x": 336.2108655157657,
+            "y": -90.01962999462906,
+            "rotation": 0.0
+          },
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
       },
-      "measurables": {
-        "pose": {
-          "x": 336.2108655157657,
-          "y": -90.01962999462906,
-          "rotation": 0.0
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "last_jog_ts": null,
+          "ready": false,
+          "lease_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
         },
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
-        "camera_image": null
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
       }
     },
     "tag_22": {
       "id": "tag_22",
       "type": "OPTICAL_CAMERA",
-      "tunables": {
-        "presence": "breadboard",
-        "nominal_pose": {
-          "x": 204.85714285714283,
-          "y": 330.7142857142857,
-          "rotation": 0.0
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": 264.6071428571429,
+            "y": 264.6071428571429,
+            "rotation": 27.5
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          }
         },
-        "nominal_motor_positions": {},
-        "storage": {
-          "in_storage": false,
-          "slot": null
-        },
-        "placement": {
-          "mode": "MANUAL"
-        },
-        "teleop_active": false,
-        "teleop_last_jog_ts": null
+        "measurables": {
+          "pose": {
+            "x": 264.1665376019533,
+            "y": 264.4571972416398,
+            "rotation": 27.5
+          },
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
       },
-      "measurables": {
-        "pose": null,
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
-        "camera_image": null
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "last_jog_ts": null,
+          "ready": false,
+          "lease_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": true,
+            "live": true,
+            "backend": "table_cam",
+            "resource_id": "cam_gripper_1",
+            "last_error": null
+          }
+        }
       }
     },
     "tag_21": {
       "id": "tag_21",
       "type": "OPTICAL_CAMERA",
-      "tunables": {
-        "presence": "breadboard",
-        "nominal_pose": {
-          "x": 171.42857142857144,
-          "y": -413.42857142857144,
-          "rotation": 0.0
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": 171.42857142857144,
+            "y": -413.42857142857144,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          }
         },
-        "nominal_motor_positions": {},
-        "storage": {
-          "in_storage": false,
-          "slot": null
-        },
-        "placement": {
-          "mode": "MANUAL"
+        "measurables": {
+          "pose": {
+            "x": 172.0991013397264,
+            "y": -413.8660876854147,
+            "rotation": -0.016599746089574374
+          },
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
         }
       },
-      "measurables": {
-        "pose": {
-          "x": 172.0991013397264,
-          "y": -413.8660876854147,
-          "rotation": -0.016599746089574374
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "last_jog_ts": null,
+          "ready": false,
+          "lease_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
         },
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
-        "camera_image": null
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
       }
     },
     "tag_18": {
       "id": "tag_18",
       "type": "OPTICAL_MIRROR",
-      "tunables": {
-        "presence": "breadboard",
-        "nominal_pose": {
-          "x": 305.7142857142857,
-          "y": 67.14285714285715,
-          "rotation": 0.0
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": 305.7142857142857,
+            "y": 67.14285714285715,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {
+            "1": 0.0,
+            "2": 0.0,
+            "3": 0.0
+          },
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "NEWTON"
+          }
         },
-        "nominal_motor_positions": {
-          "1": 0.0,
-          "2": 0.0,
-          "3": 0.0
-        },
-        "storage": {
-          "in_storage": false,
-          "slot": null
-        },
-        "placement": {
-          "mode": "NEWTON"
+        "measurables": {
+          "pose": null,
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null,
+          "motor_rotations": {
+            "1": 0.0,
+            "3": 0.0
+          }
         }
       },
-      "measurables": {
-        "pose": {
-          "x": 0.0,
-          "y": 0.0,
-          "rotation": -0.5574263532812447
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "last_jog_ts": null,
+          "ready": false,
+          "lease_ts": null,
+          "last_error": null,
+          "mode": "rz",
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
         },
-        "last_optimization_score": 0.99,
-        "last_optimized_pose": {
-          "x": 0.0,
-          "y": 0.0,
-          "rotation": -0.5574263532812447
-        },
-        "camera_image": null
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
       }
     },
     "tag_2": {
       "id": "tag_2",
       "type": "OPTICAL_BEAMSPLITTER",
-      "tunables": {
-        "presence": "breadboard",
-        "nominal_pose": {
-          "x": -111.77142857142859,
-          "y": 388.47142857142853,
-          "rotation": 45.0
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": -415.2,
+            "y": 179.8999999999999,
+            "rotation": 45.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          }
         },
-        "nominal_motor_positions": {},
-        "storage": {
-          "in_storage": false,
-          "slot": null
-        },
-        "placement": {
-          "mode": "MANUAL"
+        "measurables": {
+          "pose": {
+            "x": -414.8561395085536,
+            "y": 179.43370987738302,
+            "rotation": 45.0
+          },
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
         }
       },
-      "measurables": {
-        "pose": {
-          "x": -111.67820016387772,
-          "y": 388.0386088922051,
-          "rotation": 45.0
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "last_jog_ts": null,
+          "ready": false,
+          "lease_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
         },
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
-        "camera_image": null
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
       }
     },
     "tag_11": {
       "id": "tag_11",
       "type": "OPTICAL_LENS",
-      "tunables": {
-        "presence": "breadboard",
-        "nominal_pose": {
-          "x": -161.42857142857144,
-          "y": 235.71428571428578,
-          "rotation": 0.0
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": -161.42857142857144,
+            "y": 235.71428571428578,
+            "rotation": 30.0
+          },
+          "nominal_motor_positions": {
+            "1": 15.0,
+            "3": 0.0
+          },
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          }
         },
-        "nominal_motor_positions": {
-          "1": 0.0,
-          "3": 0.0
-        },
-        "storage": {
-          "in_storage": false,
-          "slot": null
-        },
-        "placement": {
-          "mode": "MANUAL"
+        "measurables": {
+          "pose": {
+            "x": -161.42857142857144,
+            "y": 235.71428571428578,
+            "rotation": 30.0
+          },
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
         }
       },
-      "measurables": {
-        "pose": {
-          "x": -161.6040935078767,
-          "y": 236.19702034598293,
-          "rotation": 0.19639166855623236
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "last_jog_ts": null,
+          "ready": false,
+          "lease_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
         },
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
-        "camera_image": null
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
       }
     },
     "tag_20": {
       "id": "tag_20",
       "type": "OPTICAL_MIRROR",
-      "tunables": {
-        "presence": "breadboard",
-        "nominal_pose": {
-          "x": 835,
-          "y": 200,
-          "rotation": 0
-        },
-        "nominal_motor_positions": {
-          "1": 0.0,
-          "3": 0.0
-        },
-        "storage": {
-          "in_storage": false,
-          "slot": null
-        },
-        "placement": {
-          "mode": "MANUAL"
-        }
-      },
-      "measurables": {
-        "pose": {
-          "x": 834.6091439886894,
-          "y": 200.56779016330927,
-          "rotation": 0.3388823221117814,
-          "motor_rotations": {
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": 835,
+            "y": 200,
+            "rotation": 0
+          },
+          "nominal_motor_positions": {
             "1": 0.0,
             "3": 0.0
+          },
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
           }
         },
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
-        "camera_image": null
+        "measurables": {
+          "pose": {
+            "x": 834.6091439886894,
+            "y": 200.56779016330927,
+            "rotation": 0.3388823221117814,
+            "motor_rotations": {
+              "1": 0.0,
+              "3": 0.0
+            }
+          },
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
+      },
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "last_jog_ts": null,
+          "ready": false,
+          "lease_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
       }
     },
     "tag_3": {
       "id": "tag_3",
       "type": "OPTICAL_FILTER",
-      "tunables": {
-        "presence": "breadboard",
-        "nominal_pose": {
-          "x": -1.4285714285714286,
-          "y": 237.14285714285717,
-          "rotation": 0.0
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": -125.71428571428572,
+            "y": 97.14285714285715,
+            "rotation": 91.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          }
         },
-        "nominal_motor_positions": {},
-        "storage": {
-          "in_storage": false,
-          "slot": null
-        },
-        "placement": {
-          "mode": "MANUAL"
+        "measurables": {
+          "pose": {
+            "x": -126.16558818772288,
+            "y": 97.1607500541017,
+            "rotation": 91.0
+          },
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
         }
       },
-      "measurables": {
-        "pose": {
-          "x": -1.1677286399314832,
-          "y": 237.4520760388368,
-          "rotation": 0.0
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "last_jog_ts": null,
+          "ready": false,
+          "lease_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
         },
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
-        "camera_image": null
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
       }
     },
     "tag_19": {
       "id": "tag_19",
       "type": "OPTICAL_CRYSTAL",
-      "tunables": {
-        "presence": "breadboard",
-        "nominal_pose": {
-          "x": 240.23809523809535,
-          "y": -242.14285714285717,
-          "rotation": 0.0
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": 240.23809523809535,
+            "y": -242.14285714285717,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "NEWTON"
+          }
         },
-        "nominal_motor_positions": {},
-        "storage": {
-          "in_storage": false,
-          "slot": null
-        },
-        "placement": {
-          "mode": "NEWTON"
+        "measurables": {
+          "pose": {
+            "x": 239.6568800520799,
+            "y": -241.99365863311894,
+            "rotation": -0.2070450118570847
+          },
+          "last_optimization_score": 0.99,
+          "last_optimized_pose": {
+            "x": 239.76412628247976,
+            "y": -241.83573311565084,
+            "rotation": -0.33385134947589146
+          },
+          "camera_image": null
         }
       },
-      "measurables": {
-        "pose": {
-          "x": 239.6568800520799,
-          "y": -241.99365863311894,
-          "rotation": -0.2070450118570847
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "last_jog_ts": null,
+          "ready": false,
+          "lease_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
         },
-        "last_optimization_score": 0.99,
-        "last_optimized_pose": {
-          "x": 239.76412628247976,
-          "y": -241.83573311565084,
-          "rotation": -0.33385134947589146
-        },
-        "camera_image": null
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
       }
     },
     "tag_99": {
       "id": "cam_table_top",
       "type": "OPTICAL_CAMERA",
-      "tunables": {
-        "presence": "off_table",
-        "exposure_time_ms": 50.0,
-        "nominal_motor_positions": {},
-        "storage": {
-          "in_storage": false,
-          "slot": null
+      "statecontrol": {
+        "tunables": {
+          "presence": "off_table",
+          "nominal_pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          },
+          "exposure_time_ms": 50.0
         },
-        "placement": {
-          "mode": "MANUAL"
-        },
-        "teleop_active": false,
-        "teleop_last_jog_ts": null
+        "measurables": {
+          "pose": null,
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": {
+            "path": "C:\\Users\\CaioV\\OneDrive - Massachusetts Institute of Technology\\UROP - AI Optics\\optics-digital-twin\\backend\\lab_communicator\\mock\\lab_view\\camera_captures\\tag_99_last.png",
+            "source": "mock_overhead_cam",
+            "cam_id": 0,
+            "format": "png"
+          }
+        }
       },
-      "measurables": {
-        "pose": null,
-        "last_optimization_score": null,
-        "last_optimized_pose": null,
-        "camera_image": null
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "last_jog_ts": null,
+          "ready": false,
+          "lease_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": "overhead",
+            "resource_id": "cam_table_top",
+            "last_error": null
+          }
+        }
       }
     }
   },

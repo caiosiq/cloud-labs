@@ -6,7 +6,7 @@ This repository is a **digital twin** for an autonomous optics lab: a browser-ba
 
 The UI separates **what you intend** (ghost / nominal poses on the canvas) from **what the lab reports** (solid geometry from polled state), including recipe replay and **golden** snapshots for drift checks.
 
-**Design reference:** **`backend/lab_model/README.md`** (tunables vs measurables), **`backend/lab_primitives/README.md`** (HTTP command contract and dispatch). Lab backends and the on-disk **`LAB_VIEW_PATH`** bundle: **`backend/lab_communicator/README.md`**.
+**Design reference:** **`backend/lab_model/ARCHITECTURE.md`** (Universal Component map), **`backend/lab_model/README.md`** (StateControl + Telemetry), **`docs/primitive_ui_contract.md`** (read-only panels vs primitives). Lab backends and **`LAB_VIEW_PATH`**: **`backend/lab_communicator/README.md`**.
 
 ---
 
@@ -38,7 +38,7 @@ In **real** mode, **`RealLabCommunicator`** maps **lab-frame** intent (what the 
 - **Dark, lab-style UI** (Inter typography, Material Icons): main table in the center, **left** sidebar for placed components and selection, **right** sidebar for live/overhead-style video, table-camera capture, recipes, and activity log.
 - **2D breadboard canvas** (HTML5 Canvas): metric coordinates (~±500 mm by default), grid, robot-base **danger zone**, and **laser overlays** from **`laser_lines.json`** inside **`LAB_VIEW_PATH`** (`GET /api/laser-line`, `GET /api/laser-lines`). Geometry is aligned with the backend via **`GET /api/lab-layout`** before **`app-main.js`** loads.
 - **Solid vs ghost**: placed components draw twice—opaque **physical** pose and semi-transparent **intent** pose with a dashed “drift” segment when they differ.
-- **Interaction**: select a part; **move**, **optimize**, **motors**, and **observe** live in a **floating panel** docked to the **top-right of the table** (over the canvas). The **left sidebar** lists components plus **Refresh Pose** and **Save / Load state**. Drag on canvas with optional **snap toward the laser line**; wheel to rotate while dragging. **Motor jog** appears for catalog entries that declare `motor_ids`.
+- **Interaction**: select a part; **move**, **optimize**, **motors**, **TeleOp**, **live feed**, and **record** live in a **floating component panel** (top-right of the table). The panel has **read-only STATE CONTROL + TELEMETRY** sections and a **PRIMITIVES** section for all writes (see **`docs/primitive_ui_contract.md`**). The **left sidebar** lists components plus **Refresh Pose** and **Save / Load state**. Drag on canvas with optional **snap toward the laser line**; wheel to rotate while dragging. **Motor jog** appears for catalog entries that declare motor primitives.
 - **Recipes**: record MOVE/OPTIMIZE steps; files live under **`{LAB_VIEW_PATH}/recipes/`** (see **`LAB_VIEW_PATH`** in `.env`). Successful runs can emit a **`{recipe_id}_golden.json`** reference beside the recipe JSON.
 - **Saved layouts**: **Save / Load lab state** writes JSON under **`{LAB_VIEW_PATH}/states/`** (same bundle as layout and catalog — distinct per deployment).
 - **Command Console** (bottom of the main page): typed shorthand for moves, optimize, and related actions; backed by ES modules (`command-parse.js`, `command-api.js`, `command-complete.js`, …) and wired through **`window.__commandConsoleDeps`** (see **Frontend code layout** below).
@@ -79,16 +79,16 @@ Larger slices of logic (dedicated API client, separate render module) can be pee
 
 ## Architecture
 
-### Four tiers of state (conceptual)
+### State tiers (conceptual)
 
 1. **Tier 1 — Lab state (physical truth)**  
-   Authoritative snapshot from the communicator: `system_status` (`IDLE`, `BUSY`, `OPTIMIZING`, …), timestamps, and per-component **`measurables`** (measured pose, optimization score, optional camera image ref) plus **`tunables`** (nominal pose, storage slot intent, placement mode). Shapes and helpers are documented in **`lab_model`** (see **`backend/lab_model/README.md`**).
+   Authoritative snapshot from the communicator: `system_status` (`IDLE`, `BUSY`, `OPTIMIZING`, `TELEOP`, …), timestamps, and per-component **`statecontrol`** (tunables + measurables) plus **`telemetry`** (TeleOp lease, live-feed session). Shapes and helpers: **`backend/lab_model/README.md`**, **`backend/lab_model/ARCHITECTURE.md`**.
 
 2. **Tier 2 — Ghost / intent (what the UI plans)**  
-   Client-side **ghost** poses track targets; the backend stores commanded values under **`tunables`** (`nominal_pose`, `placement.mode`, `storage`, `presence`). Debug: `GET /api/debug/ghost-state` exposes tunables-derived intent. **`GET /api/components/{tag_id}/tunables`** and **`/measurables`** return slices for one tag.
+   Client-side **ghost** poses track targets; the backend stores commanded values under **`statecontrol.tunables`** (`nominal_pose`, `placement.mode`, `storage`, `presence`). Debug: `GET /api/debug/ghost-state`. Per-tag slices: **`GET /api/components/{tag_id}/tunables`**, **`/measurables`**, **`/telemetry`**.
 
 3. **Tier 3 — Recipe (procedure)**  
-   JSON sequences of steps (`MOVE_COMPONENT`, `OPTIMIZE`, `PLACE`, `REMOVE`, …) stored under **`{LAB_VIEW_PATH}/recipes/{id}.json`**, played asynchronously by the server.
+   JSON sequences of primitive steps stored under **`{LAB_VIEW_PATH}/recipes/{id}.json`**, played asynchronously by the server.
 
 4. **Tier 4 — Golden state (reference)**  
    After a successful recipe run, a snapshot may be saved as **`{LAB_VIEW_PATH}/recipes/{id}_golden.json`** for drift comparison via `GET /api/recipes/{id}/compare`.
@@ -106,11 +106,10 @@ Larger slices of logic (dedicated API client, separate render module) can be pee
 
 | Package | Role |
 |---------|------|
-| **`lab_model`** | **Domain model** shared by mock and real: **tunables vs measurables** helpers (`component_model.py`), **storage quadrant Q3** geometry and layout checks (`storage_region.py`, fed by `lab_view/layout.json`), **software-tracked motor angles** (`motor_rotation_store` → `motor_rotations.json` under `LAB_VIEW_PATH`). Does **not** talk to hardware. See **`backend/lab_model/README.md`**. |
-| **`lab_primitives`** | **HTTP-facing command contract**: `PrimitiveId`, **Pydantic** bodies for `POST /api/command`, **`PRIMITIVE_REGISTRY`**, **`dispatch`** (`parse_command_payload`, `execute_validated_command`, `schedule_validated_command`), **read primitives** for **`GET /api/components/{tag}/tunables`** and **`.../measurables`**, and **macros** that compose atomic steps (today: `MOTOR_SEND_HOME` → tracked angle + `MOVE_MOTOR`). Package overview + roadmap: **`backend/lab_primitives/README.md`**, **`backend/lab_primitives/ROADMAP.md`**. |
-| **`lab_communicator`** | **`LabCommunicator`** template (`base.py`) and one folder per backend (**`mock/`**, **`real/`**, or a package you add). All runtime file paths for layout, catalogs, lasers, recipes, saved states, motor JSON, etc. come from **`LAB_VIEW_PATH`** (`lab_communicator/shared/lab_view_config.py`). **How to add a backend:** run `python scripts/create_lab_communicator.py <name> --with-lab-view` then follow **`backend/lab_communicator/README.md`**. |
+| **`lab_model`** | **Lab platform core** (semantics, no hardware): domain, **`statecontrol` + `telemetry`**, orchestration, **`lab_model/primitives/`**, tunables/measurables/telemetry plugins, catalog, state. See **`backend/lab_model/ARCHITECTURE.md`**. |
+| **`lab_communicator`** | **Hardware/file bridge**: **`LabCommunicator`** (`base.py`) + **`mock/`** / **`real/`** backends. Paths from **`LAB_VIEW_PATH`** (`lab_communicator/shared/lab_view_config.py`). **Add a backend:** `python scripts/create_lab_communicator.py <name> --with-lab-view` — see **`backend/lab_communicator/README.md`**. |
 
-**`main.py`** delegates command validation and scheduling to **`lab_primitives`** (same path for the recipe executor). Tunables/measurables per tag use **`fetch_read_primitive`** so reads stay aligned with the primitive vocabulary.
+**`main.py`** delegates command validation and scheduling to **`lab_model.primitives`** (same path for the recipe executor). Tunables/measurables per tag use **`fetch_read_primitive`** so reads stay aligned with the primitive vocabulary.
 
 ### Lab deployment bundle (`LAB_VIEW_PATH`)
 
@@ -126,9 +125,9 @@ Register the new id in **`lab_communicator/shared/communicator_factory.py`**, se
 
 ### Command–query style
 
-- **Query**: browser polls **`GET /api/lab-state`** (~every 500 ms) to refresh solids, status, and **`lab_mode`**. Ghost sync: after commands finish (or while **`OPTIMIZING`** in real mode—see **Newton optimization in real mode** below); **`tunables.nominal_pose`** drives the ghost overlay when present. Per-tag slices: **`GET /api/components/{tag_id}/tunables`** and **`.../measurables`** (saved state only; **`lab_primitives`** **return** primitives).
+- **Query**: browser polls **`GET /api/lab-state`** (~every 500 ms) to refresh solids, status, and **`lab_mode`**. Ghost sync: after commands finish (or while **`OPTIMIZING`** in real mode—see **Newton optimization in real mode** below); **`tunables.nominal_pose`** drives the ghost overlay when present. Per-tag slices: **`GET /api/components/{tag_id}/tunables`** and **`.../measurables`** (saved state; **`GET_TUNABLES`** / **`GET_MEASURABLES`** read primitives).
 - **Record**: **`POST /api/components/{tag_id}/measurables/record`** (or **`POST /api/command`** with **`RECORD_MEASURABLES`**) takes a fresh measurement for that tag (e.g. camera capture → **`camera_image`**). Same **`409`** guard as commands when the system is **`BUSY`** / **`OPTIMIZING`**. Conceptual notes: **`backend/lab_model/README.md`**.
-- **Command**: **`POST /api/command`** with JSON `{ "action", "target_id", "parameters" }`. Bodies are **validated** by **`lab_primitives`** (Pydantic); actions include `MOVE_COMPONENT`, `MOVE_MOTOR`, `OPTIMIZE`, `STORE_COMPONENT`, …. Successful accepts return **HTTP 200** with `"status": "accepted"`; **`409`** if the lab reports `BUSY` / `OPTIMIZING`; **`400`/`422`** on invalid payloads.
+- **Command**: **`POST /api/command`** with JSON `{ "action", "target_id", "parameters" }`. Bodies are **validated** by **`lab_model.primitives`** (Pydantic); actions include `MOVE_COMPONENT`, `MOVE_MOTOR`, `OPTIMIZE`, `STORE_COMPONENT`, …. Successful accepts return **HTTP 200** with `"status": "accepted"`; **`409`** if the lab reports `BUSY` / `OPTIMIZING`; **`400`/`422`** on invalid payloads.
 - **Placement request**: **`POST /api/components`** queues `add_component_to_state` (mock vs real behavior lives in the communicator).
 
 ### Real lab mode
@@ -154,20 +153,23 @@ After a **graceful backend shutdown** (or **`POST /api/session-reconciliation/sa
 
 Previously **mock** defaulted this feature **on** and **real** **off**; both communicators now read the same flag from **`lab_manifest.json`**. Ensure **`"session_checkpoint": true`** in your real bundle (the default template includes it).
 
-### Table cameras (CAM1 / CAM2)
+### Table cameras (CAM1 / CAM2) and table-top camera
 
-Real benches use the **`lab_automation`** recorder subprocesses (`recorder_cam_laser_align_cloudlab.py` on ports **9999** / **10000**). The UI reaches them through **per-component** routes on each catalog camera tag (e.g. `cam_gripper_1` → `tag_22`):
+Per-component **`OPTICAL_CAMERA`** tags declare capabilities in **`component_library.json`**. The UI uses **read-only TELEMETRY** for session state and **PRIMITIVES** for actions:
 
 | Need | Where |
 |------|--------|
-| Live MJPEG | Component panel → **`telemetry.stream`** → `GET /api/components/{tag_id}/telemetry/stream` |
-| Polled JPEG preview | **`telemetry.preview`** → `GET /api/components/{tag_id}/telemetry/preview` |
-| Still PNG + COBYLA reference | **`RECORD_MEASURABLES`** on the camera tag → `measurables.camera_image` |
+| Live MJPEG | **START LIVE FEED** primitive → TELEMETRY shows stream when `live_feed.stream.live` → `GET /api/components/{tag_id}/telemetry/stream` |
+| Still PNG + optimizer reference | **RECORD MEASURABLES** → `statecontrol.measurables.camera_image` → `GET /api/components/{tag_id}/camera-image` |
+| Exposure intent | **SET EXPOSURE** primitive (grouped under MOVE COMPONENT in the panel) |
+| TeleOp (gripper cameras) | **START TELEOP** / **TELEOP JOG** primitives when declared |
 | Optimizer live view | Right sidebar **Optimization preview** during `OPTIMIZE` → `GET /api/components/{tag_id}/telemetry/optimization-stream` |
 
-Preview tuning still lives in **`table_cam_preview.json`** inside **`LAB_VIEW_PATH`** (`scale`, `jpeg_quality`, `target_fps`, `max_inflight_requests`). Restart the backend after changing recorder-related fields.
+Gripper cameras (`cam_gripper_1` / `cam_gripper_2`) map to table cams via the catalog id convention. Table-top camera (`tag_99`, `stream_source: overhead`) uses the overhead mock/real stream backend.
 
-Lab-wide **`/api/table-cam/*`** routes were removed in Phase 9d; **`LabCommunicator.table_cam_*`** helpers remain for the per-component telemetry layer.
+**`table_cam_preview.json`** in **`LAB_VIEW_PATH`** still tunes recorder JPEG scale/quality for real benches; the UI no longer exposes a separate **`preview`** telemetry channel (stream only).
+
+Lab-wide **`/api/table-cam/*`** routes were removed in Phase 9d.
 
 ---
 
@@ -227,23 +229,18 @@ The canvas plot labeled **Optimization Metric (Beam Intensity)** is **synthetic*
 cloud-labs/                   # repository root (historically also called optics-digital-twin in docs)
 ├── .env                      # LAB_VIEW_PATH (required) — communicator + lab_automation live in that bundle
 ├── backend/
-│   ├── main.py               # FastAPI app; bootstrap_lab_view → communicator; delegates /api/command to lab_primitives
-│   ├── lab_model/            # Domain: tunables/measurables, storage Q3 geometry, motor rotation JSON
+│   ├── main.py               # FastAPI app; bootstrap_lab_view → communicator; delegates /api/command to lab_model.primitives
+│   ├── lab_model/            # Platform semantics (no hardware I/O)
+│   │   ├── domain/           # component shapes, holding, storage grid, motor JSON
+│   │   ├── primitives/       # PrimitiveId, schemas, registry, dispatch, macros
+│   │   ├── tunables/         # @register_tunable plugins
+│   │   ├── measurables/      # @register_measurable plugins
+│   │   ├── catalog/          # component_library validation + merge
+│   │   └── state/            # commits, refusals, snapshot, placement UI
+│   ├── lab_communicator/     # LabCommunicator bridge + mock/ + real/
 │   │   ├── README.md
-│   │   ├── component_model.py
-│   │   ├── storage_region.py
-│   │   └── motor_rotation_store.py
-│   ├── lab_primitives/       # PrimitiveId, Pydantic schemas, registry, dispatch, read primitives, macros
-│   │   ├── README.md
-│   │   ├── ROADMAP.md
-│   │   ├── ids.py
-│   │   ├── schemas.py
-│   │   ├── registry.py
-│   │   └── dispatch.py
-│   ├── lab_communicator/
-│   │   ├── README.md         # LAB_VIEW_PATH rules + how to add a backend (see scripts/create_lab_communicator.py)
 │   │   ├── base.py
-│   │   ├── shared/           # lab_view_config.py, catalog_bundle.py, commits, snapshot, …
+│   │   ├── shared/           # lab_view_config, factory, session_checkpoint, storage_intent, util
 │   │   ├── mock/
 │   │   │   ├── communicator.py
 │   │   │   ├── primitives.py
@@ -300,14 +297,20 @@ The `backend-simple/` folder holds small lab-related Python snippets with **rela
 | GET | `/api/components/{tag_id}/measurables` | Lab-reported **measurables** for one component |
 | POST | `/api/lab-state/refresh-pose` | Re-localize **measurables.pose** from overhead / table camera (real: full scan; mock: simulated). Alias: `POST /api/lab-state/refresh` |
 | POST | `/api/components` | Request add-to-lab (catalog item payload) |
-| POST | `/api/command` | Move / motor / optimize / store / … — body validated by **`lab_primitives`** (`parse_command_payload` → `schedule_validated_command`) |
+| POST | `/api/command` | Move / motor / optimize / store / … — body validated by **`lab_model.primitives`** (`parse_command_payload` → `schedule_validated_command`) |
 | GET | `/api/laser-line` | Legacy single-line coefficients `{ a, b, source, … }` |
 | GET | `/api/laser-lines` | All overlays from **`laser_lines.json`** |
 | PATCH | `/api/laser-lines/{line_id}` | Adjust a line in **`laser_lines.json`** |
-| GET | `/api/components/{tag_id}/telemetry/optimization-stream` | Optimizer iteration MJPEG during `OPTIMIZE` (tag must match `optimization_target_id`) |
-| GET | `/api/components/{tag_id}/telemetry/stream` | Per-component MJPEG (cameras; replaces legacy `/api/video-feed/stream`) |
-| GET | `/api/components/{tag_id}/telemetry/preview` | Single JPEG frame (polled live preview) |
-| GET | `/api/components/{tag_id}/telemetry/capture` | Single PNG still (when declared in catalog) |
+| GET | `/api/components/{tag_id}/telemetry` | Saved teleop + live_feed session state |
+| GET | `/api/components/{tag_id}/telemetry/stream` | Per-component MJPEG (requires live feed on) |
+| POST | `/api/components/{tag_id}/teleop/start` | Acquire TeleOp lease (`START_TELEOP`) |
+| POST | `/api/components/{tag_id}/teleop/end` | Release TeleOp lease |
+| POST | `/api/components/{tag_id}/telemetry/jog` | TeleOp jog frame (`TELEOP_JOG`) |
+| POST | `/api/components/{tag_id}/telemetry/live-feed/start` | Start live feed |
+| POST | `/api/components/{tag_id}/telemetry/live-feed/end` | End live feed |
+| POST | `/api/components/{tag_id}/measurables/record` | Record measurables (`RECORD_MEASURABLES`) |
+| GET | `/api/components/{tag_id}/camera-image` | PNG from `measurables.camera_image.path` |
+| GET | `/api/components/{tag_id}/telemetry/optimization-stream` | Optimizer iteration MJPEG during `OPTIMIZE` |
 | GET | `/api/session-reconciliation/offers` | Tags eligible to restore from last checkpoint |
 | POST | `/api/session-reconciliation/apply` | Apply checkpoint tunables/measurables for given tag ids |
 | POST | `/api/session-reconciliation/save` | Write checkpoint now |
@@ -396,4 +399,4 @@ The server builds the active catalog from **`component_library.json`** filtered 
 
 For a new real deployment, copy **`backend/lab_communicator/real/lab_view/default/`** to a writable folder, point **`LAB_VIEW_PATH`** at it, and grow **`component_library.json` / `active_catalog.json`** there. (Some older **`schemas/component_catalog*.json`** copies may still exist in the repo as documentation only — they are **not** what the FastAPI app loads.)
 
-See **`ROADMAP.md`** (repo-wide) and **`backend/lab_primitives/ROADMAP.md`** (primitive layer: tests, macros, tooling).
+See also **ROADMAP.md** (repo-wide) and **`backend/lab_model/ARCHITECTURE.md`** (Universal Component — implemented).

@@ -63,16 +63,16 @@ For each entry in `catalog["components"]`:
 | `tag_id`                           | Map key for all per-component routing.                    |
 | `motor_ids`                        | Wiring to a `wifi_stepper` controller.                    |
 | `motor_controller`                 | String key resolving to an IP-mapped controller.          |
-| `capabilities.tunables[*].min/max/options/default/unit` | Input validation at the hardware boundary. |
+| `capabilities.statecontrol.tunables[*].min/max/options/default/unit` | Input validation at the hardware boundary. |
 | `capabilities.primitives`          | Gate which methods on this component are callable.        |
 
 ### 2.3. Fields `lab_automation` MUST ignore
 
 | Field                                 | Why hardware-side ignores it             |
 |---------------------------------------|------------------------------------------|
-| `capabilities.tunables[*].widget`     | UI concern (cloud-labs picks the React widget). |
-| `capabilities.measurables[*].widget`  | Same.                                    |
-| `capabilities.telemetry[*].url`       | Cloud-labs serves the HTTP routes.       |
+| `capabilities.statecontrol.tunables[*].widget` | UI concern (cloud-labs picks the widget). |
+| `capabilities.statecontrol.measurables[*].widget`  | Same.                                    |
+| `capabilities.telemetry.live_feed[*].url`       | Cloud-labs serves the HTTP routes.       |
 | `properties.*` (radius, coating, ...) | Display-only physical specs.             |
 
 If `lab_automation` ever needs hardware-side configuration of a tunable
@@ -152,5 +152,5 @@ know the HTTP path.
 - `backend/lab_communicator/shared/catalog_schema.py` — cloud-labs's
   authoritative validator. Hardware-side validation should match it
   exactly for the fields in §2.2.
-- `scripts/migrate_component_library_to_capabilities.py` — cloud-labs's
+- `scripts/archive/migrate_component_library_to_capabilities.py` — cloud-labs's
   migration / refresh tool. `lab_automation` never runs this script.

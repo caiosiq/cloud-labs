@@ -1,15 +1,17 @@
 """
-Lab domain model: component tunables/measurables, storage-quadrant geometry, motor-angle persistence.
+Lab platform core: domain, primitives, catalog, state, tunable/measurable plugins.
 
-This package is intentionally separate from :mod:`lab_communicator`, which contains only the
-mock/real **LabCommunicator** adapters and hardware-facing glue.
+Import subpackages explicitly (e.g. ``lab_model.primitives``) to avoid import cycles
+with :mod:`lab_communicator.base`.
 
-See ``README.md`` in this directory for tunables vs measurables.
+See ``README.md`` and ``ARCHITECTURE.md``.
 """
 
-from . import component_model
-from . import holding
-from . import motor_rotation_store
-from . import storage_region
+from .domain import component, holding, motor_rotation_store, storage_region
 
-__all__ = ["component_model", "holding", "motor_rotation_store", "storage_region"]
+__all__ = [
+    "component",
+    "holding",
+    "motor_rotation_store",
+    "storage_region",
+]

@@ -1,12 +1,9 @@
 /**
  * `TablePose` — tunable widget for ``nominal_pose`` (§14.1).
  *
- * Phase 7 ships the **read-only** sibling of the canvas-drag editor.
- * The canvas (and the X/Y/Rot inputs in context-panel.js) already let
- * the operator commit pose intent; this widget exists so every
- * component renders the *same* receipt block, declaratively, from the
- * catalog. Edit affordances are wired through the existing context-
- * panel controls until Phase 8 promotes the widget to a full editor.
+ * **Pose surface #3 (read-only):** displays committed tunable intent from
+ * statecontrol. Editing is via canvas ghost drag (surface #1) or context
+ * X/Y/Rot inputs (surface #2) — see `component-model.js`.
  */
 import { widgetCard, widgetTitle, row, fmtNum } from './common.js';
 

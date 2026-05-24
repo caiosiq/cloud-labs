@@ -9,7 +9,7 @@ are **state-free** -- they receive whatever they need as arguments
 and dispatch the corresponding ``lab_automation`` call. No state
 mutations happen here; the orchestrators in
 :mod:`lab_communicator.base` own that path (refusal logic, status
-flips, commit helpers in ``shared/commits.py``).
+flips, commit helpers in ``lab_model.state.commits``).
 
 Reading this file end-to-end answers the question "what is the
 hardware contract for each primitive?" -- which physical-lab API
@@ -17,7 +17,7 @@ gets called, with which keyword args, on which thread. The thin
 hooks in :class:`RealLabCommunicator` (``_primitive_<name>``)
 delegate to these functions one-for-one.
 
-Architectural rules (``communicator_refactor.md`` §5.1, ``test_lab_primitives.py``):
+Architectural rules (``lab_communicator/README.md``, ``lab_model.platform``):
 
 - ``self.current_state`` access is forbidden in ``_primitive_*`` hook
   bodies; the orchestrator passes you the data via arguments. This
@@ -39,7 +39,7 @@ from lab_communicator.real.coordinate_frames import (
     lab_rotation_to_robot_yaw,
     lab_table_xy_to_robot_xy,
 )
-from lab_communicator.shared.snapshot import LabPose
+from lab_model.state.snapshot import LabPose
 from lab_communicator.shared.util import optional_float
 
 if TYPE_CHECKING:
@@ -319,31 +319,11 @@ async def primitive_record_measurables(
     tag_id: str,
     catalog_meta: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    """Hardware step for ``record_measurables_for_tag``.
+    """Hardware step — delegates to :mod:`lab_model.measurables`."""
+    from lab_model import measurables  # noqa: F401 — register plugins
+    from lab_model.measurables.record import observe_for_tag
 
-    For ``OPTICAL_CAMERA`` tags only: capture a single frame from
-    table-cam 1 (``capture_table_cam(1, exposure=0.2)``), write it to
-    ``Camera_Images/<tag>_record.png``, and return the metadata for
-    the orchestrator to merge into ``measurables.camera_image``. All
-    other tag types fall through with ``None``; the orchestrator then
-    returns saved measurables verbatim.
-    """
-    if (catalog_meta or {}).get("type") != "OPTICAL_CAMERA":
-        return None
-    png = communicator.capture_table_cam(1, exposure=0.2)
-    if not png:
-        return None
-    base = communicator._camera_images_base_dir()
-    os.makedirs(base, exist_ok=True)
-    path = os.path.join(base, f"{tag_id}_record.png")
-    with open(path, "wb") as f:
-        f.write(png)
-    return {
-        "path": path,
-        "source": "real_table_cam",
-        "cam_id": 1,
-        "format": "png",
-    }
+    return await observe_for_tag(communicator, tag_id, catalog_meta)
 
 
 # ---------------------------------------------------------------------------

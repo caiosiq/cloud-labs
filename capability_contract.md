@@ -30,7 +30,7 @@ The Capability Contract is the data shape that makes all four possible.
 ### Non-goals
 
 - This document does **not** redefine `tunables` / `measurables` — those are
-  already in `backend/lab_model/component_model.py` and `backend/lab_model/README.md`.
+  already in `backend/lab_model/domain/component.py` and `backend/lab_model/README.md`.
 - It does **not** define new primitives. It only describes how each component
   declares **which** primitives it supports.
 - It does **not** specify the TELEOP transport (REST vs WebSocket) — see
@@ -100,9 +100,14 @@ preserved; a new `capabilities` block is added.
       "motor_ids": [1, 3],
       "motor_controller": "wifi_stepper1",
       "capabilities": {
-        "tunables": { /* see §3.2 */ },
-        "measurables": { /* see §3.3 */ },
-        "telemetry": { /* see §3.4 */ },
+        "statecontrol": {
+          "tunables": { /* see §3.2 */ },
+          "measurables": { /* see §3.3 */ }
+        },
+        "telemetry": {
+          "teleop": { /* see §3.4 */ },
+          "live_feed": { /* see §3.4 */ }
+        },
         "primitives": [ /* see §3.5 */ ]
       }
     }
@@ -110,49 +115,63 @@ preserved; a new `capabilities` block is added.
 }
 ```
 
-### 3.2. `capabilities.tunables`
+### 3.2. `capabilities.statecontrol.tunables`
 
-Maps a tunable field name → widget descriptor.
+Maps a tunable field name → widget descriptor (read-only in the UI; writes go through primitives).
 
 ```json
-"tunables": {
-  "nominal_pose":             { "widget": "TablePose" },
-  "nominal_motor_positions":  { "widget": "NudgeMotorGroup", "motor_ids": [1, 3], "step_deg": 2.5 },
-  "placement.mode":           { "widget": "StringDropdown",  "options": ["MANUAL", "NEWTON", "COBYLA"] }
+"statecontrol": {
+  "tunables": {
+    "nominal_pose":             { "widget": "TablePose" },
+    "nominal_motor_positions":  { "widget": "JsonInspector" },
+    "exposure_time_ms":         { "widget": "FloatRange", "min": 10, "max": 1000, "default": 200, "unit": "ms" }
+  }
 }
 ```
 
-Field names use **dot notation** for nested keys (`"placement.mode"` is
-`tunables.placement.mode`). This keeps the schema flat and easy to scan.
+Legacy catalogs may still use flat `capabilities.tunables`; the loader normalizes via `normalize_capabilities()`.
 
-### 3.3. `capabilities.measurables`
+### 3.3. `capabilities.statecontrol.measurables`
 
-Maps a measurable field name → widget descriptor. These are the *receipts*; the
-UI renders them as static panels (with a `RECORD_MEASURABLES` button nearby).
+Maps a measurable field name → widget descriptor. These are *receipts*; the UI renders them read-only under **STATE CONTROL → Measurables**. Fresh values come from **`RECORD_MEASURABLES`**.
 
 ```json
-"measurables": {
-  "last_optimization_score": { "widget": "NumberBadge", "format": ".3f" },
-  "motor_rotations":         { "widget": "MotorRotationsReadout" },
-  "camera_image":            { "widget": "ImageViewer", "format": "png" }
+"statecontrol": {
+  "measurables": {
+    "last_optimization_score": { "widget": "NumberBadge", "format": ".3f" },
+    "motor_rotations":         { "widget": "MotorRotationsReadout" },
+    "camera_image":            { "widget": "ImageViewer", "format": "png" }
+  }
 }
 ```
 
 ### 3.4. `capabilities.telemetry`
 
-Maps a telemetry channel name → widget descriptor + endpoint URL. These are the
-live data streams (Phase 6).
+Declares **live session** metadata and stream endpoints. Runtime state lives in `components[tag].telemetry` (not in measurables). The UI shows session JSON read-only under **TELEMETRY**; start/stop/jog use **PRIMITIVES**.
+
+**TeleOp** (per-component lease):
 
 ```json
 "telemetry": {
-  "stream":  { "widget": "MJPEGViewer", "url": "/api/components/{tag_id}/telemetry/stream" },
-  "preview": { "widget": "JPEGPoll",    "url": "/api/components/{tag_id}/telemetry/preview", "default_fps": 10 }
+  "teleop": {
+    "pose": {
+      "widget": "TeleopJog",
+      "step_mm": [0.5, 2.0, 10.0],
+      "step_deg": [0.5, 2.0, 10.0]
+    }
+  },
+  "live_feed": {
+    "stream": {
+      "widget": "MJPEGViewer",
+      "url": "/api/components/{tag_id}/telemetry/stream"
+    }
+  }
 }
 ```
 
-`{tag_id}` is a literal placeholder substituted at boot by the cloud-labs
-catalog loader. This keeps URLs declarative without coupling the catalog to a
-specific tag id.
+Runtime teleop slice: `{ "active", "ready", "lease_ts", "last_jog_ts", "last_error" }`. Jog is allowed only when `active && ready`.
+
+**Live feed** uses a **`stream`** channel only (legacy `preview` / `JPEGPoll` removed). `{tag_id}` in URLs is substituted per instance at render time.
 
 ### 3.5. `capabilities.primitives`
 
@@ -161,14 +180,30 @@ source for what dispatch will allow.** It replaces ad-hoc flags like `is_movable
 
 ```json
 "primitives": [
-  "MOVE_COMPONENT", "MOVE_MOTOR", "MOTOR_SEND_HOME", "MOTOR_SET_ZERO",
-  "OPTIMIZE", "STORE_COMPONENT", "PLACE_FROM_STORAGE",
-  "PICK_COMPONENT", "HOVER", "PLACE_FROM_HOVER", "SCAN_ROTATE_IN_PLACE",
-  "RECORD_MEASURABLES"
+  "MOVE_COMPONENT",
+  "SET_EXPOSURE",
+  "STORE_COMPONENT",
+  "PLACE_FROM_STORAGE",
+  "PICK_COMPONENT",
+  "HOVER",
+  "PLACE_FROM_HOVER",
+  "RECORD_MEASURABLES",
+  "START_TELEOP",
+  "END_TELEOP",
+  "TELEOP_JOG",
+  "START_LIVE_FEED",
+  "END_LIVE_FEED"
 ]
 ```
 
-Primitive ids must be drawn from `backend/lab_primitives/ids.py::PrimitiveId`.
+Recommended UI display order (enforced in `frontend/js/primitives/index.js`):
+
+1. `MOVE_COMPONENT` + tunable writers (`SET_EXPOSURE`, `SET_MOTOR_SETPOINT`, …)
+2. Manipulation (`STORE_COMPONENT`, pick/hover/place, …)
+3. Workflow (`RECORD_MEASURABLES`, `OPTIMIZE`, …)
+4. Telemetry sessions (TeleOp + live feed) — always last
+
+Primitive ids must be drawn from `backend/lab_model/primitives/ids.py::PrimitiveId`.
 Unknown ids are a hard-fail at boot (see §5).
 
 **Static (non-movable) components** are expressed by **omitting** movement
@@ -239,7 +274,7 @@ widgets.
 - A component entry is missing a required field (`id`, `type`, `tag_id`,
   `capabilities.primitives`).
 - A primitive id in `capabilities.primitives` is not in
-  `lab_primitives.PrimitiveId`.
+  `lab_model.primitives.PrimitiveId`.
 - A widget descriptor’s required config is missing (e.g. `FloatRange` without
   `min` and `max`).
 
@@ -365,7 +400,7 @@ Only the **hardware-relevant** fields:
 
 ### 7.3. Migration script
 
-`scripts/migrate_component_library_to_capabilities.py` (one-shot):
+`scripts/archive/migrate_component_library_to_capabilities.py` (one-shot):
 
 - Reads the current array form.
 - Wraps it in `{ schema_version: 1, components: { ... } }`.
@@ -427,7 +462,7 @@ These are unresolved in v1; revisit before the affected phase ships.
 ## 10. References
 
 - `backend/lab_model/README.md` — tunables / measurables conceptual model.
-- `backend/lab_primitives/README.md` — primitive vocabulary + dispatch flow.
+- `backend/lab_model/primitives/README.md` — primitive vocabulary + dispatch flow.
 - `backend/lab_communicator/README.md` — `lab_view` bundle layout, manifest.
 - `Run_CloudLab_Scripts.md` — Python orchestration / long-running scripts.
 - `import_json.md` — declarative JSON sequences (LLM lab plans).

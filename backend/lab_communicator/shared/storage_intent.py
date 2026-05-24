@@ -120,7 +120,7 @@ def rebuild_intent_from_components(components: Dict[str, Any]) -> StoredIntent:
     """
     # Imported lazily so this module remains importable in environments
     # that don't have lab_model on the path (test isolation).
-    from lab_model.component_model import is_stored, storage_slot
+    from lab_model.domain.component import is_stored, storage_slot
 
     new_m: StoredIntent = {}
     for tid, ent in (components or {}).items():

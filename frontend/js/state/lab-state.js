@@ -30,6 +30,8 @@ import {
     isOnTableComponent,
     shouldRenderOnCanvas,
 } from '../component-model.js';
+import { isTeleopReady, componentDataSnapshot } from '../component-state.js';
+import { syncTeleopLivePosePolls } from '../teleop-session.js';
 import { showErrorModal } from '../ui/modals.js';
 import { maybeTriggerSessionReconciliation } from '../ui/session-reconciliation.js';
 import { fetchLayoutConflicts } from '../api/fetchers.js';
@@ -37,6 +39,7 @@ import {
     updateLayoutConflictModal,
     updateLayoutWarningBanner,
 } from '../ui/layout-conflicts.js';
+import { syncMotorActionStatuses } from '../ui/motor-action-ui.js';
 let _deps = {
     placementUiLabel: () => 'PLACED',
     updateContextPanel: () => {},
@@ -122,7 +125,15 @@ export async function fetchLabState() {
         }
 
         store.labState = await response.json();
+        syncTeleopLivePosePolls();
         console.log(`[${new Date().toLocaleTimeString()}] Received Lab State successfully.`);
+
+        const teleopReadyNow = new Set();
+        if (store.labState.components) {
+            Object.entries(store.labState.components).forEach(([name, comp]) => {
+                if (isTeleopReady(comp)) teleopReadyNow.add(name);
+            });
+        }
 
         // If a part the user was dragging from storage has since landed on the breadboard, clear the
         // drag-from-storage handle so we don't double-confirm a PLACE_FROM_STORAGE later.
@@ -157,6 +168,9 @@ export async function fetchLabState() {
 
             Object.entries(store.labState.components).forEach(([name, comp]) => {
                 if (shouldRenderOnCanvas(name, comp)) {
+                    const justLeftTeleop =
+                        store.previousTeleopReadyTags.has(name) && !isTeleopReady(comp);
+                    if (isTeleopReady(comp)) return;
                     const dp = drawPose(comp);
                     const hasPose = dp && Object.keys(dp).length > 0;
                     // First load: initialize from drawPose (intent first, measured fallback).
@@ -214,22 +228,24 @@ export async function fetchLabState() {
                             }
                         }
                     }
+                    else if (justLeftTeleop && hasPose && !store.isDragging) {
+                        store.ghostState[name] = { ...dp };
+                        if (typeof store.ghostState[name].rotation !== 'number') {
+                            store.ghostState[name].rotation = 0;
+                        }
+                        if (store.selectedComponent === name && document.getElementById('ctx-x')) {
+                            const ctxX = document.getElementById('ctx-x');
+                            const ctxY = document.getElementById('ctx-y');
+                            const ctxRot = document.getElementById('ctx-rot');
+                            if (ctxX) ctxX.value = store.ghostState[name].x.toFixed(1);
+                            if (ctxY) ctxY.value = store.ghostState[name].y.toFixed(1);
+                            if (ctxRot) ctxRot.value = store.ghostState[name].rotation.toFixed(1);
+                        }
+                    }
                 }
             });
 
             if (shouldSync) store.forceGhostSync = false;
-
-            // Phase 8b: sync ``ghost.source`` from ``tunables.teleop_active``.
-            Object.entries(store.labState.components).forEach(([name, comp]) => {
-                const ghost = store.ghostState[name];
-                if (!ghost || typeof ghost !== 'object') return;
-                const teleopActive = !!(comp && comp.tunables && comp.tunables.teleop_active);
-                if (teleopActive) {
-                    ghost.source = 'teleop';
-                } else if (ghost.source === 'teleop') {
-                    delete ghost.source;
-                }
-            });
         }
 
         // Rebuild context panel when EITHER the selected component's placement label OR the
@@ -251,12 +267,10 @@ export async function fetchLabState() {
                 store.contextPanelStatusSnapshot != null &&
                 store.contextPanelStatusSnapshot !== statusKey &&
                 rawStatus !== 'BUSY';
-            const dataKey = JSON.stringify({
-                tunables: compCtx.tunables || {},
-                measurables: compCtx.measurables || {},
-            });
+            const dataKey = componentDataSnapshot(compCtx);
             const dataChanged =
                 store.contextPanelDataSnapshot != null &&
+                dataKey != null &&
                 store.contextPanelDataSnapshot !== dataKey;
             if (placementChanged || statusChanged || dataChanged) {
                 if (placementChanged && isOnTableComponent(compCtx) && !store.isDragging) {
@@ -271,13 +285,6 @@ export async function fetchLabState() {
                 store.contextPanelDataSnapshot = dataKey;
             }
         }
-        // Only snapshot stable states so a transient BUSY in-between doesn't "use up" the real
-        // transition (IDLE → BUSY → HOLDING should still rebuild once on the HOLDING edge).
-        if (rawStatus !== 'BUSY') {
-            store.contextPanelStatusSnapshot = statusKey;
-        }
-
-        store.previousSystemStatus = store.labState.system_status;
 
         // Clear in-flight overlays once the system has settled into any stable (non-BUSY,
         // non-OPTIMIZING) state. PICK_COMPONENT and HOVER land in HOLDING (not IDLE), so gating
@@ -290,6 +297,15 @@ export async function fetchLabState() {
             store.pendingCommands.clear();
             store.pendingActions.clear();
         }
+        syncMotorActionStatuses();
+        // Only snapshot stable states so a transient BUSY in-between doesn't "use up" the real
+        // transition (IDLE → BUSY → HOLDING should still rebuild once on the HOLDING edge).
+        if (rawStatus !== 'BUSY') {
+            store.contextPanelStatusSnapshot = statusKey;
+        }
+
+        store.previousSystemStatus = store.labState.system_status;
+        store.previousTeleopReadyTags = teleopReadyNow;
         if (store.labState.system_status === 'IDLE') {
             if (store.isOptimizing) {
                 store.isOptimizing = false;

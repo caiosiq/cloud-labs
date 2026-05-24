@@ -11,11 +11,11 @@ state ownership, refusal logic, status transitions, snapshot load
 merging, motor-rotation injection, holding-field bookkeeping -- lives
 here.
 
-Architectural rules (enforced by the lints in
-``backend/tests/test_lab_primitives.py``):
+Architectural rules (enforced by ``lab_model.platform`` integrity checks
+and hook conventions documented in ``lab_communicator/README.md``):
 
-- ``shared/`` modules can be imported here; ``real/`` and ``mock/``
-  cannot. Any cross-backend coupling lives in ``shared/``.
+- ``lab_communicator/shared/`` config modules can be imported here;
+  ``real/`` and ``mock/`` must not import each other.
 - Primitive hook implementations in ``real/`` and ``mock/`` (the
   ``_primitive_*`` methods on the class, plus the ``primitive_*``
   free functions in ``primitives.py`` they delegate to) MUST NOT
@@ -29,87 +29,72 @@ from __future__ import annotations
 import json
 import os
 import threading
-import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from lab_model.component_model import (
+from lab_model.domain.component import (
     PRESENCE_BREADBOARD,
     default_measurables,
     default_tunables,
     get_measurables,
+    get_telemetry,
     get_tunables,
     is_on_table,
     is_stored,
     new_component_entry,
+    normalize_components_map,
 )
-from lab_model.holding import (
+from lab_model.domain.holding import (
     DEFAULT_HOVER_Z_MM,
     SYSTEM_STATUS_BUSY,
     SYSTEM_STATUS_HOLDING,
     SYSTEM_STATUS_IDLE,
-    SYSTEM_STATUS_OPTIMIZING,
     clear_holding,
-    confirm_holding_tag as _confirm_holding_tag_helper,
     empty_holding,
     get_holding,
-    is_holding,
     set_holding,
 )
+from lab_model.orchestration.teleop_live_pose import TeleopLivePoseStore
 from lab_model import motor_rotation_store as motor_rot
 
-from lab_model.storage_region import (
-    STORAGE_NOMINAL_ROTATION_DEG,
-    find_storage_slot_and_center,
-    is_placed_region,
-    nominal_center_pose_for_stored_entry,
-)
+from lab_model.domain.storage_region import find_storage_slot_and_center
 
-from lab_communicator.shared.catalog_lookup import (
+from lab_model.catalog.lookup import (
     catalog_wh as _catalog_wh_pure,
     motor_catalog_ok as _motor_catalog_ok_pure,
 )
-from lab_communicator.shared.commits import (
-    commit_affirm_placed,
-    commit_hover,
-    commit_move_to_breadboard,
-    commit_move_to_storage,
-    commit_observed_camera_image,
-    commit_observed_measurables,
-    commit_optimization_complete,
-    commit_pick,
-    commit_place_from_hover,
-    commit_scan_rotation,
-    commit_teleop_end,
-    commit_teleop_jog,
-    commit_teleop_start,
-    null_measurables_for_targets,
-    sweep_stale_teleop_leases,
+from lab_model.orchestration import (
+    TeleopController,
+    run_affirm_placed_at_current,
+    run_confirm_holding_tag,
+    run_end_live_feed,
+    run_hover_component,
+    run_move_component,
+    run_move_motor,
+    run_optimize_component,
+    run_pick_component,
+    run_place_from_hover,
+    run_place_from_storage,
+    run_recenter_stored_in_inventory,
+    run_record_measurables,
+    run_repack_storage_slot,
+    run_scan_rotate_in_place,
+    run_start_live_feed,
+    run_store_component,
 )
-from lab_communicator.shared.motor_state import (
+from lab_model.state.commits import (
+    commit_observed_camera_image,
+    null_measurables_for_targets,
+)
+from lab_model.state.motor_state import (
     inject_motor_rotations_into_state,
     persist_motor_rotations_from_component,
 )
-from lab_communicator.shared.snapshot import (
+from lab_model.state.snapshot import (
     LabPose,
     merge_snapshot_components,
     normalize_loaded_state,
 )
-from lab_communicator.shared.state_machine import (
-    refuse_if_any_teleop_active,
-    refuse_if_holding,
-    refuse_if_holding_other_tag,
-    refuse_if_in_storage_quadrant,
-    refuse_if_not_holding,
-    refuse_if_not_in_state,
-    refuse_if_not_on_breadboard,
-    refuse_if_not_stored,
-    refuse_if_status_not_idle,
-    refuse_if_stored,
-    refuse_if_teleop_active,
-    refuse_if_z_lab_out_of_bounds,
-)
-
 
 class LabCommunicator:
     """Concrete template: owns state + orchestrates every primitive.
@@ -175,14 +160,27 @@ class LabCommunicator:
             "holding": empty_holding(),
         }
         self.catalog_map = {}
-        # Phase 8: lazy TELEOP stale-lease sweeper. The thread is started on
-        # the first ``start_teleop`` call (no overhead for processes that
-        # never use teleop). ``_teleop_sweeper_stop`` lets tests tear down
-        # the daemon cleanly between fixtures.
-        self._teleop_sweeper_thread: Optional[threading.Thread] = None
-        self._teleop_sweeper_stop: threading.Event = threading.Event()
-        self._teleop_sweeper_ttl_ms: int = 3000
-        self._teleop_sweeper_tick_ms: int = 500
+        self._teleop_live_pose = TeleopLivePoseStore(
+            on_motion_idle=self._on_teleop_motion_idle,
+        )
+        self._teleop = TeleopController(self)
+
+    def _on_teleop_motion_idle(self, tag_id: str) -> None:
+        with self._state_lock:
+            from lab_model.state.commits import (
+                commit_teleop_command_idle,
+                commit_teleop_session_pose,
+            )
+
+            final_pose = self._teleop_live_pose.get_pose(tag_id)
+            if final_pose:
+                commit_teleop_session_pose(self.current_state, tag_id, final_pose)
+            commit_teleop_command_idle(self.current_state, tag_id)
+            self.current_state["last_updated"] = datetime.now().isoformat()
+        self._persist_state()
+
+    def get_teleop_live_pose(self, tag_id: str) -> Optional[Dict[str, Any]]:
+        return self._teleop_live_pose.get_pose(tag_id)
 
     # ---------------------------------------------------------------
     # Catalog accessors
@@ -196,7 +194,7 @@ class LabCommunicator:
         via :meth:`~lab_communicator.mock.communicator.MockLabCommunicator._load_catalog`
         when primitives need a fresh mirror.
         """
-        from lab_communicator.shared.catalog_bundle import merged_catalog_rows
+        from lab_model.catalog.bundle import merged_catalog_rows
 
         try:
             return merged_catalog_rows()
@@ -242,13 +240,15 @@ class LabCommunicator:
 
         - Acquires the state lock for the copy.
         - Injects software motor angles into
-          ``components[*].measurables.pose.motor_rotations`` and
-          ``components[*].tunables.nominal_motor_positions``.
+          ``statecontrol.measurables.pose.motor_rotations`` (readback).
+          Seeds missing ``statecontrol.tunables.nominal_motor_positions``
+          keys only — never overwrites committed setpoints.
         - Normalizes ``state["holding"]`` so the UI never sees
           ``undefined`` for held tag / requires_operator_confirm.
         """
         with self._state_lock:
             state = json.loads(json.dumps(self.current_state))
+        normalize_components_map(state.get("components") or {})
         inject_motor_rotations_into_state(state, self._catalog_meta_for_tag)
         get_holding(state)  # normalizes in-place
         return state
@@ -265,6 +265,12 @@ class LabCommunicator:
         comp = (st.get("components") or {}).get(tag_id)
         return get_measurables(comp) if isinstance(comp, dict) else {}
 
+    def return_telemetry_for_tag(self, tag_id: str) -> Dict[str, Any]:
+        """Saved telemetry slice (teleop + live_feed session state)."""
+        st = self.get_lab_state()
+        comp = (st.get("components") or {}).get(tag_id)
+        return get_telemetry(comp) if isinstance(comp, dict) else {}
+
     # Legacy aliases preserved for backward compatibility.
     def get_tunables_for_tag(self, tag_id: str) -> Dict[str, Any]:
         return self.return_tunables_for_tag(tag_id)
@@ -273,67 +279,8 @@ class LabCommunicator:
         return self.return_measurables_for_tag(tag_id)
 
     async def record_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
-        """Trigger a fresh measurement of ``tag_id`` and return its measurables.
-
-        Template method:
-
-        1. Refuse if the tag is unknown to current_state.
-        2. Refuse if the tag is currently in TELEOP (recording would
-           contradict the Golden Rule §3.2: while the operator is jogging,
-           measurables are null; press END_TELEOP first, then RECORD).
-        3. Delegate to :meth:`_primitive_record_measurables`. The hook
-           inspects the catalog ``type`` and may capture a camera frame
-           (real lab) or a synthetic frame (mock UI demo); on success
-           it returns a ``{"path", "source", "cam_id", "format"}`` dict.
-        4. If the hook returned data, commit it under the lock to
-           ``measurables.camera_image`` and persist.
-        5. Always return the (possibly updated) saved measurables.
-        """
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(tag_id)
-        if not isinstance(entry, dict):
-            return {}
-        refusal = refuse_if_teleop_active(
-            self.current_state, tag_id, primitive_name="record_measurables"
-        )
-        if refusal:
-            print(
-                f"{self.log_prefix} Refusing record_measurables: {refusal.reason}"
-            )
-            return self.return_measurables_for_tag(tag_id)
-
-        catalog_meta = self._catalog_meta_for_tag(tag_id) or {}
-        try:
-            captured = await self._primitive_record_measurables(tag_id, catalog_meta)
-        except Exception as e:  # noqa: BLE001 -- hook failures shouldn't kill UI
-            print(f"{self.log_prefix} record_measurables_for_tag failed: {e}")
-            captured = None
-
-        if isinstance(captured, dict):
-            nested = captured.get("measurables")
-            if isinstance(nested, dict):
-                patch = dict(nested)
-            elif captured.get("path"):
-                patch = {
-                    "camera_image": {
-                        "path": str(captured["path"]),
-                        "source": str(captured.get("source") or ""),
-                        "cam_id": int(captured.get("cam_id") or 0),
-                        "format": str(captured.get("format") or "png"),
-                    }
-                }
-            else:
-                patch = {
-                    k: v for k, v in captured.items() if v is not None
-                }
-            if patch:
-                with self._state_lock:
-                    commit_observed_measurables(
-                        self.current_state, tag_id, patch
-                    )
-                    self.current_state["last_updated"] = datetime.now().isoformat()
-                self._persist_state()
-        return self.return_measurables_for_tag(tag_id)
+        """Trigger a fresh measurement — see :func:`lab_model.orchestration.run_record_measurables`."""
+        return await run_record_measurables(self, tag_id)
 
     async def _primitive_record_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]
@@ -373,7 +320,7 @@ class LabCommunicator:
         """Phase 3 / Golden Rule: null measurables for the targeted tags.
 
         Thin wrapper around
-        :func:`lab_communicator.shared.commits.null_measurables_for_targets`
+        :func:`lab_model.state.commits.null_measurables_for_targets`
         that acquires the state lock, bumps ``last_updated``, and
         optionally persists. Call this **immediately before**
         ``_set_status(BUSY)`` / ``_set_status(OPTIMIZING)`` for every
@@ -429,260 +376,66 @@ class LabCommunicator:
             self._persist_state()
 
     # ---------------------------------------------------------------
-    # Phase 8: per-component TELEOP orchestrators
+    # Phase 8: per-component TELEOP (delegates to lab_model.orchestration)
     # ---------------------------------------------------------------
 
-    def _teleop_now_ms(self) -> float:
-        """Wall-clock ms used for ``teleop_last_jog_ts`` and sweeper TTL math.
-
-        Kept as a method (not a free function) so tests can monkeypatch
-        a fake clock when verifying the stale-lease sweeper without
-        sleeping for real seconds.
-        """
-        return time.time() * 1000.0
-
-    def _read_teleop_safety(self) -> Tuple[bool, int]:
-        """Pull ``(require_lab_idle, teleop_ttl_ms)`` from the manifest.
-
-        Defensive against unbootstrapped manifests: tests that construct
-        a bare ``LabCommunicator`` get the conservative defaults
-        ``(False, 3000)`` rather than a RuntimeError. The defaults match
-        :class:`LabViewManifest`.
-        """
-        try:
-            from lab_communicator.shared.lab_view_config import get_lab_manifest
-
-            m = get_lab_manifest()
-            return (bool(m.teleop_require_lab_idle), int(m.teleop_ttl_ms))
-        except Exception:
-            return (False, 3000)
-
-    def _refuse_teleop_start(self, target_id: str) -> Optional[str]:
-        """Compose the START_TELEOP refusal ladder. Returns a reason or None.
-
-        Order mirrors §16.5: per-component gates first, then lab-wide
-        gates, then the optional ``require_lab_idle`` knob. Idempotent
-        re-start of an already-leased component is allowed at the
-        orchestrator level (handled before this helper runs), so we
-        only check for *other* components' leases here.
-        """
-        r = refuse_if_not_in_state(self.current_state, target_id, primitive_name="start_teleop")
-        if r:
-            return r.reason
-        r = refuse_if_stored(self.current_state, target_id, primitive_name="start_teleop")
-        if r:
-            return r.reason
-        # One-at-a-time per §16.5: another component already teleoped blocks us.
-        r = refuse_if_any_teleop_active(
-            self.current_state, primitive_name="start_teleop", exclude_tag=target_id
-        )
-        if r:
-            return r.reason
-        require_idle, _ = self._read_teleop_safety()
-        if require_idle:
-            r = refuse_if_status_not_idle(self.current_state, primitive_name="start_teleop")
-            if r:
-                return r.reason
-        else:
-            # Even without ``require_lab_idle``: never start teleop on top
-            # of a heavy primitive owning the same component. BUSY/OPTIMIZING
-            # mean some automated motion is in flight; the operator should
-            # wait for it. (Per §16.5, teleop on a *different* component
-            # while BUSY/OPTIMIZING runs elsewhere is still allowed; we
-            # don't refuse the lab-wide status in that case.)
-            status = self.current_state.get("system_status") or SYSTEM_STATUS_IDLE
-            if status in (SYSTEM_STATUS_BUSY, SYSTEM_STATUS_OPTIMIZING):
-                # If status was set by a primitive that targeted *this* tag,
-                # the per-component motion will null its measurables and a
-                # subsequent jog would race. We can't easily tell whose
-                # status this is from here, so be conservative: refuse on
-                # same-component BUSY by looking at the targets the
-                # primitives stamp. For now, just refuse the lab-wide status
-                # when it's not IDLE/HOLDING. HOLDING is fine -- you can
-                # teleop in-air.
-                return (
-                    f"system_status={status!r}; cannot start_teleop while the "
-                    f"lab is busy. Wait for the current operation to finish."
-                )
-        return None
-
     async def start_teleop(self, target_id: str) -> None:
-        """Acquire the per-component TELEOP lease for ``target_id``.
-
-        See ``universal_component_architecture.md`` §16.5 for the
-        concurrency policy. Steps:
-
-        1. Refuse via :meth:`_refuse_teleop_start` (storage, other
-           lease, lab-wide knobs, etc).
-        2. If already teleop_active for this tag (idempotent re-start),
-           just re-stamp the timestamp and return. This is the recovery
-           path for a UI that hits "Start teleop" twice after a transient
-           network blip.
-        3. Otherwise commit ``teleop_active=True`` and stamp ts.
-        4. Null measurables (Golden Rule §3.2).
-        5. Lazily start the stale-lease sweeper.
-        6. Persist.
-        """
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-            if isinstance(entry, dict):
-                tun = entry.get("tunables") or {}
-                already = bool(tun.get("teleop_active"))
-            else:
-                already = False
-
-            if not already:
-                reason = self._refuse_teleop_start(target_id)
-                if reason:
-                    raise RuntimeError(reason)
-
-            ok = commit_teleop_start(
-                self.current_state, target_id, now_ms=self._teleop_now_ms()
-            )
-            if not ok:
-                raise RuntimeError(
-                    f"start_teleop: component {target_id!r} disappeared between "
-                    f"refusal check and commit (race)"
-                )
-            self.current_state["last_updated"] = datetime.now().isoformat()
-
-        # Golden Rule §3.2: stale measurables disappear when the part
-        # starts moving (here, when the operator takes the wheel).
-        # Idempotent re-starts also null -- if the operator restarted
-        # teleop, any measurables captured between sessions are stale.
-        self._null_measurables_for_targets([target_id], persist=False)
-        self._maybe_start_teleop_sweeper()
-        self._persist_state()
+        await self._teleop.start(target_id)
 
     async def end_teleop(self, target_id: str) -> None:
-        """Release the TELEOP lease for ``target_id`` (idempotent).
-
-        Idempotent by design: ending a session that's not active is a
-        no-op success. This is the typical disconnect path -- the UI
-        always fires END_TELEOP on page unload, even if the sweeper
-        already cleared the flag. Measurables stay null; the operator
-        records explicitly with RECORD_MEASURABLES.
-        """
-        with self._state_lock:
-            commit_teleop_end(self.current_state, target_id)
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        self._persist_state()
+        await self._teleop.end(target_id)
 
     async def teleop_jog(self, target_id: str, jog: Dict[str, Any]) -> None:
-        """Apply one absolute jog frame to ``target_id``.
+        await self._teleop.jog(target_id, jog)
 
-        ``jog`` is the validated :class:`TeleopJogParameters` dict (only
-        non-None keys present): ``nominal_pose`` and/or
-        ``nominal_motor_positions``. Refuses if the target isn't currently
-        teleop_active -- jogs require an explicit START_TELEOP first so
-        the operator can't silently move a part they think is idle.
+    async def teleop_goto(self, target_id: str, body: Dict[str, Any]) -> None:
+        await self._teleop.goto(target_id, body)
 
-        In Phase 8a the jog updates state-of-intent (``tunables.*``)
-        only; we do not forward to lab_automation hardware. The UI
-        reads back the new ``nominal_pose`` on its next poll and the
-        canvas re-renders. Phase 8b/8c will add hardware forwarding
-        through the same primitive once the UI surface stabilizes.
-        """
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-            if not isinstance(entry, dict):
-                raise RuntimeError(
-                    f"teleop_jog: {target_id!r} not found in lab state."
-                )
-            tun = entry.get("tunables") or {}
-            if not bool(tun.get("teleop_active")):
-                raise RuntimeError(
-                    f"teleop_jog: {target_id!r} is not in TELEOP; "
-                    f"call START_TELEOP first."
-                )
-            ok = commit_teleop_jog(
-                self.current_state,
-                target_id,
-                now_ms=self._teleop_now_ms(),
-                nominal_pose=jog.get("nominal_pose"),
-                nominal_motor_positions=jog.get("nominal_motor_positions"),
-            )
+    async def _primitive_prepare_teleop(self, target_id: str) -> Tuple[bool, str]:
+        """Lab-specific setup before TELEOP controls become ready."""
+        return True, "ok"
+
+    async def start_live_feed(self, target_id: str, *, channel: str = "stream") -> None:
+        await run_start_live_feed(self, target_id, channel=channel)
+
+    async def end_live_feed(self, target_id: str, *, channel: str = "all") -> None:
+        await run_end_live_feed(self, target_id, channel=channel)
+
+    async def _primitive_start_live_feed(
+        self,
+        target_id: str,
+        *,
+        channel: str,
+        backend: str,
+        cam_id: Optional[int],
+    ) -> Tuple[bool, str]:
+        if backend == "overhead":
+            return True, "ok"
+        if backend == "table_cam" and cam_id is not None:
+            ok, msg = self.table_cam_connect(int(cam_id))
             if not ok:
-                raise RuntimeError(
-                    f"teleop_jog: commit failed for {target_id!r} "
-                    f"(state changed under us?)"
-                )
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        self._persist_state()
+                return False, msg
+            return self.table_cam_live_set(int(cam_id), True)
+        return False, f"unsupported live feed backend {backend!r}"
 
-    def _maybe_start_teleop_sweeper(self) -> None:
-        """Lazily start the daemon thread that clears stale TELEOP leases.
+    async def _primitive_end_live_feed(
+        self,
+        target_id: str,
+        *,
+        channel: str,
+        catalog_meta: Dict[str, Any],
+    ) -> Tuple[bool, str]:
+        from lab_model.catalog.schema import resolve_cam_id_for_tag, resolve_telemetry_stream_backend
 
-        Idempotent (the second call is a no-op). Reads the TTL from the
-        manifest at start time; later changes to the manifest only take
-        effect after :meth:`stop_teleop_sweeper` + a new START_TELEOP.
-        A TTL of 0 disables the sweeper entirely (operator must always
-        END_TELEOP explicitly).
-        """
-        if self._teleop_sweeper_thread is not None and self._teleop_sweeper_thread.is_alive():
-            return
-        _, ttl_ms = self._read_teleop_safety()
-        if ttl_ms <= 0:
-            return
-        self._teleop_sweeper_ttl_ms = int(ttl_ms)
-        self._teleop_sweeper_stop.clear()
-        t = threading.Thread(
-            target=self._teleop_sweeper_loop,
-            name="teleop-sweeper",
-            daemon=True,
-        )
-        self._teleop_sweeper_thread = t
-        t.start()
+        backend = resolve_telemetry_stream_backend(catalog_meta or {})
+        cam_id = resolve_cam_id_for_tag(catalog_meta or {})
+        if backend == "table_cam" and cam_id is not None:
+            self.table_cam_live_set(int(cam_id), False)
+            self.table_cam_disconnect(int(cam_id))
+        return True, "ok"
 
     def stop_teleop_sweeper(self, *, join_timeout_s: float = 1.0) -> None:
-        """Stop the stale-lease sweeper (used by tests / shutdown).
-
-        No-op if the sweeper isn't running. Joining with a small timeout
-        prevents test teardown from hanging if the thread is mid-sleep.
-        """
-        self._teleop_sweeper_stop.set()
-        t = self._teleop_sweeper_thread
-        if t is not None and t.is_alive():
-            t.join(timeout=join_timeout_s)
-        self._teleop_sweeper_thread = None
-
-    def _teleop_sweeper_loop(self) -> None:
-        """Background loop: every ``_teleop_sweeper_tick_ms`` ms, sweep stale leases.
-
-        Each tick acquires the state lock briefly to call
-        :func:`sweep_stale_teleop_leases`; cleared tags are logged.
-        Persists once per tick *only* if anything was cleared, so the
-        common "no stale leases" case does zero disk I/O.
-        """
-        tick_s = max(0.05, float(self._teleop_sweeper_tick_ms) / 1000.0)
-        while not self._teleop_sweeper_stop.is_set():
-            try:
-                with self._state_lock:
-                    cleared = sweep_stale_teleop_leases(
-                        self.current_state,
-                        now_ms=self._teleop_now_ms(),
-                        ttl_ms=float(self._teleop_sweeper_ttl_ms),
-                    )
-                    if cleared:
-                        self.current_state["last_updated"] = (
-                            datetime.now().isoformat()
-                        )
-                if cleared:
-                    print(
-                        f"{self.log_prefix} teleop sweeper cleared stale leases: "
-                        f"{cleared}"
-                    )
-                    try:
-                        self._persist_state()
-                    except Exception as e:  # noqa: BLE001 -- sweeper must not die
-                        print(
-                            f"{self.log_prefix} teleop sweeper persist failed: {e}"
-                        )
-            except Exception as e:  # noqa: BLE001 -- sweeper must not die
-                print(f"{self.log_prefix} teleop sweeper tick failed: {e}")
-            # Use the event's wait() so stop_teleop_sweeper() wakes us
-            # immediately instead of blocking for the full tick.
-            self._teleop_sweeper_stop.wait(timeout=tick_s)
+        self._teleop.stop_sweeper(join_timeout_s=join_timeout_s)
 
     # ---------------------------------------------------------------
     # Persistence + post-snapshot hooks (subclasses override)
@@ -897,56 +650,8 @@ class LabCommunicator:
     async def move_motor(
         self, target_id: str, motor_id: int, distance: float
     ) -> None:
-        """Rotate a component's motor by ``distance`` degrees (relative).
-
-        Template method:
-
-        1. Refuse if STORED.
-        2. Validate the catalog declares this motor.
-        3. Status BUSY.
-        4. Delegate the hardware step to :meth:`_primitive_move_motor`.
-        5. On success, advance ``motor_rotation_store`` by ``distance``.
-        6. Status IDLE in ``finally`` (so a hardware failure rolls back
-           the BUSY flag).
-        """
-        print(
-            f"{self.log_prefix} Moving motor {motor_id} of {target_id} "
-            f"by {distance} (RELATIVE)..."
-        )
-        with self._state_lock:
-            current_snapshot = self.current_state
-
-        refusal = refuse_if_stored(
-            current_snapshot, target_id, primitive_name="move motor"
-        )
-        if refusal:
-            print(f"{self.log_prefix} Refusing motor move: {refusal.reason}")
-            return
-        refusal = refuse_if_teleop_active(
-            current_snapshot, target_id, primitive_name="move motor"
-        )
-        if refusal:
-            print(f"{self.log_prefix} Refusing motor move: {refusal.reason}")
-            return
-
-        if not self._motor_catalog_ok(target_id, motor_id):
-            mids = (self._catalog_meta_for_tag(target_id) or {}).get("motor_ids") or []
-            print(
-                f"{self.log_prefix} Error: motor_id {motor_id} invalid for "
-                f"{target_id} (motor_ids={mids})."
-            )
-            return
-
-        self._null_measurables_for_targets([target_id], persist=False)
-        self._set_status(SYSTEM_STATUS_BUSY)
-        try:
-            await self._primitive_move_motor(target_id, motor_id, float(distance))
-            motor_rot.add_delta(target_id, motor_id, float(distance))
-            print(f"{self.log_prefix} Motor moved.")
-        except Exception as e:
-            print(f"{self.log_prefix} Motor move failed: {e}")
-        finally:
-            self._set_status(SYSTEM_STATUS_IDLE)
+        """Rotate a motor — see :func:`lab_model.orchestration.run_move_motor`."""
+        await run_move_motor(self, target_id, motor_id, distance)
 
     async def _primitive_move_motor(
         self, target_id: str, motor_id: int, distance: float
@@ -1001,76 +706,16 @@ class LabCommunicator:
     async def set_motor_setpoint(
         self, target_id: str, motor_id: int, angle_deg: float
     ) -> None:
-        """Commit ``tunables.nominal_motor_positions[motor_id]`` and jog hardware to match.
+        """Commit ``tunables.nominal_motor_positions`` (see ``lab_model.tunables.nominal_motor_positions``)."""
+        from lab_model.tunables import nominal_motor_positions as motor_tunable
 
-        Computes ``delta = angle_deg - tracked_angle`` and delegates the
-        relative move to :meth:`move_motor` when ``|delta|`` is non-trivial.
-        When already at the setpoint, only the tunable intent is updated.
-        """
-        if not self._motor_catalog_ok(target_id, motor_id):
-            print(
-                f"{self.log_prefix} set_motor_setpoint: invalid tag or "
-                f"motor_id for {target_id} m{motor_id}"
-            )
-            return
-        angle = float(angle_deg)
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-            if isinstance(entry, dict):
-                tun = entry.setdefault("tunables", {})
-                if isinstance(tun, dict):
-                    nmp = tun.setdefault("nominal_motor_positions", {})
-                    if isinstance(nmp, dict):
-                        nmp[str(int(motor_id))] = angle
-                self.current_state["last_updated"] = datetime.now().isoformat()
-        self._persist_state()
-
-        cur = motor_rot.get_angle(target_id, motor_id)
-        delta = angle - cur
-        if abs(delta) < 1e-9:
-            print(
-                f"{self.log_prefix} Motor {motor_id} on {target_id}: "
-                f"setpoint {angle:g}° (intent only, already at θ)."
-            )
-            return
-        await self.move_motor(target_id, motor_id, delta)
+        await motor_tunable.apply(self, target_id, int(motor_id), float(angle_deg))
 
     async def set_exposure_time_ms(self, target_id: str, exposure_time_ms: float) -> None:
-        """Commit ``tunables.exposure_time_ms`` and forward to table-cam when applicable."""
-        exp_ms = float(exposure_time_ms)
-        if exp_ms <= 0:
-            print(f"{self.log_prefix} set_exposure_time_ms: invalid {exp_ms}")
-            return
+        """Commit ``tunables.exposure_time_ms`` (see ``lab_model.tunables.exposure_time_ms``)."""
+        from lab_model.tunables import exposure_time_ms as exposure_tunable
 
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id)
-            if isinstance(entry, dict):
-                tun = entry.setdefault("tunables", {})
-                if isinstance(tun, dict):
-                    tun["exposure_time_ms"] = exp_ms
-                self.current_state["last_updated"] = datetime.now().isoformat()
-        self._persist_state()
-
-        try:
-            from lab_communicator.shared.catalog_schema import resolve_cam_id_for_tag
-
-            row = self._catalog_meta_for_tag(target_id) or {}
-            cam_id = resolve_cam_id_for_tag(row)
-        except Exception:
-            cam_id = None
-
-        if cam_id is not None:
-            exp_s = exp_ms / 1000.0
-            ok, msg = self.table_cam_send_vexp(int(cam_id), exp_s)
-            print(
-                f"{self.log_prefix} set_exposure_time_ms {target_id}: "
-                f"{exp_ms:g} ms (cam {cam_id}) ok={ok} {msg}"
-            )
-        else:
-            print(
-                f"{self.log_prefix} set_exposure_time_ms {target_id}: "
-                f"{exp_ms:g} ms (intent only, no cam_id)"
-            )
+        await exposure_tunable.apply(self, target_id, float(exposure_time_ms))
 
     async def _primitive_motor_set_zero(self, target_id: str, motor_id: int) -> None:
         """Hardware step for :meth:`motor_set_zero` (default no-op).
@@ -1100,228 +745,24 @@ class LabCommunicator:
     async def move_component(
         self, target_id: str, target_pose: Dict[str, float]
     ) -> None:
-        """Move a placed (BREADBOARD) part to a new (XY, rotation) on the table.
-
-        Template method:
-
-        1. Refuse if STORED (use ``place_from_storage`` instead).
-        2. Refuse if the target XY falls in storage Q3 (use
-           ``store_component`` instead).
-        3. Status BUSY.
-        4. Delegate to ``_primitive_move_component(target_id, lab_pose) -> Optional[LabPose]``.
-        5. Commit BREADBOARD presence + MANUAL placement at the
-           commanded pose; ``measurables.pose`` may carry a noisy
-           override from the hook (mock).
-        6. Status IDLE in ``finally`` (so a hardware failure rolls back).
-        """
-        print(f"{self.log_prefix} Move {target_id} -> {target_pose}")
-        with self._state_lock:
-            snapshot = self.current_state
-
-        for refusal in (
-            refuse_if_not_in_state(snapshot, target_id, primitive_name="move"),
-            refuse_if_stored(snapshot, target_id, primitive_name="move"),
-            refuse_if_teleop_active(snapshot, target_id, primitive_name="move"),
-        ):
-            if refusal:
-                print(f"{self.log_prefix} Refusing move: {refusal.reason}")
-                return
-
-        target_pose = target_pose or {}
-        tx = float(target_pose.get("target_x", target_pose.get("x", 0.0)))
-        ty = float(target_pose.get("target_y", target_pose.get("y", 0.0)))
-        trot = float(target_pose.get("rotation", 0.0))
-
-        bound = refuse_if_in_storage_quadrant(tx, ty, primitive_name="move")
-        if bound:
-            print(f"{self.log_prefix} Refusing move: {bound.reason}")
-            return
-
-        commanded = LabPose(x=tx, y=ty, z=0.0, rotation=trot)
-        await self._run_move_to_breadboard(target_id, commanded)
+        await run_move_component(self, target_id, target_pose)
 
     async def store_component(self, target_id: str) -> None:
-        """Move a BREADBOARD part into the storage quadrant at a packed slot.
-
-        Template method:
-
-        1. Refuse if not on the breadboard.
-        2. Allocate the next free storage slot via
-           :func:`find_storage_slot_and_center` (catalog-aware packing).
-        3. Status BUSY → ``_primitive_move_component`` → commit STORAGE presence + slot.
-        4. Notify the storage-intent layer (real persists this; mock
-           ignores).
-        5. Status IDLE in ``finally``.
-        """
-        print(f"{self.log_prefix} Store {target_id}")
-        with self._state_lock:
-            snapshot = self.current_state
-
-        refusal = refuse_if_not_on_breadboard(
-            snapshot, target_id, primitive_name="store"
-        )
-        if refusal:
-            print(f"{self.log_prefix} Refusing store: {refusal.reason}")
-            return
-        refusal = refuse_if_teleop_active(
-            snapshot, target_id, primitive_name="store"
-        )
-        if refusal:
-            print(f"{self.log_prefix} Refusing store: {refusal.reason}")
-            return
-
-        slot = self._allocate_storage_slot(target_id)
-        if slot is None:
-            print(f"{self.log_prefix} Refusing store: no free storage slot in Q3.")
-            return
-        sx, sy, si, sj = slot
-        commanded = LabPose(
-            x=sx, y=sy, z=0.0, rotation=STORAGE_NOMINAL_ROTATION_DEG
-        )
-        await self._run_move_to_storage(target_id, commanded, si, sj)
+        await run_store_component(self, target_id)
 
     async def place_from_storage(
         self, target_id: str, target_pose: Dict[str, Any]
     ) -> None:
-        """Place a STORED part onto the breadboard at the given lab pose.
-
-        Template method:
-
-        1. Refuse if not currently STORED.
-        2. Refuse if the target XY is inside storage Q3 (use
-           ``recenter_stored_in_inventory`` if the part stays stored).
-        3. Status BUSY → ``_primitive_move_component`` → commit BREADBOARD.
-        4. Clear the storage-intent record for this tag (real-only;
-           mock no-op).
-        """
-        print(f"{self.log_prefix} PlaceFromStorage {target_id} -> {target_pose}")
-        with self._state_lock:
-            snapshot = self.current_state
-
-        refusal = refuse_if_not_stored(
-            snapshot, target_id, primitive_name="place_from_storage"
-        )
-        if refusal:
-            print(f"{self.log_prefix} Refusing place_from_storage: {refusal.reason}")
-            return
-        refusal = refuse_if_teleop_active(
-            snapshot, target_id, primitive_name="place_from_storage"
-        )
-        if refusal:
-            print(f"{self.log_prefix} Refusing place_from_storage: {refusal.reason}")
-            return
-
-        target_pose = target_pose or {}
-        tx = float(target_pose.get("target_x", target_pose.get("x", 0.0)))
-        ty = float(target_pose.get("target_y", target_pose.get("y", 0.0)))
-        trot = float(target_pose.get("rotation", 0.0))
-        if not is_placed_region(tx, ty):
-            print(
-                f"{self.log_prefix} Refusing place_from_storage: target "
-                f"({tx},{ty}) is inside storage quadrant."
-            )
-            return
-        commanded = LabPose(x=tx, y=ty, z=0.0, rotation=trot)
-        await self._run_move_to_breadboard(
-            target_id, commanded, exiting_storage=True
-        )
+        await run_place_from_storage(self, target_id, target_pose)
 
     async def repack_storage_slot(self, target_id: str) -> None:
-        """Move a STORED part to the next free inventory cell.
-
-        Template method: same shape as :meth:`store_component` except
-        the pre-condition is "currently STORED" rather than
-        "currently BREADBOARD". Used to compact the storage grid.
-        """
-        print(f"{self.log_prefix} RepackStorageSlot {target_id}")
-        with self._state_lock:
-            snapshot = self.current_state
-
-        refusal = refuse_if_not_stored(
-            snapshot, target_id, primitive_name="repack"
-        )
-        if refusal:
-            print(f"{self.log_prefix} Refusing repack: {refusal.reason}")
-            return
-
-        slot = self._allocate_storage_slot(target_id)
-        if slot is None:
-            print(f"{self.log_prefix} Refusing repack: no free storage slot.")
-            return
-        sx, sy, si, sj = slot
-        commanded = LabPose(
-            x=sx, y=sy, z=0.0, rotation=STORAGE_NOMINAL_ROTATION_DEG
-        )
-        await self._run_move_to_storage(target_id, commanded, si, sj)
+        await run_repack_storage_slot(self, target_id)
 
     async def recenter_stored_in_inventory(self, target_id: str) -> None:
-        """Move a STORED part to the *center* of its currently assigned cell.
-
-        Template method: differs from :meth:`repack_storage_slot` in
-        that the slot is the part's *current* cell (resolved from
-        the entry's slot metadata or its current pose-in-Q3), not the
-        next free one. Used when a stored part has drifted off-center.
-        """
-        print(f"{self.log_prefix} RecenterStored {target_id}")
-        with self._state_lock:
-            snapshot = self.current_state
-            entry = (snapshot.get("components") or {}).get(target_id)
-
-        refusal = refuse_if_not_stored(
-            snapshot, target_id, primitive_name="recenter"
-        )
-        if refusal:
-            print(f"{self.log_prefix} Refusing recenter: {refusal.reason}")
-            return
-
-        nom = nominal_center_pose_for_stored_entry(entry or {})
-        if nom is None:
-            print(
-                f"{self.log_prefix} Refusing recenter: cannot resolve storage "
-                f"cell (need slot metadata or pose in Q3)."
-            )
-            return
-        sx, sy, si, sj = nom
-        commanded = LabPose(
-            x=sx, y=sy, z=0.0, rotation=STORAGE_NOMINAL_ROTATION_DEG
-        )
-        await self._run_move_to_storage(target_id, commanded, si, sj)
+        await run_recenter_stored_in_inventory(self, target_id)
 
     async def affirm_placed_at_current(self, target_id: str) -> None:
-        """Mark a STORED part as PLACED at its current pose (no hardware move).
-
-        Resolves the case where the operator hand-moved a stored part
-        onto the breadboard manually -- the layout system needs to be
-        told to drop the storage-intent record without dispatching a
-        robot motion.
-
-        Template method:
-
-        1. Refuse if not currently STORED.
-        2. Commit: ``measurables.pose`` -> ``tunables.nominal_pose``,
-           presence STORAGE → BREADBOARD, mode = MANUAL.
-        3. Clear the storage-intent record.
-        4. Apply ``is_placed=True`` to the hardware-side component
-           (real-only; mock no-op).
-        """
-        print(f"{self.log_prefix} AffirmPlacedAtCurrent {target_id}")
-        with self._state_lock:
-            snapshot = self.current_state
-
-        refusal = refuse_if_not_stored(
-            snapshot, target_id, primitive_name="affirm_placed"
-        )
-        if refusal:
-            print(f"{self.log_prefix} Refusing affirm: {refusal.reason}")
-            return
-
-        with self._state_lock:
-            commit_affirm_placed(self.current_state, target_id)
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        self._after_move_out_of_storage(target_id)
-        self._apply_is_placed_flag(target_id, True)
-        self._persist_state()
-        print(f"{self.log_prefix} {target_id} marked PLACED at current pose")
+        await run_affirm_placed_at_current(self, target_id)
 
     async def add_component_to_state(self, component_data: Dict[str, Any]) -> None:
         """Insert a new component entry into ``current_state``.
@@ -1433,126 +874,8 @@ class LabCommunicator:
     async def optimize_component(
         self, target_id: str, strategy_name: str, params: Dict[str, Any]
     ) -> None:
-        """Optimize ``target_id`` with the named strategy.
-
-        Template method:
-
-        1. Refuse if the tag is unknown to the catalog.
-        2. Refuse if STORED.
-        3. Call :meth:`_primitive_prepare_optimization_run` to let the backend
-           create any per-run side state (real builds the per-run
-           images subdirectory and returns its basename for the UI;
-           mock returns ``None``).
-        4. Status OPTIMIZING + reset ``optimization_step`` +
-           ``optimization_run_dir = run_dir_basename`` +
-           ``optimization_target_id = target_id``.
-        5. Build the ``progress_callback(step)`` closure and pass it
-           into :meth:`_primitive_optimize_component` along with target / strategy /
-           params. The hook is free to call the callback as many
-           times as it wants; each call updates ``optimization_step``
-           under the lock and persists.
-        6. On hook success: commit the strategy mode, the score, and
-           the final pose to ``measurables.last_optimized_pose``.
-        7. ``finally``: call :meth:`_primitive_finalize_optimization_run` (real
-           tears down the Newton place hook), reset status to IDLE,
-           clear the step + run-dir fields.
-        """
-        print(
-            f"{self.log_prefix} Optimize {target_id} with {strategy_name} "
-            f"(params keys={sorted((params or {}).keys())})"
-        )
-
-        # Catalog gate first -- if the tag is unknown we don't even
-        # know what hardware to talk to. Real additionally rejects
-        # tags missing from ``component_map``; we surface that via the
-        # hook (raising in the hook lands in the orchestrator's except
-        # branch and the finally still runs).
-        if not self._catalog_meta_for_tag(target_id):
-            print(
-                f"{self.log_prefix} Refusing optimize: {target_id} not in "
-                f"catalog."
-            )
-            return
-
-        with self._state_lock:
-            snapshot = self.current_state
-        refusal = refuse_if_stored(snapshot, target_id, primitive_name="optimize")
-        if refusal:
-            print(f"{self.log_prefix} Refusing optimize: {refusal.reason}")
-            return
-        refusal = refuse_if_teleop_active(
-            snapshot, target_id, primitive_name="optimize"
-        )
-        if refusal:
-            print(f"{self.log_prefix} Refusing optimize: {refusal.reason}")
-            return
-
-        run_dir_basename = self._primitive_prepare_optimization_run(target_id, strategy_name)
-
-        with self._state_lock:
-            null_measurables_for_targets(self.current_state, [target_id])
-            self.current_state["system_status"] = SYSTEM_STATUS_OPTIMIZING
-            self.current_state["optimization_step"] = 0
-            self.current_state["optimization_run_dir"] = run_dir_basename
-            self.current_state["optimization_target_id"] = target_id
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        self._persist_state()
-
-        def progress_callback(*, step: Optional[int] = None) -> None:
-            """Closure passed to the hook for stepwise UI updates.
-
-            Currently only ``step`` is supported -- the hook signals
-            "iteration N landed" and we update ``optimization_step``
-            for the UI's progress bar. Future fields (e.g. live score)
-            can be added without changing the hook signature: keyword-
-            only args are inherently extensible.
-            """
-            with self._state_lock:
-                if step is not None:
-                    self.current_state["optimization_step"] = int(step)
-                self.current_state["last_updated"] = datetime.now().isoformat()
-            self._persist_state()
-
-        result: Optional[Dict[str, Any]] = None
-        try:
-            result = await self._primitive_optimize_component(
-                target_id=target_id,
-                strategy_name=strategy_name,
-                params=params or {},
-                progress_callback=progress_callback,
-            )
-        except Exception as e:  # noqa: BLE001 -- log + clean exit
-            print(f"{self.log_prefix} Optimization failed: {e}")
-            result = None
-
-        if isinstance(result, dict):
-            score = float(result.get("score", 1.0))
-            final_pose = result.get("final_pose")
-            with self._state_lock:
-                commit_optimization_complete(
-                    self.current_state,
-                    target_id,
-                    strategy_name=strategy_name,
-                    score=score,
-                    final_pose=final_pose if isinstance(final_pose, dict) else None,
-                )
-                self.current_state["last_updated"] = datetime.now().isoformat()
-            self._persist_state()
-
-        try:
-            self._primitive_finalize_optimization_run()
-        finally:
-            with self._state_lock:
-                self.current_state["system_status"] = SYSTEM_STATUS_IDLE
-                self.current_state["optimization_step"] = 0
-                self.current_state["optimization_run_dir"] = None
-                self.current_state["optimization_target_id"] = None
-                self.current_state["last_updated"] = datetime.now().isoformat()
-            self._persist_state()
-            print(
-                f"{self.log_prefix} Optimization complete for {target_id} "
-                f"({strategy_name})"
-            )
+        """Optimize — see :func:`lab_model.orchestration.run_optimize_component`."""
+        await run_optimize_component(self, target_id, strategy_name, params)
 
     def _primitive_prepare_optimization_run(
         self, target_id: str, strategy_name: str
@@ -1627,73 +950,6 @@ class LabCommunicator:
             comps, target_id, w, h, lambda tid: self._catalog_wh(tid)
         )
 
-    async def _run_move_to_breadboard(
-        self,
-        target_id: str,
-        commanded: LabPose,
-        *,
-        exiting_storage: bool = False,
-    ) -> None:
-        """Shared engine: BUSY → ``_primitive_move_component`` → BREADBOARD commit → IDLE."""
-        self._null_measurables_for_targets([target_id], persist=False)
-        self._set_status(SYSTEM_STATUS_BUSY)
-        actual: Optional[LabPose] = None
-        try:
-            actual = await self._primitive_move_component(target_id, commanded)
-        except Exception as e:  # noqa: BLE001 -- log + roll status
-            print(f"{self.log_prefix} Move failed: {e}")
-            self._set_status(SYSTEM_STATUS_IDLE)
-            return
-
-        with self._state_lock:
-            commit_move_to_breadboard(
-                self.current_state,
-                target_id,
-                x=commanded.x,
-                y=commanded.y,
-                rotation=commanded.rotation,
-                actual_pose=actual,
-            )
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        if exiting_storage:
-            self._after_move_out_of_storage(target_id)
-        self._apply_is_placed_flag(target_id, True)
-        self._set_status(SYSTEM_STATUS_IDLE)
-
-    async def _run_move_to_storage(
-        self,
-        target_id: str,
-        commanded: LabPose,
-        slot_i: int,
-        slot_j: int,
-    ) -> None:
-        """Shared engine: BUSY → ``_primitive_move_component`` → STORAGE commit → IDLE."""
-        self._null_measurables_for_targets([target_id], persist=False)
-        self._set_status(SYSTEM_STATUS_BUSY)
-        actual: Optional[LabPose] = None
-        try:
-            actual = await self._primitive_move_component(target_id, commanded)
-        except Exception as e:  # noqa: BLE001
-            print(f"{self.log_prefix} Move failed: {e}")
-            self._set_status(SYSTEM_STATUS_IDLE)
-            return
-
-        with self._state_lock:
-            commit_move_to_storage(
-                self.current_state,
-                target_id,
-                x=commanded.x,
-                y=commanded.y,
-                rotation=commanded.rotation,
-                slot_i=slot_i,
-                slot_j=slot_j,
-                actual_pose=actual,
-            )
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        self._after_move_to_storage(target_id, slot_i, slot_j)
-        self._apply_is_placed_flag(target_id, False)
-        self._set_status(SYSTEM_STATUS_IDLE)
-
     async def _primitive_move_component(
         self, target_id: str, commanded: LabPose
     ) -> Optional[LabPose]:
@@ -1746,75 +1002,7 @@ class LabCommunicator:
     async def pick_component(
         self, target_id: str, params: Dict[str, Any]
     ) -> None:
-        """Approach ``target_id``, close gripper, retract to safe Z.
-
-        Template method:
-
-        1. Refuse if already HOLDING (single-gripper invariant).
-        2. Refuse if STORED (use PLACE_FROM_STORAGE first).
-        3. Refuse if no entry in state.
-        4. Read commanded XY/rotation from ``measurables.pose``.
-        5. Status BUSY.
-        6. Delegate to ``_primitive_pick_component(target_id, lab_pose, params) -> float``;
-           the returned ``settled_z`` is the z_lab the lab will hold the
-           part at.
-        7. Commit HOLDING (tunables.nominal_pose, measurables.pose,
-           top-level holding) at the commanded XY/rotation and the
-           returned settled_z.
-        8. Status HOLDING. On hook failure, status rolls back to IDLE.
-        """
-        print(f"{self.log_prefix} Pick {target_id}...")
-        with self._state_lock:
-            snapshot = self.current_state
-
-        for refusal in (
-            refuse_if_holding(snapshot, primitive_name="pick"),
-            refuse_if_stored(snapshot, target_id, primitive_name="pick"),
-            refuse_if_not_in_state(snapshot, target_id, primitive_name="pick"),
-            refuse_if_teleop_active(snapshot, target_id, primitive_name="pick"),
-        ):
-            if refusal:
-                print(f"{self.log_prefix} Refusing pick: {refusal.reason}")
-                return
-
-        with self._state_lock:
-            entry = (self.current_state.get("components") or {}).get(target_id) or {}
-        pose_dict = ((entry.get("measurables") or {}).get("pose") or {})
-        commanded = LabPose(
-            x=float(pose_dict.get("x", 0.0)),
-            y=float(pose_dict.get("y", 0.0)),
-            z=0.0,  # picks ignore z_lab on input -- the hook returns settled_z
-            rotation=float(pose_dict.get("rotation", 0.0)),
-        )
-
-        # NOTE: nulling measurables must happen *after* reading pose_dict
-        # above — PICK uses measurables.pose to seed `commanded`. By the
-        # time we null, we've already extracted the values we need.
-        self._null_measurables_for_targets([target_id], persist=False)
-        self._set_status(SYSTEM_STATUS_BUSY)
-        try:
-            settled_z = await self._primitive_pick_component(target_id, commanded, params)
-        except Exception:
-            self._set_status(SYSTEM_STATUS_IDLE)
-            raise
-
-        settled_z_f = float(settled_z)
-        with self._state_lock:
-            commit_pick(
-                self.current_state,
-                target_id,
-                x=commanded.x,
-                y=commanded.y,
-                rotation=commanded.rotation,
-                settled_z=settled_z_f,
-            )
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        self._set_status(SYSTEM_STATUS_HOLDING)
-        print(
-            f"{self.log_prefix} Picked {target_id} at "
-            f"({commanded.x:.1f},{commanded.y:.1f},rot={commanded.rotation:.1f}) "
-            f"-> HOLDING @ z_lab={settled_z_f:.1f} mm"
-        )
+        await run_pick_component(self, target_id, params)
 
     async def _primitive_pick_component(
         self, target_id: str, commanded: LabPose, params: Dict[str, Any]
@@ -1831,84 +1019,7 @@ class LabCommunicator:
     async def hover_component(
         self, target_id: str, target_pose: Dict[str, float]
     ) -> None:
-        """Reposition an already-held part in mid-air.
-
-        Template method:
-
-        1. Refuse if not HOLDING.
-        2. Same-tag gate (the held tag must match ``target_id``).
-        3. Parse XY/rotation/z/speed from the input dict.
-        4. Bounds-check ``z_lab`` against ``max_safe_hover_z_lab_mm``.
-        5. Status BUSY.
-        6. Delegate to ``_primitive_hover_component(target_id, lab_pose, speed) -> Optional[LabPose]``.
-           ``None`` means "use commanded verbatim"; a value means
-           "this is what the hardware actually achieved" (mock returns
-           commanded + small Gaussian noise).
-        7. Commit HOLDING at the commanded pose; ``measurables.pose``
-           uses the actual_pose override when provided.
-        8. Status HOLDING (or rolls back on hook failure).
-        """
-        print(f"{self.log_prefix} Hover {target_id} -> {target_pose}")
-        with self._state_lock:
-            snapshot = self.current_state
-
-        for refusal in (
-            refuse_if_not_holding(snapshot, primitive_name="hover"),
-            refuse_if_holding_other_tag(snapshot, target_id, primitive_name="hover"),
-            refuse_if_teleop_active(snapshot, target_id, primitive_name="hover"),
-        ):
-            if refusal:
-                print(f"{self.log_prefix} Refusing hover: {refusal.reason}")
-                return
-
-        target_pose = target_pose or {}
-        tx = float(target_pose.get("target_x", target_pose.get("x", 0.0)))
-        ty = float(target_pose.get("target_y", target_pose.get("y", 0.0)))
-        trot = float(target_pose.get("rotation", 0.0))
-        tz = float(target_pose.get("z", DEFAULT_HOVER_Z_MM))
-        try:
-            speed = int(target_pose.get("speed", 100))
-        except (TypeError, ValueError):
-            speed = 100
-
-        bound = refuse_if_z_lab_out_of_bounds(
-            tz,
-            max_safe_z_lab_mm=self.max_safe_hover_z_lab_mm,
-            primitive_name="hover",
-        )
-        if bound:
-            print(f"{self.log_prefix} Refusing hover: {bound.reason}")
-            return
-
-        commanded = LabPose(x=tx, y=ty, z=tz, rotation=trot)
-
-        self._null_measurables_for_targets([target_id], persist=False)
-        self._set_status(SYSTEM_STATUS_BUSY)
-        try:
-            actual = await self._primitive_hover_component(target_id, commanded, speed)
-        except Exception:
-            # Hover always restores HOLDING -- the part is still in the
-            # gripper even if the lab refused the new pose.
-            self._set_status(SYSTEM_STATUS_HOLDING)
-            raise
-
-        with self._state_lock:
-            commit_hover(
-                self.current_state,
-                target_id,
-                x=commanded.x,
-                y=commanded.y,
-                rotation=commanded.rotation,
-                z=commanded.z,
-                actual_pose=actual,
-            )
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        self._set_status(SYSTEM_STATUS_HOLDING)
-        print(
-            f"{self.log_prefix} Hovered {target_id} -> "
-            f"({commanded.x:.1f},{commanded.y:.1f},rot={commanded.rotation:.1f},"
-            f"z={commanded.z:.1f})"
-        )
+        await run_hover_component(self, target_id, target_pose)
 
     async def _primitive_hover_component(
         self, target_id: str, commanded: LabPose, speed: int
@@ -1919,74 +1030,7 @@ class LabCommunicator:
     async def place_from_hover(
         self, target_id: str, target_pose: Dict[str, float]
     ) -> None:
-        """Place a held part on the breadboard.
-
-        Template method:
-
-        1. Refuse if not HOLDING.
-        2. Same-tag gate.
-        3. Parse XY/rotation; refuse if XY falls in storage quadrant
-           (use STORE_COMPONENT for that path).
-        4. Status BUSY.
-        5. Delegate to ``_primitive_place_from_hover(target_id, lab_pose) -> None``.
-        6. Commit placed-pose: clear holding, set presence=BREADBOARD,
-           strip ``z`` from poses (z is meaningless once on table).
-        7. Status IDLE (or HOLDING rollback on failure -- the part is
-           still in the gripper).
-        """
-        print(f"{self.log_prefix} PlaceFromHover {target_id} -> {target_pose}")
-        with self._state_lock:
-            snapshot = self.current_state
-
-        for refusal in (
-            refuse_if_not_holding(snapshot, primitive_name="place_from_hover"),
-            refuse_if_holding_other_tag(
-                snapshot, target_id, primitive_name="place_from_hover"
-            ),
-            refuse_if_teleop_active(
-                snapshot, target_id, primitive_name="place_from_hover"
-            ),
-        ):
-            if refusal:
-                print(f"{self.log_prefix} Refusing place_from_hover: {refusal.reason}")
-                return
-
-        target_pose = target_pose or {}
-        tx = float(target_pose.get("target_x", target_pose.get("x", 0.0)))
-        ty = float(target_pose.get("target_y", target_pose.get("y", 0.0)))
-        trot = float(target_pose.get("rotation", 0.0))
-
-        bound = refuse_if_in_storage_quadrant(tx, ty, primitive_name="place_from_hover")
-        if bound:
-            print(f"{self.log_prefix} Refusing place_from_hover: {bound.reason}")
-            return
-
-        commanded = LabPose(x=tx, y=ty, z=0.0, rotation=trot)
-
-        self._null_measurables_for_targets([target_id], persist=False)
-        self._set_status(SYSTEM_STATUS_BUSY)
-        try:
-            await self._primitive_place_from_hover(target_id, commanded, target_pose)
-        except Exception:
-            # Failed place: the part is still gripped. Keep HOLDING so
-            # the operator can retry without re-picking.
-            self._set_status(SYSTEM_STATUS_HOLDING)
-            raise
-
-        with self._state_lock:
-            commit_place_from_hover(
-                self.current_state,
-                target_id,
-                x=commanded.x,
-                y=commanded.y,
-                rotation=commanded.rotation,
-            )
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        self._set_status(SYSTEM_STATUS_IDLE)
-        print(
-            f"{self.log_prefix} Placed {target_id} from hover at "
-            f"({commanded.x:.1f},{commanded.y:.1f},rot={commanded.rotation:.1f})"
-        )
+        await run_place_from_hover(self, target_id, target_pose)
 
     async def _primitive_place_from_hover(
         self,
@@ -2005,160 +1049,7 @@ class LabCommunicator:
     async def scan_rotate_in_place(
         self, target_id: str, params: Dict[str, Any]
     ) -> None:
-        """Sweep rotation across [theta_min, theta_max] (held or placed).
-
-        Template method:
-
-        1. Decide dispatch mode from current state:
-           - HOLDING (held tag matches): mode="held".
-           - IDLE + on-breadboard: mode="placed".
-        2. Validate params (numeric, ``speed > 0``).
-        3. Read base pose (XY[Z] for held; XY for placed).
-        4. Status BUSY.
-        5. Construct ``on_rotation_update`` callback that commits each
-           intermediate rotation to ``current_state`` under the lock --
-           the hook calls it for stepwise UI updates without touching
-           state directly (architectural lint enforces this).
-        6. Delegate to ``_primitive_scan_rotate_in_place(...)``.
-        7. Final commit at ``theta_max`` + status flip back to HOLDING
-           (held) or IDLE (placed).
-        """
-        with self._state_lock:
-            snapshot = self.current_state
-            comp_snapshot = (snapshot.get("components") or {}).get(target_id)
-            holding_now = is_holding(snapshot)
-            status_at_entry = snapshot.get("system_status") or SYSTEM_STATUS_IDLE
-
-        # --- Dispatch decision (mode) ----------------------------------
-        if holding_now:
-            same_tag = refuse_if_holding_other_tag(
-                snapshot, target_id, primitive_name="scan_rotate_in_place"
-            )
-            if same_tag:
-                print(
-                    f"{self.log_prefix} Refusing scan_rotate_in_place: "
-                    f"{same_tag.reason}"
-                )
-                return
-            mode = "held"
-        else:
-            if status_at_entry != SYSTEM_STATUS_IDLE:
-                print(
-                    f"{self.log_prefix} Refusing scan_rotate_in_place: "
-                    f"system_status={status_at_entry!r}, need IDLE or HOLDING."
-                )
-                return
-            in_state = refuse_if_not_in_state(
-                snapshot, target_id, primitive_name="scan_rotate_in_place"
-            )
-            if in_state:
-                print(
-                    f"{self.log_prefix} Refusing scan_rotate_in_place: "
-                    f"{in_state.reason}"
-                )
-                return
-            on_table = refuse_if_not_on_breadboard(
-                snapshot, target_id, primitive_name="scan_rotate_in_place"
-            )
-            if on_table:
-                print(
-                    f"{self.log_prefix} Refusing scan_rotate_in_place: "
-                    f"{on_table.reason}"
-                )
-                return
-            mode = "placed"
-
-        teleop_busy = refuse_if_teleop_active(
-            snapshot, target_id, primitive_name="scan_rotate_in_place"
-        )
-        if teleop_busy:
-            print(
-                f"{self.log_prefix} Refusing scan_rotate_in_place: "
-                f"{teleop_busy.reason}"
-            )
-            return
-
-        # --- Param validation ------------------------------------------
-        params = params or {}
-        try:
-            theta_min = float(params.get("theta_min", 0.0))
-            theta_max = float(params.get("theta_max", 0.0))
-            speed = float(params.get("speed_deg_per_s", 1.0))
-        except (TypeError, ValueError):
-            print(f"{self.log_prefix} scan_rotate_in_place: non-numeric params.")
-            return
-        if speed <= 0:
-            print(f"{self.log_prefix} scan_rotate_in_place: speed must be > 0.")
-            return
-        axis = str(params.get("axis", "z"))
-
-        # --- Base pose lookup ------------------------------------------
-        if mode == "held":
-            held = get_holding(snapshot)
-            base = dict(held.get("nominal_pose") or {})
-            base_x = float(base.get("x", 0.0))
-            base_y = float(base.get("y", 0.0))
-            base_z: Optional[float] = float(base.get("z", DEFAULT_HOVER_Z_MM))
-        else:
-            cur_pose = ((comp_snapshot or {}).get("measurables") or {}).get("pose") or {}
-            base_x = float(cur_pose.get("x", 0.0))
-            base_y = float(cur_pose.get("y", 0.0))
-            base_z = None  # placed parts: z not stored on nominal_pose
-
-        print(
-            f"{self.log_prefix} ScanRotate mode={mode} {target_id}: "
-            f"{theta_min} deg -> {theta_max} deg @ {speed} deg/s axis={axis}"
-        )
-
-        # --- Stepwise progress callback (writes under the lock) --------
-        def on_rotation_update(rotation: float) -> None:
-            with self._state_lock:
-                commit_scan_rotation(
-                    self.current_state,
-                    target_id,
-                    mode=mode,
-                    x=base_x,
-                    y=base_y,
-                    rotation=float(rotation),
-                    z=base_z,
-                )
-                self.current_state["last_updated"] = datetime.now().isoformat()
-            self._persist_state()
-
-        # --- BUSY → hook → final commit + status flip ------------------
-        # Read of `cur_pose` (placed mode) / `held.nominal_pose` (held
-        # mode) is done above. Now safe to null measurables.
-        self._null_measurables_for_targets([target_id], persist=False)
-        self._set_status(SYSTEM_STATUS_BUSY)
-        final_status = (
-            SYSTEM_STATUS_HOLDING if mode == "held" else SYSTEM_STATUS_IDLE
-        )
-        try:
-            await self._primitive_scan_rotate_in_place(
-                target_id=target_id,
-                mode=mode,
-                theta_min=theta_min,
-                theta_max=theta_max,
-                speed=speed,
-                axis=axis,
-                base_x=base_x,
-                base_y=base_y,
-                base_z=base_z,
-                params=params,
-                on_rotation_update=on_rotation_update,
-            )
-        except Exception:
-            self._set_status(final_status)
-            raise
-
-        # Final commit at theta_max (the hook may have been stepping; the
-        # final value is always the commanded theta_max regardless).
-        on_rotation_update(theta_max)
-        self._set_status(final_status)
-        print(
-            f"{self.log_prefix} ScanRotate ({mode}) done {target_id}: "
-            f"final rot={theta_max:.2f} deg -- {final_status}"
-        )
+        await run_scan_rotate_in_place(self, target_id, params)
 
     async def _primitive_scan_rotate_in_place(
         self,
@@ -2186,26 +1077,7 @@ class LabCommunicator:
         raise NotImplementedError
 
     async def confirm_holding_tag(self, tag_id: str) -> None:
-        """Operator confirms which tag is in the gripper.
-
-        Used to clear the ``requires_operator_confirm`` flag after a
-        boot-time gripper-closed reconciliation (see
-        ``new_primitives.md`` §6.3). Pure state-only -- no hook,
-        because no hardware step is involved (it only records what the
-        operator says).
-        """
-        print(f"{self.log_prefix} ConfirmHoldingTag {tag_id}")
-        with self._state_lock:
-            if not is_holding(self.current_state):
-                print(
-                    f"{self.log_prefix} confirm_holding_tag: system not "
-                    f"HOLDING; nothing to confirm."
-                )
-                return
-            _confirm_holding_tag_helper(self.current_state, tag_id)
-            self.current_state["last_updated"] = datetime.now().isoformat()
-        self._persist_state()
-        print(f"{self.log_prefix} Confirmed held tag: {tag_id}")
+        await run_confirm_holding_tag(self, tag_id)
 
     # ---------------------------------------------------------------
     # Hardware probes (default no-op / fall-through)

@@ -1,4 +1,5 @@
 import { store } from './state/store.js';
+import { getStatecontrol, normalizeCapabilities, tunableValue } from './component-state.js';
 
 /**
  * Client-side accessors for tunables vs measurables.
@@ -7,17 +8,28 @@ import { store } from './state/store.js';
  * the canvas draws `tunables.nominal_pose` (intent), and `measurables` are
  * off-canvas receipts (encoder readback, camera_image, optimization score).
  *
- * - `drawPose(c)` — the pose for canvas drawing, collision, ghost init,
- *   storage validation, and command-revert logic. Prefers
- *   `tunables.nominal_pose`; falls back to `measurables.pose` defensively
- *   for legacy state files that may predate the universal-component
- *   migration.
- * - `nominalPose(c)` — strict tunables.nominal_pose lookup, no fallback.
- *   Use when "intent" semantics specifically matter and a missing nominal
- *   should be visible to the caller.
- * - `measPose(c)` — strict measurables.pose lookup. Use *only* for
- *   legitimate measurable consumers (encoder readback in
- *   `ui/context-panel.js`). Do not use for canvas drawing.
+ * ## Pose intent editing (three surfaces)
+ *
+ * Operators edit `nominal_pose` intent through three UI surfaces. All editors
+ * share `store.ghostState[tag]` as canvas-truth until a primitive commits:
+ *
+ * | Surface | Module | Role |
+ * |---------|--------|------|
+ * | Canvas ghost | `canvas/interaction.js` | Drag to translate; wheel to rotate. |
+ * | Context X/Y/Rot | `ui/context-panel.js` (`#ctx-x`, `#ctx-y`, `#ctx-rot`) | Numeric entry + Move → `MOVE_COMPONENT`. |
+ * | TablePose widget | `widgets/table-pose.js` | **Read-only** receipt of committed tunable in the capability panel. |
+ *
+ * TeleOp v2 adds LIVE/TARGET layers (`teleopLivePose`, `teleopTarget`) for
+ * session driving; they do not replace ghost intent for normal table moves.
+ * During held-object TeleOp, canvas drag writes `teleopTarget` instead of
+ * `ghostState` (see `interaction.js`).
+ *
+ * - `drawPose(c)` — canvas-truth pose for drawing, collision, ghost init.
+ *   Prefers `tunables.nominal_pose`; falls back to `measurables.pose` for
+ *   legacy state files.
+ * - `nominalPose(c)` — strict tunables lookup (intent semantics).
+ * - `measPose(c)` — strict measurables.pose (encoder readback only; never
+ *   use as an editor source).
  */
 
 export const PRESENCE_BREADBOARD = 'breadboard';
@@ -31,16 +43,18 @@ export const PRESENCE_OFF_TABLE = 'off_table';
  * @param {object | undefined} c
  */
 export function measPose(c) {
-    return (c && c.measurables && c.measurables.pose) || {};
+    return getStatecontrol(c).measurables?.pose || {};
 }
 
-/**
- * Strict `tunables.nominal_pose` accessor. Returns `{}` if missing.
- * @param {object | undefined} c
- */
 export function nominalPose(c) {
-    const n = c && c.tunables && c.tunables.nominal_pose;
+    const n = getStatecontrol(c).tunables?.nominal_pose;
     return n && typeof n === 'object' ? n : {};
+}
+
+/** Committed motor setpoints (tunables intent), keyed by motor id string. */
+export function nominalMotorPositions(c) {
+    const nmp = tunableValue(c, 'nominal_motor_positions');
+    return nmp && typeof nmp === 'object' ? nmp : {};
 }
 
 /**
@@ -59,16 +73,16 @@ export function drawPose(c) {
 
 /** @param {object | undefined} c */
 export function componentPresence(c) {
-    const p = c && c.tunables && c.tunables.presence;
+    const p = getStatecontrol(c).tunables?.presence;
     if (p === PRESENCE_STORAGE || p === PRESENCE_OFF_TABLE || p === PRESENCE_BREADBOARD) return p;
     return PRESENCE_BREADBOARD;
 }
 
 /** Stored in inventory Q3 intent (storage presence or in_storage flag). */
 export function isStoredComponent(c) {
-    if (!c || !c.tunables) return false;
+    if (!c) return false;
     if (componentPresence(c) === PRESENCE_STORAGE) return true;
-    const s = c.tunables.storage;
+    const s = getStatecontrol(c).tunables?.storage;
     return !!(s && s.in_storage);
 }
 
@@ -91,18 +105,14 @@ export function getCatalogRow(tagId) {
 /** Declares ``tunables.nominal_pose`` (TablePose) — drawable / draggable on canvas. */
 export function catalogDeclaresTablePose(tagId) {
     const row = getCatalogRow(tagId);
-    if (!row || !row.capabilities || !row.capabilities.tunables) return false;
-    return Object.prototype.hasOwnProperty.call(row.capabilities.tunables, 'nominal_pose');
+    const caps = normalizeCapabilities(row?.capabilities);
+    return Object.prototype.hasOwnProperty.call(caps.statecontrol.tunables || {}, 'nominal_pose');
 }
 
-/**
- * Fixed bench component: has tunables but no table pose (chrome bar, not canvas).
- * @param {string} tagId
- */
 export function isChromeComponent(tagId) {
     const row = getCatalogRow(tagId);
-    if (!row || !row.capabilities || !row.capabilities.tunables) return false;
-    const tun = row.capabilities.tunables;
+    const caps = normalizeCapabilities(row?.capabilities);
+    const tun = caps.statecontrol.tunables || {};
     const keys = Object.keys(tun);
     if (!keys.length) return false;
     return !catalogDeclaresTablePose(tagId);
@@ -132,17 +142,12 @@ export function isOffTableComponent(c) {
 
 /** Optimization outcome: strategy mode + numeric score (no legacy is_optimized). */
 export function hasOptimizationOutcome(c) {
-    const m = c && c.measurables;
+    const m = getStatecontrol(c).measurables;
     return !!(m && m.last_optimization_score != null && Number.isFinite(Number(m.last_optimization_score)));
 }
 
-/**
- * Raw ``tunables.placement.mode`` for a component, upper-cased. Defaults to
- * ``MANUAL`` when unset / malformed so callers never have to guard.
- * @param {object | undefined} c
- */
 export function placementMode(c) {
-    const pl = c && c.tunables && c.tunables.placement;
+    const pl = getStatecontrol(c).tunables?.placement;
     const m = pl && pl.mode;
     return (typeof m === 'string' && m) ? m.toUpperCase() : 'MANUAL';
 }

@@ -1,16 +1,21 @@
-import { coordInput, dispatchPrimitive, primitiveRegion, runButton } from './shared.js';
-import { measPose } from '../component-model.js';
+import { coordInput, primitiveRegion, runButton } from './shared.js';
+import { nominalMotorPositions } from '../component-model.js';
+import { store } from '../state/store.js';
+import {
+    createMotorActionStatusEl,
+    dispatchMotorCommand,
+    MOTOR_ACTION,
+    motorActionKey,
+    paintMotorActionStatus,
+    resolveMotorSetpointInputValue,
+} from '../ui/motor-action-ui.js';
 
 export function renderSetMotorSetpoint(ctx) {
     const { tagId, comp, catalogRow, hooks } = ctx;
     const motorIds = catalogRow?.motor_ids || [];
     if (!motorIds.length) return null;
 
-    const nominal =
-        (comp?.tunables?.nominal_motor_positions && typeof comp.tunables.nominal_motor_positions === 'object')
-            ? comp.tunables.nominal_motor_positions
-            : {};
-    const tracked = (measPose(comp).motor_rotations) || {};
+    const nominal = nominalMotorPositions(comp);
 
     const { section, body } = primitiveRegion('SET_MOTOR_SETPOINT', 'SET MOTOR SETPOINT');
     const hint = document.createElement('p');
@@ -19,7 +24,7 @@ export function renderSetMotorSetpoint(ctx) {
     hint.style.margin = '0 0 4px 0';
     hint.style.lineHeight = '1.35';
     hint.textContent =
-        'Commits nominal_motor_positions and jogs hardware by the delta from tracked θ.';
+        'Commits nominal_motor_positions and jogs hardware to the set angle.';
     body.appendChild(hint);
 
     motorIds.forEach((mid) => {
@@ -35,17 +40,8 @@ export function renderSetMotorSetpoint(ctx) {
         label.style.color = '#cbd5e1';
         label.style.minWidth = '28px';
 
-        const theta = document.createElement('span');
-        theta.dataset.motorAngle = `${tagId}:${mid}`;
-        const tr = tracked[String(mid)];
-        const trN = Number.isFinite(Number(tr)) ? Number(tr) : 0;
-        theta.style.fontSize = '10px';
-        theta.style.color = '#64748b';
-        theta.style.fontFamily = 'ui-monospace, monospace';
-        theta.textContent = `θ ${trN.toFixed(2)}°`;
-
         const nom = nominal[String(mid)];
-        const defaultAngle = Number.isFinite(Number(nom)) ? Number(nom) : trN;
+        const defaultAngle = resolveMotorSetpointInputValue(tagId, mid, nom);
         const inp = coordInput('setpoint °', defaultAngle);
         inp.style.flex = '1';
         inp.style.minWidth = '72px';
@@ -53,23 +49,49 @@ export function renderSetMotorSetpoint(ctx) {
         const btn = runButton('Apply', 'adjust');
         btn.style.width = 'auto';
         btn.style.flex = '0 0 auto';
+
+        const statusEl = createMotorActionStatusEl(MOTOR_ACTION.SETPOINT, tagId, mid);
+
         btn.onclick = async () => {
             const v = parseFloat(inp.value);
             if (!Number.isFinite(v)) {
                 hooks.log('Invalid motor setpoint angle.', 'error');
                 return;
             }
-            await dispatchPrimitive(hooks, {
-                action: 'SET_MOTOR_SETPOINT',
-                target_id: tagId,
-                parameters: { motor_id: Number(mid), angle_deg: v },
-            });
+            inp.value = String(v);
+            btn.disabled = true;
+
+            const result = await dispatchMotorCommand(
+                hooks,
+                {
+                    action: 'SET_MOTOR_SETPOINT',
+                    target_id: tagId,
+                    parameters: { motor_id: Number(mid), angle_deg: v },
+                },
+                MOTOR_ACTION.SETPOINT,
+                tagId,
+                mid,
+                { value: v },
+            );
+
+            btn.disabled = false;
+            if (!result?.ok && hooks.log) {
+                hooks.log(`Setpoint failed: ${result?.error || 'unknown'}`, 'warn');
+            }
         };
 
+        inp.addEventListener('input', () => {
+            const key = motorActionKey(MOTOR_ACTION.SETPOINT, tagId, mid);
+            if (store.motorActionApply[key]) {
+                delete store.motorActionApply[key];
+                paintMotorActionStatus(MOTOR_ACTION.SETPOINT, tagId, mid);
+            }
+        });
+
         row.appendChild(label);
-        row.appendChild(theta);
         row.appendChild(inp);
         row.appendChild(btn);
+        row.appendChild(statusEl);
         body.appendChild(row);
     });
 

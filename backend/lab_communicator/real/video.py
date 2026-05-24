@@ -21,7 +21,7 @@ Three sub-areas, all real-only:
 
 All helpers take the ``RealLabCommunicator`` instance explicitly. The
 class keeps thin ``def`` wrappers so the dispatch layer
-(``lab_primitives``) and Cloud-Labs HTTP routes keep their existing
+(``lab_model.primitives``) and Cloud-Labs HTTP routes keep their existing
 API. ``atexit.register`` is wired to the bound thin wrapper so
 shutdown still works after Phase 1.
 

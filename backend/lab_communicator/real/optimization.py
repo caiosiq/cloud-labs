@@ -337,7 +337,7 @@ def load_cobyla_reference_bgr_from_state(
     Returns ``None`` when no suitable recorded image exists (strategy
     may fall back to its own default).
     """
-    from lab_communicator.shared.catalog_schema import find_tag_id_for_cam_id
+    from lab_model.catalog.schema import find_tag_id_for_cam_id
 
     cam_id = int(camera_number)
     tag_id = find_tag_id_for_cam_id(communicator.catalog_map or {}, cam_id)

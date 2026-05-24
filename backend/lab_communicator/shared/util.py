@@ -41,7 +41,7 @@ def optional_float(params: Optional[Dict[str, Any]], key: str) -> Optional[float
 
     Returns ``None`` if ``params`` is falsy, the key is missing, the value
     is ``None``, or the value cannot be coerced to ``float``. The HTTP
-    surface (``lab_primitives``) already validates required fields; this
+    surface (``lab_model.primitives``) already validates required fields; this
     helper is for *optional* fields where "not provided" and "provided
     but bad" should both fall back gracefully to the primitive's default.
     """

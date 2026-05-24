@@ -5,9 +5,9 @@ cloud-labs / `lab_automation` architecture.**
 
 | | |
 |---|---|
-| **Status** | v1 draft — design locked, no code yet (Phase 0 artifact) |
+| **Status** | v1 draft design doc · **Phases 0–9 + Universal Component shape implemented** (see [`backend/lab_model/ARCHITECTURE.md`](backend/lab_model/ARCHITECTURE.md)) |
 | **Audience** | Cloud-labs maintainers, `lab_automation` maintainers, UROP advisor review |
-| **Companion docs** | [`capability_contract.md`](capability_contract.md) (focused technical spec), [`backend/lab_model/README.md`](backend/lab_model/README.md) (tunables/measurables today), [`backend/lab_primitives/README.md`](backend/lab_primitives/README.md), [`Run_CloudLab_Scripts.md`](Run_CloudLab_Scripts.md), [`import_json.md`](import_json.md) |
+| **Companion docs** | [`capability_contract.md`](capability_contract.md) (focused technical spec), [`backend/lab_model/README.md`](backend/lab_model/README.md) (tunables/measurables today), [`backend/lab_model/primitives/README.md`](backend/lab_model/primitives/README.md), [`Run_CloudLab_Scripts.md`](Run_CloudLab_Scripts.md), [`import_json.md`](import_json.md) |
 | **Scope** | Frontend (`optics-digital-twin/frontend/`), backend communicator (`optics-digital-twin/backend/`), and the separately-versioned `lab_automation` repository |
 
 ---
@@ -118,12 +118,18 @@ sensors — all share the same JSON shape:
 components[tag_id] = {
   "id": "...",
   "type": "...",
-  "tunables":   { ... },              ← intent
-  "measurables": { ... },             ← settled receipts
-  "telemetry_endpoints": { ... },     ← live data tunnels  (NEW)
-  "capabilities": { ... }             ← per-component schema (NEW; see Part IV)
+  "statecontrol": {
+    "tunables":    { ... },   ← intent (slow / formal)
+    "measurables": { ... }    ← receipts (slow / formal)
+  },
+  "telemetry": {
+    "teleop":     { active, ready, lease_ts, ... },   ← fast control session
+    "live_feed":  { stream: { connected, live, ... } } ← streaming observe
+  }
 }
 ```
+
+Catalog **`capabilities`** mirrors this: `statecontrol`, `telemetry`, and `primitives` (see [`capability_contract.md`](capability_contract.md)). Legacy flat `tunables`/`measurables` on components or in catalog are normalized at load time.
 
 There are **no** hardcoded sections like "Cameras" or "Optics". The UI
 introspects each component's `capabilities` block to decide what controls
@@ -276,6 +282,8 @@ does the canvas do when measurables are null?" problems.
 
 # Part III — Where we are today
 
+**Update (2025):** Phases 0–9 and the Universal Component refactor are **implemented**. Components use **`statecontrol` + `telemetry`**; the UI splits **read-only** StateControl/Telemetry from **PRIMITIVES** writes. See [`backend/lab_model/ARCHITECTURE.md`](backend/lab_model/ARCHITECTURE.md) for the current map. The gap analysis below is kept for historical context — many items marked ❌ below are now ✅.
+
 A surprising amount of the new architecture is already in place. This
 part is the gap analysis: what exists, what doesn't, what's mis-shaped.
 
@@ -283,7 +291,7 @@ part is the gap analysis: what exists, what doesn't, what's mis-shaped.
 
 ### 9.1. Tunables / Measurables split is live
 
-Defined in [`backend/lab_model/component_model.py`](backend/lab_model/component_model.py) and used throughout
+Defined in [`backend/lab_model/domain/component.py`](backend/lab_model/domain/component.py) and used throughout
 the state machine. Default shapes:
 
 ```python
@@ -306,7 +314,7 @@ def default_measurables() -> Dict[str, Any]:
 ```
 
 The migration from the legacy `{state, pose, intent, metadata}` shape to
-this split is already done — see `scripts/migrate_to_tunables.py`.
+this split is already done — see `scripts/archive/migrate_to_tunables.py`.
 
 ### 9.2. Cameras are already components
 
@@ -319,7 +327,7 @@ specially.
 
 ### 9.3. `OBSERVE_MEASURABLES` is the `RECORD_MEASURABLES` primitive
 
-Defined in [`backend/lab_primitives/registry.py`](backend/lab_primitives/registry.py):
+Defined in [`backend/lab_model/primitives/registry.py`](backend/lab_model/primitives/registry.py):
 
 ```python
 PrimitiveId.OBSERVE_MEASURABLES: {
@@ -605,7 +613,7 @@ mismatches; soft-fall back on unknown widgets.
 - A component entry missing a required field (`id`, `type`, `tag_id`,
   `capabilities.primitives`).
 - A primitive id in `capabilities.primitives` not in
-  `lab_primitives.PrimitiveId`.
+  `lab_model.primitives.PrimitiveId`.
 - A widget descriptor's required config missing (e.g. `FloatRange`
   without `min` and `max`).
 
@@ -915,7 +923,7 @@ constraint (none currently do).
 **Picked C.** Reasoning:
 
 1. Primitives are a closed vocabulary owned by cloud-labs
-   (`lab_primitives.PrimitiveId`). An unknown one is always a real
+   (`lab_model.primitives.PrimitiveId`). An unknown one is always a real
    problem — either a typo or a version skew that will cause silent
    "this command doesn't work" symptoms later.
 2. Widgets are a closed vocabulary owned by cloud-labs's UI layer, but
@@ -968,12 +976,12 @@ canvas position is correct before and after.
 
 **Files touched:**
 
-- `backend/lab_primitives/{ids,registry,schemas,dispatch,protocol,README}.py`.
+- `backend/lab_model/primitives/{ids,registry,schemas,dispatch,protocol,README}.py`.
 - `backend/lab_communicator/{base,real/primitives,mock/primitives}.py`
   (handler renames).
 - `backend/main.py` (route rename).
 - Docs: `backend/lab_model/README.md`, root `README.md`,
-  `backend/lab_primitives/README.md`.
+  `backend/lab_model/primitives/README.md`.
 - Frontend: `frontend/js/command-parse.js`,
   `frontend/js/ui/context-panel.js`.
 
@@ -993,7 +1001,7 @@ canvas independent of measurables.
 - `backend/lab_communicator/shared/snapshot.py` — similar for
   snapshots.
 - Audit consumers: `backend/lab_communicator/shared/pose_refresh_merge.py`,
-  `backend/lab_communicator/shared/commits.py`, recipe golden-comparison
+  `backend/lab_model/state/commits.py`, recipe golden-comparison
   in `backend/main.py`. Each needs a "what if `measurables` is null"
   branch.
 
@@ -1020,7 +1028,7 @@ catalog shape.
 
 **Files touched:**
 
-- `scripts/migrate_component_library_to_capabilities.py` — new script
+- `scripts/archive/migrate_component_library_to_capabilities.py` — new script
   that:
   - Reads existing array-form `component_library.json`.
   - Wraps in `{ schema_version: 1, components: { ... } }`.
@@ -1094,12 +1102,12 @@ known-good base.
 
 - `backend/lab_model/holding.py` — add
   `SYSTEM_STATUS_TELEOP` constant.
-- `backend/lab_model/component_model.py` — add `teleop_active` field
+- `backend/lab_model/domain/component.py` — add `teleop_active` field
   to tunables defaults; conventions for who reads/writes it.
 - `backend/lab_communicator/shared/state_machine.py` — refusal
   helpers: `refuse_if_teleop_active(tag)`,
   `refuse_if_any_teleop_active()`.
-- `backend/lab_primitives/ids.py` — new primitives: `START_TELEOP`,
+- `backend/lab_model/primitives/ids.py` — new primitives: `START_TELEOP`,
   `END_TELEOP`, jog primitive (REST or WebSocket — see Q1 in Part VII).
 - `backend/main.py` — corresponding routes.
 - `backend/lab_communicator/shared/lab_view_config.py` — read
@@ -1348,7 +1356,7 @@ otherwise". Revisit if breaking changes ever ship mid-version.
   spec, canonical for the JSON shape.
 - [`backend/lab_model/README.md`](backend/lab_model/README.md) — current
   tunables/measurables model.
-- [`backend/lab_primitives/README.md`](backend/lab_primitives/README.md) — primitive vocabulary and dispatch.
+- [`backend/lab_model/primitives/README.md`](backend/lab_model/primitives/README.md) — primitive vocabulary and dispatch.
 - [`backend/lab_communicator/README.md`](backend/lab_communicator/README.md) — lab view bundle layout, manifest.
 - [`Run_CloudLab_Scripts.md`](Run_CloudLab_Scripts.md) — Python
   orchestration layer.

@@ -10,8 +10,9 @@
  * polls.
  */
 import { widgetCard, widgetTitle, resolveTokens, nullPlaceholder } from './common.js';
+import { isLiveFeedActive } from '../component-state.js';
 
-export default function JPEGPoll({ tagId, fieldName, descriptor }) {
+export default function JPEGPoll({ tagId, fieldName, descriptor, comp }) {
     const card = widgetCard();
     card.appendChild(widgetTitle(fieldName, descriptor));
 
@@ -20,6 +21,12 @@ export default function JPEGPoll({ tagId, fieldName, descriptor }) {
         card.appendChild(nullPlaceholder('\u2014 no telemetry URL in catalog'));
         return card;
     }
+
+    if (comp && !isLiveFeedActive(comp, fieldName || 'stream')) {
+        card.appendChild(nullPlaceholder('\u2014 live feed off (turn on in PRIMITIVES)'));
+        return card;
+    }
+
     const fps = Number(descriptor && descriptor.default_fps) > 0
         ? Number(descriptor.default_fps)
         : 10;

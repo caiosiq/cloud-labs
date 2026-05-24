@@ -32,6 +32,7 @@ import {
 import { mmToPx } from './coordinates.js';
 import { store } from '../state/store.js';
 import { drawPose, isHeldTag, shouldRenderOnCanvas } from '../component-model.js';
+import { isTeleopReady } from '../component-state.js';
 import { clipTwoPointLineToLabBounds } from '../geometry/lines.js';
 import { drawAlignmentGuides, drawAlignmentIntersectionMarkers } from './guides.js';
 import { getComponentSize } from './interaction.js';
@@ -202,13 +203,8 @@ function drawLaserPath() {
  */
 const HOLDING_STEADY_COLOR = '#a855f7';
 
-/**
- * Phase 8b: cyan accent for per-component TELEOP ghosts. Picked to be
- * visually distinct from HOLDING purple, OPTIMIZING green, and the
- * generic amber "MOVING…" pending state so the operator never confuses
- * "I'm driving this manually" with "the lab is doing something".
- */
-const TELEOP_GHOST_COLOR = '#22d3ee';
+const TELEOP_TARGET_COLOR = '#fbbf24';
+const TELEOP_LIVE_COLOR = '#22d3ee';
 
 /**
  * Style + label for the amber / purple "in flight" overlay drawn on the ghost while
@@ -232,17 +228,6 @@ function pendingOverlayStyle(name) {
         default:
             return { color: '#f59e0b', label: 'MOVING...' };
     }
-}
-
-/**
- * True when ``pose.source`` indicates the per-component TELEOP authority
- * is driving this ghost. The render path treats teleop as an *overlay*
- * (extra cyan halo + label) on top of whatever the underlying ``mode``
- * is — including PENDING/HOLDING, since teleop nulls measurables but
- * doesn't change ``system_status`` (per §16.5).
- */
-function isTeleopGhost(pose) {
-    return !!(pose && pose.source === 'teleop');
 }
 
 function drawComponent(name, pose, type, mode = 'SOLID') {
@@ -306,18 +291,6 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.strokeStyle = HOLDING_STEADY_COLOR;
         ctx.lineWidth = 2;
         const r = Math.sqrt(halfW * halfW + halfH * halfH);
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.stroke();
-    }
-
-    // Phase 8b: TELEOP overlay. Drawn as a solid cyan ring slightly
-    // outside the component bounds so it composes with the selection /
-    // pending / holding halos without obscuring them.
-    if (isTeleopGhost(pose)) {
-        ctx.strokeStyle = TELEOP_GHOST_COLOR;
-        ctx.lineWidth = 2;
-        const r = Math.sqrt(halfW * halfW + halfH * halfH) + 3;
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.stroke();
@@ -508,19 +481,6 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.font = 'bold 10px Inter, sans-serif';
         ctx.fillText('HOLDING', 0, halfH + 15);
     }
-    // Phase 8b TELEOP label. Drawn slightly below other labels (or
-    // alone, if no other overlay claimed the slot) so it composes with
-    // pending/holding/optimizing markers rather than overwriting them.
-    if (isTeleopGhost(pose)) {
-        ctx.fillStyle = TELEOP_GHOST_COLOR;
-        ctx.font = 'bold 10px Inter, sans-serif';
-        const hasOtherLabel =
-            mode === 'PENDING' ||
-            mode === 'HOLDING' ||
-            (store.isOptimizing && store.pendingCommands.has(name));
-        const yOff = hasOtherLabel ? halfH + 28 : halfH + 15;
-        ctx.fillText('TELEOP', 0, yOff);
-    }
     if (store.isOptimizing && store.pendingCommands.has(name)) {
         ctx.fillStyle = '#10b981';
         ctx.font = 'bold 10px Inter, sans-serif';
@@ -578,16 +538,54 @@ export function render() {
 
     if (!store.labState) return;
 
-    // 1. Committed components (drawn at intended pose — `tunables.nominal_pose`).
+    // 1. Committed components (frozen tunables — skip tags under active TeleOp).
     Object.entries(store.labState.components).forEach(([name, comp]) => {
-        if (shouldRenderOnCanvas(name, comp)) {
+        if (shouldRenderOnCanvas(name, comp) && !isTeleopReady(comp)) {
             drawComponent(name, drawPose(comp), comp.type, 'SOLID');
         }
     });
 
-    // 2. Ghost components (intent — the pose the operator is editing).
+    // 1b. TeleOp LIVE pose (hardware truth from fast poll).
+    Object.entries(store.labState.components).forEach(([name, comp]) => {
+        if (!shouldRenderOnCanvas(name, comp) || !isTeleopReady(comp)) return;
+        const live = store.teleopLivePose[name];
+        if (live && Number.isFinite(live.x) && Number.isFinite(live.y)) {
+            drawComponent(name, live, comp.type, 'SOLID');
+            const p = mmToPx(live.x, live.y);
+            _ctx.fillStyle = TELEOP_LIVE_COLOR;
+            _ctx.font = '9px Inter, sans-serif';
+            _ctx.fillText('LIVE', p.x + 8, p.y - 8);
+        }
+    });
+
+    // 1c. TeleOp TARGET preview (client planning layer).
+    Object.entries(store.teleopTarget || {}).forEach(([name, pose]) => {
+        const comp = store.labState.components[name];
+        if (!comp || !isTeleopReady(comp) || !shouldRenderOnCanvas(name, comp)) return;
+        drawComponent(name, pose, comp.type, 'GHOST');
+        const p = mmToPx(pose.x, pose.y);
+        _ctx.fillStyle = TELEOP_TARGET_COLOR;
+        _ctx.font = '9px Inter, sans-serif';
+        _ctx.fillText('TARGET', p.x + 8, p.y + 14);
+        const live = store.teleopLivePose[name];
+        if (live && Number.isFinite(live.x)) {
+            const from = mmToPx(live.x, live.y);
+            const to = mmToPx(pose.x, pose.y);
+            _ctx.strokeStyle = TELEOP_TARGET_COLOR;
+            _ctx.setLineDash([4, 4]);
+            _ctx.beginPath();
+            _ctx.moveTo(from.x, from.y);
+            _ctx.lineTo(to.x, to.y);
+            _ctx.stroke();
+            _ctx.setLineDash([]);
+        }
+    });
+
+    // 2. Ghost components (non-TeleOp intent editing).
     Object.entries(store.ghostState).forEach(([name, pose]) => {
-        const type = store.labState.components[name]?.type || 'UNKNOWN';
+        const comp = store.labState.components[name];
+        if (comp && isTeleopReady(comp)) return;
+        const type = comp?.type || 'UNKNOWN';
         const isPending = store.pendingCommands.has(name);
         // Steady-state HOLDING: system reports HOLDING and this tag is the one in the gripper,
         // with no primitive currently in flight. We draw a distinct "HOLDING" ghost (solid
@@ -607,10 +605,6 @@ export function render() {
             let driftColor = 'rgba(255, 255, 255, 0.2)';
             if (isPending) driftColor = pendingOverlayStyle(name).color;
             else if (isHeldSteady) driftColor = HOLDING_STEADY_COLOR;
-            // Phase 8b: cyan drift while TELEOP drives this ghost (last,
-            // so teleop wins visual priority over the steady-state
-            // overlays — the operator should see "I'm driving this").
-            if (isTeleopGhost(pose)) driftColor = TELEOP_GHOST_COLOR;
             ctx.strokeStyle = driftColor;
             ctx.setLineDash([5, 5]);
             ctx.beginPath();

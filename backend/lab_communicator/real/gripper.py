@@ -34,7 +34,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict
 
-from lab_model.holding import (
+from lab_model.domain.holding import (
     DEFAULT_HOVER_Z_MM,
     SYSTEM_STATUS_HOLDING,
     held_tag,

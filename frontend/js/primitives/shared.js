@@ -69,13 +69,39 @@ export function coordInput(placeholder, value) {
     return inp;
 }
 
-export async function dispatchPrimitive(hooks, command) {
-    if (!hooks || typeof hooks.sendCommand !== 'function') return;
-    await hooks.sendCommand(command);
-    if (typeof hooks.fetchLabState === 'function') {
-        await hooks.fetchLabState();
+export async function afterCommandDispatch(hooks, targetId, opts = {}) {
+    const refreshPanel = opts.refreshPanel !== false;
+    const fetchState = opts.fetchLabState !== false;
+    if (fetchState && typeof hooks.fetchLabState === 'function') {
+        try {
+            await hooks.fetchLabState();
+        } catch (_e) {
+            /* poll will catch up */
+        }
     }
-    if (typeof hooks.refreshPanel === 'function' && command && command.target_id) {
-        hooks.refreshPanel(command.target_id);
+    if (refreshPanel && typeof hooks.refreshPanel === 'function' && targetId) {
+        hooks.refreshPanel(targetId);
     }
+}
+
+/**
+ * Send a primitive command and optionally refresh lab state / panel.
+ *
+ * @param {object} hooks
+ * @param {object} command
+ * @param {{ refreshPanel?: boolean, fetchLabState?: boolean, onSuccess?: Function, onError?: Function }} [opts]
+ * @returns {Promise<{ ok?: boolean, error?: string }|undefined>}
+ */
+export async function dispatchPrimitive(hooks, command, opts = {}) {
+    if (!hooks || typeof hooks.sendCommand !== 'function') {
+        return { ok: false, error: 'sendCommand unavailable' };
+    }
+    const result = await hooks.sendCommand(command);
+    if (!result?.ok) {
+        if (typeof opts.onError === 'function') opts.onError(result);
+        return result;
+    }
+    await afterCommandDispatch(hooks, command && command.target_id, opts);
+    if (typeof opts.onSuccess === 'function') opts.onSuccess(result);
+    return result;
 }

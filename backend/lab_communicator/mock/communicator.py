@@ -1,16 +1,17 @@
 import json
 import os
 import random
+import asyncio
 from datetime import datetime
 from io import BytesIO
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from lab_model.component_model import (
+from lab_model.domain.component import (
     PRESENCE_BREADBOARD,
     PRESENCE_STORAGE,
     default_measurables,
 )
-from lab_model.holding import (
+from lab_model.domain.holding import (
     DEFAULT_HOVER_Z_MM,
     SYSTEM_STATUS_BUSY,
     SYSTEM_STATUS_HOLDING,
@@ -21,9 +22,9 @@ from lab_model.holding import (
 )
 
 from lab_communicator.base import LabCommunicator
-from lab_communicator.shared.catalog_bundle import merged_catalog_maps
+from lab_model.catalog.bundle import merged_catalog_maps
 from lab_communicator.shared.lab_view_config import get_lab_view_paths
-from lab_communicator.shared.snapshot import LabPose
+from lab_model.state.snapshot import LabPose
 
 # Constants
 # File now at ``backend/lab_communicator/mock/communicator.py``; the
@@ -235,7 +236,7 @@ class MockLabCommunicator(LabCommunicator):
         self, preserve_tag_ids: Optional[List[str]] = None
     ) -> None:
         """Simulate camera re-localisation; ``preserve_tag_ids`` keep prior rows verbatim."""
-        from lab_communicator.shared.pose_refresh_merge import merge_scan_into_components
+        from lab_model.state.pose_refresh_merge import merge_scan_into_components
 
         state = self._read_state()
         comps = state.get("components") or {}
@@ -302,6 +303,11 @@ class MockLabCommunicator(LabCommunicator):
     # hardware step lives. Reading this section answers "what
     # primitives does the mock communicator implement?"; reading
     # ``primitives.py`` answers "what does each primitive simulate?".
+
+    async def _primitive_prepare_teleop(self, target_id: str) -> Tuple[bool, str]:
+        await asyncio.sleep(0.75)
+        print(f"[MOCK LAB] TELEOP ready for {target_id}")
+        return True, "ok"
 
     async def _primitive_move_component(
         self, target_id: str, commanded: LabPose
@@ -734,6 +740,36 @@ class MockLabCommunicator(LabCommunicator):
         else:
             draw.text((inset + 6, inset + 12), stamp, fill=(226, 232, 240))
 
+        buf = BytesIO()
+        img.save(buf, format="PNG", compress_level=6)
+        return buf.getvalue()
+
+    def capture_overhead_cam(self, exposure: float = 0.2) -> bytes:
+        """Synthetic still for the fixed table-top / overhead camera (tag_99)."""
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError:
+            print("[MOCK LAB] capture_overhead_cam: Pillow not installed")
+            return None
+
+        w, h = 480, 360
+        img = Image.new("RGB", (w, h), (18, 24, 38))
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.load_default()
+        except Exception:
+            font = None
+        banner = "MOCK · OVERHEAD CAPTURE"
+        sub = f"table-top · exp {exposure:g}s"
+        if font:
+            draw.text((16, 16), banner, fill=(125, 211, 252), font=font)
+            draw.text((16, 34), sub, fill=(148, 163, 184), font=font)
+        else:
+            draw.text((16, 16), banner, fill=(125, 211, 252))
+            draw.text((16, 34), sub, fill=(148, 163, 184))
+        draw.rectangle([(24, 64), (w - 24, h - 24)], outline=(56, 189, 248), width=3)
+        draw.line([(w // 2, 64), (w // 2, h - 24)], fill=(71, 85, 105), width=2)
+        draw.line([(24, h // 2), (w - 24, h // 2)], fill=(71, 85, 105), width=2)
         buf = BytesIO()
         img.save(buf, format="PNG", compress_level=6)
         return buf.getvalue()

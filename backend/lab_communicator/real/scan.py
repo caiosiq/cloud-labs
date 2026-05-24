@@ -16,7 +16,7 @@ Two real-only entry points, both flowing through ``OpticalExperiment.scan_compon
 Both helpers take the ``RealLabCommunicator`` instance explicitly. The
 class keeps ``def`` wrappers so external call sites
 (``RealLabCommunicator.__init__``, the dispatch layer, the
-``LabPrimitiveId.SCAN_TABLE`` route in ``lab_primitives``) keep their
+``SCAN_TABLE`` route in ``main.py``) keep their
 existing API unchanged. Phase 2 will lift the BUSY/IDLE transition into
 the base orchestrator and turn the scan body into a ``_do_*`` hook
 (see ``communicator_refactor.md`` §6).
@@ -32,7 +32,7 @@ import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Optional
 
-from lab_model.component_model import (
+from lab_model.domain.component import (
     PRESENCE_BREADBOARD,
     PRESENCE_OFF_TABLE,
     PRESENCE_STORAGE,
@@ -40,10 +40,10 @@ from lab_model.component_model import (
     default_tunables,
     is_on_table,
 )
-from lab_model.storage_region import is_storage_region
+from lab_model.domain.storage_region import is_storage_region
 
-from lab_communicator.shared.pose_refresh_merge import merge_scan_into_components
-from lab_communicator.shared.snapshot import LabPose
+from lab_model.state.pose_refresh_merge import merge_scan_into_components
+from lab_model.state.snapshot import LabPose
 
 
 if TYPE_CHECKING:
@@ -95,7 +95,7 @@ def initialize_state(
         str(x).strip() for x in (preserve_component_ids or ()) if isinstance(x, str) and x.strip()
     )
 
-    from lab_communicator.shared.catalog_bundle import merged_catalog_rows
+    from lab_model.catalog.bundle import merged_catalog_rows
 
     try:
         catalog = merged_catalog_rows()

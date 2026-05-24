@@ -11,14 +11,20 @@
  * destroys and recreates the card) closes the old connection cleanly.
  */
 import { widgetCard, widgetTitle, resolveTokens, nullPlaceholder } from './common.js';
+import { isLiveFeedActive } from '../component-state.js';
 
-export default function MJPEGViewer({ tagId, fieldName, descriptor }) {
+export default function MJPEGViewer({ tagId, fieldName, descriptor, comp }) {
     const card = widgetCard();
     card.appendChild(widgetTitle(fieldName, descriptor));
 
     const url = resolveTokens(descriptor && descriptor.url, { tagId });
     if (!url) {
         card.appendChild(nullPlaceholder('\u2014 no telemetry URL in catalog'));
+        return card;
+    }
+
+    if (!isLiveFeedActive(comp, fieldName || 'stream')) {
+        card.appendChild(nullPlaceholder('\u2014 live feed off (turn on in PRIMITIVES)'));
         return card;
     }
 

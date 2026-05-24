@@ -1,8 +1,8 @@
-# Lab model: tunables vs measurables
+# Lab model: StateControl, Telemetry, and primitives
 
-This folder is the **`lab_model`** Python package: shared domain logic for the digital twin (not hardware I/O). It explains how **tunables** and **measurables** describe each optical component.
+This folder is the **`lab_model`** Python package: shared domain logic for the digital twin (not hardware I/O). It defines how each **Universal Component** splits **slow/formal state** (StateControl) from **fast/live sessions** (Telemetry).
 
-**Related:** [ **`model.md`** ](../../model.md) (saved state vs **observe**), [ **`primitives.md`** ](../../primitives.md) (HTTP vocabulary), [ **`schemas/README.md`** ](../../schemas/README.md) (example **`camera_image`** shape).
+**Platform map:** [`ARCHITECTURE.md`](ARCHITECTURE.md) · **UI rules:** [`../../docs/primitive_ui_contract.md`](../../docs/primitive_ui_contract.md) · **Commands:** [`primitives/README.md`](primitives/README.md)
 
 ---
 
@@ -12,92 +12,106 @@ This folder is the **`lab_model`** Python package: shared domain logic for the d
 
 | Module | Role |
 |--------|------|
-| **`component_model.py`** | Shape of per-component **tunables** vs **measurables**, presence (breadboard / storage / off table), helpers to read and update those dicts. |
-| **`storage_region.py`** | Geometry for **inventory quadrant Q3** (negative **x** and negative **y** in lab mm, origin at table center): grid cells, “does this pose fit this slot?”, layout conflict analysis, random placement helpers. Uses **measurables.pose** for “where the part is” and **tunables.storage** for **intent** (slot). |
-| **`motor_rotation_store.py`** | **Software-tracked** cumulative motor angles (per tag, per motor id), persisted as ``motor_rotations.json`` inside the ``LAB_VIEW_PATH`` bundle. |
+| **`domain/component.py`** | Per-component **statecontrol** + **telemetry**, presence, accessors, shape normalization. |
+| **`domain/holding.py`** | Top-level **holding** block and **system_status** (including TELEOP). |
+| **`domain/storage_region.py`** | Q3 inventory grid; slot fit and layout helpers. |
+| **`orchestration/`** | TeleOp, live feed, moves, record, optimize, in-air, … |
+| **`measurables/`**, **`tunables/`**, **`telemetry/`** | Plugin registries for observe / commit / session metadata. |
+| **`primitives/`** | Closed enum of lab verbs, Pydantic bodies, dispatch. |
 
-It is **not** the place for mock vs real lab I/O—that lives in **`lab_communicator`** (`mock.py` / `real.py`). Communicators **import** `lab_model` to stay consistent when they update JSON state, run storage checks, or merge motor angles into lab state.
-
-**Related:** command naming and HTTP dispatch are documented in [`../../primitives.md`](../../primitives.md). Read primitives **`GET_TUNABLES` / `GET_MEASURABLES`** return **slices** of the same component entry described here.
+Hardware I/O lives in **`lab_communicator`** (`mock/`, `real/`). Communicators import `lab_model` when updating JSON state or running orchestration.
 
 ---
 
-## 2. Where tunables and measurables live
+## 2. Where state lives on each component
 
-Each component in lab state is a JSON-shaped object (see e.g. ``lab_view/lab_state.json`` in the mock bundle). Conceptually:
+Each entry in `components[tag_id]` uses this shape (legacy flat `tunables`/`measurables` are migrated on load):
 
 ```text
 components[tag_id] = {
   "id": "...",
   "type": "...",
-  "tunables":   { ... },   ← what we command / intend
-  "measurables": { ... }    ← what we observe / report
+  "statecontrol": {
+    "tunables":   { ... },   ← commanded intent
+    "measurables": { ... }   ← recorded observations
+  },
+  "telemetry": {
+    "teleop": { "active", "ready", "lease_ts", "last_jog_ts", "last_error" },
+    "live_feed": { "stream": { "connected", "live", "backend", ... } }
+  }
 }
 ```
 
-The split is **intentional**: it keeps **commands and intent** separate from **reported reality** (vision, optimization results, last known pose), so the UI and recipes can show both “what we asked for” and “what the system thinks is true.”
+**StateControl** answers: *What do we intend, and what have we formally recorded?*
+
+**Telemetry** answers: *What live sessions are active right now?* (TeleOp lease, MJPEG stream). Telemetry is **not** mixed into tunables/measurables JSON slices.
 
 ---
 
-## 3. Tunables (commanded intent)
+## 3. StateControl — tunables (intent)
 
-**Tunables** answer: *What should the system believe we want for this part?*
-
-Defaults (see `default_tunables()` in `component_model.py`) include:
+Defaults (`default_tunables()` in `component.py`):
 
 | Area | Meaning |
 |------|--------|
-| **`presence`** | High-level location: `breadboard`, `storage`, or `off_table`. |
-| **`nominal_pose`** | Intended pose in lab frame: `x`, `y`, `rotation` (mm / degrees). Often updated when you command a move or store. |
-| **`nominal_motor_positions`** | Map of motor id → commanded or nominal angle (when used). |
-| **`storage`** | `in_storage` flag and optional **`slot`** `{ "i", "j" }` for the inventory grid in Q3. |
-| **`placement`** | e.g. **`mode`**: `MANUAL`, or a strategy name after optimization—how placement was decided. |
+| **`presence`** | `breadboard`, `storage`, or `off_table`. |
+| **`nominal_pose`** | Intended pose: `x`, `y`, `rotation` (mm / deg). |
+| **`nominal_motor_positions`** | Motor id → commanded angle. |
+| **`storage`** | `in_storage` and optional **`slot`** `{ i, j }`. |
+| **`placement`** | e.g. **`mode`**: `MANUAL`, strategy name after optimize. |
+| **`exposure_time_ms`** | Cameras only — shutter intent. |
 
-Helpers like `presence_of`, `nominal_pose`, `storage_slot`, and `set_presence_and_storage` keep reads and updates consistent so **`storage_region`** and communicators do not duplicate string keys.
+Updated only via **primitives** (`MOVE_COMPONENT`, `SET_EXPOSURE`, …). The UI **read-only** tunables panel displays current values; it does not write them.
 
 ---
 
-## 4. Measurables (lab-reported state)
+## 4. StateControl — measurables (observations)
 
-**Measurables** answer: *What does the lab / mock actually report back?*
-
-Defaults (`default_measurables()`) include:
+Defaults (`default_measurables()`):
 
 | Field | Meaning |
 |-------|--------|
-| **`pose`** | Measured center pose: `x`, `y`, `rotation`. Used for drawing, collision-ish checks, and storage validation. |
-| **`last_optimization_score`** | Scalar feedback from the last run, when applicable. |
-| **`last_optimized_pose`** | Snapshot of pose after optimization, when applicable. |
-| **`camera_image`** | After **record** (`RECORD_MEASURABLES` / `POST .../measurables/record`), mock/real may set an object such as `{ "path", "source", "cam_id", "format" }` (PNG path on disk). Otherwise **`null`**. See **`schemas/README.md`**. |
+| **`pose`** | Measured center pose (layout, storage checks). |
+| **`last_optimization_score`** | Scalar from last optimize run. |
+| **`last_optimized_pose`** | Pose snapshot after optimization. |
+| **`camera_image`** | After **`RECORD_MEASURABLES`**: `{ path, source, cam_id, format }` pointing at a PNG on disk; otherwise `null`. |
 
-**Important distinction:** For layout and “where is the part on the table,” **`storage_region`** treats **`measurables.pose`** as the physical center (e.g. fitting a footprint inside a storage cell). **Tunables** carry **nominal** pose and **storage intent** (including slot), which can differ from measured pose when vision lags or the mock adds noise.
+**`RECORD_MEASURABLES`** runs observers declared in **`capabilities.statecontrol.measurables`** (see `measurables/record.py`). Ends active live feed first.
 
----
-
-## 5. How they work together in practice
-
-1. **Move / store / place-from-storage** (via `lab_primitives` and `LabCommunicator`) update both sides: e.g. after a successful move, **nominal** pose in tunables and **measured** pose in measurables are brought in line (mock may add small noise on measurables only).
-
-2. **Optimization (`OPTIMIZE`)** typically adjusts what is “known” about the part in **measurables** (pose, scores) and may set **tunables.placement.mode** to the strategy name—again separating **reported outcome** from **intent**.
-
-3. **Storage Q3 rules** (`storage_region.py`): if a part is **STORED**, **tunables** say *which cell* we intend (`storage.slot`) and **presence**; **measurables.pose** is checked against that cell’s geometry for “fits / doesn’t fit” style diagnostics.
-
-4. **Motor angles** in full lab state may combine **hardware or mock behavior** with **`motor_rotation_store`**: cumulative angles are **tracked in software** from commanded moves unless true encoder readback is modeled elsewhere—so they behave more like **derived state** than raw sensor streams. They are not the same conceptual bucket as `measurables.pose`, but they sit alongside component state when the communicator merges them into the JSON the UI polls.
+Measurables are **receipts**, not the canvas ghost source of truth during normal editing (`tunables.nominal_pose` drives intent).
 
 ---
 
-## 6. API surface (read slices vs record)
+## 5. Telemetry — TeleOp and live feed
 
-Without a motion command, the backend exposes:
+| Sub-block | Meaning | Primitives |
+|-----------|---------|------------|
+| **`telemetry.teleop`** | Per-component control lease | `START_TELEOP`, `END_TELEOP`, `TELEOP_JOG` |
+| **`telemetry.live_feed.stream`** | MJPEG session for this tag | `START_LIVE_FEED`, `END_LIVE_FEED` |
 
-- **`GET /api/components/{tag_id}/tunables`** → **`return_tunables_for_tag`** (same as legacy **`get_tunables_for_tag`**) → **`tunables`** dict.
-- **`GET /api/components/{tag_id}/measurables`** → **`return_measurables_for_tag`** → **`measurables`** dict (saved state only).
+TeleOp session fields:
 
-To **record** a fresh measurement on the lab (e.g. camera capture into **`camera_image`**):
+- **`active`** — lease requested or held.
+- **`ready`** — lab finished setup (`_primitive_prepare_teleop`); jog allowed only when true.
+- **`lease_ts`** — refreshed on start, ready, and each jog; stale-lease sweeper uses this (default TTL 5 min).
 
-- **`POST /api/components/{tag_id}/measurables/record`** or **`POST /api/command`** with **`"action": "RECORD_MEASURABLES"`**.
+Catalog declares TeleOp widget metadata under **`capabilities.telemetry.teleop`**: **`rz`** (table rotation-only) and **`pose3d`** (in-gripper XYZ + rotation), plus stream URL under **`capabilities.telemetry.live_feed.stream`**.
 
-Those reads use **`lab_primitives.fetch_read_primitive`** for **`GET_TUNABLES`** / **`GET_MEASURABLES`**; record is **`PrimitiveId.RECORD_MEASURABLES`** (see [`../../primitives.md`](../../primitives.md)). Full state: **`GET /api/lab-state`**.
+---
+
+## 6. API surface
+
+| Method | Path | Returns |
+|--------|------|---------|
+| GET | `/api/components/{tag_id}/tunables` | `statecontrol.tunables` |
+| GET | `/api/components/{tag_id}/measurables` | `statecontrol.measurables` |
+| POST | `/api/components/{tag_id}/measurables/record` | Fresh measurables after `RECORD_MEASURABLES` |
+| GET | `/api/components/{tag_id}/telemetry` | Full `telemetry` slice |
+| GET | `/api/components/{tag_id}/camera-image` | PNG file from `measurables.camera_image.path` |
+| POST | `/api/components/{tag_id}/teleop/start` | `START_TELEOP` (returns while lab prepares; poll until `ready`) |
+| POST | `/api/components/{tag_id}/telemetry/live-feed/start` | `START_LIVE_FEED` |
+
+Full state: **`GET /api/lab-state`**.
 
 ---
 
@@ -105,9 +119,9 @@ Those reads use **`lab_primitives.fetch_read_primitive`** for **`GET_TUNABLES`**
 
 | Concept | One-line |
 |--------|-----------|
-| **`lab_model`** | Domain helpers: component **tunables/measurables**, **Q3 storage geometry**, **motor angle files**—no direct hardware. |
-| **Tunables** | What we **command or intend** (presence, nominal pose, storage slot, placement mode). |
-| **Measurables** | What we **observe or report** (measured pose, optimization outputs, etc.). |
-| **Why split** | Clear separation between **intent** and **reality** for UI, recipes, and layout checks. |
+| **StateControl.tunables** | Commanded **intent** — changed by primitives only. |
+| **StateControl.measurables** | **Recorded** observations — filled by `RECORD_MEASURABLES` and commits. |
+| **Telemetry** | **Live sessions** (TeleOp, MJPEG) — separate from formal state. |
+| **UI** | Read-only panels for StateControl + Telemetry; **PRIMITIVES** for all writes. |
 
-For JSON examples and migration history, see the repo’s **`schemas/`** directory at the project root and any project notes you keep alongside this package.
+For catalog JSON, see [`../../capability_contract.md`](../../capability_contract.md). For mock/real hooks, see [`../lab_communicator/README.md`](../lab_communicator/README.md).

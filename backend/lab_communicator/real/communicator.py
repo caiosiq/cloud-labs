@@ -14,7 +14,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from lab_model import motor_rotation_store as motor_rot
-from lab_model.component_model import (
+from lab_model.domain.component import (
     PLACEMENT_MODE_HOVER,
     PLACEMENT_MODE_MANUAL,
     PLACEMENT_MODE_PICK,
@@ -28,7 +28,7 @@ from lab_model.component_model import (
     set_presence_and_storage,
     storage_slot,
 )
-from lab_model.holding import (
+from lab_model.domain.holding import (
     DEFAULT_HOVER_Z_MM,
     SYSTEM_STATUS_BUSY,
     SYSTEM_STATUS_HOLDING,
@@ -41,7 +41,7 @@ from lab_model.holding import (
     is_holding,
     set_holding,
 )
-from lab_model.storage_region import (
+from lab_model.domain.storage_region import (
     STORAGE_NOMINAL_ROTATION_DEG,
     find_storage_slot_and_center,
     is_placed_region,
@@ -51,7 +51,7 @@ from lab_model.storage_region import (
 
 from lab_communicator.base import LabCommunicator
 from lab_communicator.shared.lab_view_config import get_lab_view_paths
-from lab_communicator.shared.snapshot import LabPose
+from lab_model.state.snapshot import LabPose
 
 # ``lab_automation_path`` comes from ``lab_manifest.json`` (via bootstrap ? os.environ).
 LAB_AUTOMATION_PATH = os.getenv("LAB_AUTOMATION_PATH")
@@ -189,7 +189,7 @@ class RealLabCommunicator(LabCommunicator):
             from lab_communicator.shared.lab_view_config import (  # noqa: PLC0415
                 get_lab_view_paths_optional,
             )
-            from lab_communicator.shared.catalog_schema import (  # noqa: PLC0415
+            from lab_model.catalog.schema import (  # noqa: PLC0415
                 is_v1_object_shape,
             )
 
@@ -450,7 +450,7 @@ class RealLabCommunicator(LabCommunicator):
     # ``_post_apply_snapshot`` hooks below; everything else (merge
     # logic, holding reset, status normalization, lock acquisition,
     # motor-rotation injection on read) is shared in
-    # ``lab_communicator.base`` + ``lab_communicator.shared.snapshot``.
+    # ``lab_communicator.base`` + ``lab_model.state.snapshot``.
 
     def _apply_loaded_pose_to_hardware(
         self, tag_id: str, lab_pose: LabPose, *, is_placed: bool
@@ -459,9 +459,7 @@ class RealLabCommunicator(LabCommunicator):
 
         This is the **marquee Stage C exemption** -- the only method
         allowed to write ``OpticalComponent.current_location``. The
-        architectural lint in
-        :class:`backend.tests.test_lab_primitives.StageCInvariantsTests`
-        enforces this. Snapshot poses are lab / UI frame; the
+        hook conventions in ``lab_communicator/README.md`` enforce this. Snapshot poses are lab / UI frame; the
         ``lab_automation`` library expects robot frame. All three axes
         are transformed through the dedicated helpers so the cross-wall
         convention stays in one place (``fixing.md`` ?3, ?3.1, ?5):
@@ -513,12 +511,12 @@ class RealLabCommunicator(LabCommunicator):
         """Build the lab-frame pose dict for one Newton sub-move.
 
         Thin wrapper -- body in
-        :func:`lab_communicator.shared.placement_ui.ui_pose_for_placement_tick`.
+        :func:`lab_model.state.placement_ui.ui_pose_for_placement_tick`.
         Real passes :func:`lab_communicator.real.coordinate_frames.robot_table_xy_to_lab_xy`
         as the XY transform; mock passes the identity transform from
         ``mock/coordinate_frames.py``.
         """
-        from lab_communicator.shared.placement_ui import ui_pose_for_placement_tick
+        from lab_model.state.placement_ui import ui_pose_for_placement_tick
         return ui_pose_for_placement_tick(
             self.current_state,
             self._state_lock,
@@ -534,9 +532,9 @@ class RealLabCommunicator(LabCommunicator):
         """Mutate ``current_state`` for one phase of a Newton sub-move.
 
         Thin wrapper -- body in
-        :func:`lab_communicator.shared.placement_ui.apply_placement_ui_phase`.
+        :func:`lab_model.state.placement_ui.apply_placement_ui_phase`.
         """
-        from lab_communicator.shared.placement_ui import apply_placement_ui_phase
+        from lab_model.state.placement_ui import apply_placement_ui_phase
         apply_placement_ui_phase(
             self.current_state, self._state_lock, tag_id, phase, pose
         )
@@ -597,8 +595,8 @@ class RealLabCommunicator(LabCommunicator):
 
     def _catalog_wh(self, tag_id: str) -> Tuple[float, float]:
         """Thin wrapper around
-        :func:`lab_communicator.shared.catalog_lookup.catalog_wh`."""
-        from lab_communicator.shared.catalog_lookup import catalog_wh
+        :func:`lab_model.catalog.lookup.catalog_wh`."""
+        from lab_model.catalog.lookup import catalog_wh
         return catalog_wh(self.catalog_map.get, tag_id)
 
     # --- Z-frame transforms (see module-level comment for the convention) ---
@@ -606,11 +604,11 @@ class RealLabCommunicator(LabCommunicator):
         """Physical height of a component (base to top, mm).
 
         Thin wrapper around
-        :func:`lab_communicator.shared.catalog_lookup.component_height_mm`.
+        :func:`lab_model.catalog.lookup.component_height_mm`.
         Defaults to ``DEFAULT_COMPONENT_HEIGHT_MM`` (env-tunable) on a
         missing/malformed catalog entry.
         """
-        from lab_communicator.shared.catalog_lookup import component_height_mm
+        from lab_model.catalog.lookup import component_height_mm
         return component_height_mm(
             (self.catalog_map or {}).get,
             tag_id,

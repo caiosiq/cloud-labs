@@ -1,16 +1,17 @@
 import { coordInput, dispatchPrimitive, primitiveRegion, runButton } from './shared.js';
+import { tunableValue, normalizeCapabilities } from '../component-state.js';
 
 export function renderSetExposure(ctx) {
     const { tagId, comp, catalogRow, hooks } = ctx;
-    const desc = (catalogRow?.capabilities?.tunables?.exposure_time_ms) || {};
+    const caps = normalizeCapabilities(catalogRow?.capabilities);
+    const desc = caps.statecontrol?.tunables?.exposure_time_ms || {};
     const min = Number.isFinite(Number(desc.min)) ? Number(desc.min) : 10;
     const max = Number.isFinite(Number(desc.max)) ? Number(desc.max) : 1000;
     const unit = desc.unit || 'ms';
 
+    const stored = tunableValue(comp, 'exposure_time_ms');
     const cur =
-        (comp?.tunables?.exposure_time_ms !== undefined &&
-            comp.tunables.exposure_time_ms !== null &&
-            Number(comp.tunables.exposure_time_ms)) ||
+        (stored !== undefined && stored !== null && Number(stored)) ||
         (Number.isFinite(Number(desc.default)) ? Number(desc.default) : 200);
 
     const { section, body } = primitiveRegion('SET_EXPOSURE', 'SET EXPOSURE');

@@ -3,6 +3,7 @@ import { CANVAS_WIDTH, CANVAS_HEIGHT } from './config.js';
 import { mmToPx, pxToMm } from './canvas/coordinates.js';
 import { store } from './state/store.js';
 import { drawPose, isBreadboardIntent } from './component-model.js';
+import { isTeleopActive } from './component-state.js';
 import { log } from './ui/log.js';
 import {
     ALIGNMENT_SHOW_INTERSECTION_MARKERS,
@@ -51,6 +52,7 @@ import {
 } from './ui/context-panel.js';
 import { checkCollision, initCanvasInteraction } from './canvas/interaction.js';
 import { initRender, render } from './canvas/render.js';
+import { loadPlatformRegistries } from './lab-capabilities.js';
 
 
 const _frontendBuild =
@@ -150,6 +152,7 @@ initContextPanel({
     checkCollision: (id, x, y, opts) => checkCollision(id, x, y, opts),
 });
 initCanvasInteraction({ render: () => render() });
+store._teleopLivePoseRender = () => render();
 
 
 /** Initialize store.ghostState[tagId] from lab state for Command Console moves. */
@@ -196,6 +199,14 @@ function initAlignmentDockTools() {
 
 function init() {
     log("Interface loaded.");
+    loadPlatformRegistries()
+        .then((reg) => {
+            console.info('[cloud-labs] platform registries loaded', {
+                tunables: Object.keys(reg.tunables || {}),
+                measurables: Object.keys(reg.measurables || {}),
+            });
+        })
+        .catch((e) => console.warn('[cloud-labs] platform registries preload failed:', e));
     fetchStorageGridSpec();
     fetchStrategies();
     fetchRecipes();
@@ -273,22 +284,13 @@ function init() {
     // Phase 9c removed the lab-wide LIVE FEED pane.
     // Phase 9d removed the table-cam dock; cameras live in the component panel.
 
-    // Phase 8b: best-effort END_TELEOP on browser unload. Walks
-    // ``store.labState.components`` (last known snapshot) and fires a
-    // sendBeacon for every tag whose ``tunables.teleop_active`` was
-    // True. Without this, a closed tab would leave the lease dangling
-    // until the server's stale-lease sweeper (TTL ~3 s by default) ran;
-    // the beacon brings that down to "before the page is gone".
-    //
-    // We listen on BOTH pagehide (Safari-friendly, fires on bfcache
-    // restore too) AND beforeunload so the path is covered across
-    // browsers. The handler must stay synchronous-ish and tiny --
-    // sendBeacon hands the request to the OS and returns immediately.
+    // Best-effort END_TELEOP on browser unload. Fires sendBeacon for every
+    // tag with an active TeleOp session so leases do not linger after tab close.
     const fireTeleopEndBeacons = () => {
         const comps = store.labState && store.labState.components;
         if (!comps) return;
         Object.entries(comps).forEach(([tagId, comp]) => {
-            if (comp && comp.tunables && comp.tunables.teleop_active) {
+            if (comp && isTeleopActive(comp)) {
                 endTeleopBeacon(tagId);
             }
         });

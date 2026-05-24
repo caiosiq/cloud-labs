@@ -1,7 +1,12 @@
 /**
  * Floating component context panel.
  *
- * Renders the right-hand-side panel that appears when the user selects a component on the canvas
+ * **Pose surface #2 (X/Y/Rot):** `#ctx-x`, `#ctx-y`, `#ctx-rot` mirror
+ * `store.ghostState[selected]`; Move sends MOVE_COMPONENT. Surface #3
+ * (TablePose read-only receipt) lives in the capability popup below.
+ * See `component-model.js` for the full three-surface map.
+ *
+ * Renders the right-hand-side panel when the user selects a component on the canvas
  * (or in the inventory sidebar). The panel adapts its content based on:
  *   1. Placement state: PLACED | STORED | INVENTORY (`placementUiLabel`).
  *   2. System status:   IDLE | HOLDING (`holding` + `unconfirmed`).
@@ -26,6 +31,7 @@ import {
     isStoredComponent,
     measPose,
 } from '../component-model.js';
+import { componentDataSnapshot } from '../component-state.js';
 import { renderComponentPopup } from './component-popup.js';
 
 const PRIMITIVE_DEV_HINTS =
@@ -33,11 +39,7 @@ const PRIMITIVE_DEV_HINTS =
     typeof window.location !== 'undefined' &&
     /(?:^|[?&])dev=1(?:&|$)/.test(window.location.search || '');
 
-// Phase 7 superseded the hand-built ``renderMeasurablesReceipt`` from
-// Phase 4; the symmetric per-component viewer in
-// ``frontend/js/ui/component-viewer.js`` now renders MEASURABLES (and
-// TUNABLES + TELEMETRY + PRIMITIVES) from the catalog's
-// ``capabilities`` block via the widget registry.
+// Capability panels (TablePose, measurables, primitives) render via component-popup.js.
 
 // DOM refs (resolved lazily so we don't need DI for elements that exist at boot anyway).
 function refs() {
@@ -337,9 +339,6 @@ export function updateContextPanel(name) {
     const hld = getHolding(store.labState);
     store.contextPanelStatusSnapshot = `${(store.labState && store.labState.system_status) || 'IDLE'}|${hld.tag_id || ''}|${hld.requires_operator_confirm ? '1' : '0'}`;
     if (comp) {
-        store.contextPanelDataSnapshot = JSON.stringify({
-            tunables: comp.tunables || {},
-            measurables: comp.measurables || {},
-        });
+        store.contextPanelDataSnapshot = componentDataSnapshot(comp);
     }
 }

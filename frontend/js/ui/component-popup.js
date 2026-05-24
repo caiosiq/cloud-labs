@@ -6,6 +6,7 @@ import { measPose } from '../component-model.js';
 import { sendCommand } from '../api/commands.js';
 import { fetchLabState } from '../state/lab-state.js';
 import { log } from './log.js';
+import { updateMotorAngleLabels } from './context-panel.js';
 import { renderReadOnlyPanel } from './component-viewer.js';
 import { renderPrimitiveRegions } from '../primitives/index.js';
 
@@ -36,7 +37,15 @@ export function renderComponentPopup(tagId, deps = {}) {
         null;
     const caps = catalogRow.capabilities;
 
-    root.appendChild(renderReadOnlyPanel(tagId, comp, catalogRow));
+    root.appendChild(renderReadOnlyPanel(tagId, comp, catalogRow, {
+        sendCommand,
+        fetchLabState,
+        updateMotorAngleLabels,
+        refreshPanel: deps.updateContextPanel
+            ? (tid) => deps.updateContextPanel(tid || tagId)
+            : undefined,
+        log,
+    }));
 
     if (caps && Array.isArray(caps.primitives) && caps.primitives.length) {
         const primBlock = document.createElement('div');
@@ -55,6 +64,7 @@ export function renderComponentPopup(tagId, deps = {}) {
             tagId,
             comp,
             catalogRow,
+            labState: store.labState,
             placementState: deps.placementState,
             getPose: () => {
                 const ghost = store.ghostState && store.ghostState[tagId];
@@ -65,6 +75,7 @@ export function renderComponentPopup(tagId, deps = {}) {
                 sendCommand,
                 fetchLabState,
                 log,
+                updateMotorAngleLabels,
                 refreshPanel: deps.updateContextPanel
                     ? (tid) => deps.updateContextPanel(tid)
                     : undefined,

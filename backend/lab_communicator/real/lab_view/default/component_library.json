@@ -21,54 +21,78 @@
       ],
       "motor_controller": "wifi_stepper2",
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            },
+            "nominal_motor_positions": {
+              "widget": "JsonInspector"
+            }
           },
-          "nominal_motor_positions": {
-            "widget": "JsonInspector"
-          },
+          "measurables": {
+            "motor_rotations": {
+              "widget": "MotorRotationsReadout"
+            },
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
+            }
+          }
+        },
+        "telemetry": {
           "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
-        },
-        "measurables": {
-          "motor_rotations": {
-            "widget": "MotorRotationsReadout"
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
           },
-          "last_optimization_score": {
-            "widget": "NumberBadge",
-            "format": ".3f"
-          }
+          "live_feed": {}
         },
-        "telemetry": {},
         "primitives": [
           "MOVE_COMPONENT",
+          "SET_MOTOR_SETPOINT",
+          "MOVE_MOTOR",
+          "MOTOR_SEND_HOME",
+          "MOTOR_SET_ZERO",
           "STORE_COMPONENT",
           "PLACE_FROM_STORAGE",
           "PICK_COMPONENT",
           "HOVER",
           "PLACE_FROM_HOVER",
           "RECORD_MEASURABLES",
-          "MOVE_MOTOR",
-          "MOTOR_SEND_HOME",
-          "MOTOR_SET_ZERO",
           "OPTIMIZE",
           "SCAN_ROTATE_IN_PLACE",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG",
-          "SET_MOTOR_SETPOINT"
+          "TELEOP_GOTO"
         ]
       }
     },
@@ -87,50 +111,70 @@
         "fov": 60
       },
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            },
+            "exposure_time_ms": {
+              "widget": "FloatRange",
+              "min": 10.0,
+              "max": 1000.0,
+              "default": 200.0,
+              "unit": "ms"
+            }
           },
-          "exposure_time_ms": {
-            "widget": "FloatRange",
-            "min": 10.0,
-            "max": 1000.0,
-            "default": 200.0,
-            "unit": "ms"
-          },
-          "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
-        },
-        "measurables": {
-          "camera_image": {
-            "widget": "ImageViewer",
-            "format": "png"
+          "measurables": {
+            "camera_image": {
+              "widget": "ImageViewer",
+              "format": "png"
+            }
           }
         },
         "telemetry": {
-          "stream": {
-            "widget": "MJPEGViewer",
-            "url": "/api/components/{tag_id}/telemetry/stream"
+          "teleop": {
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
           },
-          "preview": {
-            "widget": "JPEGPoll",
-            "url": "/api/components/{tag_id}/telemetry/preview",
-            "default_fps": 10
+          "live_feed": {
+            "stream": {
+              "widget": "MJPEGViewer",
+              "url": "/api/components/{tag_id}/telemetry/stream"
+            }
           }
         },
         "primitives": [
           "MOVE_COMPONENT",
+          "SET_EXPOSURE",
           "STORE_COMPONENT",
           "PLACE_FROM_STORAGE",
           "PICK_COMPONENT",
@@ -139,8 +183,9 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG",
-          "SET_EXPOSURE"
+          "TELEOP_GOTO",
+          "START_LIVE_FEED",
+          "END_LIVE_FEED"
         ]
       }
     },
@@ -159,50 +204,70 @@
         "fov": 60
       },
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            },
+            "exposure_time_ms": {
+              "widget": "FloatRange",
+              "min": 10.0,
+              "max": 1000.0,
+              "default": 200.0,
+              "unit": "ms"
+            }
           },
-          "exposure_time_ms": {
-            "widget": "FloatRange",
-            "min": 10.0,
-            "max": 1000.0,
-            "default": 200.0,
-            "unit": "ms"
-          },
-          "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
-        },
-        "measurables": {
-          "camera_image": {
-            "widget": "ImageViewer",
-            "format": "png"
+          "measurables": {
+            "camera_image": {
+              "widget": "ImageViewer",
+              "format": "png"
+            }
           }
         },
         "telemetry": {
-          "stream": {
-            "widget": "MJPEGViewer",
-            "url": "/api/components/{tag_id}/telemetry/stream"
+          "teleop": {
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
           },
-          "preview": {
-            "widget": "JPEGPoll",
-            "url": "/api/components/{tag_id}/telemetry/preview",
-            "default_fps": 10
+          "live_feed": {
+            "stream": {
+              "widget": "MJPEGViewer",
+              "url": "/api/components/{tag_id}/telemetry/stream"
+            }
           }
         },
         "primitives": [
           "MOVE_COMPONENT",
+          "SET_EXPOSURE",
           "STORE_COMPONENT",
           "PLACE_FROM_STORAGE",
           "PICK_COMPONENT",
@@ -211,8 +276,9 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG",
-          "SET_EXPOSURE"
+          "TELEOP_GOTO",
+          "START_LIVE_FEED",
+          "END_LIVE_FEED"
         ]
       }
     },
@@ -237,54 +303,78 @@
       ],
       "motor_controller": "wifi_stepper1",
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            },
+            "nominal_motor_positions": {
+              "widget": "JsonInspector"
+            }
           },
-          "nominal_motor_positions": {
-            "widget": "JsonInspector"
-          },
+          "measurables": {
+            "motor_rotations": {
+              "widget": "MotorRotationsReadout"
+            },
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
+            }
+          }
+        },
+        "telemetry": {
           "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
-        },
-        "measurables": {
-          "motor_rotations": {
-            "widget": "MotorRotationsReadout"
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
           },
-          "last_optimization_score": {
-            "widget": "NumberBadge",
-            "format": ".3f"
-          }
+          "live_feed": {}
         },
-        "telemetry": {},
         "primitives": [
           "MOVE_COMPONENT",
+          "SET_MOTOR_SETPOINT",
+          "MOVE_MOTOR",
+          "MOTOR_SEND_HOME",
+          "MOTOR_SET_ZERO",
           "STORE_COMPONENT",
           "PLACE_FROM_STORAGE",
           "PICK_COMPONENT",
           "HOVER",
           "PLACE_FROM_HOVER",
           "RECORD_MEASURABLES",
-          "MOVE_MOTOR",
-          "MOTOR_SEND_HOME",
-          "MOTOR_SET_ZERO",
           "OPTIMIZE",
           "SCAN_ROTATE_IN_PLACE",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG",
-          "SET_MOTOR_SETPOINT"
+          "TELEOP_GOTO"
         ]
       }
     },
@@ -303,26 +393,50 @@
         "damage_threshold": "10J/cm^2"
       },
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            }
           },
-          "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
+          "measurables": {}
         },
-        "measurables": {},
-        "telemetry": {},
+        "telemetry": {
+          "teleop": {
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
+          },
+          "live_feed": {}
+        },
         "primitives": [
           "MOVE_COMPONENT",
           "STORE_COMPONENT",
@@ -333,7 +447,7 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG"
+          "TELEOP_GOTO"
         ]
       }
     },
@@ -352,26 +466,50 @@
         "polarization": "Non-polarizing"
       },
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            }
           },
-          "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
+          "measurables": {}
         },
-        "measurables": {},
-        "telemetry": {},
+        "telemetry": {
+          "teleop": {
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
+          },
+          "live_feed": {}
+        },
         "primitives": [
           "MOVE_COMPONENT",
           "STORE_COMPONENT",
@@ -382,7 +520,7 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG"
+          "TELEOP_GOTO"
         ]
       }
     },
@@ -407,54 +545,78 @@
       ],
       "motor_controller": "wifi_stepper1",
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            },
+            "nominal_motor_positions": {
+              "widget": "JsonInspector"
+            }
           },
-          "nominal_motor_positions": {
-            "widget": "JsonInspector"
-          },
+          "measurables": {
+            "motor_rotations": {
+              "widget": "MotorRotationsReadout"
+            },
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
+            }
+          }
+        },
+        "telemetry": {
           "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
-        },
-        "measurables": {
-          "motor_rotations": {
-            "widget": "MotorRotationsReadout"
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
           },
-          "last_optimization_score": {
-            "widget": "NumberBadge",
-            "format": ".3f"
-          }
+          "live_feed": {}
         },
-        "telemetry": {},
         "primitives": [
           "MOVE_COMPONENT",
+          "SET_MOTOR_SETPOINT",
+          "MOVE_MOTOR",
+          "MOTOR_SEND_HOME",
+          "MOTOR_SET_ZERO",
           "STORE_COMPONENT",
           "PLACE_FROM_STORAGE",
           "PICK_COMPONENT",
           "HOVER",
           "PLACE_FROM_HOVER",
           "RECORD_MEASURABLES",
-          "MOVE_MOTOR",
-          "MOTOR_SEND_HOME",
-          "MOTOR_SET_ZERO",
           "OPTIMIZE",
           "SCAN_ROTATE_IN_PLACE",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG",
-          "SET_MOTOR_SETPOINT"
+          "TELEOP_GOTO"
         ]
       }
     },
@@ -479,54 +641,78 @@
       ],
       "motor_controller": "wifi_stepper2",
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            },
+            "nominal_motor_positions": {
+              "widget": "JsonInspector"
+            }
           },
-          "nominal_motor_positions": {
-            "widget": "JsonInspector"
-          },
+          "measurables": {
+            "motor_rotations": {
+              "widget": "MotorRotationsReadout"
+            },
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
+            }
+          }
+        },
+        "telemetry": {
           "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
-        },
-        "measurables": {
-          "motor_rotations": {
-            "widget": "MotorRotationsReadout"
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
           },
-          "last_optimization_score": {
-            "widget": "NumberBadge",
-            "format": ".3f"
-          }
+          "live_feed": {}
         },
-        "telemetry": {},
         "primitives": [
           "MOVE_COMPONENT",
+          "SET_MOTOR_SETPOINT",
+          "MOVE_MOTOR",
+          "MOTOR_SEND_HOME",
+          "MOTOR_SET_ZERO",
           "STORE_COMPONENT",
           "PLACE_FROM_STORAGE",
           "PICK_COMPONENT",
           "HOVER",
           "PLACE_FROM_HOVER",
           "RECORD_MEASURABLES",
-          "MOVE_MOTOR",
-          "MOTOR_SEND_HOME",
-          "MOTOR_SET_ZERO",
           "OPTIMIZE",
           "SCAN_ROTATE_IN_PLACE",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG",
-          "SET_MOTOR_SETPOINT"
+          "TELEOP_GOTO"
         ]
       }
     },
@@ -545,26 +731,50 @@
         "cut_on": "600nm"
       },
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            }
           },
-          "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
+          "measurables": {}
         },
-        "measurables": {},
-        "telemetry": {},
+        "telemetry": {
+          "teleop": {
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
+          },
+          "live_feed": {}
+        },
         "primitives": [
           "MOVE_COMPONENT",
           "STORE_COMPONENT",
@@ -575,7 +785,7 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG"
+          "TELEOP_GOTO"
         ]
       }
     },
@@ -595,26 +805,50 @@
         "refractive_index": 1.74
       },
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            }
           },
-          "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
+          "measurables": {}
         },
-        "measurables": {},
-        "telemetry": {},
+        "telemetry": {
+          "teleop": {
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
+          },
+          "live_feed": {}
+        },
         "primitives": [
           "MOVE_COMPONENT",
           "STORE_COMPONENT",
@@ -625,7 +859,7 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG"
+          "TELEOP_GOTO"
         ]
       }
     },
@@ -650,54 +884,78 @@
       ],
       "motor_controller": "wifi_stepper3",
       "capabilities": {
-        "tunables": {
-          "nominal_pose": {
-            "widget": "TablePose"
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose"
+            },
+            "nominal_motor_positions": {
+              "widget": "JsonInspector"
+            }
           },
-          "nominal_motor_positions": {
-            "widget": "JsonInspector"
-          },
+          "measurables": {
+            "motor_rotations": {
+              "widget": "MotorRotationsReadout"
+            },
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
+            }
+          }
+        },
+        "telemetry": {
           "teleop": {
-            "widget": "TeleopJog",
-            "step_mm": [
-              0.5,
-              2.0,
-              10.0
-            ],
-            "step_deg": [
-              0.5,
-              2.0,
-              10.0
-            ]
-          }
-        },
-        "measurables": {
-          "motor_rotations": {
-            "widget": "MotorRotationsReadout"
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
           },
-          "last_optimization_score": {
-            "widget": "NumberBadge",
-            "format": ".3f"
-          }
+          "live_feed": {}
         },
-        "telemetry": {},
         "primitives": [
           "MOVE_COMPONENT",
+          "SET_MOTOR_SETPOINT",
+          "MOVE_MOTOR",
+          "MOTOR_SEND_HOME",
+          "MOTOR_SET_ZERO",
           "STORE_COMPONENT",
           "PLACE_FROM_STORAGE",
           "PICK_COMPONENT",
           "HOVER",
           "PLACE_FROM_HOVER",
           "RECORD_MEASURABLES",
-          "MOVE_MOTOR",
-          "MOTOR_SEND_HOME",
-          "MOTOR_SET_ZERO",
           "OPTIMIZE",
           "SCAN_ROTATE_IN_PLACE",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_JOG",
-          "SET_MOTOR_SETPOINT"
+          "TELEOP_GOTO"
         ]
       }
     }

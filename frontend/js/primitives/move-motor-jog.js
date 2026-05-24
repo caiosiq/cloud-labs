@@ -1,20 +1,23 @@
-import { dispatchPrimitive, primitiveRegion, secondaryButton } from './shared.js';
-import { measPose } from '../component-model.js';
+import { primitiveRegion, secondaryButton } from './shared.js';
+import {
+    createMotorActionStatusEl,
+    dispatchMotorJog,
+    MOTOR_ACTION,
+} from '../ui/motor-action-ui.js';
 
 export function renderMoveMotorJog(ctx) {
-    const { tagId, comp, catalogRow, hooks } = ctx;
+    const { tagId, catalogRow, hooks } = ctx;
     const motorIds = catalogRow?.motor_ids || [];
     if (!motorIds.length) return null;
 
     const step = 2.5;
-    const tracked = (measPose(comp).motor_rotations) || {};
 
     const { section, body } = primitiveRegion('MOVE_MOTOR', 'MOVE MOTOR (relative jog)');
     const hint = document.createElement('p');
     hint.style.fontSize = '10px';
     hint.style.color = '#94a3b8';
     hint.style.margin = '0 0 4px 0';
-    hint.textContent = `Relative jog in ±${step}° steps (does not change nominal setpoint).`;
+    hint.textContent = `Relative jog in ±${step}° steps; updates nominal_motor_positions to match.`;
     body.appendChild(hint);
 
     motorIds.forEach((mid) => {
@@ -29,41 +32,24 @@ export function renderMoveMotorJog(ctx) {
         label.style.fontSize = '11px';
         label.style.minWidth = '28px';
 
-        const theta = document.createElement('span');
-        theta.dataset.motorAngle = `${tagId}:${mid}`;
-        const tr = tracked[String(mid)];
-        const trN = Number.isFinite(Number(tr)) ? Number(tr) : 0;
-        theta.style.fontSize = '10px';
-        theta.style.color = '#64748b';
-        theta.style.fontFamily = 'ui-monospace, monospace';
-        theta.textContent = `θ ${trN.toFixed(2)}°`;
-
         const bRev = secondaryButton('', 'remove');
         bRev.style.width = 'auto';
         bRev.style.padding = '6px 10px';
         bRev.title = `Jog −${step}°`;
-        bRev.onclick = () =>
-            void dispatchPrimitive(hooks, {
-                action: 'MOVE_MOTOR',
-                target_id: tagId,
-                parameters: { motor_id: Number(mid), distance: -step },
-            });
+        bRev.onclick = () => void dispatchMotorJog(hooks, tagId, mid, -step);
 
         const bFwd = secondaryButton('', 'add');
         bFwd.style.width = 'auto';
         bFwd.style.padding = '6px 10px';
         bFwd.title = `Jog +${step}°`;
-        bFwd.onclick = () =>
-            void dispatchPrimitive(hooks, {
-                action: 'MOVE_MOTOR',
-                target_id: tagId,
-                parameters: { motor_id: Number(mid), distance: step },
-            });
+        bFwd.onclick = () => void dispatchMotorJog(hooks, tagId, mid, step);
+
+        const statusEl = createMotorActionStatusEl(MOTOR_ACTION.JOG, tagId, mid);
 
         row.appendChild(label);
-        row.appendChild(theta);
         row.appendChild(bRev);
         row.appendChild(bFwd);
+        row.appendChild(statusEl);
         body.appendChild(row);
     });
 
