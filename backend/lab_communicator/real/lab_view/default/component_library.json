@@ -107,6 +107,7 @@
       },
       "height_mm": 60,
       "properties": {
+        "placeable_on_table": true,
         "resolution": "1920x1080",
         "fov": 60,
         "hardware_binding": {
@@ -207,6 +208,7 @@
       },
       "height_mm": 60,
       "properties": {
+        "placeable_on_table": true,
         "resolution": "1920x1080",
         "fov": 60,
         "hardware_binding": {

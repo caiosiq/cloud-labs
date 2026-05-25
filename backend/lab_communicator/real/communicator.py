@@ -164,7 +164,8 @@ class RealLabCommunicator(LabCommunicator):
                 print(
                     f"[REAL LAB] Passed catalog to OpticalExperiment "
                     f"(schema_version={catalog_doc.get('schema_version')}, "
-                    f"{len(catalog_doc.get('components') or {})} components)"
+                    f"{len(catalog_doc.get('components') or {})} active components "
+                    f"from active_catalog.json)"
                 )
             else:
                 if catalog_doc is not None:
@@ -252,30 +253,16 @@ class RealLabCommunicator(LabCommunicator):
 
     @staticmethod
     def _load_catalog_for_lab_automation() -> Optional[Dict[str, Any]]:
-        """Read the active lab_view catalog as a v1 doc for lab_automation.
+        """v1 catalog for ``lab_automation``: ``component_library`` ∩ ``active_catalog``.
 
-        Returns ``None`` if the bundle is not bootstrapped (unit test paths)
-        or the file is still in legacy array shape -- in which case the
-        hardware side keeps its own hardcoded defaults. Once the migration
-        script has run on the active bundle, this returns the full
-        ``{schema_version, components}`` document.
+        Only tags listed in ``active_catalog.json`` are registered for vision scan
+        and manipulable lookup. The full library remains on disk for editing;
+        inactive parts are invisible to the hardware registry until activated.
         """
         try:
-            from lab_communicator.shared.lab_view_config import (  # noqa: PLC0415
-                get_lab_view_paths_optional,
-            )
-            from lab_model.catalog.schema import (  # noqa: PLC0415
-                is_v1_object_shape,
-            )
+            from lab_model.catalog.bundle import active_catalog_v1_document  # noqa: PLC0415
 
-            paths = get_lab_view_paths_optional()
-            if paths is None:
-                return None
-            with open(paths.component_library_json, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if is_v1_object_shape(data):
-                return data
-            return None
+            return active_catalog_v1_document()
         except Exception as exc:
             print(f"[REAL LAB] _load_catalog_for_lab_automation skipped: {exc!r}")
             return None
@@ -1011,7 +998,23 @@ class RealLabCommunicator(LabCommunicator):
             was = self._hardware_teleop_was_executing.get(tag_id, False)
             now = bool(pose.get("executing"))
             if was and not now:
-                self._on_teleop_motion_idle(tag_id)
+                # Commit idle state without re-entering get_teleop_live_pose (recursion).
+                with self._state_lock:
+                    from lab_model.state.commits import (
+                        commit_teleop_command_idle,
+                        commit_teleop_session_pose,
+                    )
+
+                    if pose:
+                        commit_teleop_session_pose(
+                            self.current_state, tag_id, pose
+                        )
+                    commit_teleop_command_idle(self.current_state, tag_id)
+                    self.current_state["last_updated"] = datetime.now().isoformat()
+                try:
+                    self._persist_state()
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[REAL LAB] teleop idle persist failed: {exc!r}")
             self._hardware_teleop_was_executing[tag_id] = now
         return pose
 

@@ -181,6 +181,16 @@ class TeleopController:
                 return
             if prep_ok:
                 initial_pose = _initial_live_pose(host.current_state, target_id)
+                hw_tags = getattr(host, "_hardware_teleop_tags", None)
+                if hw_tags and target_id in hw_tags:
+                    hw_pose = host._teleop_live_get_pose(target_id)
+                    if isinstance(hw_pose, dict) and hw_pose.get("rotation") is not None:
+                        initial_pose = {
+                            "x": float(hw_pose.get("x", initial_pose["x"])),
+                            "y": float(hw_pose.get("y", initial_pose["y"])),
+                            "z": float(hw_pose.get("z", initial_pose.get("z", DEFAULT_HOVER_Z_MM))),
+                            "rotation": float(hw_pose["rotation"]),
+                        }
                 commit_teleop_ready(
                     host.current_state, target_id, now_ms=self.now_ms()
                 )

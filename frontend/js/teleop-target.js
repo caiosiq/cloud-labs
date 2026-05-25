@@ -29,7 +29,8 @@ export {
     DEFAULT_HOVER_Z_MM,
 } from './teleop-pose.js';
 
-export const DEFAULT_TELEOP_SPEED = { linear_mm_s: 25, angular_deg_s: 15 };
+/** ~10% of legacy bench max for safer first TeleOp moves. */
+export const DEFAULT_TELEOP_SPEED = { linear_mm_s: 2.5, angular_deg_s: 1.5 };
 
 export function getTeleopSpeed(tagId) {
     return store.teleopSpeed[tagId] || { ...DEFAULT_TELEOP_SPEED };

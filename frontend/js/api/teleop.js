@@ -13,6 +13,8 @@
  * instead of throwing, so rate-limited canvas loops stay simple.
  */
 import { log } from '../ui/log.js';
+import { applyComponentTelemetryFromServer } from '../component-state.js';
+import { syncTeleopTargetFromCurrent } from '../teleop-target.js';
 import { isTeleopWsConnected, teleopGotoViaWs } from './teleop-session-ws.js';
 
 async function _parseBody(response) {
@@ -42,8 +44,12 @@ export async function startTeleop(tagId) {
             log(`START_TELEOP ${tagId} refused: ${detail}`, 'warn');
             return { ok: false, error: detail };
         }
+        if (body && body.telemetry) {
+            applyComponentTelemetryFromServer(tagId, body.telemetry);
+        }
+        syncTeleopTargetFromCurrent(tagId);
         log(`START_TELEOP ${tagId}`, 'info');
-        return { ok: true, tunables: body && body.tunables };
+        return { ok: true, tunables: body && body.tunables, telemetry: body && body.telemetry };
     } catch (e) {
         const msg = (e && e.message) ? e.message : String(e);
         log(`START_TELEOP ${tagId} failed: ${msg}`, 'error');
@@ -70,8 +76,11 @@ export async function endTeleop(tagId) {
             log(`END_TELEOP ${tagId} refused: ${detail}`, 'warn');
             return { ok: false, error: detail };
         }
+        if (body && body.telemetry) {
+            applyComponentTelemetryFromServer(tagId, body.telemetry);
+        }
         log(`END_TELEOP ${tagId}`, 'info');
-        return { ok: true, tunables: body && body.tunables };
+        return { ok: true, tunables: body && body.tunables, telemetry: body && body.telemetry };
     } catch (e) {
         const msg = (e && e.message) ? e.message : String(e);
         log(`END_TELEOP ${tagId} failed: ${msg}`, 'error');

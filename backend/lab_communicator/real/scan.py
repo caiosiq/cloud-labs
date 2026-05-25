@@ -94,10 +94,11 @@ def initialize_state(
         str(x).strip() for x in (preserve_component_ids or ()) if isinstance(x, str) and x.strip()
     )
 
-    from lab_model.catalog.bundle import merged_catalog_rows
+    from lab_model.catalog.bundle import active_tag_ids, merged_catalog_rows
 
     try:
         catalog = merged_catalog_rows()
+        scan_tag_ids = frozenset(active_tag_ids())
     except Exception as e:
         print(f"[REAL LAB] Error loading lab_view catalog bundle: {e}. Cannot scan.")
         communicator._ensure_fixture_components()
@@ -107,10 +108,24 @@ def initialize_state(
         item.get("tag_id"): item for item in catalog if isinstance(item.get("tag_id"), str)
     }
 
-    # Scan registry manipulables (Phase 8 — no parallel OpticalComponent dict).
-    manipulables = list(communicator.experiment.list_manipulables())
+    # Scan only active_catalog tags (ceiling cameras skip inactive library entries).
+    all_manipulables = list(communicator.experiment.list_manipulables())
+    manipulables = [
+        m
+        for m in all_manipulables
+        if getattr(m, "tag_id", None) in scan_tag_ids
+    ]
+    skipped = len(all_manipulables) - len(manipulables)
+    if skipped:
+        print(
+            f"[REAL LAB] Skipping scan for {skipped} registry tag(s) "
+            f"not in active_catalog.json"
+        )
     if not manipulables:
-        print("[REAL LAB] Warning: registry has no manipulables; check catalog passthrough.")
+        print(
+            "[REAL LAB] Warning: no manipulables to scan for active_catalog; "
+            "check active_catalog.json and catalog passthrough."
+        )
     else:
         communicator.experiment.scan_components_cloudlab(
             manipulables, force_rescan=True

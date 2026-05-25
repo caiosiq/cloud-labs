@@ -23,7 +23,7 @@ These are enforced at process startup (`bootstrap_lab_view`). If any are missing
 | **`layout.json`** | Lab bounds, danger zone, storage grid (`negative_xy`), breadboard spacing — feeds `lab_model.domain.storage_region`. |
 | **`laser_lines.json`** | Laser overlays (`GET /api/laser-line`, `/api/laser-lines`). |
 | **`component_library.json`** | Full parts catalog keyed by `tag_id`. |
-| **`active_catalog.json`** | `{ "tag_ids": [...] }` — intersection + order for `GET /api/catalog` (`catalog_bundle.py`). |
+| **`active_catalog.json`** | `{ "tag_ids": [...] }` — intersection + order for `GET /api/catalog`, **real boot scan**, and the catalog passed to `lab_automation` (`active_catalog_v1_document` in `lab_model/catalog/bundle.py`). |
 | **`motor_rotations.json`** | Software-tracked motor angles (may start as `{}`). |
 
 ### 0.2 Created automatically if absent

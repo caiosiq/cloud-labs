@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from lab_model.catalog.schema import load_component_library_rows
 from lab_communicator.shared.lab_view_config import LabViewPaths, get_lab_view_paths_optional
@@ -59,6 +59,38 @@ def active_tag_ids(active_path: Optional[str] = None) -> List[str]:
         else:
             raise ValueError(f"active_catalog.json tag_ids entries must be non-empty strings: {p}")
     return out
+
+
+def filter_v1_catalog_to_active_tags(
+    doc: Dict[str, Any],
+    active_ids: Iterable[str],
+) -> Dict[str, Any]:
+    """Return a shallow copy of a v1 catalog doc with only ``active_ids`` in ``components``."""
+    allowed = {str(t).strip() for t in active_ids if isinstance(t, str) and str(t).strip()}
+    components = doc.get("components")
+    if not isinstance(components, dict):
+        return dict(doc)
+    filtered = {
+        k: v for k, v in components.items() if isinstance(k, str) and k in allowed
+    }
+    out = dict(doc)
+    out["components"] = filtered
+    return out
+
+
+def active_catalog_v1_document(paths: Optional[LabViewPaths] = None) -> Optional[Dict[str, Any]]:
+    """v1 ``{schema_version, components}`` for ``lab_automation``, restricted to ``active_catalog.json``."""
+    from lab_model.catalog.schema import is_v1_object_shape  # noqa: PLC0415
+
+    lp = paths or get_lab_view_paths_optional()
+    if lp is None:
+        return None
+    with open(lp.component_library_json, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not is_v1_object_shape(data):
+        return None
+    active = active_tag_ids(lp.active_catalog_json)
+    return filter_v1_catalog_to_active_tags(data, active)
 
 
 def merged_catalog_rows(paths: Optional[LabViewPaths] = None) -> List[Dict[str, Any]]:

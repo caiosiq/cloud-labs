@@ -17,6 +17,33 @@ import functools
 
 logger = logging.getLogger(__name__)
 
+
+def _install_windows_connection_reset_handler() -> None:
+    """
+    Windows Proactor asyncio logs ERROR when a client aborts TCP/WS (WinError 10054).
+
+    Harmless on disconnect; suppress so real failures stay visible.
+    """
+    if os.name != "nt":
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    previous = loop.get_exception_handler()
+
+    def _handler(loop: asyncio.AbstractEventLoop, context: Dict[str, Any]) -> None:
+        exc = context.get("exception")
+        if isinstance(exc, ConnectionResetError):
+            return
+        if previous is not None:
+            previous(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_handler)
+
+
 # Load .env from project root (parent of backend/) — only LAB_VIEW_PATH is required there.
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _env_path = os.path.join(_project_root, ".env")
@@ -115,10 +142,18 @@ def _persist_session_checkpoint_on_shutdown() -> None:
 
 @asynccontextmanager
 async def _app_lifespan(_: FastAPI):
+    _install_windows_connection_reset_handler()
     yield
     # Phase 8 teardown: stop the TELEOP stale-lease sweeper thread (if it
     # ever started) before persisting the session checkpoint, so the
     # checkpoint reflects a quiesced state instead of one mid-sweep.
+    try:
+        if lab is not None:
+            shutdown = getattr(lab, "shutdown_lab_processes", None)
+            if callable(shutdown):
+                shutdown()
+    except Exception:
+        pass
     try:
         if lab is not None:
             lab.stop_teleop_sweeper()
@@ -574,7 +609,29 @@ async def get_component_telemetry_preview(tag_id: str, exposure: float = 0.2):
         )
     cam_id = _resolve_cam_id_or_400(catalog_row, tag_id)
     comp = ((lab.current_state or {}).get("components") or {}).get(tag_id)
-    if isinstance(comp, dict) and is_live_feed_active(comp, "stream"):
+    live_on = isinstance(comp, dict) and is_live_feed_active(comp, "stream")
+    if backend == "table_cam":
+        connected_map = getattr(lab, "_table_cam_connected", None)
+        cam_connected = (
+            isinstance(connected_map, dict)
+            and bool(connected_map.get(int(cam_id)))
+        )
+        # Fast JPEG ring path while live, or warm "LIVE OFF" placeholder after
+        # END_LIVE_FEED (streaming stopped, TCP still up). Avoid slow CAP when
+        # JPEGPoll races a session teardown.
+        if live_on or cam_connected:
+            try:
+                jpeg = lab.fetch_table_cam_preview_jpeg(int(cam_id))
+            except NotImplementedError as exc:
+                raise HTTPException(
+                    status_code=501,
+                    detail="Telemetry preview is unavailable for this lab backend.",
+                ) from exc
+            if jpeg:
+                return Response(content=jpeg, media_type="image/jpeg")
+        if not live_on:
+            return Response(status_code=204)
+    elif live_on:
         try:
             jpeg = lab.fetch_table_cam_preview_jpeg(int(cam_id))
         except NotImplementedError as exc:
@@ -710,6 +767,7 @@ async def post_component_teleop_start(tag_id: str):
         "status": "ok",
         "message": f"TELEOP started for {tag_id}",
         "tunables": fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id),
+        "telemetry": lab.return_telemetry_for_tag(tag_id),
     }
 
 
@@ -732,6 +790,7 @@ async def post_component_teleop_end(tag_id: str):
         "status": "ok",
         "message": f"TELEOP ended for {tag_id}",
         "tunables": fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id),
+        "telemetry": lab.return_telemetry_for_tag(tag_id),
     }
 
 

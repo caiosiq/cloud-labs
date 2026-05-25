@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-05-24T15:33:02.702446",
+  "last_updated": "2026-05-25T14:36:39.956014",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -117,8 +117,8 @@
         },
         "live_feed": {
           "stream": {
-            "connected": true,
-            "live": true,
+            "connected": false,
+            "live": false,
             "backend": "table_cam",
             "resource_id": "cam_gripper_1",
             "last_error": null

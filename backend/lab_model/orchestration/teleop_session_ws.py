@@ -50,6 +50,8 @@ async def _pose_push_loop(
             await asyncio.sleep(_PUSH_INTERVAL_S)
     except asyncio.CancelledError:
         raise
+    except (ConnectionResetError, OSError):
+        pass
     except Exception as exc:  # noqa: BLE001
         _LOG.debug("teleop ws push loop ended for %s: %s", tag_id, exc)
 

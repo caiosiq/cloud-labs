@@ -36,7 +36,7 @@ import {
 
 import { afterCommandDispatch } from '../primitives/shared.js';
 
-import { buildTeleopGotoPayload } from '../teleop-target.js';
+import { buildTeleopGotoPayload, syncTeleopTargetFromCurrent } from '../teleop-target.js';
 
 import { ensureTeleopTargetPose, getTeleopTargetPose } from '../teleop-pose.js';
 
@@ -190,6 +190,7 @@ export default function TeleopRz({
 
 
 
+    syncTeleopTargetFromCurrent(tagId);
     ensureTeleopTargetPose(tagId, state);
 
 

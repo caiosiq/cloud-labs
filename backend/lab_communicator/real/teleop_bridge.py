@@ -1,6 +1,7 @@
 """Phase 6: cloud-labs TeleOp ↔ lab_automation LiveControlSession bridge."""
 from __future__ import annotations
 
+import inspect
 import threading
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
@@ -83,6 +84,41 @@ def warn_if_lab_hardware_pose_diverged(
         )
 
 
+def sync_component_for_teleop_prepare(
+    communicator: "RealLabCommunicator", tag_id: str
+) -> None:
+    """Align hardware before TeleOp without placeholder ``z_lab_to_robot`` grasp Z.
+
+    Uses scan cache / robot-frame Z (same as pick & move), not lab-frame Z sync.
+    Logs XY desync vs cloud-labs for operator awareness.
+    """
+    comp = communicator.get_manipulable(tag_id)
+    if comp is None:
+        raise RuntimeError(
+            f"sync_component_for_teleop_prepare: {tag_id!r} not in component map"
+        )
+    exp = communicator.experiment
+    if exp is None:
+        raise RuntimeError("lab_automation experiment not initialized")
+    exp.sync_component_location_from_initial_scan(comp)
+
+    with communicator._state_lock:
+        entry = (communicator.current_state.get("components") or {}).get(tag_id)
+    if not isinstance(entry, dict):
+        raise RuntimeError(f"sync_component_for_teleop_prepare: {tag_id!r} not in lab state")
+
+    mp = meas_pose(entry)
+    np = nominal_pose(entry)
+    src = mp if mp.get("x") is not None or mp.get("y") is not None else np
+    lab_pose = LabPose(
+        x=float(src.get("x", 0.0)),
+        y=float(src.get("y", 0.0)),
+        z=float(src.get("z", 0.0)),
+        rotation=float(src.get("rotation", 0.0)),
+    )
+    warn_if_lab_hardware_pose_diverged(communicator, tag_id, lab_pose)
+
+
 def sync_component_from_lab_state(
     communicator: "RealLabCommunicator", tag_id: str
 ) -> None:
@@ -161,6 +197,67 @@ def lab_target_to_hardware(
     return out
 
 
+def _read_lab_rz_rotations(
+    communicator: "RealLabCommunicator", tag_id: str
+) -> Dict[str, Optional[float]]:
+    """Return ``{"meas": …, "nominal": …}`` Rz (deg) for ``tag_id`` or Nones.
+
+    Used as the cloud-labs side of the TeleOp Rz handshake: the **measured**
+    rotation is passed to :meth:`OpticalExperiment.start_table_rotation` as a
+    *hint* (``lab_rz_initial=…``). :class:`LiveControlSession.enter_table_rotation`
+    then inverts the post-grasp ``locked_pose`` via
+    :func:`lab_automation.utils.angles.lab_table_rz_from_arm_rpy` (using this
+    hint to disambiguate the multivalued inverse) and seeds ``_lab_rotation``
+    from THAT, so the value the UI sees on entry comes from the actual TCP
+    orientation — not from cloud-labs state — and the robot does not jolt.
+    """
+    with communicator._state_lock:
+        entry = (communicator.current_state.get("components") or {}).get(tag_id)
+
+    def _pick(d: Any) -> Optional[float]:
+        if not isinstance(d, dict):
+            return None
+        v = d.get("rotation")
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    if not isinstance(entry, dict):
+        return {"meas": None, "nominal": None}
+    return {
+        "meas": _pick(meas_pose(entry)),
+        "nominal": _pick(nominal_pose(entry)),
+    }
+
+
+def _call_start_table_rotation(
+    exp: Any,
+    component: Any,
+    *,
+    safe_z: Optional[float],
+    lab_rz_initial: Optional[float],
+) -> None:
+    """Forward to ``start_table_rotation`` with graceful kwarg degradation.
+
+    Older ``lab_automation`` builds did not accept ``lab_rz_initial``; falling
+    back to the legacy signature keeps cloud-labs runnable against them (with
+    the original brittle inverse seeding of ``_lab_rotation``).
+    """
+    try:
+        sig = inspect.signature(exp.start_table_rotation)
+        if "lab_rz_initial" in sig.parameters and lab_rz_initial is not None:
+            exp.start_table_rotation(
+                component, safe_z=safe_z, lab_rz_initial=lab_rz_initial
+            )
+            return
+    except (TypeError, ValueError):
+        pass
+    exp.start_table_rotation(component, safe_z=safe_z)
+
+
 def start_hardware_session(
     communicator: "RealLabCommunicator",
     tag_id: str,
@@ -183,12 +280,67 @@ def start_hardware_session(
         _ACTIVE_HW_TAG = tag_id
 
     try:
-        sync_component_from_lab_state(communicator, tag_id)
+        sync_component_for_teleop_prepare(communicator, tag_id)
         mode = resolve_teleop_mode(communicator, tag_id)
         exp = communicator.experiment
 
         if mode == "rz":
-            exp.start_table_rotation(comp, safe_z=safe_z)
+            rotations = _read_lab_rz_rotations(communicator, tag_id)
+            meas_rz = rotations["meas"]
+            nominal_rz = rotations["nominal"]
+            lab_rz_initial = meas_rz if meas_rz is not None else nominal_rz
+            diff = (
+                (meas_rz - nominal_rz)
+                if (meas_rz is not None and nominal_rz is not None)
+                else None
+            )
+            bar = "=" * 78
+            print(bar)
+            print(
+                f"[TELEOP-DEBUG] cloud-labs start_hardware_session  "
+                f"tag={tag_id}  mode=rz"
+            )
+            print(bar)
+            meas_fmt = (
+                f"{meas_rz:+9.3f}" if meas_rz is not None else "    (none)"
+            )
+            nom_fmt = (
+                f"{nominal_rz:+9.3f}" if nominal_rz is not None else "    (none)"
+            )
+            diff_fmt = (
+                f"{diff:+9.3f}" if diff is not None else "    (n/a)"
+            )
+            hint_fmt = (
+                f"{lab_rz_initial:+9.3f}"
+                if lab_rz_initial is not None
+                else "    (none)"
+            )
+            print(
+                f"[TELEOP-DEBUG]   measurables.pose.rotation (UI 'current') = "
+                f"{meas_fmt} deg"
+            )
+            print(
+                f"[TELEOP-DEBUG]   nominal_pose.rotation                    = "
+                f"{nom_fmt} deg"
+            )
+            print(
+                f"[TELEOP-DEBUG]   diff (meas - nominal)                    = "
+                f"{diff_fmt} deg"
+            )
+            print(
+                f"[TELEOP-DEBUG]   → lab_rz_initial hint sent to lab_auto   = "
+                f"{hint_fmt} deg  (measured if available else nominal)"
+            )
+            print(
+                f"[TELEOP-DEBUG]   (lab_automation will INVERT post-grasp locked_pose"
+            )
+            print(
+                f"[TELEOP-DEBUG]    to seed _lab_rotation; this hint disambiguates only.)"
+            )
+            print(bar)
+            _call_start_table_rotation(
+                exp, comp, safe_z=safe_z, lab_rz_initial=lab_rz_initial
+            )
         else:
             cloud_holding = False
             with communicator._state_lock:
@@ -227,16 +379,21 @@ def enqueue_hardware_goto(
     communicator: "RealLabCommunicator",
     tag_id: str,
     target: Dict[str, Any],
-    speed: Dict[str, Any],  # noqa: ARG001 — reserved for Phase 6+ rate limits
+    speed: Dict[str, Any],
 ) -> None:
     """Non-blocking goto on the live-control queue."""
     if not communicator.experiment or not communicator.experiment.live_control.active:
         raise RuntimeError("hardware live session not active")
     mode = resolve_teleop_mode(communicator, tag_id)
     body = lab_target_to_hardware(communicator, tag_id, target, mode=mode)
+    print(
+        f"[TELEOP-DEBUG] cloud-labs enqueue_hardware_goto  tag={tag_id}  "
+        f"mode={mode}  ui_target={target}  → lab_automation body={body}  "
+        f"speed={speed}"
+    )
     if not body:
         return
-    communicator.experiment.set_target(body)
+    communicator.experiment.set_target(body, speed=speed or {})
 
 
 def read_hardware_live_pose(

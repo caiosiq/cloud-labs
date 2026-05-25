@@ -680,9 +680,19 @@ def catalog_declared_primitives(catalog_row: Optional[Dict[str, Any]]) -> List[s
     return [str(p) for p in prims if isinstance(p, str)]
 
 
+def catalog_is_placeable_on_table(catalog_row: Optional[Dict[str, Any]]) -> bool:
+    """True when a camera (or other instrument) sits on the breadboard like other optics."""
+    if not isinstance(catalog_row, dict):
+        return False
+    props = catalog_row.get("properties") or {}
+    return isinstance(props, dict) and props.get("placeable_on_table") is True
+
+
 def catalog_is_fixed_instrument(catalog_row: Optional[Dict[str, Any]]) -> bool:
     """True for bench-fixed components (cameras, lasers) — not arm-scanned optics."""
     if not isinstance(catalog_row, dict):
+        return False
+    if catalog_is_placeable_on_table(catalog_row):
         return False
     props = catalog_row.get("properties") or {}
     if isinstance(props, dict) and props.get("fixture") is True:

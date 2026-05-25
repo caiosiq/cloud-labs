@@ -172,7 +172,9 @@ class LabCommunicator:
                 commit_teleop_session_pose,
             )
 
-            final_pose = self.get_teleop_live_pose(tag_id)
+            # Use _teleop_live_get_pose — not get_teleop_live_pose (RealLab override
+            # would re-enter motion-idle detection and recurse).
+            final_pose = self._teleop_live_get_pose(tag_id)
             if final_pose:
                 commit_teleop_session_pose(self.current_state, tag_id, final_pose)
             commit_teleop_command_idle(self.current_state, tag_id)
@@ -465,9 +467,17 @@ class LabCommunicator:
         backend = resolve_telemetry_stream_backend(catalog_meta or {})
         cam_id = resolve_cam_id_for_tag(catalog_meta or {})
         if backend == "table_cam" and cam_id is not None:
+            # Stop streaming only — keep recorder TCP session warm for the next
+            # START_LIVE_FEED and so in-flight JPEGPoll requests get fast
+            # "LIVE OFF" placeholders instead of blocking CAP captures.
             self.table_cam_live_set(int(cam_id), False)
-            self.table_cam_disconnect(int(cam_id))
         return True, "ok"
+
+    def shutdown_lab_processes(self) -> None:
+        """Best-effort teardown of lab child processes (real recorder subprocesses)."""
+        fn = getattr(self, "_shutdown_recorders", None)
+        if callable(fn):
+            fn()
 
     def stop_teleop_sweeper(self, *, join_timeout_s: float = 1.0) -> None:
         self._teleop.stop_sweeper(join_timeout_s=join_timeout_s)

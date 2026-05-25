@@ -11,6 +11,9 @@
  */
 import { widgetCard, widgetTitle, resolveTokens, nullPlaceholder } from './common.js';
 import { isLiveFeedActive } from '../component-state.js';
+import { registerJpegPollStop } from './jpeg-poll-registry.js';
+
+export { stopJpegPollForTag } from './jpeg-poll-registry.js';
 
 export default function JPEGPoll({ tagId, fieldName, descriptor, comp }) {
     const card = widgetCard();
@@ -74,10 +77,11 @@ export default function JPEGPoll({ tagId, fieldName, descriptor, comp }) {
             timer = null;
         }
     }
+    const unregister = registerJpegPollStop(tagId, stop);
     // Stop polling when the element is removed from the DOM.
     const obs = new MutationObserver(() => {
         if (!card.isConnected) {
-            stop();
+            unregister();
             obs.disconnect();
         }
     });

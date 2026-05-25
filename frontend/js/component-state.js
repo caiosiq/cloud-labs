@@ -4,6 +4,8 @@
  * All UI reads of tunables / measurables / telemetry should go through
  * this module — never ``comp.tunables`` or ``comp.statecontrol`` directly.
  */
+import { store } from './state/store.js';
+import { stopJpegPollForTag } from './widgets/jpeg-poll-registry.js';
 
 export function getStatecontrol(comp) {
     if (!comp || typeof comp !== 'object') {
@@ -69,6 +71,30 @@ export function componentDataSnapshot(comp) {
         measurables: getMeasurables(comp),
         telemetry: getTelemetry(comp),
     });
+}
+
+/**
+ * Merge server telemetry into ``store.labState`` after a dedicated telemetry route
+ * (live-feed start/end, teleop start/end) so the panel updates without waiting for poll.
+ *
+ * @param {string} tagId
+ * @param {object | null | undefined} telemetry
+ * @returns {boolean} whether state was patched
+ */
+export function applyComponentTelemetryFromServer(tagId, telemetry) {
+    if (!tagId || !telemetry || typeof telemetry !== 'object') return false;
+    if (!store.labState?.components?.[tagId]) return false;
+    const entry = store.labState.components[tagId];
+    const prev = getTelemetry(entry);
+    const wasLive = isLiveFeedActive(entry, 'stream');
+    entry.telemetry = {
+        teleop: { ...prev.teleop, ...(telemetry.teleop || {}) },
+        live_feed: { ...prev.live_feed, ...(telemetry.live_feed || {}) },
+    };
+    if (wasLive && !isLiveFeedActive(entry, 'stream')) {
+        stopJpegPollForTag(tagId);
+    }
+    return true;
 }
 
 export function getTelemetry(comp) {

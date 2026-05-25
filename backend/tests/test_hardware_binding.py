@@ -7,6 +7,7 @@ from pathlib import Path
 
 from lab_model.catalog.schema import (
     catalog_is_fixed_instrument,
+    catalog_is_placeable_on_table,
     resolve_cam_id_for_tag,
     resolve_hardware_binding,
     resolve_telemetry_stream_backend,
@@ -55,7 +56,12 @@ class TestHardwareBinding(unittest.TestCase):
 
     def test_fixed_instruments_detected(self) -> None:
         self.assertTrue(catalog_is_fixed_instrument(_load_real_catalog_row("tag_99")))
-        self.assertTrue(catalog_is_fixed_instrument(_load_real_catalog_row("tag_22")))
+        row22 = _load_real_catalog_row("tag_22")
+        self.assertTrue(catalog_is_placeable_on_table(row22))
+        self.assertFalse(catalog_is_fixed_instrument(row22))
+        row21 = _load_real_catalog_row("tag_21")
+        self.assertTrue(catalog_is_placeable_on_table(row21))
+        self.assertFalse(catalog_is_fixed_instrument(row21))
 
     def test_fixture_entry_v1_shape(self) -> None:
         row = _load_real_catalog_row("tag_99")

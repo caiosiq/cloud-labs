@@ -1,6 +1,7 @@
 """Phase 7 — TeleOp live-feed preview profile selection."""
 from __future__ import annotations
 
+import asyncio
 import os
 import threading
 import unittest
@@ -14,7 +15,7 @@ from lab_communicator.shared.lab_view_config import (
     load_table_cam_preview_config,
 )
 from lab_model.domain.component import new_component_entry
-from lab_model.orchestration.live_feed import _resolve_live_feed_profile
+from lab_model.orchestration.live_feed import _resolve_live_feed_profile, run_end_live_feed
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _MOCK_LAB_VIEW = _PROJECT_ROOT / "backend" / "lab_communicator" / "mock" / "lab_view"
@@ -87,6 +88,23 @@ class TestLiveFeedProfile(unittest.TestCase):
         ok, _ = lab.table_cam_live_set(1, False)
         self.assertTrue(ok)
         self.assertEqual(lab._table_cam_stream_profile[1], "default")
+
+    def test_end_live_feed_stops_streaming_but_keeps_cam_connected(self) -> None:
+        lab = MockLabCommunicator()
+        lab.table_cam_connect(1)
+        lab.table_cam_live_set(1, True)
+        self.assertTrue(lab._table_cam_streaming[1])
+        self.assertTrue(lab._table_cam_connected[1])
+
+        async def _end() -> None:
+            await run_end_live_feed(lab, "tag_22", channel="stream")
+
+        asyncio.run(_end())
+        self.assertFalse(lab._table_cam_streaming[1])
+        self.assertTrue(
+            lab._table_cam_connected[1],
+            "END_LIVE_FEED must not disconnect table cam (avoids CAP fallback / TCP refused)",
+        )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 /**
  * Shared chrome for per-primitive UI regions in the component popup.
  */
+import { syncTeleopLivePosePolls } from '../teleop-session.js';
 
 export function primitiveRegion(primitiveId, title, opts = {}) {
     const section = document.createElement('div');
@@ -106,7 +107,16 @@ export async function afterCommandDispatch(hooks, targetId, opts = {}) {
         }
     }
     if (refreshPanel && typeof hooks.refreshPanel === 'function' && targetId) {
+        // Force rebuild — telemetry session edges are not always picked up by
+        // componentDataSnapshot diff alone when poll races the POST handler.
+        if (typeof hooks.resetPanelSnapshot === 'function') {
+            hooks.resetPanelSnapshot();
+        }
+        syncTeleopLivePosePolls();
         hooks.refreshPanel(targetId);
+        if (typeof hooks.render === 'function') {
+            hooks.render();
+        }
     }
 }
 

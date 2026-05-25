@@ -44,6 +44,10 @@ export function renderComponentPopup(tagId, deps = {}) {
         refreshPanel: deps.updateContextPanel
             ? (tid) => deps.updateContextPanel(tid || tagId)
             : undefined,
+        resetPanelSnapshot: () => {
+            store.contextPanelDataSnapshot = null;
+        },
+        render: deps.render,
         log,
     }));
 
@@ -79,6 +83,10 @@ export function renderComponentPopup(tagId, deps = {}) {
                 refreshPanel: deps.updateContextPanel
                     ? (tid) => deps.updateContextPanel(tid)
                     : undefined,
+                resetPanelSnapshot: () => {
+                    store.contextPanelDataSnapshot = null;
+                },
+                render: deps.render,
             },
             checkCollision: deps.checkCollision,
             render: deps.render,
