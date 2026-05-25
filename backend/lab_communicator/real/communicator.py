@@ -141,6 +141,10 @@ class RealLabCommunicator(LabCommunicator):
         super().__init__()
 
         print("[REAL LAB] Initializing OpticalExperiment...")
+        print(
+            "[REAL LAB] Bench calibration is loaded from lab_automation/data/calibration/ "
+            "(package path, not cloud-labs cwd)."
+        )
         # Initialize the experiment manager.
         #
         # Phase 5 of ``universal_component_architecture.md`` (§16.4 / §17.1):
