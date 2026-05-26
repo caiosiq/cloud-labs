@@ -2,30 +2,51 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Dict
 
 if TYPE_CHECKING:
     from lab_communicator.base import LabCommunicator
 
-_KNOWN = frozenset({"mock", "real"})
+_CommunicatorFactory = Callable[[], "LabCommunicator"]
+_FACTORIES: Dict[str, _CommunicatorFactory] = {}
+
+
+def register_communicator(communicator_id: str, factory: _CommunicatorFactory) -> None:
+    """Register a backend factory (used by ``scripts/create_lab_communicator.py``)."""
+    key = (communicator_id or "").strip().lower()
+    if not key:
+        raise ValueError("communicator_id must be non-empty")
+    _FACTORIES[key] = factory
 
 
 def known_communicator_ids() -> frozenset[str]:
-    return _KNOWN
+    return frozenset(_FACTORIES.keys())
 
 
 def create_communicator(communicator_id: str) -> "LabCommunicator":
     """Import and construct the backend named in ``lab_manifest.json``."""
     key = (communicator_id or "").strip().lower()
-    if key not in _KNOWN:
+    factory = _FACTORIES.get(key)
+    if factory is None:
         raise ValueError(
             f"Unknown communicator {communicator_id!r} in lab_manifest.json "
-            f"(supported: {', '.join(sorted(_KNOWN))})"
+            f"(supported: {', '.join(sorted(_FACTORIES))})"
         )
-    if key == "real":
-        from lab_communicator.real import RealLabCommunicator
+    return factory()
 
-        return RealLabCommunicator()
+
+def _register_builtins() -> None:
     from lab_communicator.mock import MockLabCommunicator
+    from lab_communicator.real import RealLabCommunicator
 
-    return MockLabCommunicator()
+    register_communicator("mock", MockLabCommunicator)
+    register_communicator("real", RealLabCommunicator)
+
+
+_register_builtins()
+
+# Optional third-party backends (append-only; see scripts/create_lab_communicator.py).
+try:
+    from lab_communicator import extra_communicators  # noqa: F401
+except ImportError:
+    pass

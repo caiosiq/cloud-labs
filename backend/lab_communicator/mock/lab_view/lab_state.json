@@ -1,6 +1,10 @@
 {
   "system_status": "IDLE",
+<<<<<<< Updated upstream
   "last_updated": "2026-05-25T14:36:39.956014",
+=======
+  "last_updated": "2026-05-24T22:39:11.300835",
+>>>>>>> Stashed changes
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -68,8 +72,8 @@
         "tunables": {
           "presence": "breadboard",
           "nominal_pose": {
-            "x": 264.6071428571429,
-            "y": 264.6071428571429,
+            "x": 188.17857142857167,
+            "y": 188.17857142857167,
             "rotation": 27.5
           },
           "nominal_motor_positions": {},
@@ -84,8 +88,8 @@
         },
         "measurables": {
           "pose": {
-            "x": 264.1665376019533,
-            "y": 264.4571972416398,
+            "x": 188.64635696243795,
+            "y": 187.96674625550816,
             "rotation": 27.5
           },
           "last_optimization_score": null,
@@ -258,7 +262,7 @@
           "nominal_pose": {
             "x": -285.9136213307018,
             "y": 239.78365379287555,
-            "rotation": 100.0
+            "rotation": 140.0
           },
           "nominal_motor_positions": {},
           "storage": {
@@ -273,7 +277,7 @@
           "pose": {
             "x": -285.9136213307018,
             "y": 239.78365379287555,
-            "rotation": 100.0
+            "rotation": 140.0
           },
           "last_optimization_score": null,
           "last_optimized_pose": null,

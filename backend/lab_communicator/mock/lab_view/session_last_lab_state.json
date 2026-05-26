@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "saved_at": "2026-05-24T19:34:08.842677+00:00",
+  "saved_at": "2026-05-25T02:39:04.999544+00:00",
   "lab_mode": "MOCK",
   "lab_state": {
     "system_status": "IDLE",
-    "last_updated": "2026-05-24T15:33:02.702446",
+    "last_updated": "2026-05-24T22:39:04.996913",
     "components": {
       "tag_9": {
         "id": "tag_9",
@@ -72,8 +72,8 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 264.6071428571429,
-              "y": 264.6071428571429,
+              "x": 188.17857142857167,
+              "y": 188.17857142857167,
               "rotation": 27.5
             },
             "nominal_motor_positions": {},
@@ -88,18 +88,13 @@
           },
           "measurables": {
             "pose": {
-              "x": 264.1665376019533,
-              "y": 264.4571972416398,
+              "x": 188.64635696243795,
+              "y": 187.96674625550816,
               "rotation": 27.5
             },
             "last_optimization_score": null,
             "last_optimized_pose": null,
-            "camera_image": {
-              "path": "C:\\Users\\CaioV\\OneDrive - Massachusetts Institute of Technology\\UROP - AI Optics\\optics-digital-twin\\backend\\lab_communicator\\mock\\lab_view\\camera_captures\\tag_22_last.png",
-              "source": "mock_table_cam",
-              "cam_id": 1,
-              "format": "png"
-            }
+            "camera_image": null
           }
         },
         "telemetry": {
@@ -121,8 +116,8 @@
           },
           "live_feed": {
             "stream": {
-              "connected": true,
-              "live": true,
+              "connected": false,
+              "live": false,
               "backend": "table_cam",
               "resource_id": "cam_gripper_1",
               "last_error": null
@@ -262,7 +257,7 @@
             "nominal_pose": {
               "x": -285.9136213307018,
               "y": 239.78365379287555,
-              "rotation": 100.0
+              "rotation": 140.0
             },
             "nominal_motor_positions": {},
             "storage": {
@@ -277,7 +272,7 @@
             "pose": {
               "x": -285.9136213307018,
               "y": 239.78365379287555,
-              "rotation": 100.0
+              "rotation": 140.0
             },
             "last_optimization_score": null,
             "last_optimized_pose": null,

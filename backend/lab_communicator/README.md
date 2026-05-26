@@ -18,7 +18,7 @@ These are enforced at process startup (`bootstrap_lab_view`). If any are missing
 
 | File | Role |
 |------|------|
-| **`lab_manifest.json`** | Deployment identity: `communicator` (`mock` \| `real`), optional `lab_automation_path` (project-relative path to the `lab_automation` package for real benches), `session_checkpoint` (default **true** — graceful shutdown snapshot + UI reconciliation). Created with inferred defaults when missing. |
+| **`lab_manifest.json`** | Deployment identity: `communicator` id (`mock`, `real`, or your custom id from `extra_communicators.py`), optional `lab_automation_path` (required for `real` — project-relative path to the `lab_automation` package), `session_checkpoint` (default **true** — graceful shutdown snapshot + UI reconciliation). Created with inferred defaults when missing. |
 | **`table_cam_preview.json`** | Recorder JPEG tuning for **real** table cams (`scale`, `jpeg_quality`, …). Not a separate UI telemetry channel — live video uses per-tag **`telemetry.live_feed.stream`**. |
 | **`layout.json`** | Lab bounds, danger zone, storage grid (`negative_xy`), breadboard spacing — feeds `lab_model.domain.storage_region`. |
 | **`laser_lines.json`** | Laser overlays (`GET /api/laser-line`, `/api/laser-lines`). |
@@ -67,10 +67,14 @@ backend/lab_communicator/my_backend/
 Then:
 
 1. Set **`LAB_VIEW_PATH`** to that `lab_view/` directory (or any bundle that satisfies the mandatory files in **section 0.1**).
-2. Add a **`LAB_MODE`** branch in `backend/main.py` that imports `MyBackendLabCommunicator` and assigns `lab = ...`.
-3. Replace stub bodies in `primitives.py` (and optional hooks in `communicator.py`) with real behavior.
+2. Ensure **`lab_manifest.json`** in that bundle sets `"communicator": "my_backend"` (the script does this when you use `--with-lab-view`).
+3. Set **`.env`**: `LAB_VIEW_PATH=<path-to-lab_view>` only — **`LAB_MODE` is derived from the manifest** at boot (`communicator` → upper-case mode in API responses).
+4. Replace stub bodies in `primitives.py` (and optional hooks in `communicator.py`) with real behavior.
+5. Read **`backend/lab_communicator/my_backend/INTEGRATORS.md`** (generated checklist for your colleague).
 
-Run `python scripts/create_lab_communicator.py --help` for `--lab-view-root`, `--force`, etc.
+The script registers the backend in `lab_communicator/extra_communicators.py` (loaded by `shared/communicator_factory.py`). You do **not** edit `main.py` for a new backend.
+
+Run `python scripts/create_lab_communicator.py --help` for `--lab-view-root`, `--force`, `--no-register`, etc.
 
 ---
 
@@ -165,26 +169,36 @@ Provide or reuse a **lab_view** directory satisfying **section 0.1**.
 
 ---
 
-## 6. Wire into `main.py` and `.env`
+## 6. Wire into cloud-labs (manifest + factory)
 
-`LAB_VIEW_PATH` is resolved **before** the communicator is constructed.
+Cloud-labs selects the backend from **`lab_manifest.json`** → `"communicator"` (not a hard-coded `main.py` branch).
 
-Add a branch alongside `MOCK` / `REAL`:
+1. Register the class (automatic when using `scripts/create_lab_communicator.py`; otherwise append to `lab_communicator/extra_communicators.py`):
 
 ```python
-elif LAB_MODE == "MY_BACKEND":
-    from lab_communicator.my_backend import MyBackendLabCommunicator
-    lab = MyBackendLabCommunicator()
+from lab_communicator.my_backend import MyBackendLabCommunicator
+from lab_communicator.shared.communicator_factory import register_communicator
+
+register_communicator("my_backend", MyBackendLabCommunicator)
 ```
 
-`.env` example:
+2. Point **`.env`** at your bundle:
 
 ```env
-LAB_MODE=MY_BACKEND
 LAB_VIEW_PATH=backend/lab_communicator/my_backend/lab_view
 ```
 
-Video routes: **`LAB_MODE == "REAL"`** is what triggers MJPEG from `lab.get_video_stream` today; other modes serve the static SVG unless you extend `main.py`.
+3. Set **`lab_manifest.json`** in that bundle:
+
+```json
+{ "communicator": "my_backend", "session_checkpoint": true }
+```
+
+On boot, `bootstrap_lab_view()` validates mandatory files, loads the catalog, and `main.py` calls `create_communicator(COMMUNICATOR_ID)`.
+
+**Real bench only:** add `"lab_automation_path": "../lab_automation"` when `"communicator": "real"`. Digital-twin / simulator backends do not need `lab_automation`.
+
+**Video / telemetry:** routes such as `/api/components/{tag_id}/telemetry/stream` call methods on your class (`get_table_cam_stream`, `table_cam_connect`, …). Copy the mock implementations for a synthetic feed, or wire your twin’s render loop. `LAB_MODE == "REAL"` still gates some legacy optimization-stream paths in `main.py` — extend those checks if your twin needs the same routes.
 
 ---
 
@@ -209,4 +223,4 @@ Copy/adapt the mock/real round-trip test classes when your backend grows beyond 
 | **`shared/`** | Shared helpers — hardware-agnostic; includes lab_view bootstrap + catalog merge. |
 | **`<backend>/communicator.py`** | Checklist: init, persistence hooks, `_primitive_*` delegations, optional UI/video. |
 | **`<backend>/primitives.py`** | Hardware/simulation steps — state-clean free functions. |
-| **New backend** | Run `scripts/create_lab_communicator.py ...`, implement primitives, wire `LAB_MODE` + `LAB_VIEW_PATH`. |
+| **New backend** | Run `scripts/create_lab_communicator.py ...`, implement primitives, set `LAB_VIEW_PATH` + `lab_manifest.json` communicator id. |
