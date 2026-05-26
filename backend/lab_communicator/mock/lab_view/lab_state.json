@@ -1,10 +1,6 @@
 {
   "system_status": "IDLE",
-<<<<<<< Updated upstream
   "last_updated": "2026-05-25T14:36:39.956014",
-=======
-  "last_updated": "2026-05-24T22:39:11.300835",
->>>>>>> Stashed changes
   "components": {
     "tag_9": {
       "id": "tag_9",
