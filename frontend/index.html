@@ -399,14 +399,38 @@
             background-color: #13151a; 
         }
 
-        /* --- Component controls (floating dock over canvas) --- */
-        #context-panel {
+        /* --- Component controls (floating multi-panel dock over canvas) ---
+           Holds one or more ``.component-panel`` children. row-reverse makes
+           additional panels (Ctrl/Cmd+click) stack to the LEFT of the first
+           one opened, matching the operator request "add another window to
+           the left". When more panels than fit are open, the dock scrolls
+           horizontally. ``pointer-events: none`` on the dock itself lets
+           canvas drags pass through the gaps between panels; each panel
+           re-enables pointer events on itself. */
+        #panel-dock {
             position: absolute;
             top: 12px;
             right: 12px;
             left: auto;
+            max-width: calc(100% - 24px);
+            max-height: calc(100vh - 130px);
+            display: flex;
+            flex-direction: row-reverse;
+            align-items: flex-start;
+            gap: 12px;
+            z-index: 25;
+            pointer-events: none;
+            overflow-x: auto;
+            overflow-y: visible;
+        }
+        #panel-dock > * { pointer-events: auto; }
+        /* When no panels are open we render nothing — `.component-panel`
+           children are mounted dynamically by ui/context-panel.js. */
+        #panel-dock:empty { display: none; }
+
+        .component-panel {
             width: 318px;
-            max-width: min(360px, calc(100% - 24px));
+            flex: 0 0 318px;
             max-height: calc(100vh - 130px);
             overflow-x: hidden;
             overflow-y: auto;
@@ -417,11 +441,36 @@
             border: 1px solid var(--border-color);
             border-radius: 12px;
             box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-            z-index: 25;
-            display: none; /* until a component is selected */
+            transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+            opacity: 0.82;
+            cursor: pointer; /* clicking the panel body focuses it */
+        }
+        .component-panel--focused {
+            border-color: var(--primary-accent);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55),
+                        0 0 0 2px var(--primary-glow);
+            opacity: 1;
+            cursor: default;
+        }
+        /* Live camera feeds keep streaming on every open panel regardless of
+           focus, but interactive controls (buttons, inputs, selects, textareas,
+           the Move/Position fields) only respond on the focused panel. The
+           panel root remains clickable so one click focuses it; on the next
+           click the underlying control activates. */
+        .component-panel:not(.component-panel--focused) button,
+        .component-panel:not(.component-panel--focused) input,
+        .component-panel:not(.component-panel--focused) select,
+        .component-panel:not(.component-panel--focused) textarea {
+            pointer-events: none;
+        }
+        /* The close-this-panel "X" is allowed even on unfocused panels — being
+           able to dismiss a non-focused panel without first focusing it is
+           less surprising. */
+        .component-panel:not(.component-panel--focused) .component-panel__close {
+            pointer-events: auto;
         }
 
-        #context-panel .coord-input {
+        .component-panel .coord-input {
             background: #0f1115;
             border: 1px solid var(--border-color);
             color: white;
@@ -436,32 +485,32 @@
            Brighter text, a subtle filled background, a stronger border, and
            accent-colored icons give them a clear "this is clickable" read
            while still looking quieter than the primary blue CTA buttons. */
-        #context-panel .btn-secondary {
+        .component-panel .btn-secondary {
             background-color: rgba(148, 163, 184, 0.08);
             border-color: rgba(148, 163, 184, 0.28);
             color: var(--text-primary);
             font-weight: 600;
         }
-        #context-panel .btn-secondary:hover {
+        .component-panel .btn-secondary:hover {
             background-color: rgba(148, 163, 184, 0.16);
             border-color: rgba(148, 163, 184, 0.55);
             color: var(--text-primary);
         }
-        #context-panel .btn-secondary:disabled,
-        #context-panel .btn-secondary[disabled] {
+        .component-panel .btn-secondary:disabled,
+        .component-panel .btn-secondary[disabled] {
             opacity: 0.55;
             cursor: not-allowed;
         }
-        #context-panel .btn-secondary .material-icons-round {
+        .component-panel .btn-secondary .material-icons-round {
             color: var(--primary-accent);
         }
         /* Primary buttons (Move, Place from hover, Confirm held tag) already
            sit on a bright blue fill, so just make sure the icon contrasts. */
-        #context-panel .btn-primary .material-icons-round {
+        .component-panel .btn-primary .material-icons-round {
             color: #ffffff;
         }
 
-        .context-panel__close {
+        .component-panel__close {
             flex-shrink: 0;
             width: 32px;
             height: 32px;
@@ -477,11 +526,11 @@
             justify-content: center;
             transition: color 0.15s ease, background 0.15s ease;
         }
-        .context-panel__close:hover {
+        .component-panel__close:hover {
             color: var(--text-primary);
             background: rgba(255, 255, 255, 0.07);
         }
-        .context-panel__close .material-icons-round {
+        .component-panel__close .material-icons-round {
             font-size: 20px;
         }
 
@@ -685,42 +734,18 @@
             <div id="laser-lines-list"></div>
         </div>
 
-        <!-- Component controls: floats over table (selection, pose, move, optimize, motors, observe) -->
-        <div id="context-panel" role="region" aria-label="Component controls">
-            <div class="context-panel__header" style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 0 0 12px 0; border-bottom: 1px solid var(--border-color);">
-                <div style="flex: 1; min-width: 0;">
-                    <div style="font-size: 10px; color: var(--text-muted); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px;">Selected part</div>
-                    <div><span id="selected-comp-name" style="color: var(--primary-accent);">Component</span></div>
-                    <div style="margin-top: 4px; font-size: 10px; color: var(--text-muted); letter-spacing: 0.04em;">
-                        <span style="text-transform: uppercase;">Tag ID:</span>
-                        <span id="selected-comp-tag" style="color: var(--text-secondary); font-family: 'JetBrains Mono', 'Fira Code', monospace;">—</span>
-                    </div>
-                    <div id="selected-comp-properties" style="margin-top: 6px; font-size: 11px; font-style: italic; color: var(--text-muted); font-weight: 400; text-transform: none; line-height: 1.4;"></div>
-                </div>
-                <button type="button" id="ctx-panel-close" class="context-panel__close" title="Close" aria-label="Close component controls">
-                    <span class="material-icons-round" aria-hidden="true">close</span>
-                </button>
-            </div>
-            
-            <div id="ctx-table-pose-section" style="margin-top: 12px;">
-                <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">POSITION (mm)</label>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
-                    <input type="number" id="ctx-x" placeholder="X" class="coord-input">
-                    <input type="number" id="ctx-y" placeholder="Y" class="coord-input">
-                </div>
-                <div style="margin-bottom: 12px;">
-                     <input type="number" id="ctx-rot" placeholder="Rotation (°)" class="coord-input" style="width: 100%;">
-                </div>
-                <button id="ctx-move-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px;">Move to Coordinates</button>
-            </div>
-
-            <div id="ctx-record-slot"></div>
-
-            <div id="ctx-table-motion-section" style="margin-top: 20px;">
-                <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 8px;">OPTIMIZATION STRATEGIES</label>
-                <div id="ctx-strategies"></div>
-            </div>
-        </div>
+        <!--
+            Component controls: floating multi-panel dock over the table.
+            Each open component gets its own ``.component-panel`` child
+            mounted dynamically by ``ui/context-panel.js`` (the panel-dock
+            manager). Plain click on a component (canvas / sidebar /
+            chrome bar) replaces the open panels with just that one;
+            Ctrl/Cmd+click adds a new panel to the left of the existing
+            ones. Clicking a panel focuses it (only the focused panel
+            captures interactive clicks; others stay visible so live
+            camera feeds keep streaming).
+        -->
+        <div id="panel-dock" role="region" aria-label="Component control panels"></div>
     </div>
 
     <!-- Command Console (collapsed by default; js/command-console.js + command-parse.js + command-api.js) -->

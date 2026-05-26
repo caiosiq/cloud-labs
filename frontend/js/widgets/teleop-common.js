@@ -362,7 +362,7 @@ export function speedPanel(tagId, opts = {}) {
     const angMin = Number(descriptor?.angular_min) || 1;
     const angMax = Number(descriptor?.angular_max) || 120;
     const linMin = Number(descriptor?.linear_min) || 1;
-    const linMax = Number(descriptor?.linear_max) || 200;
+    const linMax = Number(descriptor?.linear_max) || 70;
 
     panel.appendChild(
         speedInput(

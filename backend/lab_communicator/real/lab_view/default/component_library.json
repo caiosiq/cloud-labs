@@ -10,7 +10,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "optical_density": 1.0,
         "transmission": 0.1
@@ -105,7 +105,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 175,
       "properties": {
         "placeable_on_table": true,
         "resolution": "1920x1080",
@@ -206,7 +206,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "placeable_on_table": true,
         "resolution": "1920x1080",
@@ -306,7 +306,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "radius_of_curvature": "100mm",
         "reflectivity": 0.98,
@@ -402,7 +402,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "material": "Anodized Aluminum",
         "damage_threshold": "10J/cm^2"
@@ -475,7 +475,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "split_ratio": "50:50",
         "polarization": "Non-polarizing"
@@ -548,7 +548,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "focal_length": "50mm",
         "material": "BK7",
@@ -644,7 +644,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "radius_of_curvature": "Infinity",
         "reflectivity": 0.99,
@@ -740,7 +740,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "type": "Longpass",
         "cut_on": "600nm"
@@ -813,7 +813,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "material": "KTP",
         "cut_angle": "theta=90, phi=23.5",
@@ -887,7 +887,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "radius_of_curvature": "planar",
         "reflectivity": 0.98,
@@ -983,7 +983,7 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
         "stream_source": "overhead",
         "resolution": "1920x1080",

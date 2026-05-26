@@ -1,61 +1,49 @@
 /**
- * Floating component context panel.
+ * Multi-panel dock manager.
  *
- * **Pose surface #2 (X/Y/Rot):** `#ctx-x`, `#ctx-y`, `#ctx-rot` mirror
- * `store.ghostState[selected]`; Move sends MOVE_COMPONENT. Surface #3
- * (TablePose read-only receipt) lives in the capability popup below.
- * See `component-model.js` for the full three-surface map.
+ * Owns ``#panel-dock`` — the floating row of ``.component-panel`` elements
+ * over the canvas. The dock supports:
+ *   - **Replace semantics** (default): plain click on a component swaps
+ *     every open panel with just that one (matches the historical
+ *     single-panel behaviour).
+ *   - **Add semantics**: ``openPanel(tag, { add: true })`` (driven by
+ *     Ctrl/Cmd+click) appends another panel to the dock without closing
+ *     the existing ones. With the dock's ``flex-direction: row-reverse``
+ *     CSS, the newest panel appears visually to the LEFT of older ones.
+ *   - **Focus**: only the focused panel captures interactive clicks
+ *     (CSS gates the others with ``pointer-events: none`` on controls).
+ *     Unfocused panels remain visible and scrollable so live camera
+ *     feeds keep streaming.
  *
- * Renders the right-hand-side panel when the user selects a component on the canvas
- * (or in the inventory sidebar). The panel adapts its content based on:
- *   1. Placement state: PLACED | STORED | INVENTORY (`placementUiLabel`).
- *   2. System status:   IDLE | HOLDING (`holding` + `unconfirmed`).
+ * Public API:
+ *   - ``openPanel(tagId, { add })`` — open or focus.
+ *   - ``focusPanel(tagId)`` — change focus only (panel must be open).
+ *   - ``closePanel(tagId)`` — remove a single panel.
+ *   - ``closeAllPanels()`` — wipe the dock.
+ *   - ``updateContextPanel(tagId)`` — refresh-if-open. **Does not** open
+ *     a new panel; legacy callers paired this with
+ *     ``store.selectedComponent = tag`` (which the compat shim in
+ *     ``state/store.js`` maps to ``openPanels = [tag]``), so the pair
+ *     still effectively means "open and refresh".
+ *   - ``clearSelectionAndHideContextPanel()`` — empty-canvas click;
+ *     keeps panels open and only clears focus (less destructive than the
+ *     single-panel behaviour, matching the operator-requested default).
  *
- * Read-only capability panels and per-primitive forms live in ``component-popup.js`` /
- * ``frontend/js/primitives/``.
- *
- * Dependencies that are still in `app-main.js` (the canvas `render()` plus the
- * `fetchLabState` call site after observing measurables) are injected at boot via
- * `initContextPanel`.
+ * Pose editing lives in the canvas ghost + in-air / TeleOp primitives at
+ * the bottom of each panel (see ``ui/component-popup.js``).
  */
 import { store } from '../state/store.js';
 import { log } from './log.js';
-import { sendCommand } from '../api/commands.js';
 import { showParameterModal } from './modals.js';
 import {
     getHolding,
     isHoldingState,
-    isHoldingUnconfirmed,
-    isChromeComponent,
     isOffTableComponent,
     isStoredComponent,
     measPose,
 } from '../component-model.js';
 import { componentDataSnapshot } from '../component-state.js';
-import { renderComponentPopup } from './component-popup.js';
-
-const PRIMITIVE_DEV_HINTS =
-    typeof window !== 'undefined' &&
-    typeof window.location !== 'undefined' &&
-    /(?:^|[?&])dev=1(?:&|$)/.test(window.location.search || '');
-
-// Capability panels (TablePose, measurables, primitives) render via component-popup.js.
-
-// DOM refs (resolved lazily so we don't need DI for elements that exist at boot anyway).
-function refs() {
-    return {
-        contextPanel: document.getElementById('context-panel'),
-        ctxX: document.getElementById('ctx-x'),
-        ctxY: document.getElementById('ctx-y'),
-        ctxRot: document.getElementById('ctx-rot'),
-        ctxMoveBtn: document.getElementById('ctx-move-btn'),
-        ctxRecordSlot: document.getElementById('ctx-record-slot'),
-        ctxStrategies: document.getElementById('ctx-strategies'),
-        selectedCompName: document.getElementById('selected-comp-name'),
-        selectedCompTag: document.getElementById('selected-comp-tag'),
-        selectedCompProperties: document.getElementById('selected-comp-properties'),
-    };
-}
+import { renderComponentPanel } from './component-popup.js';
 
 let _render = () => {};
 let _checkCollision = () => ({ detected: false });
@@ -69,42 +57,7 @@ let _checkCollision = () => ({ detected: false });
 export function initContextPanel(deps) {
     if (deps && typeof deps.render === 'function') _render = deps.render;
     if (deps && typeof deps.checkCollision === 'function') _checkCollision = deps.checkCollision;
-
-    // Wire the Move button — calls MOVE_COMPONENT with a pre-flight collision check; on collision
-    // we revert the x/y inputs to the current ghost state so the user sees the rejection.
-    const { ctxMoveBtn, ctxX, ctxY, ctxRot } = refs();
-    if (ctxMoveBtn) {
-        ctxMoveBtn.addEventListener('click', async () => {
-            if (!store.selectedComponent) return;
-
-            const tx = parseFloat(ctxX.value);
-            const ty = parseFloat(ctxY.value);
-            const trot = parseFloat(ctxRot.value);
-
-            const collision = _checkCollision(store.selectedComponent, tx, ty);
-            if (collision.detected) {
-                log(`Move cancelled: Collision with ${collision.other}`, 'error');
-                if (store.ghostState[store.selectedComponent]) {
-                    const old = store.ghostState[store.selectedComponent];
-                    ctxX.value = old.x.toFixed(1);
-                    ctxY.value = old.y.toFixed(1);
-                }
-                return;
-            }
-
-            // Bump the ghost immediately for visual feedback while the command is in flight.
-            store.ghostState[store.selectedComponent].x = tx;
-            store.ghostState[store.selectedComponent].y = ty;
-            store.ghostState[store.selectedComponent].rotation = trot;
-
-            await sendCommand({
-                action: 'MOVE_COMPONENT',
-                target_id: store.selectedComponent,
-                parameters: { target_x: tx, target_y: ty, rotation: trot },
-            });
-            _render();
-        });
-    }
+    _installDockClickDelegate();
 }
 
 /** Legacy-style label for context panel / drag rules (PLACED | STORED | INVENTORY). */
@@ -115,20 +68,137 @@ export function placementUiLabel(comp) {
     return 'PLACED';
 }
 
-/** Same as clicking empty canvas: clear selection and hide the floating component panel. */
-export function clearSelectionAndHideContextPanel() {
-    store.selectedComponent = null;
-    store.contextPanelStateSnapshot = null;
-    store.contextPanelStatusSnapshot = null;
-    store.contextPanelDataSnapshot = null;
-    store.dragFromStorageTag = null;
-    store.dragFromStorageStartPose = null;
-    const r = refs();
-    if (r.contextPanel) r.contextPanel.style.display = 'none';
+// ---------- panel-dock API ----------
+
+/**
+ * Open a panel for ``tagId``.
+ *
+ * - ``add=false`` (default): closes every other open panel first, then
+ *   mounts ``tagId`` and focuses it. Matches the historical single-panel
+ *   "click replaces" behaviour.
+ * - ``add=true``: keeps existing panels open, appends ``tagId`` (or focuses
+ *   it if already open). Driven by Ctrl/Cmd+click. With the dock's
+ *   ``row-reverse`` styling the new panel appears to the LEFT of the
+ *   existing ones.
+ *
+ * Always focuses ``tagId`` after the mount so the user can immediately
+ * interact with the newly-opened panel.
+ *
+ * @param {string} tagId
+ * @param {{ add?: boolean }} [opts]
+ */
+export function openPanel(tagId, opts = {}) {
+    if (!tagId) return;
+    const add = !!opts.add;
+    if (!add) {
+        const toClose = store.openPanels.filter((t) => t !== tagId);
+        toClose.forEach((t) => _removePanelDom(t));
+        store.openPanels = store.openPanels.filter((t) => t === tagId);
+        const stale = [...store.contextPanelSnapshots.keys()].filter((k) => k !== tagId);
+        stale.forEach((k) => store.contextPanelSnapshots.delete(k));
+    }
+    if (!store.openPanels.includes(tagId)) {
+        store.openPanels.push(tagId);
+    }
+    _mountOrRebuildPanel(tagId);
+    focusPanel(tagId);
     _render();
 }
 
-// --- Holding banner ---
+/**
+ * Change which open panel is focused. No-op if ``tagId`` is not open.
+ * @param {string | null} tagId
+ */
+export function focusPanel(tagId) {
+    if (tagId == null) {
+        if (store.focusedPanel == null) return;
+        store.focusedPanel = null;
+        _applyFocusStyling();
+        _render();
+        return;
+    }
+    if (!store.openPanels.includes(tagId)) return;
+    if (store.focusedPanel === tagId) {
+        _applyFocusStyling();
+        return;
+    }
+    store.focusedPanel = tagId;
+    _applyFocusStyling();
+    _render();
+}
+
+/**
+ * Close a single panel. If it was the focused one, focus falls back to the
+ * next-most-recently-opened panel (or ``null`` if none remain).
+ * @param {string} tagId
+ */
+export function closePanel(tagId) {
+    if (!tagId || !store.openPanels.includes(tagId)) return;
+    _removePanelDom(tagId);
+    store.openPanels = store.openPanels.filter((t) => t !== tagId);
+    store.contextPanelSnapshots.delete(tagId);
+    if (store.focusedPanel === tagId) {
+        store.focusedPanel = store.openPanels[store.openPanels.length - 1] || null;
+        _applyFocusStyling();
+    }
+    _render();
+}
+
+/** Close every open panel and clear all per-tag snapshot state. */
+export function closeAllPanels() {
+    store.openPanels.slice().forEach((t) => _removePanelDom(t));
+    store.openPanels = [];
+    store.focusedPanel = null;
+    store.contextPanelSnapshots.clear();
+    _panelScrollMemory.clear();
+    store.dragFromStorageTag = null;
+    store.dragFromStorageStartPose = null;
+    _render();
+}
+
+/**
+ * Legacy "empty-canvas click" handler. Multi-panel default: keep panels
+ * open, only clear focus. The operator can explicitly close panels via
+ * the X button on each one.
+ */
+export function clearSelectionAndHideContextPanel() {
+    focusPanel(null);
+}
+
+/**
+ * Refresh the panel for ``tagId`` if it is currently open. Does NOT open a
+ * panel — legacy call sites that wanted "open and show" set
+ * ``store.selectedComponent = tag`` first (which the compat shim maps to
+ * ``openPanels = [tag]; focusedPanel = tag``) and then called this.
+ *
+ * Also writes the latest snapshot for ``tagId`` so the lab-state poller's
+ * change-detection compares against fresh values.
+ *
+ * @param {string} tagId
+ */
+export function updateContextPanel(tagId) {
+    if (!tagId) return;
+    if (!store.openPanels.includes(tagId)) return;
+    _mountOrRebuildPanel(tagId);
+    _applyFocusStyling();
+}
+
+/** Refresh tracked motor angle labels in primitive UI regions. */
+export function updateMotorAngleLabels(tagId) {
+    if (!tagId || !store.labState || !store.labState.components) return;
+    const comp = store.labState.components[tagId];
+    if (!comp) return;
+    const mr = (measPose(comp).motor_rotations) || {};
+    document.querySelectorAll(`[data-motor-angle^="${tagId}:"]`).forEach((el) => {
+        const mid = (el.dataset.motorAngle || '').split(':')[1];
+        if (!mid) return;
+        const v = mr[String(mid)];
+        const n = (v !== undefined && v !== null && Number.isFinite(Number(v))) ? Number(v) : 0;
+        el.textContent = `θ ${n.toFixed(2)}°`;
+    });
+}
+
+// ---------- holding banner (unchanged behaviour) ----------
 
 function ensureHoldingBannerEl() {
     let el = document.getElementById('holding-banner');
@@ -158,8 +228,6 @@ export function updateHoldingBanner() {
     const hld = getHolding(store.labState);
     el.style.display = 'block';
     if (hld.requires_operator_confirm) {
-        // UNCONFIRMED: red banner — gripper closed on startup but the held tag is unknown.
-        // All other commands are blocked until the operator runs `confirmhold <tag>`.
         el.style.background = 'rgba(239, 68, 68, 0.12)';
         el.style.borderColor = 'rgba(239, 68, 68, 0.5)';
         el.style.color = '#fee2e2';
@@ -199,146 +267,145 @@ export function updateHoldingBanner() {
     }
 }
 
-/** Refresh tracked motor angle labels in primitive UI regions. */
-export function updateMotorAngleLabels(tagId) {
-    if (!tagId || !store.labState || !store.labState.components) return;
-    const comp = store.labState.components[tagId];
-    if (!comp) return;
-    const mr = (measPose(comp).motor_rotations) || {};
-    document.querySelectorAll(`[data-motor-angle^="${tagId}:"]`).forEach((el) => {
-        const mid = (el.dataset.motorAngle || '').split(':')[1];
-        if (!mid) return;
-        const v = mr[String(mid)];
-        const n = (v !== undefined && v !== null && Number.isFinite(Number(v))) ? Number(v) : 0;
-        el.textContent = `θ ${n.toFixed(2)}°`;
+// Per-tag scroll position preserved across panel DOM rebuilds (full
+// ``replaceWith`` would otherwise reset ``overflow-y: auto`` to the top).
+const _panelScrollMemory = new Map();
+
+// ---------- internal: DOM plumbing ----------
+
+function _getDock() {
+    return document.getElementById('panel-dock');
+}
+
+/**
+ * Mount (or rebuild) the panel DOM for ``tagId``, then refresh its snapshot
+ * entry. With the dock's ``row-reverse`` styling, ``appendChild`` places the
+ * newly-mounted panel visually to the LEFT of any existing panels — which
+ * matches the user-requested "Ctrl+click adds a window to the left".
+ */
+function _mountOrRebuildPanel(tagId) {
+    const dock = _getDock();
+    if (!dock) return;
+
+    const comp =
+        (store.labState && store.labState.components && store.labState.components[tagId]) || null;
+    const placement = placementUiLabel(comp);
+
+    const fresh = renderComponentPanel(tagId, {
+        placementState: placement,
+        checkCollision: _checkCollision,
+        render: _render,
+        updateContextPanel,
+        showParameterModal,
+        closePanel,
+    });
+
+    const existing = dock.querySelector(
+        `.component-panel[data-tag-id="${_cssEscape(tagId)}"]`,
+    );
+    let scrollState = _panelScrollMemory.get(tagId) || { top: 0, left: 0 };
+    if (existing) {
+        scrollState = { top: existing.scrollTop, left: existing.scrollLeft };
+        _panelScrollMemory.set(tagId, scrollState);
+    }
+    if (existing) {
+        existing.replaceWith(fresh);
+    } else {
+        dock.appendChild(fresh);
+    }
+    _attachPanelScrollMemory(fresh);
+    _restorePanelScroll(fresh, scrollState);
+
+    const hld = getHolding(store.labState);
+    const statusKey = `${(store.labState && store.labState.system_status) || 'IDLE'}|${hld.tag_id || ''}|${hld.requires_operator_confirm ? '1' : '0'}`;
+    const dataKey = comp ? componentDataSnapshot(comp) : null;
+    store.contextPanelSnapshots.set(tagId, {
+        state: placement,
+        status: statusKey,
+        data: dataKey,
     });
 }
 
-// --- Main: updateContextPanel ---
+function _removePanelDom(tagId) {
+    const dock = _getDock();
+    if (!dock) return;
+    const el = dock.querySelector(
+        `.component-panel[data-tag-id="${_cssEscape(tagId)}"]`,
+    );
+    if (el) el.remove();
+    _panelScrollMemory.delete(tagId);
+}
 
-export function updateContextPanel(name) {
-    const {
-        contextPanel,
-        ctxX,
-        ctxY,
-        ctxRot,
-        ctxMoveBtn,
-        ctxRecordSlot,
-        ctxStrategies,
-        selectedCompName,
-        selectedCompTag,
-        selectedCompProperties,
-    } = refs();
-    if (!contextPanel || !ctxX || !ctxY || !ctxRot) return;
+/** Remember scroll position while the operator reads long primitive lists. */
+function _attachPanelScrollMemory(panel) {
+    const tag = panel && panel.dataset && panel.dataset.tagId;
+    if (!tag || panel.__scrollMemoryAttached) return;
+    panel.__scrollMemoryAttached = true;
+    panel.addEventListener(
+        'scroll',
+        () => {
+            _panelScrollMemory.set(tag, {
+                top: panel.scrollTop,
+                left: panel.scrollLeft,
+            });
+        },
+        { passive: true },
+    );
+}
 
-    const comp = store.labState.components[name];
-    const pose = store.ghostState[name];
+function _restorePanelScroll(panel, scrollState) {
+    if (!panel || !scrollState) return;
+    const apply = () => {
+        panel.scrollTop = scrollState.top;
+        panel.scrollLeft = scrollState.left;
+    };
+    apply();
+    requestAnimationFrame(apply);
+}
 
-    let displayName = name;
-    let properties = {};
+function _applyFocusStyling() {
+    const dock = _getDock();
+    if (!dock) return;
+    const focused = store.focusedPanel;
+    dock.querySelectorAll('.component-panel').forEach((el) => {
+        const tag = el.dataset.tagId;
+        el.classList.toggle('component-panel--focused', tag != null && tag === focused);
+    });
+}
 
-    if (store.catalogMap[name]) {
-        displayName = store.catalogMap[name].name;
-        if (store.catalogMap[name].properties) {
-            properties = store.catalogMap[name].properties;
-        }
+/**
+ * Install a single delegated click handler on ``#panel-dock``. Any click
+ * that bubbles up from inside a ``.component-panel`` shifts focus to that
+ * panel. The close button on each panel calls ``stopPropagation`` so it
+ * dismisses without first focusing.
+ *
+ * On the focused panel, inner controls (buttons, inputs) work normally —
+ * their click bubbles up here too, but the ``tag === focused`` early-return
+ * makes it a cheap no-op.
+ */
+function _installDockClickDelegate() {
+    const dock = _getDock();
+    if (!dock || dock.__dockDelegateInstalled) return;
+    dock.__dockDelegateInstalled = true;
+    dock.addEventListener('click', (ev) => {
+        const panel = ev.target.closest('.component-panel');
+        if (!panel) return;
+        const tag = panel.dataset.tagId;
+        if (!tag || tag === store.focusedPanel) return;
+        focusPanel(tag);
+    });
+}
+
+/**
+ * CSS.escape polyfill — we use the tag id inside an attribute selector and
+ * legitimate ids (e.g. ``tag_22``) contain underscores; modern browsers
+ * support ``CSS.escape`` natively but fall back to a conservative literal
+ * for ASCII letters / digits / underscore / hyphen which covers every tag
+ * id our backend generates today.
+ */
+function _cssEscape(s) {
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+        return CSS.escape(s);
     }
-
-    if (selectedCompName) selectedCompName.textContent = displayName;
-    if (selectedCompTag) selectedCompTag.textContent = name;
-
-    if (selectedCompProperties) {
-        selectedCompProperties.innerHTML = '';
-        if (Object.keys(properties).length > 0) {
-            const propsHtml = Object.entries(properties).map(([key, val]) => {
-                // Format key: radius_of_curvature → "Radius of curvature".
-                const cleanKey = key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
-                return `<div style="margin-bottom: 2px;">${cleanKey}: <span style="color: #e2e8f0;">${val}</span></div>`;
-            }).join('');
-            selectedCompProperties.innerHTML = propsHtml;
-        }
-    }
-
-    contextPanel.style.display = 'block';
-
-    const chromeOnly = isChromeComponent(name);
-    const tablePoseSection = document.getElementById('ctx-table-pose-section');
-    const tableMotionSection = document.getElementById('ctx-table-motion-section');
-    if (tablePoseSection) tablePoseSection.style.display = 'none';
-    if (tableMotionSection) tableMotionSection.style.display = 'none';
-
-    document.querySelectorAll('.ctx-dynamic-storage').forEach((el) => el.remove());
-
-    const placementState = placementUiLabel(comp);
-    if (pose && Number.isFinite(pose.x)) {
-        ctxX.value = pose.x.toFixed(1);
-        ctxY.value = pose.y.toFixed(1);
-        ctxRot.value = (pose.rotation || 0).toFixed(1);
-    } else {
-        ctxX.value = '';
-        ctxY.value = '';
-        ctxRot.value = '';
-    }
-
-    if (ctxRecordSlot) {
-        ctxRecordSlot.innerHTML = '';
-        const wrap = document.createElement('div');
-        wrap.style.marginTop = chromeOnly ? '0' : '8px';
-        if (chromeOnly) {
-            const hint = document.createElement('p');
-            hint.style.fontSize = '9px';
-            hint.style.color = '#64748b';
-            hint.style.lineHeight = '1.35';
-            hint.style.margin = '0 0 8px 0';
-            hint.textContent =
-                'Fixed bench component — not placed on the table. Use the chrome bar above the canvas for quick access.';
-            wrap.appendChild(hint);
-        }
-        wrap.appendChild(
-            renderComponentPopup(name, {
-                placementState,
-                checkCollision: _checkCollision,
-                render: _render,
-                updateContextPanel,
-                showParameterModal,
-            }),
-        );
-        if (PRIMITIVE_DEV_HINTS) {
-            const dev = document.createElement('div');
-            dev.style.fontSize = '9px';
-            dev.style.color = '#475569';
-            dev.style.marginTop = '6px';
-            dev.innerHTML =
-                'Dev: <code>POST /api/components/{tag}/measurables/record</code>';
-            wrap.appendChild(dev);
-        }
-        ctxRecordSlot.appendChild(wrap);
-    }
-
-    if (!chromeOnly && placementState === 'STORED') {
-        if (ctxMoveBtn) ctxMoveBtn.style.display = 'none';
-        const hint = document.createElement('div');
-        hint.className = 'ctx-dynamic-storage';
-        hint.style.marginTop = '8px';
-        hint.style.fontSize = '10px';
-        hint.style.color = '#94a3b8';
-        hint.style.lineHeight = '1.35';
-        hint.innerHTML =
-            'Stored in Q3 at <strong>cell center</strong> and <strong>0°</strong> by default. Use <strong>Drag from storage</strong> or set X/Y/Rot and <strong>Place from storage</strong>.';
-        if (selectedCompProperties) selectedCompProperties.appendChild(hint);
-    } else if (!chromeOnly) {
-        if (ctxMoveBtn) ctxMoveBtn.style.display = 'flex';
-    }
-
-    if (ctxStrategies) {
-        ctxStrategies.innerHTML = '';
-        ctxStrategies.style.display = 'none';
-    }
-
-    store.contextPanelStateSnapshot = placementState;
-    const hld = getHolding(store.labState);
-    store.contextPanelStatusSnapshot = `${(store.labState && store.labState.system_status) || 'IDLE'}|${hld.tag_id || ''}|${hld.requires_operator_confirm ? '1' : '0'}`;
-    if (comp) {
-        store.contextPanelDataSnapshot = componentDataSnapshot(comp);
-    }
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
 }

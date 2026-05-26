@@ -21,7 +21,36 @@ export const store = {
      * cleared whenever the tag is removed from ``pendingCommands``.
      */
     pendingActions: new Map(),
-    selectedComponent: null,
+    /**
+     * Multi-panel state.
+     *
+     * ``openPanels`` — ordered list of currently-open component tags.
+     * Insertion order matches click order; with the dock's
+     * ``flex-direction: row-reverse`` styling, additional panels opened
+     * via Ctrl/Cmd+click appear to the LEFT of the first one (matching
+     * the operator request "add another window to the left").
+     *
+     * ``focusedPanel`` — the one panel that captures interactive clicks
+     * (buttons, inputs). All other open panels stay visible and scrollable
+     * so live camera feeds keep rendering, but their controls are gated
+     * with ``pointer-events: none`` until focused.
+     *
+     * ``selectedComponent`` (below, installed as a property descriptor)
+     * is a backwards-compatibility shim that reads ``focusedPanel`` and
+     * on write replaces ``openPanels`` with ``[value]`` (legacy "click
+     * replaces" semantics). New code should call into the panel-dock
+     * manager (``openPanel`` / ``focusPanel`` / ``closePanel``) directly.
+     */
+    openPanels: [],
+    focusedPanel: null,
+    /**
+     * Per-tag snapshot bag (``{ state, status, data }``) that drives the
+     * "rebuild this panel because something changed" check in lab-state.js.
+     * Keyed by ``tagId``. Populated and consumed only by ``ui/context-panel.js``
+     * and ``state/lab-state.js`` — every other reader should go through the
+     * panel-dock manager.
+     */
+    contextPanelSnapshots: new Map(),
     availableStrategies: null,
     availableRecipes: [],
     /** From GET /api/laser-lines (per LAB_MODE schema). */
@@ -57,22 +86,6 @@ export const store = {
     layoutIssues: [],
     /** From GET /api/storage-grid (inventory cell overlay) */
     storageGridSpec: null,
-    /** Last `state` (PLACED/STORED/…) shown in the context panel for the selected part — used to refresh controls when lab state updates. */
-    contextPanelStateSnapshot: null,
-    /**
-     * Composite snapshot of top-level status fields that also cause the
-     * context panel to rebuild (even when the selected component's placement
-     * label is unchanged). Currently covers `system_status`, the currently
-     * held tag and the `requires_operator_confirm` flag so that IDLE → HOLDING
-     * and HOLDING → IDLE transitions immediately swap the in-air controls.
-     */
-    contextPanelStatusSnapshot: null,
-    /**
-     * JSON snapshot of the selected component's tunables + measurables.
-     * When this changes, the context panel re-renders so read-only widgets
-     * and primitive regions (e.g. TELEOP) stay in sync without re-clicking.
-     */
-    contextPanelDataSnapshot: null,
     /** STORED part id when "Drag from storage" mode is active (only that part can be dragged to place). */
     dragFromStorageTag: null,
     /** Ghost pose snapshot at mousedown when starting a drag-from-storage move (for cancel/revert). */
@@ -93,6 +106,11 @@ export const store = {
     teleopLivePose: {},
     /** Operator target preview while planning a TeleOp goto. */
     teleopTarget: {},
+    /**
+     * After START_TELEOP, sync ``teleopTarget`` from the first live CURRENT
+     * poll (hardware truth) instead of nominal/meas layout seed.
+     */
+    teleopTargetAwaitingLive: {},
     /** Per-tag TeleOp motion speed. */
     teleopSpeed: {},
     /**
@@ -102,3 +120,42 @@ export const store = {
     /** Optional render hook set by canvas init. */
     _teleopLivePoseRender: null,
 };
+
+/**
+ * ``store.selectedComponent`` — backwards-compatible shim.
+ *
+ * Reads return the focused panel's tag id (or ``null``). Writes apply the
+ * legacy single-panel "click replaces" semantics:
+ *   - ``store.selectedComponent = null``  → clear every panel.
+ *   - ``store.selectedComponent = "tag"`` → if the tag is already open, just
+ *     focus it; otherwise replace the open set with ``["tag"]`` and focus it.
+ *
+ * Every existing call site (canvas/interaction.js, ui/updateUI.js,
+ * ui/bench-chrome-bar.js, etc.) keeps working through this shim. New code
+ * paths should call ``openPanel`` / ``focusPanel`` directly via the
+ * panel-dock manager in ``ui/context-panel.js``.
+ */
+Object.defineProperty(store, 'selectedComponent', {
+    enumerable: true,
+    configurable: true,
+    get() {
+        return this.focusedPanel;
+    },
+    set(value) {
+        if (value == null) {
+            this.openPanels = [];
+            this.focusedPanel = null;
+            this.contextPanelSnapshots.clear();
+            return;
+        }
+        const tag = String(value);
+        if (this.openPanels.includes(tag)) {
+            this.focusedPanel = tag;
+            return;
+        }
+        this.openPanels = [tag];
+        this.focusedPanel = tag;
+        const stale = [...this.contextPanelSnapshots.keys()].filter((k) => k !== tag);
+        stale.forEach((k) => this.contextPanelSnapshots.delete(k));
+    },
+});

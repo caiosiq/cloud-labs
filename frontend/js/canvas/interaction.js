@@ -42,6 +42,7 @@ import {
 } from './alignment-snap.js';
 import {
     clearSelectionAndHideContextPanel,
+    openPanel,
     placementUiLabel,
     updateContextPanel,
 } from '../ui/context-panel.js';
@@ -213,32 +214,48 @@ function nextWheelRotationDeg(current, directionSign) {
 // --- Event handlers ---
 
 function onMouseDown(canvas, e) {
-    if (store.labState && store.labState.system_status !== 'IDLE') return;
+    // The lab being non-IDLE (BUSY / OPTIMIZING / HOLDING) used to block this
+    // entire handler so the operator couldn't accidentally start a drag
+    // mid-command. Multi-panel mode loosens that: *opening* a panel (e.g. to
+    // watch a camera feed while another component is in TeleOp) is always
+    // allowed; only the drag-to-move path is gated below.
+    const labBusy =
+        !!store.labState && store.labState.system_status !== 'IDLE';
 
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
     const hit = getComponentAtPosition(mouseX, mouseY);
+    // Ctrl/Cmd+click opens an ADDITIONAL panel without closing the current
+    // ones (operator request: "Ctrl+click adds a window to the left").
+    // Plain click keeps the legacy "click replaces" semantics.
+    const addPanel = !!(e.ctrlKey || e.metaKey);
 
     if (hit) {
         // Drag-from-storage is "sticky" to a single tag. If the user clicks any other component
-        // while drag-from-storage mode is active, exit drag mode and select the new component.
+        // while drag-from-storage mode is active, exit drag mode and open the new component's panel.
         if (store.dragFromStorageTag && hit.name !== store.dragFromStorageTag) {
             store.dragFromStorageTag = null;
             store.dragFromStorageStartPose = null;
-            store.selectedComponent = hit.name;
-            updateContextPanel(hit.name);
-            _render();
+            openPanel(hit.name, { add: addPanel });
             log('Drag from storage cancelled (another part was selected).', 'info');
             return;
         }
-        if (store.selectedComponent !== hit.name) {
-            store.selectedComponent = hit.name;
-            updateContextPanel(hit.name);
-            _render();
-            log(`Selected ${hit.name}`, 'info');
-        } else {
+        // Two-stage interaction (preserved from single-panel UX):
+        //   1. First click on a component that is not currently the focused
+        //      one: open / focus its panel and stop. No drag.
+        //   2. Second click on the same (already-focused) component: drag.
+        // Ctrl+click is always pure panel-management — never starts a drag.
+        const alreadyFocused =
+            !addPanel && store.focusedPanel === hit.name && store.openPanels.includes(hit.name);
+        if (!alreadyFocused) {
+            openPanel(hit.name, { add: addPanel });
+            if (!addPanel) log(`Selected ${hit.name}`, 'info');
+            return;
+        }
+        {
+            if (labBusy) return;
             const stComp = store.labState.components[hit.name];
             if (isStoredComponent(stComp)) {
                 // STORED parts can only be dragged once the user explicitly opts into drag mode
@@ -380,7 +397,10 @@ function onWheel(e) {
     }
 
     _render();
-    if (store.selectedComponent === tag) {
+    // Multi-panel: refresh whichever open panel matches the wheel target,
+    // not just the focused one — the dragging component may differ from the
+    // focused panel.
+    if (store.openPanels.includes(tag)) {
         updateContextPanel(tag);
     }
 }

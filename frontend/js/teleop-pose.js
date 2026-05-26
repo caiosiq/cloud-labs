@@ -13,7 +13,7 @@ import { drawPose, getHolding, isHeldTag, measPose } from './component-model.js'
 
 /** @typedef {'x' | 'y' | 'z' | 'rotation'} TeleopPoseField */
 
-export const DEFAULT_HOVER_Z_MM = 40.0;
+export const DEFAULT_HOVER_Z_MM = 245.0;
 
 /** @param {object | null | undefined} pose */
 export function normalizeTeleopPose(pose) {
@@ -50,6 +50,36 @@ export function getTeleopTargetPose(tagId) {
 
 function hasTablePosition(pose) {
     return Number.isFinite(Number(pose?.x)) && Number.isFinite(Number(pose?.y));
+}
+
+/** True when live hardware pose has enough fields to seed TARGET. */
+export function canSeedTargetFromCurrent(pose) {
+    if (!pose || typeof pose !== 'object') return false;
+    if (hasTablePosition(pose)) return true;
+    return Number.isFinite(Number(pose.rotation));
+}
+
+export function markTeleopTargetAwaitingLive(tagId) {
+    if (!tagId) return;
+    store.teleopTargetAwaitingLive[tagId] = true;
+}
+
+export function clearTeleopTargetAwaitingLive(tagId) {
+    if (tagId && store.teleopTargetAwaitingLive) {
+        delete store.teleopTargetAwaitingLive[tagId];
+    }
+}
+
+/**
+ * On first live-pose tick after START_TELEOP, copy CURRENT → TARGET so both
+ * readouts match before the operator nudges.
+ */
+export function maybeSyncTeleopTargetFromFirstLivePose(tagId, labState = store.labState) {
+    if (!tagId || !store.teleopTargetAwaitingLive[tagId]) return getTeleopTargetPose(tagId);
+    const current = getTeleopCurrentPose(tagId);
+    if (!canSeedTargetFromCurrent(current)) return getTeleopTargetPose(tagId);
+    clearTeleopTargetAwaitingLive(tagId);
+    return seedTeleopTargetPose(tagId, current);
 }
 
 /**
@@ -103,6 +133,8 @@ function isAccidentalEmptySeed(pose) {
  * Safe to call on every live-pose tick.
  */
 export function maybeRepairTeleopTargetSeed(tagId, labState = store.labState) {
+    const synced = maybeSyncTeleopTargetFromFirstLivePose(tagId, labState);
+    if (store.teleopTargetAwaitingLive[tagId]) return synced;
     const target = getTeleopTargetPose(tagId);
     if (!target || !isAccidentalEmptySeed(target)) return target;
     const seed = resolveTeleopPlanSeedPose(tagId, labState);
@@ -135,6 +167,7 @@ export function ensureTeleopTargetPose(tagId, labState = store.labState) {
  * @returns {number} updated field value
  */
 export function nudgeTeleopTargetField(tagId, field, delta, labState = store.labState) {
+    clearTeleopTargetAwaitingLive(tagId);
     ensureTeleopTargetPose(tagId, labState);
     const target = store.teleopTarget[tagId];
     target[field] = Number(target[field] || 0) + Number(delta);

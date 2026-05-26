@@ -168,15 +168,29 @@ def initialize_state(
             print("  (no current_location)")
 
         if comp and comp.current_location:
-            # Found on table (robot frame, written by scan_components_cloudlab).
+            # Found on table (robot frame from scan_components_cloudlab).
             loc = comp.current_location
+            from lab_communicator.real.coordinate_frames import robot_table_xy_to_lab_xy
+            from lab_model.domain.holding import BREADBOARD_SURFACE_Z_LAB_MM
+
+            x_lab, y_lab = robot_table_xy_to_lab_xy(float(loc.x), float(loc.y))
+            z_raw = getattr(loc, "z", None)
+            if z_raw is not None:
+                z_lab = communicator._z_robot_to_lab(tag_id, float(z_raw))
+            else:
+                z_lab = BREADBOARD_SURFACE_Z_LAB_MM
             calc_rotation = getattr(loc, "yaw", None) or 0
             print(
                 f"  fallback yaw (deg): {getattr(loc, 'yaw', None)} "
                 f"-> rotation: {calc_rotation:.2f}"
             )
 
-            pose = {"x": loc.x, "y": loc.y, "rotation": calc_rotation}
+            pose = {
+                "x": x_lab,
+                "y": y_lab,
+                "z": z_lab,
+                "rotation": calc_rotation,
+            }
             # Include roll/pitch/yaw so the UI can derive display rz
             # (e.g. from yaw for a top-down view).
             for key in ("roll", "pitch", "yaw"):

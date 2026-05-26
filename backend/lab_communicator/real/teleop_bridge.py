@@ -258,6 +258,23 @@ def _call_start_table_rotation(
     exp.start_table_rotation(component, safe_z=safe_z)
 
 
+def _call_start_held_cartesian(
+    exp: Any,
+    component: Any,
+    *,
+    lab_rz_initial: Optional[float],
+) -> None:
+    """Forward to ``start_held_cartesian`` with graceful kwarg degradation."""
+    try:
+        sig = inspect.signature(exp.start_held_cartesian)
+        if "lab_rz_initial" in sig.parameters:
+            exp.start_held_cartesian(component, lab_rz_initial=lab_rz_initial)
+            return
+    except (TypeError, ValueError):
+        pass
+    exp.start_held_cartesian(component)
+
+
 def start_hardware_session(
     communicator: "RealLabCommunicator",
     tag_id: str,
@@ -358,7 +375,48 @@ def start_hardware_session(
                 raise RuntimeError(
                     "pose3d TeleOp requires PICK first (robot not holding)"
                 )
-            exp.start_held_cartesian(comp)
+            rotations = _read_lab_rz_rotations(communicator, tag_id)
+            meas_rz = rotations["meas"]
+            nominal_rz = rotations["nominal"]
+            lab_rz_initial = meas_rz if meas_rz is not None else nominal_rz
+            bar = "=" * 78
+            print(bar)
+            print(
+                f"[TELEOP-DEBUG] cloud-labs start_hardware_session  "
+                f"tag={tag_id}  mode=pose3d"
+            )
+            print(bar)
+            meas_fmt = (
+                f"{meas_rz:+9.3f}" if meas_rz is not None else "    (none)"
+            )
+            nom_fmt = (
+                f"{nominal_rz:+9.3f}" if nominal_rz is not None else "    (none)"
+            )
+            hint_fmt = (
+                f"{lab_rz_initial:+9.3f}"
+                if lab_rz_initial is not None
+                else "    (none)"
+            )
+            print(
+                f"[TELEOP-DEBUG]   measurables.pose.rotation (UI 'current') = "
+                f"{meas_fmt} deg"
+            )
+            print(
+                f"[TELEOP-DEBUG]   nominal_pose.rotation                    = "
+                f"{nom_fmt} deg"
+            )
+            print(
+                f"[TELEOP-DEBUG]   → lab_rz_initial sent to lab_automation    = "
+                f"{hint_fmt} deg"
+            )
+            print(
+                f"[TELEOP-DEBUG]   (HELD_CARTESIAN seeds _lab_rotation from this "
+                f"hint; pick-grip TCP rotvec is NOT inverted.)"
+            )
+            print(bar)
+            _call_start_held_cartesian(
+                exp, comp, lab_rz_initial=lab_rz_initial
+            )
     except Exception:
         with _HW_SESSION_LOCK:
             if _ACTIVE_HW_TAG == tag_id:

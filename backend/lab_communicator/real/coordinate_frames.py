@@ -16,7 +16,8 @@ conversion is needed before "talking to the robot".
 What lives here:
 
 * Calibration **constants** (``LAB_ROBOT_TABLE_ROTATION_RAD``,
-  ``TABLE_Z0_ROBOT_MM``, ``GRASP_OFFSET_MM``, ``DEFAULT_COMPONENT_HEIGHT_MM``,
+  ``TABLE_Z0_ROBOT_MM``, ``BREADBOARD_HEIGHT_ABOVE_FLOOR_MM``,
+  ``GRASP_OFFSET_MM``, ``DEFAULT_COMPONENT_HEIGHT_MM``,
   ``MAX_SAFE_HOVER_Z_LAB_MM``). All env-overridable via
   :func:`lab_communicator.shared.util.env_float`.
 * XY transforms ``lab_table_xy_to_robot_xy`` / ``robot_table_xy_to_lab_xy``.
@@ -115,10 +116,11 @@ def robot_yaw_to_lab_rotation(yaw_robot: float) -> float:
 # Lab vs robot Z (see new_primitives.md: "Z / coordinate convention")
 # ---------------------------------------------------------------------------
 # Cloud-labs, the UI, the HTTP API, and lab_model all speak ``z_lab``:
-#     Height of a component's *base* above the breadboard surface (mm).
-#     z_lab = 0   -> part is resting on the breadboard.
-#     z_lab = 40  -> part's base is 40 mm above the breadboard
-#                    (default hover).
+#     Height of a component's *base* above the **lab floor** (mm).
+#     z_lab = 0   -> part base is on the floor.
+#     z_lab = 215 -> part base is on the breadboard surface (May 2026 bench:
+#                    breadboard ~21.5 cm above floor).
+#     z_lab = 245 -> typical post-pick hover (~30 mm above breadboard).
 #
 # lab_automation speaks ``z_robot``: the robot-frame z command of
 # whatever reference point the robot controller uses (flange / gripper
@@ -132,16 +134,32 @@ def robot_yaw_to_lab_rotation(yaw_robot: float) -> float:
 # every incoming read inverse-transforms z_robot -> z_lab.
 #
 # Transform (outgoing):
-#     z_robot = TABLE_Z0_ROBOT_MM + height_mm - GRASP_OFFSET_MM + z_lab
+#     z_robot = TABLE_Z0_ROBOT_MM + height_mm - GRASP_OFFSET_MM
+#               + z_lab - BREADBOARD_HEIGHT_ABOVE_FLOOR_MM
 # Inverse (incoming):
-#     z_lab   = z_robot - TABLE_Z0_ROBOT_MM - height_mm + GRASP_OFFSET_MM
+#     z_lab   = z_robot - TABLE_Z0_ROBOT_MM - height_mm
+#               + GRASP_OFFSET_MM + BREADBOARD_HEIGHT_ABOVE_FLOOR_MM
 #
-# The three inputs are each owned by exactly one thing so they don't
+# May 2026 calibration (measured on bench):
+#   - Beam-splitter class optics ~210 mm tall; gripper camera (tag_22)
+#     ~175 mm.
+#   - With the legacy transform (breadboard-referenced z_lab, height_mm
+#     = 60), commanding z_lab=0 placed the base ~215 mm above the floor.
+#   - ``BREADBOARD_HEIGHT_ABOVE_FLOOR_MM`` re-zeroes z_lab on the floor
+#     while ``TABLE_Z0_ROBOT_MM`` + catalog ``height_mm`` keep the same
+#     robot commands for breadboard contact and post-pick hover.
+#
+# The four inputs are each owned by exactly one thing so they don't
 # drift:
 # - ``TABLE_Z0_ROBOT_MM`` (per-setup calibration): robot-frame z reading
-#   such that the empty gripper fingers are just touching the breadboard
-#   surface. One-time touch-off calibration. Override with env
-#   ``TABLE_Z0_ROBOT_MM``.
+#   when the empty gripper fingers touch the **breadboard** surface,
+#   adjusted together with ``height_mm`` and
+#   ``BREADBOARD_HEIGHT_ABOVE_FLOOR_MM`` so breadboard contact still
+#   commands the same ``z_robot`` as before recalibration (~560 mm with
+#   the May 2026 defaults). Override with env ``TABLE_Z0_ROBOT_MM``.
+# - ``BREADBOARD_HEIGHT_ABOVE_FLOOR_MM`` (bench geometry): vertical
+#   distance from lab floor to breadboard surface (mm). Override with env
+#   ``BREADBOARD_HEIGHT_ABOVE_FLOOR_MM``.
 # - ``GRASP_OFFSET_MM`` (gripper design constant): distance from the
 #   *top* of the component housing DOWN to the point where the gripper
 #   fingers close. 0 means "closes at the very top of the housing"; a
@@ -161,13 +179,16 @@ def robot_yaw_to_lab_rotation(yaw_robot: float) -> float:
 #   ``_component_height_mm`` lookup, not by the transform itself.
 
 TABLE_Z0_ROBOT_MM: float = env_float(
-    "TABLE_Z0_ROBOT_MM", 500.0, log_prefix="[REAL LAB]"
+    "TABLE_Z0_ROBOT_MM", 350.0, log_prefix="[REAL LAB]"
+)
+BREADBOARD_HEIGHT_ABOVE_FLOOR_MM: float = env_float(
+    "BREADBOARD_HEIGHT_ABOVE_FLOOR_MM", 215.0, log_prefix="[REAL LAB]"
 )
 GRASP_OFFSET_MM: float = env_float(
     "GRASP_OFFSET_MM", 0.0, log_prefix="[REAL LAB]"
 )
 DEFAULT_COMPONENT_HEIGHT_MM: float = env_float(
-    "DEFAULT_COMPONENT_HEIGHT_MM", 60.0, log_prefix="[REAL LAB]"
+    "DEFAULT_COMPONENT_HEIGHT_MM", 210.0, log_prefix="[REAL LAB]"
 )
 MAX_SAFE_HOVER_Z_LAB_MM: float = env_float(
     "MAX_SAFE_HOVER_Z_LAB_MM", 200.0, log_prefix="[REAL LAB]"
@@ -186,6 +207,7 @@ def z_lab_to_robot(z_lab: float, height_mm: float) -> float:
         + float(height_mm)
         - GRASP_OFFSET_MM
         + float(z_lab)
+        - BREADBOARD_HEIGHT_ABOVE_FLOOR_MM
     )
 
 
@@ -200,4 +222,5 @@ def z_robot_to_lab(z_robot: float, height_mm: float) -> float:
         - TABLE_Z0_ROBOT_MM
         - float(height_mm)
         + GRASP_OFFSET_MM
+        + BREADBOARD_HEIGHT_ABOVE_FLOOR_MM
     )

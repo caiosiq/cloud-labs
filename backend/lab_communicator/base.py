@@ -548,6 +548,12 @@ class LabCommunicator:
             merge_offers_tag_ids,
             read_checkpoint_document,
         )
+        from lab_model.domain.component import (
+            get_measurables,
+            get_tunables,
+            measurables_bucket,
+            tunables_bucket,
+        )
 
         paths = get_lab_view_paths_optional()
         if paths is None:
@@ -587,10 +593,14 @@ class LabCommunicator:
                 dst = comps[tid]
                 if not isinstance(dst, dict):
                     continue
-                st_t = json.loads(json.dumps(src_ent.get("tunables") or {}))
-                st_m = json.loads(json.dumps(src_ent.get("measurables") or {}))
-                dst["tunables"] = st_t
-                dst["measurables"] = st_m
+                st_t = json.loads(json.dumps(get_tunables(src_ent)))
+                st_m = json.loads(json.dumps(get_measurables(src_ent)))
+                dst_tun = tunables_bucket(dst)
+                dst_meas = measurables_bucket(dst)
+                dst_tun.clear()
+                dst_tun.update(st_t)
+                dst_meas.clear()
+                dst_meas.update(st_m)
                 meta = self._catalog_meta_for_tag(tid) or {}
                 motor_ids_any = meta.get("motor_ids") or []
                 motor_ids_int: List[int] = []
@@ -605,7 +615,12 @@ class LabCommunicator:
             self.current_state["last_updated"] = datetime.now().isoformat()
 
         self._persist_state()
+        self._post_session_reconciliation_tags(merged_ids)
         return merged_ids
+
+    def _post_session_reconciliation_tags(self, merged_ids: List[str]) -> None:
+        """Hook after checkpoint merge (real syncs registry poses)."""
+        return
 
     def _post_apply_snapshot(self, components: Dict[str, Any]) -> None:
         """Called once at the end of :meth:`set_lab_state`.

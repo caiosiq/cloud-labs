@@ -39,8 +39,11 @@ SYSTEM_STATUS_HOLDING = "HOLDING"
 #: teleoped somewhere" at a glance.
 SYSTEM_STATUS_TELEOP = "TELEOP"
 
-DEFAULT_HOVER_Z_MM = 40.0
-"""Default safe clearance height (mm above table) used by mock PICK / HOVER defaults."""
+BREADBOARD_SURFACE_Z_LAB_MM = 215.0
+"""Height of the breadboard surface above the lab floor (``z_lab`` convention)."""
+
+DEFAULT_HOVER_Z_MM = 245.0
+"""Default safe hover height (mm above **lab floor**): breadboard (~215 mm) + ~30 mm clearance."""
 
 
 def empty_holding() -> Dict[str, Any]:

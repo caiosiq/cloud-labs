@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from lab_communicator.shared.lab_view_config import atomic_write_json, get_lab_view_paths_optional
+from lab_model.domain.component import get_measurables, get_tunables
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,10 @@ def round_float_tree(obj: Any, digits: int = 4) -> Any:
 def _canonical_blob(part: Dict[str, Any]) -> str:
     """Stable compare blob for tunables + measurables."""
 
-    slug = {"tunables": part.get("tunables"), "measurables": part.get("measurables")}
+    slug = {
+        "tunables": get_tunables(part),
+        "measurables": get_measurables(part),
+    }
     return json.dumps(round_float_tree(slug), sort_keys=True)
 
 
@@ -194,8 +198,8 @@ def merge_offers_with_debug(
         b = ck[tid]
         if not isinstance(a, dict) or not isinstance(b, dict):
             continue
-        pa = (a.get("measurables") or {}).get("pose") or {}
-        pb = (b.get("measurables") or {}).get("pose") or {}
+        pa = get_measurables(a).get("pose") or {}
+        pb = get_measurables(b).get("pose") or {}
         if not isinstance(pa, dict) or not isinstance(pb, dict):
             continue
         if not poses_close(pa, pb, thresholds):

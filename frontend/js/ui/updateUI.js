@@ -29,6 +29,7 @@ let _deps = {
     updateMotorAngleLabels: () => {},
     updateHoldingBanner: () => {},
     render: () => {},
+    openPanel: () => {},
 };
 
 /**
@@ -38,6 +39,7 @@ let _deps = {
  *   updateMotorAngleLabels: (tagId: string) => void,
  *   updateHoldingBanner: () => void,
  *   render: () => void,
+ *   openPanel: (tagId: string, opts?: { add?: boolean }) => void,
  * }} deps
  */
 export function initUpdateUI(deps) {
@@ -98,7 +100,16 @@ export function updateUI() {
     Object.entries(components).forEach(([name, comp]) => {
         const card = document.createElement('div');
         card.className = 'component-card';
-        if (name === store.selectedComponent) card.style.borderColor = '#3b82f6';
+        // Multi-panel: any open card gets a soft outline; the focused panel's
+        // card gets the bright primary-accent border so the operator can see
+        // at a glance which sidebar items have a dock panel and which one is
+        // currently interactive.
+        if (store.openPanels.includes(name)) {
+            card.style.borderColor = 'rgba(59, 130, 246, 0.45)';
+        }
+        if (name === store.focusedPanel) {
+            card.style.borderColor = '#3b82f6';
+        }
 
         const isPlaced = isOnTableComponent(comp);
 
@@ -163,10 +174,12 @@ export function updateUI() {
             ${statusDot}
         `;
 
-        card.addEventListener('click', () => {
-            store.selectedComponent = name;
-            _deps.updateContextPanel(name);
-            _deps.render();
+        // Ctrl/Cmd+click opens an additional panel without closing existing
+        // ones (matches the canvas-side multi-panel rule). Plain click keeps
+        // the legacy "replace" semantics.
+        card.addEventListener('click', (ev) => {
+            const add = !!(ev.ctrlKey || ev.metaKey);
+            _deps.openPanel(name, { add });
         });
 
         componentList.appendChild(card);

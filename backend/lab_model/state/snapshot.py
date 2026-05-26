@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Set, Tuple
 
-from lab_model.domain.component import get_measurables, normalize_components_map
+from lab_model.domain.component import get_measurables, get_tunables, normalize_components_map
 from lab_model.domain.holding import empty_holding
 
 
@@ -48,8 +48,8 @@ class LabPose:
     Always in **lab frame** (the UI / cloud-labs convention):
 
     - ``x``, ``y`` -- millimeters on the breadboard, lab axes.
-    - ``z`` -- millimeters above the breadboard surface (z_lab = 0
-      means resting on the table).
+    - ``z`` -- millimeters above the **lab floor** (``z_lab = 0`` is on
+      the floor; ``z_lab ≈ 215`` is resting on the breadboard).
     - ``rotation`` -- degrees, lab top-down rotation.
 
     Backends with a robot frame (real) transform these into robot frame
@@ -64,18 +64,39 @@ class LabPose:
 
     @classmethod
     def from_entry(cls, entry: Dict[str, Any]) -> "LabPose":
-        """Extract a ``LabPose`` from a component entry's ``measurables.pose``.
+        """Extract a ``LabPose`` from a component entry (meas, else nominal).
 
-        Defaults all four fields to 0.0 when missing -- snapshot files
-        from before the z-convention landed don't have ``z``, and a
-        z_lab of 0 means "on the breadboard" which is almost always
-        what those older snapshots intend.
+        Missing ``z`` on breadboard parts defaults to
+        :data:`lab_model.domain.holding.BREADBOARD_SURFACE_Z_LAB_MM`
+        (not ``0`` — floor level would forward-transform to a dangerously
+        low robot ``z``).
         """
-        pose = get_measurables(entry or {}).get("pose") or {}
+        from lab_model.domain.component import presence_of, PRESENCE_BREADBOARD
+        from lab_model.domain.holding import BREADBOARD_SURFACE_Z_LAB_MM
+
+        meas = get_measurables(entry or {}).get("pose")
+        nominal = get_tunables(entry or {}).get("nominal_pose") or {}
+        if isinstance(meas, dict) and (
+            meas.get("x") is not None or meas.get("y") is not None
+        ):
+            pose = meas
+        elif isinstance(nominal, dict):
+            pose = nominal
+        else:
+            pose = meas if isinstance(meas, dict) else {}
+
+        z_default = (
+            BREADBOARD_SURFACE_Z_LAB_MM
+            if presence_of(entry or {}) == PRESENCE_BREADBOARD
+            else 0.0
+        )
+        z_raw = pose.get("z")
+        z = float(z_raw) if z_raw is not None else float(z_default)
+
         return cls(
             x=float(pose.get("x", 0.0)),
             y=float(pose.get("y", 0.0)),
-            z=float(pose.get("z", 0.0)),
+            z=z,
             rotation=float(pose.get("rotation", 0.0)),
         )
 

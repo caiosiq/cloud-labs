@@ -43,8 +43,8 @@ import { fetchLabState, initLabState, startLabStatePolling } from './state/lab-s
 import { initBenchChromeBar } from './ui/bench-chrome-bar.js';
 import { initUpdateUI, updateUI } from './ui/updateUI.js';
 import {
-    clearSelectionAndHideContextPanel,
     initContextPanel,
+    openPanel,
     placementUiLabel,
     updateContextPanel,
     updateHoldingBanner,
@@ -85,7 +85,8 @@ const saveStateBtn = document.getElementById('save-state-btn');
 const loadStateBtn = document.getElementById('load-state-btn');
 const recipeList = document.getElementById('recipe-list');
 
-const ctxPanelCloseBtn = document.getElementById('ctx-panel-close');
+// Each per-tag panel renders its own close button now (see ui/component-popup.js).
+// The historical global #ctx-panel-close element no longer exists in index.html.
 
 // Recipe UI Elements (Right Sidebar)
 const recordBtn = document.getElementById('record-btn');
@@ -135,9 +136,10 @@ initLabState({
     updateUI: () => updateUI(),
 });
 initBenchChromeBar({
-    onSelect: (tagId) => {
-        updateContextPanel(tagId);
-        render();
+    // Chrome bar click → open (or focus) a panel for the chrome tag.
+    // Ctrl/Cmd+click adds a panel without closing existing ones (multi-panel).
+    onSelect: (tagId, opts) => {
+        openPanel(tagId, opts || {});
     },
 });
 initUpdateUI({
@@ -146,6 +148,7 @@ initUpdateUI({
     updateMotorAngleLabels: (tagId) => updateMotorAngleLabels(tagId),
     updateHoldingBanner: () => updateHoldingBanner(),
     render: () => render(),
+    openPanel: (tagId, opts) => openPanel(tagId, opts || {}),
 });
 initContextPanel({
     render: () => render(),
@@ -222,13 +225,8 @@ function init() {
         }
     });
 
-    if (ctxPanelCloseBtn) {
-        ctxPanelCloseBtn.addEventListener('click', (ev) => {
-            ev.preventDefault();
-            ev.stopPropagation();
-            clearSelectionAndHideContextPanel();
-        });
-    }
+    // Each per-tag panel renders its own close button now; the legacy
+    // global #ctx-panel-close listener that used to live here is gone.
 
     if (saveStateBtn) {
         saveStateBtn.addEventListener('click', async () => {

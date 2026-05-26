@@ -512,6 +512,19 @@ class RealLabCommunicator(LabCommunicator):
         """
         self._rebuild_stored_intent_from_lab_state(components)
 
+    def _post_session_reconciliation_tags(self, merged_ids: List[str]) -> None:
+        """Push restored checkpoint poses into ``lab_automation`` registry."""
+        for tid in merged_ids:
+            with self._state_lock:
+                ent = (self.current_state.get("components") or {}).get(tid)
+            if not isinstance(ent, dict):
+                continue
+            self._apply_loaded_pose_to_hardware(
+                tid,
+                LabPose.from_entry(ent),
+                is_placed=is_on_table(ent),
+            )
+
     def _tag_id_for_component(self, comp: Any) -> Optional[str]:
         """Reverse-lookup ``OpticalComponent`` -> tag id.
 

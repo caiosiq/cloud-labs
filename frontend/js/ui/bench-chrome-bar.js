@@ -13,7 +13,10 @@ import { getComponentIcon } from './icons.js';
 let _onSelect = () => {};
 
 /**
- * @param {{ onSelect: (tagId: string) => void }} deps
+ * @param {{ onSelect: (tagId: string, opts?: { add?: boolean }) => void }} deps
+ *   ``onSelect`` is invoked with the clicked chrome tag and the
+ *   add/replace intent (Ctrl/Cmd+click → add a panel without closing
+ *   the existing ones; plain click → legacy "replace").
  */
 export function initBenchChromeBar(deps) {
     if (deps && typeof deps.onSelect === 'function') _onSelect = deps.onSelect;
@@ -45,15 +48,18 @@ export function refreshBenchChromeBar() {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'bench-chrome-bar__btn';
-        if (tagId === store.selectedComponent) btn.classList.add('bench-chrome-bar__btn--active');
+        // Multi-panel: any open chrome panel gets the active highlight; the
+        // focused one stays distinguishable via the panel's own border (the
+        // chrome bar only carries one styling slot today, so we use focus).
+        if (tagId === store.focusedPanel) btn.classList.add('bench-chrome-bar__btn--active');
         btn.title = `${displayName} (${tagId}) — fixed bench component`;
         btn.innerHTML = `
             <span class="material-icons-round bench-chrome-bar__icon">${icon}</span>
             <span class="bench-chrome-bar__name">${displayName}</span>
         `;
-        btn.addEventListener('click', () => {
-            store.selectedComponent = tagId;
-            _onSelect(tagId);
+        btn.addEventListener('click', (ev) => {
+            const add = !!(ev.ctrlKey || ev.metaKey);
+            _onSelect(tagId, { add });
         });
         bar.appendChild(btn);
     });

@@ -256,13 +256,27 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     ctx.shadowColor = isTranslucent ? 'transparent' : 'rgba(0,0,0,0.5)';
     ctx.shadowBlur = isTranslucent ? 0 : 10;
 
-    if (name === store.selectedComponent) {
+    // Multi-panel selection halo:
+    //   - any component with an OPEN panel gets a soft secondary outline so
+    //     the operator can see at a glance which parts have a dock window.
+    //   - the FOCUSED panel's component gets the bright primary outline
+    //     (matches the historical single-selection look exactly).
+    // Circumscribed circle covers oblong shapes too.
+    const haloR = Math.sqrt(halfW * halfW + halfH * halfH) + 5;
+    if (store.openPanels.includes(name) && name !== store.focusedPanel) {
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.45)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(0, 0, haloR, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+    if (name === store.focusedPanel) {
         ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        // Circumscribed circle for the selection halo so it covers oblong shapes too.
-        const r = Math.sqrt(halfW * halfW + halfH * halfH) + 5;
-        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.arc(0, 0, haloR, 0, Math.PI * 2);
         ctx.stroke();
     }
 

@@ -185,22 +185,15 @@ export async function fetchLabState() {
                         if (typeof store.ghostState[name].rotation !== 'number') {
                             store.ghostState[name].rotation = 0;
                         }
-                        if (store.selectedComponent === name && document.getElementById('ctx-x')) {
-                            const ctxX = document.getElementById('ctx-x');
-                            const ctxY = document.getElementById('ctx-y');
-                            const ctxRot = document.getElementById('ctx-rot');
-                            if (ctxX) ctxX.value = store.ghostState[name].x.toFixed(1);
-                            if (ctxY) ctxY.value = store.ghostState[name].y.toFixed(1);
-                            if (ctxRot) ctxRot.value = store.ghostState[name].rotation.toFixed(1);
-                        }
                     }
                     // HOLDING: only the held tag's ghost follows live intent (incl. z) —
                     // every other component stays on the user's last committed intent.
                     //
-                    // IMPORTANT: we deliberately do NOT overwrite the ctx-x/y/rot/z input fields
-                    // here. Those represent the operator's *intent* for the next HOVER /
-                    // PLACE_FROM_HOVER and must stay editable. Their initial values are set once
-                    // by `renderInAirControlsForContext` when the HOLDING panel is rebuilt.
+                    // IMPORTANT: we deliberately do NOT overwrite the panel x/y/rot/z input
+                    // fields here. Those represent the operator's *intent* for the next
+                    // HOVER / PLACE_FROM_HOVER and must stay editable. Their initial values
+                    // are set once by `renderInAirControlsForContext` when the HOLDING panel
+                    // is rebuilt.
                     else if (
                         isHoldingState(store.labState) &&
                         isHeldTag(name, store.labState) &&
@@ -217,29 +210,11 @@ export async function fetchLabState() {
                         if (typeof store.ghostState[name].rotation !== 'number') {
                             store.ghostState[name].rotation = 0;
                         }
-                        if (store.selectedComponent === name) {
-                            if (document.getElementById('ctx-x')) {
-                                const ctxX = document.getElementById('ctx-x');
-                                const ctxY = document.getElementById('ctx-y');
-                                const ctxRot = document.getElementById('ctx-rot');
-                                if (ctxX) ctxX.value = store.ghostState[name].x.toFixed(1);
-                                if (ctxY) ctxY.value = store.ghostState[name].y.toFixed(1);
-                                if (ctxRot) ctxRot.value = store.ghostState[name].rotation.toFixed(1);
-                            }
-                        }
                     }
                     else if (justLeftTeleop && hasPose && !store.isDragging) {
                         store.ghostState[name] = { ...dp };
                         if (typeof store.ghostState[name].rotation !== 'number') {
                             store.ghostState[name].rotation = 0;
-                        }
-                        if (store.selectedComponent === name && document.getElementById('ctx-x')) {
-                            const ctxX = document.getElementById('ctx-x');
-                            const ctxY = document.getElementById('ctx-y');
-                            const ctxRot = document.getElementById('ctx-rot');
-                            if (ctxX) ctxX.value = store.ghostState[name].x.toFixed(1);
-                            if (ctxY) ctxY.value = store.ghostState[name].y.toFixed(1);
-                            if (ctxRot) ctxRot.value = store.ghostState[name].rotation.toFixed(1);
                         }
                     }
                 }
@@ -248,43 +223,47 @@ export async function fetchLabState() {
             if (shouldSync) store.forceGhostSync = false;
         }
 
-        // Rebuild context panel when EITHER the selected component's placement label OR the
-        // top-level (system_status, holding) snapshot changes. The latter is what flips
-        // IDLE ↔ HOLDING so the Pick / Hover / Place buttons appear/disappear without the user
-        // having to re-click the sidebar card. Transient BUSY states are ignored so the panel
-        // doesn't briefly revert mid-command — the pending overlay on canvas signals "in flight".
-        const selCtx = store.selectedComponent;
+        // Rebuild EVERY open panel when its component's placement label OR the
+        // top-level (system_status, holding) snapshot changes. The latter is
+        // what flips IDLE ↔ HOLDING so the Pick / Hover / Place buttons
+        // appear/disappear without the operator re-clicking the sidebar card.
+        // Transient BUSY states are ignored so panels don't briefly revert
+        // mid-command — the pending overlay on canvas signals "in flight".
+        //
+        // Multi-panel: each open tag has its own snapshot bag in
+        // ``store.contextPanelSnapshots`` so panel A's rebuild doesn't
+        // invalidate panel B's change-detection.
         const hldCtx = getHolding(store.labState);
         const rawStatus = store.labState.system_status || 'IDLE';
         const statusKey = `${rawStatus}|${hldCtx.tag_id || ''}|${hldCtx.requires_operator_confirm ? '1' : '0'}`;
-        if (selCtx && store.labState.components && store.labState.components[selCtx]) {
-            const compCtx = store.labState.components[selCtx];
+        store.openPanels.forEach((tag) => {
+            if (!store.labState.components || !store.labState.components[tag]) return;
+            const compCtx = store.labState.components[tag];
             const stCtx = _deps.placementUiLabel(compCtx);
+            const snap = store.contextPanelSnapshots.get(tag) || {};
             const placementChanged =
-                store.contextPanelStateSnapshot != null &&
-                store.contextPanelStateSnapshot !== stCtx;
+                snap.state != null && snap.state !== stCtx;
             const statusChanged =
-                store.contextPanelStatusSnapshot != null &&
-                store.contextPanelStatusSnapshot !== statusKey &&
+                snap.status != null &&
+                snap.status !== statusKey &&
                 rawStatus !== 'BUSY';
             const dataKey = componentDataSnapshot(compCtx);
             const dataChanged =
-                store.contextPanelDataSnapshot != null &&
-                dataKey != null &&
-                store.contextPanelDataSnapshot !== dataKey;
+                snap.data != null && dataKey != null && snap.data !== dataKey;
             if (placementChanged || statusChanged || dataChanged) {
                 if (placementChanged && isOnTableComponent(compCtx) && !store.isDragging) {
                     const dp = drawPose(compCtx);
-                    store.ghostState[selCtx] = { ...dp };
-                    if (typeof store.ghostState[selCtx].rotation !== 'number') {
-                        store.ghostState[selCtx].rotation = 0;
+                    store.ghostState[tag] = { ...dp };
+                    if (typeof store.ghostState[tag].rotation !== 'number') {
+                        store.ghostState[tag].rotation = 0;
                     }
                 }
-                _deps.updateContextPanel(selCtx);
-                _deps.updateMotorAngleLabels(selCtx);
-                store.contextPanelDataSnapshot = dataKey;
+                _deps.updateContextPanel(tag);
+                _deps.updateMotorAngleLabels(tag);
+                // updateContextPanel rebuilds the panel DOM and writes a full
+                // fresh snapshot for ``tag``; no extra bookkeeping needed.
             }
-        }
+        });
 
         // Clear in-flight overlays once the system has settled into any stable (non-BUSY,
         // non-OPTIMIZING) state. PICK_COMPONENT and HOVER land in HOLDING (not IDLE), so gating
@@ -298,11 +277,11 @@ export async function fetchLabState() {
             store.pendingActions.clear();
         }
         syncMotorActionStatuses();
-        // Only snapshot stable states so a transient BUSY in-between doesn't "use up" the real
-        // transition (IDLE → BUSY → HOLDING should still rebuild once on the HOLDING edge).
-        if (rawStatus !== 'BUSY') {
-            store.contextPanelStatusSnapshot = statusKey;
-        }
+        // Per-tag snapshots are now written by ``updateContextPanel(tag)`` at
+        // mount/rebuild time (see ``ui/context-panel.js``). The legacy global
+        // ``contextPanelStatusSnapshot`` advance is therefore unnecessary —
+        // each panel's snapshot is initialized when its panel mounts and
+        // refreshed when its panel rebuilds.
 
         store.previousSystemStatus = store.labState.system_status;
         store.previousTeleopReadyTags = teleopReadyNow;

@@ -7,9 +7,12 @@ import { store } from './state/store.js';
 import { isBreadboardIntent, isHeldTag } from './component-model.js';
 import { getTelemetry } from './component-state.js';
 import {
+    clearTeleopTargetAwaitingLive,
     getTeleopCurrentPose,
     getTeleopTargetPose,
+    markTeleopTargetAwaitingLive,
     seedTeleopTargetPose,
+    canSeedTargetFromCurrent,
 } from './teleop-pose.js';
 
 export {
@@ -25,6 +28,10 @@ export {
     notifyTeleopPoseLayers,
     resolveTeleopPlanSeedPose,
     maybeRepairTeleopTargetSeed,
+    maybeSyncTeleopTargetFromFirstLivePose,
+    markTeleopTargetAwaitingLive,
+    clearTeleopTargetAwaitingLive,
+    canSeedTargetFromCurrent,
     normalizeTeleopPose,
     DEFAULT_HOVER_Z_MM,
 } from './teleop-pose.js';
@@ -66,7 +73,11 @@ export function buildTeleopGotoPayload(tagId, comp, labState, target) {
 
 /** Seed target from live current when starting to plan. */
 export function syncTeleopTargetFromCurrent(tagId) {
+    markTeleopTargetAwaitingLive(tagId);
     const current = getTeleopCurrentPose(tagId);
-    if (current) return seedTeleopTargetPose(tagId, current);
+    if (current && canSeedTargetFromCurrent(current)) {
+        clearTeleopTargetAwaitingLive(tagId);
+        return seedTeleopTargetPose(tagId, current);
+    }
     return getTeleopTargetPose(tagId);
 }

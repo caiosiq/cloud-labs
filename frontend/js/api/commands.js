@@ -67,7 +67,9 @@ export async function sendCommand(command) {
                             store.ghostState[command.target_id].y = original.y;
                             store.ghostState[command.target_id].rotation = original.rotation;
 
-                            if (store.selectedComponent === command.target_id) {
+                            // Multi-panel: refresh whichever open panel matches
+                            // this target — not just the focused one.
+                            if (store.openPanels.includes(command.target_id)) {
                                 _updateContextPanel(command.target_id);
                             }
                             _render();
@@ -192,7 +194,7 @@ export async function confirmPlaceFromStorageDrag(targetId, parameters) {
                     store.ghostState[targetId].y = o.y;
                     store.ghostState[targetId].rotation = o.rotation;
                 }
-                if (store.selectedComponent === targetId) {
+                if (store.openPanels.includes(targetId)) {
                     _updateContextPanel(targetId);
                 }
                 _render();

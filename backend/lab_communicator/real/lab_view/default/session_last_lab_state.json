@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "saved_at": "2026-05-25T23:14:58.485332+00:00",
+  "saved_at": "2026-05-26T01:44:51.045431+00:00",
   "lab_mode": "REAL",
   "lab_state": {
     "system_status": "IDLE",
-    "last_updated": "2026-05-25T19:13:29.252201",
+    "last_updated": "2026-05-25T21:44:51.045431",
     "components": {
       "tag_22": {
         "id": "tag_22",
@@ -13,7 +13,7 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 175.16006091177553,
+              "x": 145.46469842362933,
               "y": -202.14285714285717,
               "rotation": 0.0
             },
@@ -28,7 +28,7 @@
           },
           "measurables": {
             "pose": {
-              "x": 175.16006091177553,
+              "x": 145.46469842362933,
               "y": -202.14285714285717,
               "rotation": 0.0
             },
@@ -56,10 +56,10 @@
           },
           "live_feed": {
             "stream": {
-              "connected": true,
-              "live": true,
-              "backend": "table_cam",
-              "resource_id": "cam_gripper_1",
+              "connected": false,
+              "live": false,
+              "backend": null,
+              "resource_id": null,
               "last_error": null
             }
           }
@@ -72,9 +72,9 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 359.9911571428571,
-              "y": -202.14285714285717,
-              "rotation": 0.0
+              "x": 361.05061707230186,
+              "y": -204.62420802676843,
+              "rotation": 180.0
             },
             "nominal_motor_positions": {},
             "storage": {
@@ -87,9 +87,9 @@
           },
           "measurables": {
             "pose": {
-              "x": 359.9911571428571,
-              "y": -202.14285714285717,
-              "rotation": 0.0
+              "x": 361.05061707230186,
+              "y": -204.62420802676843,
+              "rotation": 180.0
             },
             "last_optimization_score": null,
             "last_optimized_pose": null,
@@ -131,9 +131,12 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 450.3125501570305,
-              "y": -58.99246555778957,
-              "rotation": 180.0
+              "x": 466.56333874654024,
+              "y": -79.30424378152938,
+              "rotation": 182.82144436081734,
+              "roll": -180,
+              "pitch": 0,
+              "yaw": 182.82144436081734
             },
             "nominal_motor_positions": {
               "1": 0.0,
@@ -149,9 +152,12 @@
           },
           "measurables": {
             "pose": {
-              "x": 450.3125501570305,
-              "y": -58.99246555778957,
-              "rotation": 180.0,
+              "x": 466.56333874654024,
+              "y": -79.30424378152938,
+              "rotation": 182.82144436081734,
+              "roll": -180,
+              "pitch": 0,
+              "yaw": 182.82144436081734,
               "motor_rotations": {
                 "1": 0.0,
                 "3": 0.0
@@ -197,16 +203,17 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 307.7623201493905,
-              "y": -380.5253512887463,
-              "rotation": 90.93812720614972,
+              "x": 369.0298419356888,
+              "y": -383.7154386074668,
+              "z": 155.0,
+              "rotation": 88.39788656233529,
               "roll": -180,
               "pitch": 0,
-              "yaw": 90.93812720614972
+              "yaw": 88.39788656233529
             },
             "nominal_motor_positions": {
-              "1": 2500.0,
-              "3": 7500.0
+              "1": 0.0,
+              "3": 0.0
             },
             "storage": {
               "in_storage": false,
@@ -217,18 +224,7 @@
             }
           },
           "measurables": {
-            "pose": {
-              "x": 307.7623201493905,
-              "y": -380.5253512887463,
-              "rotation": 90.93812720614972,
-              "roll": -180,
-              "pitch": 0,
-              "yaw": 90.93812720614972,
-              "motor_rotations": {
-                "1": 2500.0,
-                "3": 7500.0
-              }
-            },
+            "pose": null,
             "last_optimization_score": null,
             "last_optimized_pose": null,
             "camera_image": null

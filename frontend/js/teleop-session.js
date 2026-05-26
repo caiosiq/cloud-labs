@@ -4,7 +4,11 @@
  * Prefers WebSocket push (Phase 4); falls back to HTTP poll for debug/legacy.
  */
 import { store } from './state/store.js';
-import { maybeRepairTeleopTargetSeed } from './teleop-pose.js';
+import {
+    clearTeleopTargetAwaitingLive,
+    maybeRepairTeleopTargetSeed,
+    maybeSyncTeleopTargetFromFirstLivePose,
+} from './teleop-pose.js';
 import { startTeleopLivePosePoll, stopTeleopLivePosePoll } from './api/teleop-live-pose.js';
 import {
     shouldUseWebSocketTransport,
@@ -17,6 +21,7 @@ import { getCatalogRow } from './component-model.js';
 const _activeTags = new Set();
 
 function onLivePoseUpdate(tagId) {
+    maybeSyncTeleopTargetFromFirstLivePose(tagId);
     maybeRepairTeleopTargetSeed(tagId);
     if (typeof store._teleopLivePoseRender === 'function') {
         store._teleopLivePoseRender(tagId);
@@ -68,6 +73,7 @@ export function syncTeleopLivePosePolls() {
             stopLiveTransport(tagId);
             _activeTags.delete(tagId);
             delete store.teleopTarget[tagId];
+            clearTeleopTargetAwaitingLive(tagId);
         }
     });
 }
@@ -78,4 +84,5 @@ export function stopTeleopPollForTag(tagId) {
         _activeTags.delete(tagId);
     }
     delete store.teleopTarget[tagId];
+    clearTeleopTargetAwaitingLive(tagId);
 }
