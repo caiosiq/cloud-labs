@@ -873,7 +873,7 @@ async def get_component_telemetry_live_pose(tag_id: str):
     """High-rate live pose for TeleOp or autonomous OPTIMIZE (in-memory; not lab_state JSON)."""
     _refuse_teleop_if_lab_down(tag_id)
     from lab_model.domain.component import is_teleop_ready
-    from lab_model.domain.holding import SYSTEM_STATUS_BUSY
+    from lab_model.domain.holding import SYSTEM_STATUS_BUSY, SYSTEM_STATUS_OPTIMIZING
 
     state = lab.get_lab_state()
     entry = (state.get("components") or {}).get(tag_id)
@@ -881,7 +881,7 @@ async def get_component_telemetry_live_pose(tag_id: str):
     teleop_ok = isinstance(entry, dict) and is_teleop_ready(entry)
     optimize_ok = (
         optimize_tag == tag_id
-        and state.get("system_status") == SYSTEM_STATUS_BUSY
+        and state.get("system_status") in (SYSTEM_STATUS_BUSY, SYSTEM_STATUS_OPTIMIZING)
     )
     if not teleop_ok and not optimize_ok:
         raise HTTPException(
@@ -896,7 +896,16 @@ async def get_component_telemetry_live_pose(tag_id: str):
         raise HTTPException(status_code=503, detail="Live pose unavailable.")
     out_pose = {
         k: pose[k]
-        for k in ("x", "y", "z", "rotation", "executing", "iteration", "loss")
+        for k in (
+            "x",
+            "y",
+            "z",
+            "rotation",
+            "executing",
+            "iteration",
+            "loss",
+            "optimize_event",
+        )
         if k in pose
     }
     mp = pose.get("motor_positions")

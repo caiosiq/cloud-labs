@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "saved_at": "2026-05-27T08:20:28.734812+00:00",
+  "saved_at": "2026-05-27T08:26:29.767783+00:00",
   "lab_mode": "MOCK",
   "lab_state": {
     "system_status": "IDLE",
-    "last_updated": "2026-05-27T02:52:08.415524",
+    "last_updated": "2026-05-27T04:26:10.374954",
     "optimization_reference": {
       "path": "C:\\Users\\CaioV\\OneDrive - Massachusetts Institute of Technology\\UROP - AI Optics\\optics-digital-twin\\backend\\lab_communicator\\mock\\lab_view\\camera_captures\\tag_21_last.png",
       "format": "png",
@@ -99,8 +99,8 @@
           },
           "measurables": {
             "pose": {
-              "x": -262.03510787014227,
-              "y": -332.06058515161374,
+              "x": -262.70654256775373,
+              "y": -332.3899082146337,
               "rotation": 0.0
             },
             "last_optimization_score": null,
@@ -161,12 +161,7 @@
             "pose": null,
             "last_optimization_score": null,
             "last_optimized_pose": null,
-            "camera_image": {
-              "path": "C:\\Users\\CaioV\\OneDrive - Massachusetts Institute of Technology\\UROP - AI Optics\\optics-digital-twin\\backend\\lab_communicator\\mock\\lab_view\\camera_captures\\tag_21_last.png",
-              "source": "mock_table_cam",
-              "cam_id": 2,
-              "format": "png"
-            }
+            "camera_image": null
           }
         },
         "telemetry": {
@@ -204,13 +199,13 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 339.64,
-              "y": 205.35,
+              "x": 338.4592392086304,
+              "y": 204.11723470439898,
               "rotation": 42.5
             },
             "nominal_motor_positions": {
-              "1": 7250.0,
-              "3": 1250.0
+              "1": 7750.0,
+              "3": 2250.0
             },
             "storage": {
               "in_storage": false,
@@ -221,16 +216,8 @@
             }
           },
           "measurables": {
-            "pose": {
-              "x": 339.5416967004799,
-              "y": 205.71747986493764,
-              "rotation": 42.5,
-              "motor_rotations": {
-                "1": 4500.0,
-                "3": -750.0
-              }
-            },
-            "last_optimization_score": null,
+            "pose": null,
+            "last_optimization_score": 0.9682,
             "last_optimized_pose": null,
             "camera_image": null,
             "motor_rotations": {
@@ -457,7 +444,7 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": -125.71428571428572,
+              "x": -124.89754461012463,
               "y": 97.14285714285715,
               "rotation": 91.0
             },
@@ -471,12 +458,8 @@
             }
           },
           "measurables": {
-            "pose": {
-              "x": -126.40808938190831,
-              "y": 97.02688951654326,
-              "rotation": 90.99567881180268
-            },
-            "last_optimization_score": null,
+            "pose": null,
+            "last_optimization_score": 0.98,
             "last_optimized_pose": null,
             "camera_image": null
           }
@@ -695,7 +678,7 @@
       "nominal_pose": null,
       "requires_operator_confirm": false
     },
-    "optimization_step": 0,
+    "optimization_step": null,
     "optimization_run_dir": null,
     "optimization_target_id": null
   }

@@ -37,6 +37,7 @@ export function startTeleopLivePosePoll(tagId, opts = {}) {
             const merged = { ...pose };
             if (body.iteration != null) merged.iteration = body.iteration;
             if (body.loss != null) merged.loss = body.loss;
+            if (pose.optimize_event != null) merged.optimize_event = pose.optimize_event;
             store.teleopLivePose[tagId] = merged;
             if (typeof opts.onUpdate === 'function') {
                 opts.onUpdate(merged);

@@ -35,13 +35,25 @@ def _tick_payload(pose: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return body
 
 
-def _message_type(pose: Dict[str, Any]) -> str:
+def _message_type_for_push(
+    pose: Dict[str, Any], last_sent_iteration: Optional[int]
+) -> str:
+    """Classify WS payload — emit ``step`` once per new ``iteration`` value.
+
+    Motion callbacks overwrite ``optimize_event`` to ``motion`` immediately
+    after a step snapshot, often before the push loop runs. Tracking the last
+    iteration we already pushed avoids missing chart/readout updates.
+    """
+    iter_val = pose.get("iteration")
+    if iter_val is not None:
+        try:
+            iter_i = int(iter_val)
+        except (TypeError, ValueError):
+            iter_i = None
+        if iter_i is not None and iter_i != last_sent_iteration:
+            return "step"
     evt = pose.get("optimize_event")
     if evt == "step":
-        return "step"
-    if evt == "motion":
-        return "motion"
-    if pose.get("iteration") is not None or pose.get("loss") is not None:
         return "step"
     return "motion"
 
@@ -53,13 +65,13 @@ async def _optimize_push_loop(
     *,
     stop: asyncio.Event,
 ) -> None:
-    last_type: Optional[str] = None
+    last_sent_iteration: Optional[int] = None
     try:
         while not stop.is_set():
             pose = lab.get_teleop_live_pose(tag_id)
             tick = _tick_payload(pose)
             if tick is not None:
-                msg_type = _message_type(pose)
+                msg_type = _message_type_for_push(pose, last_sent_iteration)
                 payload: Dict[str, Any] = {
                     "type": msg_type,
                     "ts_ms": pose.get("ts_ms") if pose else None,
@@ -68,9 +80,12 @@ async def _optimize_push_loop(
                 if msg_type == "step":
                     if "iteration" in tick:
                         payload["iteration"] = tick["iteration"]
+                        try:
+                            last_sent_iteration = int(tick["iteration"])
+                        except (TypeError, ValueError):
+                            pass
                     if "loss" in tick:
                         payload["loss"] = tick["loss"]
-                last_type = msg_type
                 await websocket.send_json(payload)
             await asyncio.sleep(_PUSH_INTERVAL_S)
     except asyncio.CancelledError:

@@ -14,7 +14,19 @@ import {
 import { notifyOptimizeReadouts } from './optimize-live-readout.js';
 
 const _activeTarget = { tagId: null, ws: null, mode: null };
+/** Last chart ``iteration`` pushed per tag (step dedupe across motion polls). */
+const _lastStepIteration = {};
 let _watchTimer = null;
+
+function resetStepTracking(tagId) {
+    if (tagId) {
+        delete _lastStepIteration[tagId];
+    } else {
+        Object.keys(_lastStepIteration).forEach((k) => {
+            delete _lastStepIteration[k];
+        });
+    }
+}
 
 const LIVE_POSE_DESCRIPTOR = {
     url: '/api/components/{tag_id}/telemetry/live-pose',
@@ -48,8 +60,13 @@ function tickFromMsg(msg, pose) {
     return tick;
 }
 
-function messageKind(msg, pose) {
-    if (msg?.type === 'step' || msg?.type === 'motion') return msg.type;
+function messageKind(msg, pose, tagId) {
+    const iter = msg?.iteration ?? pose?.iteration;
+    if (iter != null && _lastStepIteration[tagId] !== iter) {
+        return 'step';
+    }
+    if (msg?.type === 'step') return 'step';
+    if (msg?.type === 'motion') return 'motion';
     if (msg?.iteration != null || msg?.loss != null) return 'step';
     if (pose?.iteration != null || pose?.loss != null) return 'step';
     return 'motion';
@@ -60,9 +77,12 @@ function applyTick(tagId, msg) {
     if (!pose || typeof pose !== 'object') return;
     store.teleopLivePose[tagId] = { ...pose };
 
-    const kind = messageKind(msg, pose);
+    const kind = messageKind(msg, pose, tagId);
     if (kind === 'step') {
         const tick = tickFromMsg(msg, pose);
+        if (tick.iteration != null) {
+            _lastStepIteration[tagId] = tick.iteration;
+        }
         store.optimizeTick = tick;
         onOptimizationTick(tick);
         notifyOptimizeReadouts(tagId);
@@ -81,6 +101,7 @@ function stopOptimizeTransport() {
     if (_activeTarget.tagId) {
         stopTeleopLivePosePoll(_activeTarget.tagId);
         delete store.teleopLivePose[_activeTarget.tagId];
+        resetStepTracking(_activeTarget.tagId);
     }
     _activeTarget.tagId = null;
     _activeTarget.mode = null;
@@ -130,6 +151,7 @@ function startOptimizeWs(tagId, { resetChart = false } = {}) {
 
     if (resetChart) {
         store.optimizeLossSeries = [];
+        resetStepTracking(tagId);
         drawOptimizationLossChart();
     }
 
@@ -206,8 +228,12 @@ export function beginOptimizeTelemetryWatch() {
     void optimizeTelemetryWatchTick();
 }
 
+export function resetOptimizeStepTracking(tagId) {
+    resetStepTracking(tagId);
+}
+
 export function armOptimizeSession(tagId) {
-    void tagId;
+    resetStepTracking(tagId);
     beginOptimizeTelemetryWatch();
 }
 
