@@ -224,43 +224,101 @@ async def primitive_optimize_component(
     communicator: "MockLabCommunicator",
     *,
     target_id: str,
-    strategy_name: str,  # noqa: ARG001 -- mock ignores the strategy name
+    strategy_name: str,
     params: Dict[str, Any],  # noqa: ARG001
-    progress_callback: Callable[..., None],
+    live_pose_callback: Callable[..., None],
 ) -> Optional[Dict[str, Any]]:
-    """Mock hardware step for ``optimize_component``.
+    """Mock edge loop — motion ticks during travel, step ticks at measurements."""
+    import math
 
-    Simulates a multi-step optimization run, ticking
-    ``progress_callback(step=k)`` between sleeps so the UI's progress
-    bar animates. Returns ``{"score": 0.99, "final_pose": ...}`` where
-    ``final_pose`` keeps the existing XY but adds a small Gaussian
-    rotation drift -- mock's stand-in for "the optimizer nudged the
-    rotation". The orchestrator hands this dict to
-    :func:`commit_optimization_complete`.
+    tun = communicator.return_tunables_for_tag(target_id)
+    np = tun.get("nominal_pose") or {}
+    base_x = float(np.get("x", 0.0))
+    base_y = float(np.get("y", 0.0))
+    base_rot = float(np.get("rotation", 0.0))
+    strat = (strategy_name or "COBYLA").upper()
+    axis = str(params.get("axis") or "x").lower()
+    tol = float(params.get("tolerance_ratio") or 0.05)
 
-    Snapshots the part's current pose under
-    :meth:`return_measurables_for_tag` (lock-aware accessor), keeping
-    this primitive state-clean (no direct ``self.current_state``
-    reads).
-    """
-    cur = (communicator.return_measurables_for_tag(target_id) or {}).get("pose") or {}
-    base_x = float(cur.get("x", 0.0))
-    base_y = float(cur.get("y", 0.0))
-    base_rot = float(cur.get("rotation", 0.0))
+    if strat == "NEWTON":
+        delta_x = random.uniform(-2.0, 2.0)
+        delta_y = random.uniform(-2.0, 2.0)
+        target_x = base_x + (delta_x if axis == "x" else 0.0)
+        target_y = base_y + (delta_y if axis == "y" else 0.0)
+        target_rot = base_rot
+        algo_steps = 8
+        motion_ticks = 6
+        final_loss = max(0.01, tol * 0.4)
+    else:
+        target_x = base_x
+        target_y = base_y
+        target_rot = base_rot
+        meta = communicator._catalog_meta_for_tag(target_id) or {}
+        motor_ids = meta.get("motor_ids") or []
+        if not isinstance(motor_ids, list) or not motor_ids:
+            motor_ids = [1]
+        nmp = tun.get("nominal_motor_positions") or {}
+        motor_pos: Dict[str, float] = {}
+        for mid in motor_ids:
+            key = str(mid)
+            raw = nmp.get(key, nmp.get(mid, 0.0))
+            try:
+                motor_pos[key] = float(raw)
+            except (TypeError, ValueError):
+                motor_pos[key] = 0.0
+        algo_steps = 10
+        final_loss = 0.02 + random.uniform(0, 0.02)
+        jump_sizes = (-500.0, -250.0, 250.0, 500.0)
 
-    steps = 6  # arbitrary -- enough for the UI to animate
-    per_step = 0.5
-    for k in range(1, steps + 1):
-        await asyncio.sleep(per_step)
-        progress_callback(step=k)
+    for i in range(1, algo_steps + 1):
+        t = i / algo_steps
+        if strat == "NEWTON":
+            prev_x = base_x + (target_x - base_x) * ((i - 1) / algo_steps)
+            prev_y = base_y + (target_y - base_y) * ((i - 1) / algo_steps)
+            step_x = base_x + (target_x - base_x) * t
+            step_y = base_y + (target_y - base_y) * t
+            for m in range(1, motion_ticks + 1):
+                frac = m / motion_ticks
+                cur_x = prev_x + (step_x - prev_x) * frac
+                cur_y = prev_y + (step_y - prev_y) * frac
+                live_pose_callback(pose={"x": cur_x, "y": cur_y, "rotation": base_rot})
+                await asyncio.sleep(0.03)
+            loss = final_loss + (1.0 - final_loss) * math.exp(-4.5 * t)
+            live_pose_callback(
+                pose={"x": step_x, "y": step_y, "rotation": base_rot},
+                iteration=i,
+                loss=round(loss, 5),
+            )
+        else:
+            mid = random.choice(motor_ids)
+            motor_pos[str(mid)] = motor_pos.get(str(mid), 0.0) + random.choice(jump_sizes)
+            loss = final_loss + (1.0 - final_loss) * math.exp(-3.5 * t)
+            live_pose_callback(
+                pose={"x": base_x, "y": base_y, "rotation": base_rot},
+                motor_positions=dict(motor_pos),
+                iteration=i,
+                loss=round(loss, 5),
+            )
+            await asyncio.sleep(0.08)
 
+    score = max(0.0, min(1.0, 1.0 - final_loss))
+    if strat == "NEWTON":
+        return {
+            "score": round(score, 4),
+            "final_pose": {
+                "x": target_x,
+                "y": target_y,
+                "rotation": target_rot,
+            },
+        }
     return {
-        "score": 0.99,
+        "score": round(score, 4),
         "final_pose": {
             "x": base_x,
             "y": base_y,
-            "rotation": base_rot + random.uniform(-1.0, 1.0),
+            "rotation": base_rot,
         },
+        "final_motor_positions": dict(motor_pos),
     }
 
 

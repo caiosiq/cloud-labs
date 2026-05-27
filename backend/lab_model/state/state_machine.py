@@ -33,6 +33,7 @@ from lab_model.domain.component import (
     PRESENCE_BREADBOARD,
     is_stored,
     is_teleop_active,
+    presence_of,
 )
 from lab_model.domain.holding import (
     SYSTEM_STATUS_HOLDING,
@@ -63,6 +64,14 @@ def ok() -> RefusalResult:
 def refuse(reason: str) -> RefusalResult:
     """Return a refusal with a human-readable reason."""
     return RefusalResult(refused=True, reason=reason)
+
+
+class PrimitiveRefusalError(Exception):
+    """Raised when a state primitive refuses; surfaced as HTTP 422."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason)
 
 
 def refuse_if_stored(
@@ -250,7 +259,12 @@ def refuse_if_not_on_breadboard(
     """
     components = current_state.get("components") or {}
     entry = components.get(target_id) if isinstance(components, dict) else None
-    presence = ((entry or {}).get("tunables") or {}).get("presence")
+    if not isinstance(entry, dict):
+        return refuse(
+            f"{target_id} not in lab state; cannot {primitive_name} "
+            f"(need on breadboard)."
+        )
+    presence = presence_of(entry)
     if presence != PRESENCE_BREADBOARD:
         return refuse(
             f"{target_id} presence={presence!r}; cannot {primitive_name} "

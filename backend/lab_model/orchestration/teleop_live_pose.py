@@ -26,6 +26,8 @@ class TeleopLivePoseStore:
         self._poses: Dict[str, Dict[str, Any]] = {}
         self._targets: Dict[str, Dict[str, float]] = {}
         self._speeds: Dict[str, Dict[str, float]] = {}
+        self._optimize_meta: Dict[str, Dict[str, Any]] = {}
+        self._optimize_event: Dict[str, str] = {}
         self._on_motion_idle = on_motion_idle
         self._motion_thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
@@ -39,6 +41,11 @@ class TeleopLivePoseStore:
                 "z": _float(initial.get("z", 40.0), 40.0),
                 "ts_ms": time.time() * 1000.0,
             }
+            mp = initial.get("motor_positions")
+            if isinstance(mp, dict) and mp:
+                self._poses[tag_id]["motor_positions"] = {
+                    str(k): _float(v) for k, v in mp.items()
+                }
             self._targets.pop(tag_id, None)
 
     def stop_session(self, tag_id: str) -> None:
@@ -46,6 +53,50 @@ class TeleopLivePoseStore:
             self._poses.pop(tag_id, None)
             self._targets.pop(tag_id, None)
             self._speeds.pop(tag_id, None)
+            self._optimize_meta.pop(tag_id, None)
+            self._optimize_event.pop(tag_id, None)
+
+    def set_pose_immediate(
+        self,
+        tag_id: str,
+        pose: Dict[str, Any],
+        *,
+        motor_positions: Optional[Dict[str, Any]] = None,
+        motor_deltas: Optional[Dict[str, Any]] = None,
+        iteration: Optional[int] = None,
+        loss: Optional[float] = None,
+    ) -> None:
+        """Publish a pose/motor snapshot (autonomous OPTIMIZE); no motion loop."""
+        with self._lock:
+            cur = self._poses.setdefault(
+                tag_id,
+                {"x": 0.0, "y": 0.0, "rotation": 0.0, "z": 40.0, "ts_ms": time.time() * 1000.0},
+            )
+            for key in ("x", "y", "rotation", "z"):
+                if key in pose and pose[key] is not None:
+                    cur[key] = _float(pose[key], cur.get(key, 0.0))
+            if isinstance(motor_positions, dict) and motor_positions:
+                cur["motor_positions"] = {
+                    str(k): _float(v) for k, v in motor_positions.items()
+                }
+            elif isinstance(motor_deltas, dict) and motor_deltas:
+                mp = dict(cur.get("motor_positions") or {})
+                for mid, delta in motor_deltas.items():
+                    key = str(mid)
+                    mp[key] = _float(mp.get(key, 0.0)) + _float(delta)
+                cur["motor_positions"] = mp
+            cur["ts_ms"] = time.time() * 1000.0
+            self._targets.pop(tag_id, None)
+            self._speeds.pop(tag_id, None)
+            if iteration is not None or loss is not None:
+                meta = self._optimize_meta.setdefault(tag_id, {})
+                if iteration is not None:
+                    meta["iteration"] = int(iteration)
+                if loss is not None:
+                    meta["loss"] = float(loss)
+                self._optimize_event[tag_id] = "step"
+            else:
+                self._optimize_event[tag_id] = "motion"
 
     def get_pose(self, tag_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -54,6 +105,17 @@ class TeleopLivePoseStore:
                 return None
             out = dict(pose)
             out["executing"] = tag_id in self._targets
+            mp = out.get("motor_positions")
+            if isinstance(mp, dict):
+                out["motor_positions"] = dict(mp)
+            meta = self._optimize_meta.get(tag_id) or {}
+            if "iteration" in meta:
+                out["iteration"] = meta["iteration"]
+            if "loss" in meta:
+                out["loss"] = meta["loss"]
+            evt = self._optimize_event.get(tag_id)
+            if evt:
+                out["optimize_event"] = evt
             return out
 
     def is_executing(self, tag_id: str) -> bool:

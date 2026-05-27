@@ -17,7 +17,6 @@ import {
 } from './canvas/guides.js';
 import {
     fetchCatalogMap,
-    fetchRecipes,
     fetchStorageGridSpec,
     fetchStrategies,
     initApiFetchers,
@@ -25,7 +24,6 @@ import {
 import { showErrorModal } from './ui/modals.js';
 import { initSessionReconciliation } from './ui/session-reconciliation.js';
 import { initLayoutConflicts } from './ui/layout-conflicts.js';
-import { initRecipes, renderRecipes } from './ui/recipes.js';
 import {
     fetchLaserLines,
     initLaserLinesPanel,
@@ -40,6 +38,7 @@ import {
 } from './api/commands.js';
 import { endTeleopBeacon } from './api/teleop.js';
 import { fetchLabState, initLabState, startLabStatePolling } from './state/lab-state.js';
+import { initOptimizationSidebar } from './ui/optimization-sidebar.js';
 import { initBenchChromeBar } from './ui/bench-chrome-bar.js';
 import { initUpdateUI, updateUI } from './ui/updateUI.js';
 import {
@@ -53,6 +52,7 @@ import {
 import { checkCollision, initCanvasInteraction } from './canvas/interaction.js';
 import { initRender, render } from './canvas/render.js';
 import { loadPlatformRegistries } from './lab-capabilities.js';
+import { initCommandConsole } from './command-console.js';
 
 
 const _frontendBuild =
@@ -83,25 +83,11 @@ initGuides({
 const refreshBtn = document.getElementById('refresh-btn');
 const saveStateBtn = document.getElementById('save-state-btn');
 const loadStateBtn = document.getElementById('load-state-btn');
-const recipeList = document.getElementById('recipe-list');
-
-// Each per-tag panel renders its own close button now (see ui/component-popup.js).
-// The historical global #ctx-panel-close element no longer exists in index.html.
-
-// Recipe UI Elements (Right Sidebar)
-const recordBtn = document.getElementById('record-btn');
-const recipeEditorName = document.getElementById('recipe-editor-name');
-const recipeStepsContainer = document.getElementById('recipe-steps-container');
-const recipeEditorSave = document.getElementById('recipe-editor-save');
-const recipeEditorCancel = document.getElementById('recipe-editor-cancel');
-const recIndicator = document.getElementById('rec-indicator');
-
 
 // --- Module wiring ---
 
 initApiFetchers({
     onCatalogLoaded: () => updateUI(),
-    onRecipesLoaded: () => renderRecipes(),
 });
 
 // Load guides before first render so junction scan includes pencil lines.
@@ -112,15 +98,6 @@ fetchLaserLines();
 
 initSessionReconciliation({ fetchLabState: () => fetchLabState() });
 initLayoutConflicts({ executeSendCommand: (cmd) => executeSendCommand(cmd) });
-initRecipes({
-    recipeList,
-    recipeStepsContainer,
-    recipeEditorName,
-    recipeEditorSave,
-    recipeEditorCancel,
-    recIndicator,
-    recordBtn,
-});
 initLaserLinesPanelDeps({ render: () => render() });
 initPoseRefresh({
     fetchLabState: () => fetchLabState(),
@@ -212,8 +189,8 @@ function init() {
         .catch((e) => console.warn('[cloud-labs] platform registries preload failed:', e));
     fetchStorageGridSpec();
     fetchStrategies();
-    fetchRecipes();
     fetchLabState();
+    initOptimizationSidebar();
     startLabStatePolling();
     refreshBtn.addEventListener('click', async () => {
         try {
@@ -314,5 +291,7 @@ window.__commandConsoleDeps = {
     getCatalogEntry: (tagId) => store.catalogMap[tagId] || null,
     getLabState: () => store.labState
 };
+
+initCommandConsole(window.__commandConsoleDeps);
 
 init();

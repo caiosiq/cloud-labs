@@ -79,6 +79,7 @@ from lab_model.orchestration import (
     run_record_measurables,
     run_repack_storage_slot,
     run_scan_rotate_in_place,
+    run_set_cobyla_reference,
     run_start_live_feed,
     run_store_component,
 )
@@ -136,7 +137,7 @@ class LabCommunicator:
     #: Safety bound for ``z_lab`` (mm) accepted by ``hover_component``.
     #: Subclasses with a calibrated robot frame override (real uses
     #: ``MAX_SAFE_HOVER_Z_LAB_MM`` from ``coordinate_frames.py``); mock
-    #: leaves a generous default so tests don't need a calibration.
+    #: overrides with a generous band (see ``MockLabCommunicator``).
     max_safe_hover_z_lab_mm: float = 200.0
 
     # --- State (subclasses populate in __init__) ---
@@ -164,6 +165,7 @@ class LabCommunicator:
             on_motion_idle=self._on_teleop_motion_idle,
         )
         self._teleop = TeleopController(self)
+        self._optimize_active_tag: Optional[str] = None
 
     def _on_teleop_motion_idle(self, tag_id: str) -> None:
         with self._state_lock:
@@ -183,6 +185,46 @@ class LabCommunicator:
 
     def get_teleop_live_pose(self, tag_id: str) -> Optional[Dict[str, Any]]:
         return self._teleop_live_get_pose(tag_id)
+
+    def _begin_optimize_live_session(
+        self,
+        tag_id: str,
+        initial_pose: Dict[str, Any],
+        *,
+        initial_motor_positions: Optional[Dict[str, float]] = None,
+    ) -> None:
+        """Start in-memory live telemetry for autonomous OPTIMIZE."""
+        self._optimize_active_tag = tag_id
+        seed = dict(initial_pose or {})
+        if initial_motor_positions:
+            seed["motor_positions"] = {
+                str(k): float(v) for k, v in initial_motor_positions.items()
+            }
+        self._teleop_live_start(tag_id, seed)
+
+    def _optimize_live_pose_update(
+        self,
+        tag_id: str,
+        pose: Dict[str, Any],
+        *,
+        motor_positions: Optional[Dict[str, Any]] = None,
+        motor_deltas: Optional[Dict[str, Any]] = None,
+        iteration: Optional[int] = None,
+        loss: Optional[float] = None,
+    ) -> None:
+        self._teleop_live_pose.set_pose_immediate(
+            tag_id,
+            pose,
+            motor_positions=motor_positions,
+            motor_deltas=motor_deltas,
+            iteration=iteration,
+            loss=loss,
+        )
+
+    def _end_optimize_live_session(self, tag_id: str) -> None:
+        self._teleop_live_stop_sync(tag_id)
+        if self._optimize_active_tag == tag_id:
+            self._optimize_active_tag = None
 
     def _teleop_live_start(self, tag_id: str, initial_pose: Dict[str, Any]) -> None:
         self._teleop_live_pose.start_session(tag_id, initial_pose)
@@ -301,6 +343,18 @@ class LabCommunicator:
         comp = (st.get("components") or {}).get(tag_id)
         return get_measurables(comp) if isinstance(comp, dict) else {}
 
+    def return_stored_tag_ids(self) -> Dict[str, Any]:
+        """Tag ids currently in storage (``GET_STORAGE`` read primitive)."""
+        st = self.get_lab_state()
+        components = st.get("components") or {}
+        tag_ids: list[str] = []
+        if isinstance(components, dict):
+            for tag_id, entry in components.items():
+                if isinstance(entry, dict) and is_stored(entry):
+                    tag_ids.append(str(tag_id))
+        tag_ids.sort()
+        return {"tag_ids": tag_ids}
+
     def return_telemetry_for_tag(self, tag_id: str) -> Dict[str, Any]:
         """Saved telemetry slice (teleop + live_feed session state)."""
         st = self.get_lab_state()
@@ -317,6 +371,10 @@ class LabCommunicator:
     async def record_measurables_for_tag(self, tag_id: str) -> Dict[str, Any]:
         """Trigger a fresh measurement — see :func:`lab_model.orchestration.run_record_measurables`."""
         return await run_record_measurables(self, tag_id)
+
+    async def set_cobyla_reference(self, tag_id: str) -> Dict[str, Any]:
+        """Pin lab COBYLA reference from ``measurables.camera_image`` on ``tag_id``."""
+        return await run_set_cobyla_reference(self, tag_id)
 
     async def _primitive_record_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]
@@ -964,24 +1022,14 @@ class LabCommunicator:
         target_id: str,
         strategy_name: str,
         params: Dict[str, Any],
-        progress_callback: "Callable[..., None]",
+        live_pose_callback: "Callable[..., None]",
     ) -> Optional[Dict[str, Any]]:
         """Hardware step for :meth:`optimize_component`.
 
-        Drives the actual strategy run (``experiment.optimize_component``
-        on real, simulated sleep loop on mock). Returns either:
-
-        - ``None`` -- run completed without producing summary data; the
-          orchestrator skips the success commit (status still flips
-          back to IDLE in ``finally``).
-        - ``{"score": float, "final_pose": Optional[dict]}`` -- the
-          orchestrator passes this through
-          :func:`commit_optimization_complete`.
-
-        ``progress_callback(step=N)`` is the orchestrator-built
-        closure. Hooks call it whenever they have a step boundary;
-        real lets the file-watcher thread do the counting and so does
-        not call it explicitly. Mock ticks it on every simulated step.
+        Edge loop runs locally (mock sim / lab_automation on real). Calls
+        ``live_pose_callback(pose={...}, motor_positions={...}, motor_deltas={...})``
+        for high-rate canvas telemetry; returns ``{"score": float, "final_pose": dict, ...}``
+        for commit.
         """
         raise NotImplementedError
 

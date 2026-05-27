@@ -5,7 +5,13 @@
  * @see coding_on_the_ui.md
  */
 
+import { LOSS_METRICS_BY_STRATEGY } from './command-grammar.js';
 import { formatHelp, parseCommandLine } from './command-parse.js';
+import {
+    cobylaReferenceReady,
+    defaultOptimizeSensor,
+    getOptimizeFormPrefs,
+} from './optimize-session.js';
 
 /**
  * @param {string} line
@@ -76,6 +82,30 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
         return;
     }
 
+    if (result.type === 'storage') {
+        try {
+            const r = await fetch('/api/lab/storage');
+            const text = await r.text();
+            let body;
+            try {
+                body = JSON.parse(text);
+            } catch {
+                appendLine(text || `HTTP ${r.status}`, r.ok ? 'info' : 'error');
+                return;
+            }
+            if (!r.ok) {
+                const detail = body && body.detail !== undefined ? body.detail : text;
+                appendLine(typeof detail === 'string' ? detail : JSON.stringify(detail), 'error');
+                return;
+            }
+            appendLine(JSON.stringify(body, null, 2), 'info');
+        } catch (e) {
+            const msg = e && e.message ? e.message : String(e);
+            appendLine(`Request failed: ${msg}`, 'error');
+        }
+        return;
+    }
+
     if (result.type === 'record') {
         const tagId = result.tagId;
         appendLine(`Record measurables (${tagId})…`, 'info');
@@ -115,35 +145,58 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
     let command = result.command;
 
     if (command.action === 'OPTIMIZE' && command.parameters) {
+        const tagId = command.target_id;
         const strat = command.parameters.strategy;
-        if (strat === 'COBYLA') {
-            const p = { ...command.parameters };
-            if (!p.motor_ids || !p.motor_ids.length) {
-                const entry = deps.getCatalogEntry(command.target_id);
-                const motorIds = entry && entry.motor_ids;
-                if (!motorIds || !motorIds.length) {
-                    appendLine(
-                        'COBYLA needs motor_ids (in JSON or the component catalog for the current mode).',
-                        'error'
-                    );
-                    return;
-                }
-                p.motor_ids = motorIds;
-            }
-            if (p.camera_number === undefined) {
-                p.camera_number = 1;
-            }
-            if (p.exposure === undefined && typeof deps.getTableCamExposureSeconds === 'function') {
-                p.exposure = deps.getTableCamExposureSeconds();
-            }
-            command = { ...command, parameters: p };
-        } else if (strat === 'NEWTON') {
-            const p = { ...command.parameters };
-            if (p.exposure === undefined && typeof deps.getTableCamExposureSeconds === 'function') {
-                p.exposure = deps.getTableCamExposureSeconds();
-            }
-            command = { ...command, parameters: p };
+        const p = { ...command.parameters };
+        const saved = getOptimizeFormPrefs(tagId) || {};
+        const metrics = LOSS_METRICS_BY_STRATEGY[strat] || ['centroid_match'];
+
+        if (!p.sensor_component) {
+            p.sensor_component = saved.sensor || defaultOptimizeSensor(tagId);
         }
+        if (!p.sensor_component) {
+            appendLine(
+                'OPTIMIZE needs a sensor tag (e.g. optimize tag_1 COBYLA tag_22).',
+                'error'
+            );
+            return;
+        }
+
+        if (!p.loss_metric) {
+            p.loss_metric =
+                saved.lossMetric && metrics.includes(saved.lossMetric)
+                    ? saved.lossMetric
+                    : metrics[0];
+        } else if (!metrics.includes(p.loss_metric)) {
+            appendLine(
+                `Loss metric "${p.loss_metric}" is not allowed for ${strat} `
+                + `(allowed: ${metrics.join(', ') || 'none'}).`,
+                'error',
+            );
+            return;
+        }
+
+        if (typeof saved.videoExposure === 'number' && Number.isFinite(saved.videoExposure)) {
+            p.video_exposure = saved.videoExposure;
+        }
+        if (strat === 'NEWTON') {
+            if (saved.axis === 'x' || saved.axis === 'y') {
+                p.axis = saved.axis;
+            }
+            if (typeof saved.toleranceRatio === 'number' && Number.isFinite(saved.toleranceRatio)) {
+                p.tolerance_ratio = saved.toleranceRatio;
+            }
+        }
+
+        if (strat === 'COBYLA' && !cobylaReferenceReady()) {
+            appendLine(
+                'COBYLA blocked: pin a lab optimization reference first (record camera capture).',
+                'error'
+            );
+            return;
+        }
+
+        command = { ...command, parameters: p };
     }
 
     if (command.action === 'MOVE_COMPONENT') {

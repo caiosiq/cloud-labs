@@ -5,7 +5,7 @@
  * statecontrol. Editing is via canvas ghost drag (surface #1) or context
  * X/Y/Rot inputs (surface #2) — see `component-model.js`.
  */
-import { widgetCard, widgetTitle, row, fmtNum } from './common.js';
+import { widgetCard, widgetTitle, row, fmtPoseMm } from './common.js';
 
 export default function TablePose({ fieldName, descriptor, value }) {
     const card = widgetCard();
@@ -21,8 +21,8 @@ export default function TablePose({ fieldName, descriptor, value }) {
         card.appendChild(el);
         return card;
     }
-    card.appendChild(row('x (mm)', fmtNum(pose.x, 1)));
-    card.appendChild(row('y (mm)', fmtNum(pose.y, 1)));
-    card.appendChild(row('rotation (\u00b0)', fmtNum(pose.rotation || 0, 1)));
+    card.appendChild(row('x (mm)', fmtPoseMm(pose.x)));
+    card.appendChild(row('y (mm)', fmtPoseMm(pose.y)));
+    card.appendChild(row('rotation (\u00b0)', fmtPoseMm(pose.rotation || 0)));
     return card;
 }

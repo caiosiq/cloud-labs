@@ -50,6 +50,9 @@ class MockLabCommunicator(LabCommunicator):
 
     log_prefix = "[MOCK LAB]"
 
+    #: Mock bench has no robot calibration gate — allow typical post-pick hovers (~245 mm).
+    max_safe_hover_z_lab_mm: float = 500.0
+
     def __init__(self):
         # Phase 2A made base the owner of ``current_state``,
         # ``catalog_map``, and the state lock. Mock additionally
@@ -238,6 +241,7 @@ class MockLabCommunicator(LabCommunicator):
         self, preserve_tag_ids: Optional[List[str]] = None
     ) -> None:
         """Simulate camera re-localisation; ``preserve_tag_ids`` keep prior rows verbatim."""
+        from lab_model.domain.component import get_measurables, get_tunables
         from lab_model.state.pose_refresh_merge import merge_scan_into_components
 
         state = self._read_state()
@@ -254,14 +258,17 @@ class MockLabCommunicator(LabCommunicator):
         for tag_id, comp in baseline.items():
             if not isinstance(comp, dict):
                 continue
-            tun = comp.get("tunables") or {}
+            tun = get_tunables(comp)
             pres = tun.get("presence")
             if pres not in (PRESENCE_BREADBOARD, PRESENCE_STORAGE):
                 continue
             refreshed = json.loads(json.dumps(comp))
-            np = refreshed.get("tunables", {}).get("nominal_pose") or {}
-            meas = refreshed.setdefault("measurables", default_measurables())
-            pose = meas.setdefault("pose", {})
+            np = get_tunables(refreshed).get("nominal_pose") or {}
+            meas = get_measurables(refreshed)
+            pose = meas.get("pose")
+            if not isinstance(pose, dict):
+                pose = {}
+                meas["pose"] = pose
             nx = float(np.get("x", pose.get("x", 0.0)))
             ny = float(np.get("y", pose.get("y", 0.0)))
             nr = float(np.get("rotation", pose.get("rotation", 0.0)))
@@ -329,7 +336,7 @@ class MockLabCommunicator(LabCommunicator):
         target_id: str,
         strategy_name: str,
         params: Dict[str, Any],
-        progress_callback: Callable[..., None],
+        live_pose_callback: Callable[..., None],
     ) -> Optional[Dict[str, Any]]:
         from lab_communicator.mock.primitives import primitive_optimize_component
         return await primitive_optimize_component(
@@ -337,7 +344,7 @@ class MockLabCommunicator(LabCommunicator):
             target_id=target_id,
             strategy_name=strategy_name,
             params=params,
-            progress_callback=progress_callback,
+            live_pose_callback=live_pose_callback,
         )
 
     async def _primitive_add_component_to_state(

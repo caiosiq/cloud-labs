@@ -2,14 +2,13 @@
  * `ImageViewer` — measurable widget (§14.2).
  *
  * Loads the recorded camera image via
- * ``GET /api/components/{tag_id}/camera-image`` (Phase 4 route). Adds
- * a per-render cache-buster so a fresh ``RECORD_MEASURABLES`` is
- * reflected immediately; ``onerror`` collapses the element so a 404
- * (no record yet) doesn't leave a broken-image icon in the panel.
+ * ``GET /api/components/{tag_id}/camera-image``. Includes a control to
+ * pin the capture as the lab-wide COBYLA optimization reference.
  */
 import { widgetCard, widgetTitle, nullPlaceholder } from './common.js';
+import { pinLabOptimizationReference } from '../api/lab-optimization.js';
 
-export default function ImageViewer({ tagId, fieldName, descriptor, value }) {
+export default function ImageViewer({ tagId, fieldName, descriptor, value, hooks }) {
     const card = widgetCard();
     card.appendChild(widgetTitle(fieldName, descriptor));
 
@@ -39,5 +38,36 @@ export default function ImageViewer({ tagId, fieldName, descriptor, value }) {
     img.style.display = 'block';
     img.onerror = () => { img.style.display = 'none'; };
     card.appendChild(img);
+
+    if (fieldName === 'camera_image') {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary';
+        btn.style.width = '100%';
+        btn.style.marginTop = '6px';
+        btn.style.fontSize = '10px';
+        btn.innerHTML = '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">push_pin</span> Set as lab optimization reference';
+        btn.classList.add('widget-action-btn');
+        btn.onclick = async () => {
+            btn.disabled = true;
+            try {
+                await pinLabOptimizationReference(tagId);
+                if (typeof hooks?.fetchLabState === 'function') {
+                    await hooks.fetchLabState();
+                }
+                if (typeof hooks?.refreshPanel === 'function') {
+                    hooks.refreshPanel(tagId);
+                }
+            } catch (err) {
+                if (typeof hooks?.log === 'function') {
+                    hooks.log(err.message || String(err), 'error');
+                }
+            } finally {
+                btn.disabled = false;
+            }
+        };
+        card.appendChild(btn);
+    }
+
     return card;
 }

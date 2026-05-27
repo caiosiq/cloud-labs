@@ -16,13 +16,13 @@
  * telemetry, and primitives all live inside this template.
  */
 import { store } from '../state/store.js';
-import { measPose } from '../component-model.js';
+import { inAirDisplayPose } from '../component-model.js';
 import { sendCommand } from '../api/commands.js';
 import { fetchLabState } from '../state/lab-state.js';
 import { log } from './log.js';
 import { updateMotorAngleLabels, placementUiLabel } from './context-panel.js';
 import { renderReadOnlyPanel } from './component-viewer.js';
-import { renderPrimitiveRegions } from '../primitives/index.js';
+import { renderPrimitiveRegions, renderAutomatedActionsBlock } from '../primitives/index.js';
 import { isChromeComponent, isStoredComponent } from '../component-model.js';
 
 const PRIMITIVE_DEV_HINTS =
@@ -242,11 +242,7 @@ function _renderBody(tagId, comp, catalogRow, deps) {
             catalogRow,
             labState: store.labState,
             placementState: deps.placementState,
-            getPose: () => {
-                const ghost = store.ghostState && store.ghostState[tagId];
-                if (ghost && Number.isFinite(ghost.x)) return ghost;
-                return measPose(comp) || {};
-            },
+            getPose: () => inAirDisplayPose(tagId, store.labState, comp),
             hooks: {
                 sendCommand,
                 fetchLabState,
@@ -268,6 +264,11 @@ function _renderBody(tagId, comp, catalogRow, deps) {
 
         primBlock.appendChild(renderPrimitiveRegions(tagId, caps.primitives, ctx));
         wrap.appendChild(primBlock);
+
+        const autoBlock = renderAutomatedActionsBlock(ctx);
+        if (autoBlock instanceof HTMLElement) {
+            wrap.appendChild(autoBlock);
+        }
     }
 
     if (PRIMITIVE_DEV_HINTS) {

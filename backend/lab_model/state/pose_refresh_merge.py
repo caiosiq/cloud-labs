@@ -41,4 +41,9 @@ def merge_scan_into_components(
         if tid in prev_in and tid not in merged:
             merged[tid] = json.loads(json.dumps(prev_in[tid]))
 
+    # Scan misses or mock gaps must not drop components that were on the table.
+    for tid, entry in prev_in.items():
+        if tid not in merged:
+            merged[tid] = json.loads(json.dumps(entry))
+
     return merged

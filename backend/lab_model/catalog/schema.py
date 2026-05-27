@@ -263,8 +263,8 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
     - Every component gets ``MOVE_COMPONENT`` + storage/pick/hover/place +
       ``RECORD_MEASURABLES`` in ``primitives``.
     - If ``motor_ids`` is set, append motor primitives + add
-      ``nominal_motor_positions`` tunable and ``motor_rotations`` +
-      ``last_optimization_score`` measurables.
+      ``nominal_motor_positions`` tunable and ``motor_rotations`` measurable.
+    - If the row is optimize-placeable, add ``last_optimization_score`` measurable.
     - ``OPTICAL_CAMERA`` adds ``exposure_time_ms`` tunable, ``camera_image``
       measurable, and the ``stream`` telemetry channel.
     """
@@ -303,8 +303,13 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
             "widget": "JsonInspector",
         }
         measurables["motor_rotations"] = {"widget": "MotorRotationsReadout"}
-        measurables["last_optimization_score"] = {"widget": "NumberBadge", "format": ".3f"}
         primitives.extend(list(_MOTOR_TUNABLE_PRIMITIVES))
+
+    if catalog_is_optimize_placeable(row):
+        measurables.setdefault(
+            "last_optimization_score",
+            dict(_LAST_OPTIMIZATION_SCORE_MEASURABLE),
+        )
 
     if comp_type == "OPTICAL_CAMERA":
         tunables["exposure_time_ms"] = {
@@ -749,11 +754,101 @@ def catalog_declares_table_pose(catalog_row: Optional[Dict[str, Any]]) -> bool:
     """True when the catalog row declares ``tunables.nominal_pose`` (TablePose)."""
     if not isinstance(catalog_row, dict):
         return False
-    caps = catalog_row.get("capabilities") or {}
-    if not isinstance(caps, dict):
-        return False
-    tun = caps.get("tunables") or {}
+    caps = normalize_capabilities(catalog_row.get("capabilities"))
+    tun = (caps.get("statecontrol") or {}).get("tunables") or {}
     return isinstance(tun, dict) and "nominal_pose" in tun
+
+
+def catalog_has_motors(catalog_row: Optional[Dict[str, Any]]) -> bool:
+    """True when the catalog row declares one or more ``motor_ids``."""
+    if not isinstance(catalog_row, dict):
+        return False
+    mids = catalog_row.get("motor_ids") or []
+    return isinstance(mids, list) and bool(mids)
+
+
+def catalog_is_optimize_placeable(catalog_row: Optional[Dict[str, Any]]) -> bool:
+    """Breadboard-placeable optics that may run NEWTON (not bench-fixed chrome)."""
+    if not catalog_declares_table_pose(catalog_row):
+        return False
+    if catalog_is_fixed_instrument(catalog_row):
+        return False
+    comp_type = str((catalog_row or {}).get("type") or "")
+    if comp_type in ("OPTICAL_CAMERA", "CEILING_CAMERA", "LASER_SOURCE"):
+        return catalog_is_placeable_on_table(catalog_row)
+    return True
+
+
+_NEWTON_STRATEGY: Dict[str, Any] = {
+    "label": "Newton Strategy",
+    "loss_metrics": ["centroid_match"],
+    "parameters": {
+        "axis": {"type": "string", "enum": ["x", "y"], "default": "x"},
+        "tolerance_ratio": {"type": "float", "default": 0.05},
+        "video_exposure": {"type": "float", "default": 0.2},
+    },
+}
+_COBYLA_STRATEGY: Dict[str, Any] = {
+    "label": "COBYLA Alignment",
+    "loss_metrics": ["reference_match"],
+    "parameters": {
+        "video_exposure": {"type": "float", "default": 0.2},
+    },
+}
+_DEFAULT_OPTIMIZE_SENSORS = ["tag_22", "tag_21"]
+
+_LAST_OPTIMIZATION_SCORE_MEASURABLE: Dict[str, Any] = {
+    "widget": "NumberBadge",
+    "format": ".3f",
+}
+
+
+def ensure_last_optimization_score_measurable(caps: Dict[str, Any]) -> None:
+    """Declare ``last_optimization_score`` in catalog measurables (optimize receipt)."""
+    sc = caps.get("statecontrol")
+    if not isinstance(sc, dict):
+        sc = {}
+        caps["statecontrol"] = sc
+    meas = sc.get("measurables")
+    if not isinstance(meas, dict):
+        meas = {}
+        sc["measurables"] = meas
+    meas.setdefault("last_optimization_score", dict(_LAST_OPTIMIZATION_SCORE_MEASURABLE))
+
+
+def catalog_optimize_strategies(catalog_row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Strategy matrix: NEWTON for all placeable targets; COBYLA only with motors."""
+    if not catalog_is_optimize_placeable(catalog_row):
+        return {}
+    strategies: Dict[str, Any] = {"NEWTON": dict(_NEWTON_STRATEGY)}
+    if catalog_has_motors(catalog_row):
+        strategies["COBYLA"] = dict(_COBYLA_STRATEGY)
+    return strategies
+
+
+def enrich_catalog_row_optimize(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure placeable catalog rows declare OPTIMIZE + the strategy matrix."""
+    strategies = catalog_optimize_strategies(row)
+    if not strategies:
+        return row
+    out = dict(row)
+    caps = normalize_capabilities(out.get("capabilities"))
+    caps = dict(caps)
+    caps["supports_optimization"] = True
+    prims = list(caps.get("primitives") or [])
+    if "OPTIMIZE" not in prims:
+        prims.append("OPTIMIZE")
+    caps["primitives"] = prims
+    opt = dict(caps.get("optimize") or {})
+    opt["strategies"] = strategies
+    if not opt.get("sensor_candidates"):
+        opt["sensor_candidates"] = list(_DEFAULT_OPTIMIZE_SENSORS)
+    if not opt.get("default_sensor"):
+        opt["default_sensor"] = _DEFAULT_OPTIMIZE_SENSORS[0]
+    caps["optimize"] = opt
+    ensure_last_optimization_score_measurable(caps)
+    out["capabilities"] = caps
+    return out
 
 
 def resolve_telemetry_stream_backend(catalog_row: Optional[Dict[str, Any]]) -> str:
@@ -829,14 +924,14 @@ def load_component_library_rows(
         rows, warnings = validate_catalog_v1(data, source=path)
         if warnings:
             log = on_warning or (lambda m: print(f"[catalog] {m}"))
-            for w in warnings:
-                log(w)
-        return rows
+        for w in warnings:
+            log(w)
+        return [enrich_catalog_row_optimize(r) for r in rows]
 
     if is_legacy_array_shape(data):
         # Pre-migration bundle; pass through unchanged so existing behavior
         # is preserved until the operator runs the migration script.
-        return [x for x in data if isinstance(x, dict)]
+        return [enrich_catalog_row_optimize(x) for x in data if isinstance(x, dict)]
 
     raise ValueError(
         f"component_library.json must be either a JSON array (legacy) or a "

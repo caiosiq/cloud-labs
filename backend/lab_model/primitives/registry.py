@@ -29,6 +29,12 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "handler": "return_measurables_for_tag",
         "http": "GET /api/components/{tag_id}/measurables",
     },
+    PrimitiveId.GET_STORAGE: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": True,
+        "handler": "return_stored_tag_ids",
+        "http": "GET /api/lab/storage",
+    },
     PrimitiveId.RECORD_MEASURABLES: {
         "kind": PrimitiveKind.ATOMIC,
         "read_only": False,
@@ -85,6 +91,11 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "kind": PrimitiveKind.ATOMIC,
         "read_only": False,
         "handler": "optimize_component",
+    },
+    PrimitiveId.SET_COBYLA_REFERENCE: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "set_cobyla_reference",
     },
     PrimitiveId.STORE_COMPONENT: {
         "kind": PrimitiveKind.ATOMIC,

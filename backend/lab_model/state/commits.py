@@ -41,6 +41,7 @@ from lab_model.domain.component import (
     live_feed_bucket,
     live_feed_channel,
     measurables_bucket,
+    presence_of,
     set_presence_and_storage,
     teleop_bucket,
     tunables_bucket,
@@ -270,6 +271,7 @@ def commit_move_to_breadboard(
         tun["nominal_pose"] = dict(cmd)
         tun["placement"] = {"mode": PLACEMENT_MODE_MANUAL}
         meas["pose"] = achieved
+        tun.pop("last_breadboard_pose", None)
         set_presence_and_storage(entry, PRESENCE_BREADBOARD, in_storage=False, slot=None)
 
 
@@ -305,6 +307,14 @@ def commit_move_to_storage(
     if entry is not None:
         tun = tunables_bucket(entry)
         meas = measurables_bucket(entry)
+        if presence_of(entry) == PRESENCE_BREADBOARD:
+            prev = dict(tun.get("nominal_pose") or meas.get("pose") or {})
+            if prev.get("x") is not None or prev.get("y") is not None:
+                tun["last_breadboard_pose"] = {
+                    "x": float(prev.get("x", 0.0)),
+                    "y": float(prev.get("y", 0.0)),
+                    "rotation": float(prev.get("rotation", 0.0)),
+                }
         tun["nominal_pose"] = dict(cmd)
         tun["placement"] = {"mode": PLACEMENT_MODE_STORAGE}
         meas["pose"] = achieved
@@ -343,47 +353,34 @@ def commit_optimization_complete(
     state: Dict[str, Any],
     target_id: str,
     *,
-    strategy_name: str,
     score: float,
     final_pose: Optional[Dict[str, float]] = None,
+    final_motor_positions: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """After a successful OPTIMIZE_COMPONENT run: write summary fields.
+    """After a successful OPTIMIZE run: commit tunables + optimization score.
 
-    The optimization tells the system "this strategy got the part
-    aligned" -- we record the strategy mode so the UI badge updates,
-    a single scalar score (whatever the strategy considered "done"),
-    and a snapshot of the final pose so the operator can compare
-    later (``measurables.last_optimized_pose``).
-
-    ``final_pose``:
-    - ``None``: copy the current ``measurables.pose`` (Newton on real
-      already updated it mid-run via the cloudlab progress callback;
-      we just snapshot it).
-    - ``dict``: an explicit ``{x, y, rotation}`` (mock returns its
-      simulated drift this way; this also lands as the new
-      ``measurables.pose``).
+    Optimization is a move primitive — the durable outcome is updated intent
+    (``nominal_pose``, optional motor setpoints) plus a scalar score receipt.
+    Does not write ``measurables.pose``, strategy names into ``placement.mode``,
+    or ``last_optimized_pose``.
     """
     entry = _component_entry(state, target_id)
     if entry is None:
         return
     tun = tunables_bucket(entry)
     meas = measurables_bucket(entry)
-    tun["placement"] = {"mode": (strategy_name or "").upper()}
+    tun["placement"] = {"mode": PLACEMENT_MODE_MANUAL}
     meas["last_optimization_score"] = float(score)
     if final_pose is not None:
-        pose = {
+        tun["nominal_pose"] = {
             "x": float(final_pose.get("x", 0.0)),
             "y": float(final_pose.get("y", 0.0)),
             "rotation": float(final_pose.get("rotation", 0.0)),
         }
-        meas["pose"] = pose
-        meas["last_optimized_pose"] = dict(pose)
-    else:
-        cur = meas.get("pose") or {}
-        if cur:
-            meas["last_optimized_pose"] = {
-                k: cur[k] for k in ("x", "y", "rotation") if k in cur
-            }
+    if final_motor_positions is not None:
+        tun["nominal_motor_positions"] = {
+            str(k): float(v) for k, v in final_motor_positions.items()
+        }
 
 
 def null_measurables_for_targets(
@@ -483,6 +480,27 @@ def commit_observed_camera_image(
         "cam_id": int(cam_id),
         "format": fmt,
     }
+
+
+def commit_pin_optimization_reference(
+    state: Dict[str, Any],
+    tag_id: str,
+    camera_image: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Pin lab-wide COBYLA reference from a component's ``measurables.camera_image``."""
+    from datetime import datetime
+    import os
+
+    path = camera_image.get("path")
+    payload = {
+        "path": os.path.abspath(str(path).strip()),
+        "format": str(camera_image.get("format") or "png"),
+        "source": str(camera_image.get("source") or "camera_image"),
+        "sensor_component": tag_id,
+        "pinned_at": datetime.now().isoformat(),
+    }
+    state["optimization_reference"] = payload
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -857,6 +875,7 @@ __all__ = [
     "commit_move_to_storage",
     "commit_affirm_placed",
     "commit_observed_camera_image",
+    "commit_pin_optimization_reference",
     "commit_observed_measurables",
     "commit_optimization_complete",
     "null_measurables_for_targets",

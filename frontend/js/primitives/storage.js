@@ -1,28 +1,81 @@
 import { store } from '../state/store.js';
 import { isStorageRegion } from '../storage-region.js';
+import { drawPose } from '../component-model.js';
+import { tunableValue } from '../component-state.js';
 import { coordInput, dispatchPrimitive, primitiveRegion, runButton, secondaryButton } from './shared.js';
 
+function placeFromStorageSeedPose(tagId, comp) {
+    const saved = tunableValue(comp, 'last_breadboard_pose');
+    if (
+        saved
+        && typeof saved === 'object'
+        && Number.isFinite(Number(saved.x))
+        && Number.isFinite(Number(saved.y))
+    ) {
+        return {
+            x: Number(saved.x),
+            y: Number(saved.y),
+            rotation: Number(saved.rotation ?? 0),
+        };
+    }
+    const cached = store.lastBreadboardPose?.[tagId];
+    if (
+        cached
+        && Number.isFinite(Number(cached.x))
+        && Number.isFinite(Number(cached.y))
+    ) {
+        return {
+            x: Number(cached.x),
+            y: Number(cached.y),
+            rotation: Number(cached.rotation ?? 0),
+        };
+    }
+    const ghost = store.ghostState?.[tagId];
+    if (
+        ghost
+        && Number.isFinite(Number(ghost.x))
+        && Number.isFinite(Number(ghost.y))
+        && !isStorageRegion(Number(ghost.x), Number(ghost.y))
+    ) {
+        return {
+            x: Number(ghost.x),
+            y: Number(ghost.y),
+            rotation: Number(ghost.rotation ?? 0),
+        };
+    }
+    return drawPose(comp) || {};
+}
+
 export function renderStoreComponent(ctx) {
-    const { tagId, placementState, hooks } = ctx;
+    const { tagId, placementState, hooks, comp } = ctx;
     if (placementState !== 'PLACED') return null;
     const { section, body } = primitiveRegion('STORE_COMPONENT', 'STORE COMPONENT');
     const btn = secondaryButton('Move to storage (auto pack)', 'inventory_2');
-    btn.onclick = () =>
+    btn.onclick = () => {
+        const pose = drawPose(ctx.comp);
+        if (pose && Number.isFinite(Number(pose.x)) && Number.isFinite(Number(pose.y))) {
+            store.lastBreadboardPose[tagId] = {
+                x: Number(pose.x),
+                y: Number(pose.y),
+                rotation: Number(pose.rotation ?? 0),
+            };
+        }
         void dispatchPrimitive(hooks, {
             action: 'STORE_COMPONENT',
             target_id: tagId,
             parameters: {},
         });
+    };
     body.appendChild(btn);
     return section;
 }
 
 export function renderPlaceFromStorage(ctx) {
-    const { tagId, placementState, hooks, render, updateContextPanel } = ctx;
+    const { tagId, placementState, hooks, render, updateContextPanel, comp } = ctx;
     if (placementState !== 'STORED') return null;
 
     const { section, body } = primitiveRegion('PLACE_FROM_STORAGE', 'PLACE FROM STORAGE');
-    const p = ctx.getPose() || {};
+    const p = placeFromStorageSeedPose(tagId, comp) || {};
     const grid = document.createElement('div');
     grid.style.display = 'grid';
     grid.style.gridTemplateColumns = '1fr 1fr 1fr';

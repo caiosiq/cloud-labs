@@ -2,10 +2,9 @@
  * Command dispatch — the **only** code path that POSTs to `/api/command`.
  *
  * Two-stage flow:
- *   1. `sendCommand` — applies user-facing safeguards (e.g. MOVE_COMPONENT confirm modal). If the
- *      user confirms, it delegates to `executeSendCommand`. Recording-mode bypasses the modal
- *      because the recipe editor needs every command to be captured deterministically.
- *   2. `executeSendCommand` — does the network call, mirrors recipe state, and tracks
+ *   1. `sendCommand` — applies user-facing safeguards (e.g. MOVE_COMPONENT confirm modal).
+ *      If the user confirms, it delegates to `executeSendCommand`.
+ *   2. `executeSendCommand` — does the network call and tracks
  *      `pendingCommands` / `pendingActions` so the renderer can show pending visual feedback
  *      while the backend processes the request.
  *
@@ -19,7 +18,35 @@ import { store } from '../state/store.js';
 import { log } from '../ui/log.js';
 import { showConfirmationModal } from '../ui/modals.js';
 import { drawPose, isBreadboardIntent } from '../component-model.js';
-import { updateRecipeEditorList } from '../ui/recipes.js';
+import { clearOptimizeSession, syncLabReferenceDisplay } from '../ui/optimization-sidebar.js';
+import { fmtPoseMm } from '../widgets/common.js';
+
+function rememberPendingInAirPose(command) {
+    const tagId = command?.target_id;
+    const params = command?.parameters;
+    if (!tagId || !params || typeof params !== 'object') return;
+    if (command.action === 'HOVER') {
+        store.pendingInAirPose[tagId] = {
+            x: Number(params.target_x ?? params.x),
+            y: Number(params.target_y ?? params.y),
+            rotation: Number(params.rotation ?? 0),
+            z: Number(params.z),
+        };
+    } else if (command.action === 'PLACE_FROM_HOVER') {
+        store.pendingInAirPose[tagId] = {
+            x: Number(params.target_x ?? params.x),
+            y: Number(params.target_y ?? params.y),
+            rotation: Number(params.rotation ?? 0),
+            z: 0,
+        };
+    }
+}
+
+function clearPendingInAirPose(tagId) {
+    if (tagId && store.pendingInAirPose) {
+        delete store.pendingInAirPose[tagId];
+    }
+}
 
 let _render = () => {};
 let _updateContextPanel = () => {};
@@ -34,12 +61,11 @@ export function initCommands(deps) {
 }
 
 export async function sendCommand(command) {
-    // MOVE_COMPONENT goes through a user confirmation modal — except while recording a recipe,
-    // where every command is captured verbatim so the recipe stays deterministic.
-    if (command.action === 'MOVE_COMPONENT' && !store.isRecording) {
+    // MOVE_COMPONENT goes through a user confirmation modal before dispatch.
+    if (command.action === 'MOVE_COMPONENT') {
         let msg = `Move <strong>${command.target_id}</strong>?`;
         if (command.parameters) {
-            msg += `<br>X: ${command.parameters.target_x.toFixed(1)} mm<br>Y: ${command.parameters.target_y.toFixed(1)} mm<br>Rot: ${command.parameters.rotation.toFixed(1)}°`;
+            msg += `<br>X: ${fmtPoseMm(command.parameters.target_x)} mm<br>Y: ${fmtPoseMm(command.parameters.target_y)} mm<br>Rot: ${fmtPoseMm(command.parameters.rotation)}°`;
         }
 
         return new Promise((resolve) => {
@@ -88,22 +114,10 @@ export async function executeSendCommand(command) {
     try {
         log(`Sending command: ${command.action}`, 'info');
 
-        // Recipe editor: capture the command verbatim so it can be played back later.
-        // We still execute it live so the user sees the immediate effect.
-        if (store.isRecording) {
-            const step = {
-                step: store.currentRecipeSteps.length + 1,
-                action: command.action,
-                component: command.target_id,
-                parameters: command.parameters || {},
-            };
-            store.currentRecipeSteps.push(step);
-            updateRecipeEditorList();
-        }
-
         if (command.target_id) {
             store.pendingCommands.add(command.target_id);
             if (command.action) store.pendingActions.set(command.target_id, command.action);
+            rememberPendingInAirPose(command);
         }
 
         const response = await fetch('/api/command', {
@@ -121,6 +135,13 @@ export async function executeSendCommand(command) {
             if (command.target_id) {
                 store.pendingCommands.delete(command.target_id);
                 store.pendingActions.delete(command.target_id);
+                clearPendingInAirPose(command.target_id);
+            }
+            if (command.action === 'OPTIMIZE') {
+                store.optimizeActiveTarget = null;
+                store.optimizeActiveSensor = null;
+                store.optimizeRunningStrategy = null;
+                clearOptimizeSession();
             }
             return { ok: false, error: detail };
         }
@@ -129,20 +150,34 @@ export async function executeSendCommand(command) {
 
         if (!response.ok) {
             const detail = result.detail || `HTTP ${response.status}`;
-            log(`Command rejected: ${detail}`, 'error');
+            const detailText = typeof detail === 'string' ? detail : JSON.stringify(detail);
+            log(`Command rejected: ${detailText}`, 'error');
+            if (command.target_id) {
+                store.pendingCommands.delete(command.target_id);
+                store.pendingActions.delete(command.target_id);
+                clearPendingInAirPose(command.target_id);
+            }
+            if (command.action === 'OPTIMIZE') {
+                store.optimizeActiveTarget = null;
+                store.optimizeActiveSensor = null;
+                store.optimizeRunningStrategy = null;
+                clearOptimizeSession();
+            }
+            return { ok: false, error: detailText };
+        }
+
+        if (command.action === 'SET_COBYLA_REFERENCE') {
             if (command.target_id) {
                 store.pendingCommands.delete(command.target_id);
                 store.pendingActions.delete(command.target_id);
             }
-            return { ok: false, error: detail };
+            if (result.optimization_reference && store.labState) {
+                store.labState.optimization_reference = result.optimization_reference;
+            }
+            syncLabReferenceDisplay();
         }
 
         log(`Server: ${result.message}`, 'info');
-
-        if (command.action === 'OPTIMIZE') {
-            store.isOptimizing = true;
-            store.optimizationData = [];
-        }
 
         return { ok: true, message: result.message || 'Accepted' };
     } catch (error) {
@@ -150,6 +185,7 @@ export async function executeSendCommand(command) {
         if (command.target_id) {
             store.pendingCommands.delete(command.target_id);
             store.pendingActions.delete(command.target_id);
+            clearPendingInAirPose(command.target_id);
         }
         return { ok: false, error: error.message || String(error) };
     }
@@ -167,7 +203,7 @@ export async function confirmPlaceFromStorageDrag(targetId, parameters) {
     const msg =
         `Place <strong>${targetId}</strong> from storage onto the breadboard?<br><br>` +
         `This will change the part from <strong>STORED</strong> to <strong>PLACED</strong>.<br><br>` +
-        `X: ${Number(tx).toFixed(1)} mm<br>Y: ${Number(ty).toFixed(1)} mm<br>Rot: ${Number(tr).toFixed(1)}°`;
+        `X: ${fmtPoseMm(tx)} mm<br>Y: ${fmtPoseMm(ty)} mm<br>Rot: ${fmtPoseMm(tr)}°`;
 
     return new Promise((resolve) => {
         showConfirmationModal(

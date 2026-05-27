@@ -12,6 +12,7 @@ Recipe / script convenience only; operators use per-field primitives in the UI.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict
 
 from lab_communicator.base import LabCommunicator
@@ -74,5 +75,7 @@ async def run_apply_tunables_patch(
             if isinstance(entry, dict):
                 tunables_bucket(entry)["storage"] = dict(storage)
         lab._persist_state()
+
+    # Lab-level optimization_reference is set via SET_COBYLA_REFERENCE or PUT /api/lab/optimization-reference.
 
     # Step 4 (motion) intentionally omitted — use explicit primitives.

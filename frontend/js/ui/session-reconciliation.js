@@ -29,6 +29,8 @@ export function initSessionReconciliation(deps) {
 
 export async function maybeTriggerSessionReconciliation() {
     if (store.sessionReconciliationFetched) return;
+    // Boot-time prompt only — never interrupt an active optimization run.
+    if (store.optimizeActiveTarget || store.optimizeSession) return;
     try {
         if (
             typeof sessionStorage !== 'undefined' &&

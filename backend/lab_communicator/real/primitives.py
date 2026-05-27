@@ -31,7 +31,6 @@ Architectural rules (``lab_communicator/README.md``, ``lab_model.platform``):
 from __future__ import annotations
 
 import asyncio
-import inspect
 import os
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
@@ -366,42 +365,15 @@ async def primitive_optimize_component(
     target_id: str,
     strategy_name: str,
     params: Dict[str, Any],
-    progress_callback: Callable[..., None],  # noqa: ARG001 -- file watcher drives steps on real
+    live_pose_callback: Callable[..., None],
 ) -> Optional[Dict[str, Any]]:
     """Hardware step for ``optimize_component``.
 
-    Builds the strategy (``NewtonPlacementStrategy_cloudlab`` or
-    ``CobylaAlignmentStrategy_cloudlab``), wires the cloudlab Newton
-    place-UI hook (which drives ghost / physical updates for the
-    canvas), and dispatches
-    ``experiment.optimize_component(comp, strategy)`` on a worker
-    thread. The strategy run itself is synchronous and can take
-    minutes -- if we held the event loop the lab-state poller would
-    starve.
-
-    ``progress_callback`` is the orchestrator-built closure for
-    ``optimization_step`` updates. Real does **not** call it
-    explicitly: the file watcher started in
-    :func:`lab_communicator.real.optimization.monitor_optimization_dir`
-    parses ``stepNN`` from PNG filenames and writes the step counter
-    directly under the state lock (the file watcher isn't a
-    ``_primitive_*`` hook, so the architectural lint allows it).
-
-    Returns ``{"score": 1.0, "final_pose": None}`` so the
-    orchestrator's :func:`commit_optimization_complete` snapshots
-    whatever pose the strategy left in ``measurables.pose``.
+    Delegates to :mod:`lab_communicator.real.optimize_edge`, which drives
+    ``live_pose_callback`` and returns a commit payload. The placeholder
+    loop documents the future ``lab_automation`` contract via
+    ``build_lab_automation_optimize_spec`` until real strategies are wired.
     """
-    from lab_automation.objects.strategies import (
-        CobylaAlignmentStrategy_cloudlab,
-        NewtonPlacementStrategy_cloudlab,
-    )
-
-    comp = communicator.get_manipulable(target_id)
-    if comp is None:
-        raise RuntimeError(
-            f"[REAL LAB] primitive_optimize_component: {target_id} not in map."
-        )
-
     run_dir = communicator._active_optimization_image_dir
     if run_dir is None:
         raise RuntimeError(
@@ -409,97 +381,16 @@ async def primitive_optimize_component(
             "primitive_prepare_optimization_run was not called?"
         )
 
-    strategy = None
-    if strategy_name == "NEWTON":
-        communicator._install_cloudlab_place_ui_hook(target_id)
+    from lab_communicator.real.optimize_edge import run_optimize_edge
 
-        try:
-            _nexp = float(params.get("exposure", 0.2))
-        except (TypeError, ValueError):
-            _nexp = 0.2
-        _nexp = max(0.001, min(30.0, _nexp))
-
-        newton_kw: Dict[str, Any] = dict(
-            camera_number=params["camera_number"],
-            target_x_pixel=params["target_x_pixel"],
-            tolerance_ratio=params["tolerance_ratio"],
-            axis=params["axis"],
-            initial_move=-0.2,
-            do_repositioning=False,
-            video_exposure=_nexp,
-            capture_exposure=_nexp,
-        )
-        try:
-            init_sig = inspect.signature(NewtonPlacementStrategy_cloudlab.__init__)
-            if "progress_callback" in init_sig.parameters:
-                newton_kw["progress_callback"] = communicator._cloudlab_progress_callback(target_id)
-        except (TypeError, ValueError):
-            pass
-
-        communicator._apply_optimization_output_dir_kw(
-            NewtonPlacementStrategy_cloudlab, newton_kw, run_dir
-        )
-        strategy = NewtonPlacementStrategy_cloudlab(**newton_kw)
-        print("[REAL LAB] DOING NEWTON STRATEGY")
-    elif strategy_name == "COBYLA":
-        motor_ids = params.get("motor_ids")
-        if not motor_ids:
-            raise ValueError("COBYLA strategy requires 'motor_ids' parameter.")
-
-        meta = communicator.catalog_map.get(target_id)
-        if not meta or not meta.get("motor_controller"):
-            raise ValueError(
-                f"COBYLA requires 'motor_controller' in component_catalog "
-                f"for {target_id} (e.g. \"wifi_stepper1\")."
-            )
-        motor_controller = meta["motor_controller"]
-
-        try:
-            _exp = float(params.get("exposure", 0.2))
-        except (TypeError, ValueError):
-            _exp = 0.2
-        _exp = max(0.001, min(30.0, _exp))
-
-        cobyla_kw: Dict[str, Any] = {
-            "motor_controller": motor_controller,
-            "camera_number": params.get("camera_number", 1),
-            "motor_ids": motor_ids,
-            "objective_threshold": params.get("objective_threshold", 100.0),
-            "video_exposure": _exp,
-            "capture_exposure": _exp,
-        }
-        from lab_communicator.real.optimization import load_cobyla_reference_bgr_from_state
-
-        ref_copy = load_cobyla_reference_bgr_from_state(
-            communicator,
-            camera_number=int(params.get("camera_number", 1)),
-        )
-        if ref_copy is not None:
-            try:
-                sig = inspect.signature(CobylaAlignmentStrategy_cloudlab.__init__)
-                if "reference_image" in sig.parameters:
-                    cobyla_kw["reference_image"] = ref_copy
-            except (TypeError, ValueError):
-                cobyla_kw["reference_image"] = ref_copy
-        else:
-            print(
-                "[REAL LAB] COBYLA: no reference from measurables.camera_image; "
-                "strategy will use its own fallback if any."
-            )
-
-        communicator._apply_optimization_output_dir_kw(
-            CobylaAlignmentStrategy_cloudlab, cobyla_kw, run_dir
-        )
-        strategy = CobylaAlignmentStrategy_cloudlab(**cobyla_kw)
-    else:
-        print(
-            f"[REAL LAB] primitive_optimize_component: unrecognized "
-            f"strategy {strategy_name!r}; no run dispatched."
-        )
-        return None
-
-    await asyncio.to_thread(communicator.experiment.optimize_component, comp, strategy)
-    return {"score": 1.0, "final_pose": None}
+    return await run_optimize_edge(
+        communicator,
+        target_id=target_id,
+        strategy_name=strategy_name,
+        params=params,
+        live_pose_callback=live_pose_callback,
+        run_dir=run_dir,
+    )
 
 
 def primitive_finalize_optimization_run(

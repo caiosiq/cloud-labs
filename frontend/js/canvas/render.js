@@ -32,6 +32,7 @@ import {
 import { mmToPx } from './coordinates.js';
 import { store } from '../state/store.js';
 import { drawPose, isHeldTag, shouldRenderOnCanvas } from '../component-model.js';
+import { isOptimizeLiveActive, supportsOptimizeLiveCanvas } from '../optimize-session.js';
 import { isTeleopReady } from '../component-state.js';
 import { clipTwoPointLineToLabBounds } from '../geometry/lines.js';
 import { drawAlignmentGuides, drawAlignmentIntersectionMarkers } from './guides.js';
@@ -225,6 +226,8 @@ function pendingOverlayStyle(name) {
             return { color: '#a855f7', label: 'PLACING...' };
         case 'SCAN_ROTATE_IN_PLACE':
             return { color: '#a855f7', label: 'SCAN ROTATING...' };
+        case 'OPTIMIZE':
+            return { color: '#a855f7', label: 'OPTIMIZING...' };
         default:
             return { color: '#f59e0b', label: 'MOVING...' };
     }
@@ -310,10 +313,10 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.stroke();
     }
 
-    if (store.isOptimizing && store.pendingCommands.has(name)) {
-        ctx.shadowColor = '#10b981';
+    if (isOptimizeLiveActive(name) && supportsOptimizeLiveCanvas(name)) {
+        ctx.shadowColor = '#a855f7';
         ctx.shadowBlur = 20;
-        ctx.strokeStyle = '#10b981';
+        ctx.strokeStyle = '#a855f7';
         ctx.lineWidth = 2;
         const r = Math.sqrt(halfW * halfW + halfH * halfH);
         ctx.beginPath();
@@ -495,50 +498,13 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.font = 'bold 10px Inter, sans-serif';
         ctx.fillText('HOLDING', 0, halfH + 15);
     }
-    if (store.isOptimizing && store.pendingCommands.has(name)) {
-        ctx.fillStyle = '#10b981';
+    if (isOptimizeLiveActive(name) && supportsOptimizeLiveCanvas(name)) {
+        ctx.fillStyle = '#a855f7';
         ctx.font = 'bold 10px Inter, sans-serif';
-        ctx.fillText('OPTIMIZING...', 0, halfH + 15);
+        ctx.fillText('AUTO...', 0, halfH + 15);
     }
 
     ctx.restore();
-}
-
-function drawOptimizationGraph() {
-    if (!store.isOptimizing || store.optimizationData.length === 0) return;
-    // Fake beam-intensity values are mock-only; the real lab has no such metric in state.
-    if (!store.labState || store.labState.lab_mode !== 'MOCK') return;
-
-    const ctx = _ctx;
-    const w = 300;
-    const h = 150;
-    const x = CANVAS_WIDTH - w - 20;
-    const y = CANVAS_HEIGHT - h - 20;
-
-    ctx.fillStyle = 'rgba(24, 27, 33, 0.9)';
-    ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = '#2a2e36';
-    ctx.strokeRect(x, y, w, h);
-
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '11px Inter';
-    ctx.fillText('Optimization Metric (Beam Intensity)', x + 10, y + 20);
-
-    ctx.beginPath();
-    ctx.strokeStyle = '#10b981';
-    ctx.lineWidth = 2;
-
-    const maxSteps = 20;
-    const xScale = (w - 20) / maxSteps;
-    const yScale = (h - 40);
-
-    store.optimizationData.forEach((point, i) => {
-        const px = x + 10 + point.step * xScale;
-        const py = y + h - 10 - point.value * yScale;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-    });
-    ctx.stroke();
 }
 
 export function render() {
@@ -552,23 +518,30 @@ export function render() {
 
     if (!store.labState) return;
 
-    // 1. Committed components (frozen tunables — skip tags under active TeleOp).
+    // 1. Committed components (frozen tunables — skip tags under active TeleOp / OPTIMIZE live).
     Object.entries(store.labState.components).forEach(([name, comp]) => {
-        if (shouldRenderOnCanvas(name, comp) && !isTeleopReady(comp)) {
+        if (
+            shouldRenderOnCanvas(name, comp)
+            && !isTeleopReady(comp)
+            && !(isOptimizeLiveActive(name) && supportsOptimizeLiveCanvas(name))
+        ) {
             drawComponent(name, drawPose(comp), comp.type, 'SOLID');
         }
     });
 
-    // 1b. TeleOp LIVE pose (hardware truth from fast poll).
+    // 1b. TeleOp / autonomous OPTIMIZE LIVE pose (hardware truth from fast poll).
     Object.entries(store.labState.components).forEach(([name, comp]) => {
-        if (!shouldRenderOnCanvas(name, comp) || !isTeleopReady(comp)) return;
+        if (!shouldRenderOnCanvas(name, comp)) return;
+        const teleop = isTeleopReady(comp);
+        const auto = isOptimizeLiveActive(name) && supportsOptimizeLiveCanvas(name);
+        if (!teleop && !auto) return;
         const live = store.teleopLivePose[name];
         if (live && Number.isFinite(live.x) && Number.isFinite(live.y)) {
             drawComponent(name, live, comp.type, 'SOLID');
             const p = mmToPx(live.x, live.y);
-            _ctx.fillStyle = TELEOP_LIVE_COLOR;
+            _ctx.fillStyle = teleop ? TELEOP_LIVE_COLOR : '#a855f7';
             _ctx.font = '9px Inter, sans-serif';
-            _ctx.fillText('LIVE', p.x + 8, p.y - 8);
+            _ctx.fillText(teleop ? 'LIVE' : 'AUTO', p.x + 8, p.y - 8);
         }
     });
 
@@ -629,5 +602,4 @@ export function render() {
         }
     });
 
-    drawOptimizationGraph();
 }

@@ -71,6 +71,7 @@ from lab_model import motor_rotation_store as motor_rot
 bootstrap_lab_view(_project_root)
 motor_rot.configure(get_lab_view_paths().motor_rotations_json)
 
+from lab_model.state.state_machine import PrimitiveRefusalError
 from lab_model.primitives import (
     ConfirmHoldingTagBody,
     HoverBody,
@@ -81,6 +82,7 @@ from lab_model.primitives import (
     PrimitiveId,
     RecordMeasurablesBody,
     ScanRotateInPlaceBody,
+    SetCobylaReferenceBody,
     StartTeleopBody,
     StartLiveFeedBody,
     EndLiveFeedBody,
@@ -868,25 +870,39 @@ async def post_component_telemetry_goto(tag_id: str, request: Request):
 
 @app.get("/api/components/{tag_id}/telemetry/live-pose")
 async def get_component_telemetry_live_pose(tag_id: str):
-    """High-rate live pose for TeleOp (in-memory; not in lab_state JSON).
-
-    Deprecated hot path — prefer ``WS /api/components/{tag_id}/teleop/session``.
-    Kept for debug clients and HTTP fallback.
-    """
+    """High-rate live pose for TeleOp or autonomous OPTIMIZE (in-memory; not lab_state JSON)."""
     _refuse_teleop_if_lab_down(tag_id)
     from lab_model.domain.component import is_teleop_ready
+    from lab_model.domain.holding import SYSTEM_STATUS_BUSY
 
     state = lab.get_lab_state()
     entry = (state.get("components") or {}).get(tag_id)
-    if not isinstance(entry, dict) or not is_teleop_ready(entry):
+    optimize_tag = getattr(lab, "_optimize_active_tag", None)
+    teleop_ok = isinstance(entry, dict) and is_teleop_ready(entry)
+    optimize_ok = (
+        optimize_tag == tag_id
+        and state.get("system_status") == SYSTEM_STATUS_BUSY
+    )
+    if not teleop_ok and not optimize_ok:
         raise HTTPException(
             status_code=409,
-            detail=f"{tag_id!r} is not in an active ready TELEOP session.",
+            detail=(
+                f"{tag_id!r} is not in an active TeleOp session or autonomous "
+                f"OPTIMIZE run."
+            ),
         )
     pose = lab.get_teleop_live_pose(tag_id)
     if pose is None:
         raise HTTPException(status_code=503, detail="Live pose unavailable.")
-    return {"status": "ok", "pose": pose}
+    out_pose = {
+        k: pose[k]
+        for k in ("x", "y", "z", "rotation", "executing", "iteration", "loss")
+        if k in pose
+    }
+    mp = pose.get("motor_positions")
+    if isinstance(mp, dict) and mp:
+        out_pose["motor_positions"] = dict(mp)
+    return {"status": "ok", "pose": out_pose}
 
 
 @app.websocket("/api/components/{tag_id}/teleop/session")
@@ -902,6 +918,21 @@ async def ws_component_teleop_session(websocket: WebSocket, tag_id: str):
     from lab_model.orchestration.teleop_session_ws import run_teleop_session_websocket
 
     await run_teleop_session_websocket(websocket, lab, tag_id)
+
+
+@app.websocket("/api/components/{tag_id}/optimize/session")
+async def ws_component_optimize_session(websocket: WebSocket, tag_id: str):
+    """Read-only optimize telemetry: pose + loss @ ~25 Hz during BUSY OPTIMIZE."""
+    if lab is None:
+        await websocket.close(code=1013, reason="Lab not initialized")
+        return
+    catalog_row = (lab.catalog_map or {}).get(tag_id)
+    if not isinstance(catalog_row, dict):
+        await websocket.close(code=4404, reason=f"Unknown tag {tag_id!r}")
+        return
+    from lab_model.orchestration.optimize_session_ws import run_optimize_session_websocket
+
+    await run_optimize_session_websocket(websocket, lab, tag_id)
 
 
 @app.post("/api/components/{tag_id}/telemetry/live-feed/start")
@@ -992,6 +1023,76 @@ async def get_lab_state():
     except Exception as e:
         logger.exception("GET /api/lab-state failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read Lab State: {str(e)}")
+
+
+@app.get("/api/lab/storage")
+async def get_lab_storage():
+    """Stored component tag ids. Primitive: ``GET_STORAGE``."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    try:
+        return fetch_read_primitive(lab, PrimitiveId.GET_STORAGE)
+    except Exception as e:
+        logger.exception("GET /api/lab/storage failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/lab/optimization-reference")
+async def put_lab_optimization_reference(body: Dict[str, Any]):
+    """Pin a lab-wide COBYLA / optimization reference image (bench property)."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    path = body.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise HTTPException(status_code=422, detail="reference.path is required")
+    abs_path = os.path.abspath(path.strip())
+    if not os.path.isfile(abs_path):
+        raise HTTPException(status_code=422, detail=f"Reference file not found: {abs_path}")
+    payload = {
+        "path": abs_path,
+        "format": body.get("format") or "png",
+        "source": body.get("source") or "camera_image",
+        "sensor_component": body.get("sensor_component"),
+        "pinned_at": body.get("pinned_at"),
+    }
+    with lab._state_lock:
+        lab.current_state["optimization_reference"] = payload
+        lab.current_state["last_updated"] = datetime.now().isoformat()
+    lab._persist_state()
+    return {"status": "ok", "optimization_reference": payload}
+
+
+@app.delete("/api/lab/optimization-reference")
+async def delete_lab_optimization_reference():
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    with lab._state_lock:
+        lab.current_state.pop("optimization_reference", None)
+        lab.current_state["last_updated"] = datetime.now().isoformat()
+    lab._persist_state()
+    return {"status": "ok"}
+
+
+@app.get("/api/lab/optimization-reference/image")
+async def get_lab_optimization_reference_image():
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    state = lab.get_lab_state()
+    ref = state.get("optimization_reference") if isinstance(state, dict) else None
+    if not isinstance(ref, dict):
+        raise HTTPException(status_code=404, detail="No lab optimization reference pinned")
+    path = ref.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise HTTPException(status_code=404, detail="Lab optimization reference has no path")
+    abs_path = os.path.abspath(path.strip())
+    if not os.path.isfile(abs_path):
+        raise HTTPException(status_code=404, detail=f"Reference file missing: {abs_path}")
+    fmt = str(ref.get("format") or "png").lower()
+    media_by_fmt = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+    if fmt not in media_by_fmt:
+        raise HTTPException(status_code=400, detail=f"Unsupported format {fmt!r}")
+    return FileResponse(abs_path, media_type=media_by_fmt[fmt])
+
 
 def _schedule_pose_refresh(
     background_tasks: BackgroundTasks,
@@ -1404,6 +1505,17 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
         await execute_validated_command(lab, cmd)
         meas = fetch_read_primitive(lab, PrimitiveId.GET_MEASURABLES, cmd.target_id)
         return {"status": "ok", "measurables": meas}
+
+    if isinstance(cmd, SetCobylaReferenceBody):
+        try:
+            ref = await lab.set_cobyla_reference(cmd.target_id)
+        except PrimitiveRefusalError as e:
+            raise HTTPException(status_code=422, detail=e.reason)
+        return {
+            "status": "ok",
+            "message": f"COBYLA reference pinned from {cmd.target_id}",
+            "optimization_reference": ref,
+        }
 
     return schedule_validated_command(lab, cmd, background_tasks)
 

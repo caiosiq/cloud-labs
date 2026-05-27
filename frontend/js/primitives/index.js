@@ -20,12 +20,13 @@ import {
     renderHoldingNotice,
 } from './in-air.js';
 import { renderStoreComponent, renderPlaceFromStorage } from './storage.js';
-import { renderOptimize } from './optimize.js';
+import { renderAutomatedActionsSection } from './optimize.js';
 import { renderScanRotate } from './scan-rotate.js';
 import { getWidget } from '../widgets/index.js';
 import { isLiveFeedActive, isTeleopActive, normalizeCapabilities } from '../component-state.js';
 import { isHeldTag } from '../component-model.js';
 import { store } from '../state/store.js';
+import { supportsLiveVideo, supportsOptimization, supportsTeleop } from '../catalog-support.js';
 import { primitiveRegion, sessionHint } from './shared.js';
 
 const PRIMITIVE_UI = {
@@ -46,7 +47,7 @@ const PRIMITIVE_UI = {
     CONFIRM_HOLDING_TAG: renderConfirmHolding,
     STORE_COMPONENT: renderStoreComponent,
     PLACE_FROM_STORAGE: renderPlaceFromStorage,
-    OPTIMIZE: renderOptimize,
+    OPTIMIZE: null, /* rendered via renderAutomatedActionsSection */
     SCAN_ROTATE_IN_PLACE: (ctx) => renderScanRotate(ctx, { contextHint: 'placed' }),
 };
 
@@ -106,10 +107,9 @@ const PRIMITIVE_DISPLAY_ORDER = [
     'HOVER',
     'PLACE_FROM_HOVER',
     'CONFIRM_HOLDING_TAG',
-    'RECORD_MEASURABLES',
-    'OPTIMIZE',
-    'SCAN_ROTATE_IN_PLACE',
-    ...TELEMETRY_BOTTOM_PRIMITIVES,
+  'RECORD_MEASURABLES',
+  'SCAN_ROTATE_IN_PLACE',
+  ...TELEMETRY_BOTTOM_PRIMITIVES,
 ];
 
 function sortPrimitivesForDisplay(allowList) {
@@ -171,10 +171,12 @@ export function renderPrimitiveRegions(tagId, allowList, ctx) {
         if (teleopActive && TUNABLE_WRITER_PRIMITIVES.has(prim)) return;
         if (liveFeedActive && MEASURABLE_WRITER_PRIMITIVES.has(prim)) return;
 
-        if (prim === 'START_TELEOP' && isTeleopActive(ctx.comp)) return;
+        if (prim === 'START_TELEOP' && (!supportsTeleop(ctx.catalogRow) || isTeleopActive(ctx.comp))) return;
         if (prim === 'END_TELEOP' && !isTeleopActive(ctx.comp)) return;
-        if (prim === 'START_LIVE_FEED' && isLiveFeedActive(ctx.comp, liveFeedChannel)) return;
+        if (prim === 'START_LIVE_FEED' && (!supportsLiveVideo(ctx.catalogRow) || isLiveFeedActive(ctx.comp, liveFeedChannel))) return;
         if (prim === 'END_LIVE_FEED' && !isLiveFeedActive(ctx.comp, liveFeedChannel)) return;
+        if (prim === 'TELEOP_GOTO' && !supportsTeleop(ctx.catalogRow)) return;
+        if (prim === 'OPTIMIZE') return;
 
         if (prim === 'TELEOP_GOTO') {
             const comp = ctx.comp;
@@ -247,5 +249,18 @@ export function renderPrimitiveRegions(tagId, allowList, ctx) {
     }
 
     return root;
+}
+
+/**
+ * Standalone Automated Actions section (not nested under PRIMITIVES / telemetry).
+ * @param {object} ctx — same context as renderPrimitiveRegions
+ * @returns {HTMLElement|null}
+ */
+export function renderAutomatedActionsBlock(ctx) {
+    if (!supportsOptimization(ctx.catalogRow || ctx.tagId)) return null;
+    if (ctx.placementState === 'STORED') return null;
+    const prims = ctx.catalogRow?.capabilities?.primitives;
+    if (!Array.isArray(prims) || !prims.includes('OPTIMIZE')) return null;
+    return renderAutomatedActionsSection(ctx);
 }
 

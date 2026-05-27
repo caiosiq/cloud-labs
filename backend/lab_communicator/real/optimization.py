@@ -50,7 +50,7 @@ import inspect
 import os
 import re
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 
 if TYPE_CHECKING:
@@ -325,52 +325,41 @@ def load_cobyla_reference_bgr_from_state(
     communicator: "RealLabCommunicator",
     *,
     camera_number: int = 1,
+    sensor_tag_id: str | None = None,
 ) -> Optional[Any]:
-    """Load the COBYLA reference BGR image from ``measurables.camera_image``.
+    """Load the COBYLA reference BGR image from lab or sensor state."""
+    from lab_model.orchestration.cobyla_reference import (
+        cobyla_reference_file_exists,
+        cobyla_reference_path,
+    )
 
-    Phase 9d replaces the legacy side-channel ``_cobyla_reference_bgr``
-    cache. The operator workflow is:
-
-      1. ``RECORD_MEASURABLES`` on the gripper camera (e.g. ``tag_22``).
-      2. ``OPTIMIZE`` with strategy COBYLA and matching ``camera_number``.
-
-    Returns ``None`` when no suitable recorded image exists (strategy
-    may fall back to its own default).
-    """
-    from lab_model.catalog.schema import find_tag_id_for_cam_id
-
-    cam_id = int(camera_number)
-    tag_id = find_tag_id_for_cam_id(communicator.catalog_map or {}, cam_id)
+    tag_id = sensor_tag_id
     if not tag_id:
-        print(
-            f"[REAL LAB] COBYLA: no catalog tag for camera_number={cam_id}"
-        )
-        return None
+        from lab_model.catalog.schema import find_tag_id_for_cam_id
+
+        cam_id = int(camera_number)
+        tag_id = find_tag_id_for_cam_id(communicator.catalog_map or {}, cam_id)
+        if not tag_id:
+            print(
+                f"[REAL LAB] COBYLA: no catalog tag for camera_number={cam_id}"
+            )
+            return None
 
     with communicator._state_lock:
-        entry = (communicator.current_state.get("components") or {}).get(tag_id)
-    if not isinstance(entry, dict):
-        print(f"[REAL LAB] COBYLA: tag {tag_id!r} not in lab state")
-        return None
-
-    ci = (entry.get("measurables") or {}).get("camera_image")
-    if not isinstance(ci, dict):
+        state = communicator.current_state
+    path = cobyla_reference_path(state, tag_id)
+    if not path:
         print(
-            f"[REAL LAB] COBYLA: no measurables.camera_image on {tag_id!r} "
-            f"(run RECORD_MEASURABLES on that camera first)"
+            "[REAL LAB] COBYLA: no lab optimization reference "
+            "(pin via sidebar / PUT /api/lab/optimization-reference)"
         )
         return None
 
-    path = ci.get("path")
-    if not isinstance(path, str) or not path:
-        print(f"[REAL LAB] COBYLA: camera_image.path empty on {tag_id!r}")
+    if not cobyla_reference_file_exists(path):
+        print(f"[REAL LAB] COBYLA: reference file missing: {path}")
         return None
 
     abs_path = os.path.abspath(path)
-    if not os.path.isfile(abs_path):
-        print(f"[REAL LAB] COBYLA: camera image file missing: {abs_path}")
-        return None
-
     try:
         with open(abs_path, "rb") as f:
             data = f.read()
@@ -385,7 +374,7 @@ def load_cobyla_reference_bgr_from_state(
 
     h, w = img.shape[:2]
     print(
-        f"[REAL LAB] COBYLA reference from {tag_id!r} measurables.camera_image "
+        f"[REAL LAB] COBYLA reference from lab.optimization_reference "
         f"({w}x{h} BGR)"
     )
     return img
@@ -426,6 +415,77 @@ def cloudlab_progress_callback(
             return
         pose = communicator._ui_pose_for_placement_tick(tid, target_x, target_y)
         communicator._apply_placement_ui_phase(tid, phase, pose)
+
+    return _cb
+
+
+def cobyla_live_motor_callback(
+    communicator: "RealLabCommunicator",
+    target_tag_id: str,
+    motor_ids: List[Any],
+    live_pose_callback: Callable[..., None],
+):
+    """Build a duck-typed ``progress_callback`` for COBYLA motor steps.
+
+    lab_automation may call with either:
+    - ``(motor_id, delta, iteration=, loss=)`` — discrete stepper jump
+    - ``(motor_positions={...}, iteration=, loss=)`` — absolute snapshot
+    """
+    allowed = {str(m) for m in motor_ids}
+
+    def _current_motor_positions() -> Dict[str, float]:
+        live = communicator.get_teleop_live_pose(target_tag_id) or {}
+        mp = live.get("motor_positions")
+        if isinstance(mp, dict) and mp:
+            return {str(k): float(v) for k, v in mp.items()}
+        with communicator._state_lock:
+            ent = (communicator.current_state.get("components") or {}).get(target_tag_id)
+            if isinstance(ent, dict):
+                from lab_model.domain.component import get_tunables
+
+                nmp = get_tunables(ent).get("nominal_motor_positions") or {}
+                if isinstance(nmp, dict):
+                    return {str(k): float(v) for k, v in nmp.items()}
+        return {str(m): 0.0 for m in motor_ids}
+
+    def _cb(*args, **kwargs) -> None:
+        iteration = kwargs.get("iteration")
+        loss = kwargs.get("loss")
+        motor_positions = kwargs.get("motor_positions")
+        motor_deltas = kwargs.get("motor_deltas")
+
+        if len(args) >= 2 and motor_positions is None and motor_deltas is None:
+            mid = str(args[0])
+            if mid in allowed:
+                motor_deltas = {mid: args[1]}
+            if len(args) >= 3 and iteration is None:
+                iteration = args[2]
+            if len(args) >= 4 and loss is None:
+                loss = args[3]
+        elif len(args) == 1 and isinstance(args[0], dict):
+            motor_positions = args[0]
+
+        pose = communicator.get_teleop_live_pose(target_tag_id) or {}
+        table_pose = {
+            k: pose[k]
+            for k in ("x", "y", "rotation", "z")
+            if k in pose
+        }
+        if motor_deltas and not motor_positions:
+            cur = _current_motor_positions()
+            for mid, delta in motor_deltas.items():
+                key = str(mid)
+                if key not in allowed:
+                    continue
+                cur[key] = cur.get(key, 0.0) + float(delta)
+            motor_positions = cur
+
+        live_pose_callback(
+            pose=table_pose,
+            motor_positions=motor_positions,
+            iteration=iteration,
+            loss=loss,
+        )
 
     return _cb
 

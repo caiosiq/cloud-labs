@@ -93,7 +93,31 @@
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO"
-        ]
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            },
+            "COBYLA": {
+              "label": "COBYLA Alignment",
+              "loss_metrics": [
+                "centroid_match",
+                "reference_match"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_22": {
@@ -135,6 +159,10 @@
             "camera_image": {
               "widget": "ImageViewer",
               "format": "png"
+            },
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
             }
           }
         },
@@ -193,8 +221,26 @@
           "END_TELEOP",
           "TELEOP_GOTO",
           "START_LIVE_FEED",
-          "END_LIVE_FEED"
-        ]
+          "END_LIVE_FEED",
+          "OPTIMIZE"
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_21": {
@@ -236,6 +282,10 @@
             "camera_image": {
               "widget": "ImageViewer",
               "format": "png"
+            },
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
             }
           }
         },
@@ -293,8 +343,26 @@
           "END_TELEOP",
           "TELEOP_GOTO",
           "START_LIVE_FEED",
-          "END_LIVE_FEED"
-        ]
+          "END_LIVE_FEED",
+          "OPTIMIZE"
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_18": {
@@ -390,7 +458,31 @@
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO"
-        ]
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            },
+            "COBYLA": {
+              "label": "COBYLA Alignment",
+              "loss_metrics": [
+                "centroid_match",
+                "reference_match"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_2": {
@@ -414,7 +506,12 @@
               "widget": "TablePose"
             }
           },
-          "measurables": {}
+          "measurables": {
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
+            }
+          }
         },
         "telemetry": {
           "teleop": {
@@ -462,8 +559,26 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_GOTO"
-        ]
+          "TELEOP_GOTO",
+          "OPTIMIZE"
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_10": {
@@ -487,7 +602,12 @@
               "widget": "TablePose"
             }
           },
-          "measurables": {}
+          "measurables": {
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
+            }
+          }
         },
         "telemetry": {
           "teleop": {
@@ -535,8 +655,26 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_GOTO"
-        ]
+          "TELEOP_GOTO",
+          "OPTIMIZE"
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_11": {
@@ -632,7 +770,31 @@
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO"
-        ]
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            },
+            "COBYLA": {
+              "label": "COBYLA Alignment",
+              "loss_metrics": [
+                "centroid_match",
+                "reference_match"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_20": {
@@ -728,7 +890,31 @@
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO"
-        ]
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            },
+            "COBYLA": {
+              "label": "COBYLA Alignment",
+              "loss_metrics": [
+                "centroid_match",
+                "reference_match"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_3": {
@@ -752,7 +938,12 @@
               "widget": "TablePose"
             }
           },
-          "measurables": {}
+          "measurables": {
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
+            }
+          }
         },
         "telemetry": {
           "teleop": {
@@ -800,8 +991,26 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_GOTO"
-        ]
+          "TELEOP_GOTO",
+          "OPTIMIZE"
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_19": {
@@ -826,7 +1035,12 @@
               "widget": "TablePose"
             }
           },
-          "measurables": {}
+          "measurables": {
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f"
+            }
+          }
         },
         "telemetry": {
           "teleop": {
@@ -874,8 +1088,26 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_GOTO"
-        ]
+          "TELEOP_GOTO",
+          "OPTIMIZE"
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_8": {
@@ -971,7 +1203,31 @@
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO"
-        ]
+        ],
+        "supports_optimization": true,
+        "optimize": {
+          "strategies": {
+            "NEWTON": {
+              "label": "Newton Strategy",
+              "loss_metrics": [
+                "centroid_match",
+                "axis_deviation"
+              ]
+            },
+            "COBYLA": {
+              "label": "COBYLA Alignment",
+              "loss_metrics": [
+                "centroid_match",
+                "reference_match"
+              ]
+            }
+          },
+          "sensor_candidates": [
+            "tag_22",
+            "tag_21"
+          ],
+          "default_sensor": "tag_22"
+        }
       }
     },
     "tag_99": {

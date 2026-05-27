@@ -1,4 +1,4 @@
-"""Measurable plugin: ``last_optimization_score`` (motorized / optimizable components)."""
+"""Measurable plugin: ``last_optimization_score`` (optimizable components)."""
 from __future__ import annotations
 
 import random

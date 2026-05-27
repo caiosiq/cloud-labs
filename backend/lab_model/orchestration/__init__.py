@@ -20,6 +20,7 @@ from .table_moves import (
 from .measurables_record import run_record_measurables
 from .optimize import run_optimize_component
 from .scan_rotate import run_scan_rotate_in_place
+from .set_cobyla_reference import run_set_cobyla_reference
 from .teleop import TeleopController
 
 __all__ = [
@@ -40,6 +41,7 @@ __all__ = [
     "run_record_measurables",
     "run_repack_storage_slot",
     "run_scan_rotate_in_place",
+    "run_set_cobyla_reference",
     "run_start_live_feed",
     "run_store_component",
 ]

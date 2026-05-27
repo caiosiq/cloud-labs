@@ -2,13 +2,23 @@
  * Read-only per-component capability viewer (STATE CONTROL / TELEMETRY).
  */
 import { getStatecontrol, getTelemetry, isLiveFeedActive, measurableValue, normalizeCapabilities, tunableValue } from '../component-state.js';
+import { inAirDisplayPose, isHeldTag } from '../component-model.js';
+import { store } from '../state/store.js';
 import { getWidget } from '../widgets/index.js';
 
 const LIVE_VIEW_WIDGETS = new Set(['MJPEGViewer', 'JPEGPoll']);
 const TELEOP_CONTROL_WIDGETS = new Set(['TeleopRz', 'TeleopPose3d']);
 const TELEOP_READOUT_WIDGETS = new Set(['LivePosePoll']);
 
-function valueForField(comp, scope, fieldName) {
+function valueForField(comp, scope, fieldName, tagId) {
+    if (
+        scope === 'tunables'
+        && fieldName === 'nominal_pose'
+        && tagId
+        && isHeldTag(tagId, store.labState)
+    ) {
+        return inAirDisplayPose(tagId, store.labState, comp);
+    }
     if (scope === 'tunables') return tunableValue(comp, fieldName);
     if (scope === 'measurables') return measurableValue(comp, fieldName);
     return null;
@@ -69,7 +79,7 @@ function renderScope(scope, declaration, comp, tagId, hooks, { gateLiveFeed = fa
             return;
         }
         const widget = getWidget(widgetName);
-        const value = valueForField(comp, scope === 'live_feed' ? 'measurables' : scope, fieldName);
+        const value = valueForField(comp, scope === 'live_feed' ? 'measurables' : scope, fieldName, tagId);
         let card;
         try {
             card = widget({
@@ -211,7 +221,7 @@ function renderTelemetryReadOnly(telDecl, comp, tagId, hooks) {
  */
 export function renderReadOnlyPanel(tagId, comp, catalogRow, hooks = {}) {
     const root = document.createElement('div');
-    root.className = 'component-panel component-panel--readonly';
+    root.className = 'component-readonly-panel';
     root.style.display = 'flex';
     root.style.flexDirection = 'column';
     root.style.gap = '12px';

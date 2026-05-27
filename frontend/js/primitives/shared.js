@@ -1,6 +1,7 @@
 /**
  * Shared chrome for per-primitive UI regions in the component popup.
  */
+import { fmtPoseMm, POSE_MM_DECIMALS } from '../widgets/common.js';
 import { syncTeleopLivePosePolls } from '../teleop-session.js';
 
 export function primitiveRegion(primitiveId, title, opts = {}) {
@@ -9,6 +10,7 @@ export function primitiveRegion(primitiveId, title, opts = {}) {
     section.dataset.primitive = primitiveId;
     if (opts.accent === 'teleop') section.classList.add('prim-region--teleop');
     if (opts.accent === 'live-feed') section.classList.add('prim-region--live-feed');
+    if (opts.accent === 'optimize') section.classList.add('prim-region--optimize');
     if (opts.active) section.classList.add('prim-region--session-active');
     section.style.marginTop = '10px';
     section.style.paddingTop = '10px';
@@ -90,8 +92,9 @@ export function coordInput(placeholder, value) {
     inp.type = 'number';
     inp.className = 'coord-input';
     inp.placeholder = placeholder;
+    inp.step = String(10 ** -POSE_MM_DECIMALS);
     if (value !== undefined && value !== null && Number.isFinite(Number(value))) {
-        inp.value = String(value);
+        inp.value = fmtPoseMm(value);
     }
     return inp;
 }

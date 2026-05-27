@@ -311,6 +311,129 @@
             border-left-color: #059669;
         }
 
+        .btn-optimize {
+            background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35);
+            margin-top: 4px;
+        }
+        .btn-optimize:hover { filter: brightness(1.08); }
+
+        .prim-region--optimize .prim-region__title { color: #c4b5fd; }
+        .prim-region--optimize {
+            border-left: 3px solid rgba(168, 85, 247, 0.55);
+            background: rgba(88, 28, 135, 0.08);
+            border-radius: 0 8px 8px 0;
+            padding: 8px 10px 10px 12px;
+            margin-top: 12px;
+        }
+        .opt-hint {
+            font-size: 10px;
+            color: #94a3b8;
+            margin: 0 0 8px 0;
+            line-height: 1.4;
+        }
+        .opt-field { margin-bottom: 6px; }
+        .opt-field__label {
+            display: block;
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 3px;
+        }
+        .opt-field__control {
+            width: 100%;
+            font-size: 11px;
+            padding: 6px 8px;
+            background: #0f1115;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            color: #e2e8f0;
+        }
+
+        .automated-actions-section {
+            margin-top: 16px;
+            padding: 12px 12px 14px;
+            border: 1px solid rgba(168, 85, 247, 0.35);
+            border-radius: 10px;
+            background: linear-gradient(180deg, rgba(88, 28, 135, 0.14) 0%, rgba(15, 17, 21, 0.6) 100%);
+            box-shadow: inset 0 1px 0 rgba(196, 181, 253, 0.08);
+        }
+        .automated-actions-section__header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(168, 85, 247, 0.25);
+        }
+        .automated-actions-section__icon {
+            font-size: 18px;
+            color: #c4b5fd;
+        }
+        .automated-actions-section__title {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #e9d5ff;
+        }
+        .automated-actions-section__body {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .opt-live-readout {
+            margin: 4px 0 6px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: rgba(15, 17, 21, 0.85);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+        .opt-live-readout__grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 6px 10px;
+        }
+        .opt-live-readout__cell {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+        .opt-live-readout__label {
+            font-size: 8px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: #64748b;
+        }
+        .opt-live-readout__value {
+            font-family: ui-monospace, 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: #c4b5fd;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .opt-ref-warning {
+            font-size: 10px;
+            line-height: 1.35;
+            color: #fbbf24;
+            margin: 2px 0 4px;
+            padding: 6px 8px;
+            border-radius: 6px;
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.25);
+        }
+        .btn-optimize:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            filter: none;
+        }
+
         .prim-session-hint {
             font-size: 10px;
             font-style: italic;
@@ -331,6 +454,9 @@
             justify-content: center;
             overflow: hidden;
             gap: 0;
+            /* Keep table canvas above the fixed command-console bar */
+            padding-bottom: 52px;
+            box-sizing: border-box;
         }
 
         #bench-chrome-bar {
@@ -457,17 +583,22 @@
            the Move/Position fields) only respond on the focused panel. The
            panel root remains clickable so one click focuses it; on the next
            click the underlying control activates. */
-        .component-panel:not(.component-panel--focused) button,
-        .component-panel:not(.component-panel--focused) input,
-        .component-panel:not(.component-panel--focused) select,
-        .component-panel:not(.component-panel--focused) textarea {
+        #panel-dock > .component-panel:not(.component-panel--focused) button,
+        #panel-dock > .component-panel:not(.component-panel--focused) input,
+        #panel-dock > .component-panel:not(.component-panel--focused) select,
+        #panel-dock > .component-panel:not(.component-panel--focused) textarea {
             pointer-events: none;
         }
         /* The close-this-panel "X" is allowed even on unfocused panels — being
            able to dismiss a non-focused panel without first focusing it is
            less surprising. */
-        .component-panel:not(.component-panel--focused) .component-panel__close {
+        #panel-dock > .component-panel:not(.component-panel--focused) .component-panel__close {
             pointer-events: auto;
+        }
+        /* Pin-reference and similar cross-panel widget actions stay one-click. */
+        #panel-dock > .component-panel:not(.component-panel--focused) .widget-action-btn {
+            pointer-events: auto;
+            cursor: pointer;
         }
 
         .component-panel .coord-input {
@@ -764,7 +895,7 @@
         </div>
     </div>
 
-    <!-- RIGHT SIDEBAR (Recipes & Monitor) -->
+    <!-- RIGHT SIDEBAR (Optimization preview & monitor) -->
     <div id="sidebar-right">
         <div id="sidebar-right-pinned">
         <!--
@@ -786,97 +917,89 @@
         </div>
 
         <div id="sidebar-right-scroll">
-        <!-- Optimization preview (Phase 9d — replaces deprecated table-cam dock) -->
+        <!-- Optimization preview (payload-driven sidebar) -->
         <style>
             #optimization-feed-section {
-                --optimization-preview-height: 200px;
+                --opt-sidebar-panel-min-h: 120px;
             }
-            #optimization-feed-section .optimization-feed-slot {
-                height: var(--optimization-preview-height);
+            .opt-sidebar-panel {
                 margin: 0 12px 10px;
                 border-radius: 6px;
-                box-sizing: border-box;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                overflow: hidden;
-                position: relative;
-                background: #0f1115;
                 border: 1px solid var(--border-color);
-                transition: border-color 160ms ease, box-shadow 160ms ease;
+                background: #0f1115;
+                overflow: hidden;
             }
-            #optimization-feed-preview .optimization-feed-stage {
-                position: absolute;
-                inset: 0;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 4px;
+            .opt-sidebar-panel__header {
+                padding: 6px 10px;
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+                text-transform: uppercase;
+                color: var(--text-muted);
+                border-bottom: 1px solid #2a2e36;
+            }
+            .opt-sidebar-panel__body {
+                min-height: var(--opt-sidebar-panel-min-h);
+                padding: 8px;
                 box-sizing: border-box;
             }
-            #optimization-feed-preview .optimization-feed-stage img {
-                max-width: 100%;
-                max-height: 100%;
-                object-fit: contain;
-            }
-            #optimization-feed-placeholder {
-                max-width: 100%;
-                padding: 8px 12px;
-                line-height: 1.45;
+            .opt-sidebar-empty {
                 color: var(--text-muted);
-                font-size: 12px;
+                font-size: 11px;
+                line-height: 1.45;
                 text-align: center;
+                padding: 12px 8px;
+            }
+            .opt-sidebar-meta {
+                color: #64748b;
+                font-size: 9px;
+                margin-bottom: 6px;
+            }
+            .opt-sidebar-img {
+                display: block;
+                max-width: 100%;
+                max-height: 160px;
+                margin: 0 auto;
+                object-fit: contain;
+                border-radius: 4px;
+                border: 1px solid #2a2e36;
+                background: #000;
+            }
+            .opt-sidebar-img--feed {
+                max-height: 180px;
+            }
+            #optimization-loss-chart {
+                width: 100%;
+                height: 140px;
+                border-radius: 4px;
+                display: block;
+                background: #0a0c10;
             }
         </style>
         <div id="optimization-feed-section" style="border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
             <div class="section-header">
                 <span>Optimization preview</span>
             </div>
-            <p style="padding: 0 12px 6px; margin: 0; font-size: 10px; color: var(--text-muted); line-height: 1.35;">
-                Camera live view, capture, and COBYLA reference: use each camera tag in the component panel
-                (<code>RECORD_MEASURABLES</code>, telemetry widgets).
+            <p id="optimization-preview-status" style="padding: 0 12px 4px; margin: 0; font-size: 10px; color: var(--text-muted); line-height: 1.35;">
+                Idle — loss curve appears when optimization runs.
             </p>
-            <div id="optimization-feed-preview" class="optimization-feed-slot">
-                <div class="optimization-feed-stage">
-                    <img id="optimization-feed-img" src="" alt="Optimization stream" style="display: none;">
-                    <div id="optimization-feed-placeholder">Runs during OPTIMIZE — per-component optimization stream.</div>
-                </div>
-                <div id="optimization-overlay" style="display: none; position: absolute; bottom: 8px; left: 8px; background: rgba(0, 255, 0, 0.15); border: 1px solid #22c55e; padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #22c55e; font-weight: bold; align-items: center; gap: 4px; backdrop-filter: blur(4px);">
-                    <span class="material-icons-round" style="font-size: 14px;">auto_awesome</span>
-                    <span id="optimization-step-text">OPTIMIZING (Step 0)</span>
-                </div>
-            </div>
-        </div>
+            <div id="optimization-preview-readout-slot" style="padding: 0 12px 8px;"></div>
 
-        <!-- Recipe Editor -->
-        <div style="flex-shrink: 0; display: flex; flex-direction: column;">
-             <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>Recipe Editor</span>
-                <div id="rec-indicator" style="display: none; color: #ef4444; font-weight: bold; font-size: 10px; align-items: center; gap: 4px;">
-                    <span class="material-icons-round" style="font-size: 10px; animation: pulse 1s infinite;">fiber_manual_record</span> REC
+            <div class="opt-sidebar-panel" id="optimization-loss-panel">
+                <div class="opt-sidebar-panel__header">Loss curve</div>
+                <div class="opt-sidebar-panel__body">
+                    <canvas id="optimization-loss-chart" width="320" height="140"></canvas>
                 </div>
-            </div>
-            
-            <div style="padding: 0 16px 8px;">
-                 <input type="text" id="recipe-editor-name" placeholder="Recipe Name..." style="width: 100%; padding: 8px; background: #0f1115; border: 1px solid #2a2e36; border-radius: 6px; color: white; font-size: 12px; margin-bottom: 8px;">
-                 
-                 <div style="display: flex; gap: 8px;">
-                     <button id="record-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 6px;">
-                        <span class="material-icons-round" style="font-size: 14px;">fiber_manual_record</span> Record
-                    </button>
-                    <button id="recipe-editor-save" type="button" class="btn btn-primary btn--sidebar-inline" style="font-size: 11px; padding: 6px;">
-                        <span class="material-icons-round" style="font-size: 14px;">save</span> Save
-                    </button>
-                 </div>
             </div>
 
-            <div id="recipe-steps-container" style="background: rgba(0,0,0,0.2); margin: 0 16px 16px; border: 1px solid #2a2e36; border-radius: 6px; max-height: 280px; overflow-y: auto;">
-                <div style="padding: 20px; text-align: center; color: #64748b; font-size: 12px;">No steps recorded.</div>
+            <div class="opt-sidebar-panel" id="optimization-reference-panel">
+                <div class="opt-sidebar-panel__header">Lab optimization reference</div>
+                <div class="opt-sidebar-panel__body" id="optimization-reference-slot"></div>
             </div>
-            
-            <div class="section-header" style="border-top: 1px solid var(--border-color); padding-top: 12px;">Saved Recipes</div>
-            <div id="recipe-list" style="max-height: 200px; overflow-y: auto; padding: 0 16px 16px;">
-                <!-- List -->
+
+            <div class="opt-sidebar-panel" id="optimization-live-feed-panel" hidden>
+                <div class="opt-sidebar-panel__header">Live feed</div>
+                <div class="opt-sidebar-panel__body" id="optimization-live-feed-slot"></div>
             </div>
         </div>
         </div>
@@ -932,17 +1055,6 @@
 
         @keyframes spin { 100% { transform: rotate(360deg); } }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-        
-        .recipe-step-item {
-            display: flex;
-            align-items: center;
-            padding: 6px 8px;
-            border-bottom: 1px solid #2a2e36;
-            font-size: 11px;
-            color: #e2e8f0;
-        }
-        .recipe-step-item:last-child { border-bottom: none; }
-        .recipe-step-item:hover { background: #181b21; }
         
         .step-num { width: 24px; color: #64748b; font-weight: 600; }
         .step-action { width: 70px; font-weight: 600; color: #3b82f6; }
@@ -1114,6 +1226,5 @@
         </div>
     </div>
     <script type="module" src="/static/js/main.js?v=10"></script>
-    <script type="module" src="/static/js/command-console.js?v=5"></script>
 </body>
 </html>

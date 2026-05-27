@@ -37,12 +37,14 @@ import { log } from './log.js';
 import { showParameterModal } from './modals.js';
 import {
     getHolding,
+    inAirDisplayPose,
     isHoldingState,
     isOffTableComponent,
     isStoredComponent,
     measPose,
 } from '../component-model.js';
 import { componentDataSnapshot } from '../component-state.js';
+import { fmtPoseMm } from '../widgets/common.js';
 import { renderComponentPanel } from './component-popup.js';
 
 let _render = () => {};
@@ -244,12 +246,13 @@ export function updateHoldingBanner() {
         el.style.background = 'rgba(168, 85, 247, 0.12)';
         el.style.borderColor = 'rgba(168, 85, 247, 0.45)';
         el.style.color = '#f3e8ff';
-        const pose = hld.nominal_pose || {};
+        const hld = getHolding(store.labState);
+        const pose = inAirDisplayPose(hld.tag_id, store.labState) || hld.nominal_pose || {};
         const poseStr = [
-            Number.isFinite(Number(pose.x)) ? `x=${Number(pose.x).toFixed(1)}` : null,
-            Number.isFinite(Number(pose.y)) ? `y=${Number(pose.y).toFixed(1)}` : null,
-            Number.isFinite(Number(pose.rotation)) ? `rot=${Number(pose.rotation).toFixed(1)}°` : null,
-            Number.isFinite(Number(pose.z)) ? `z=${Number(pose.z).toFixed(1)}` : null,
+            Number.isFinite(Number(pose.x)) ? `x=${fmtPoseMm(pose.x)}` : null,
+            Number.isFinite(Number(pose.y)) ? `y=${fmtPoseMm(pose.y)}` : null,
+            Number.isFinite(Number(pose.rotation)) ? `rot=${fmtPoseMm(pose.rotation)}°` : null,
+            Number.isFinite(Number(pose.z)) ? `z=${fmtPoseMm(pose.z)}` : null,
         ].filter(Boolean).join(' ');
         el.innerHTML =
             '<div style="display:flex; align-items:flex-start; gap:8px;">' +

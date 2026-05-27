@@ -46,7 +46,10 @@ function pushHistoryLine(historyList, line) {
 /**
  * @param {object} deps
  */
+let _commandConsoleReady = false;
+
 export function initCommandConsole(deps) {
+    if (_commandConsoleReady) return;
     const { log } = deps;
     const root = document.getElementById('command-console-root');
     const panel = document.getElementById('command-console-panel');
@@ -256,11 +259,5 @@ export function initCommandConsole(deps) {
     });
 
     refreshHint();
-}
-
-const deps = typeof window !== 'undefined' ? window.__commandConsoleDeps : null;
-if (deps) {
-    initCommandConsole(deps);
-} else {
-    console.warn('[Command Console] window.__commandConsoleDeps missing — ensure js/main.js (app bundle) runs before this module.');
+    _commandConsoleReady = true;
 }

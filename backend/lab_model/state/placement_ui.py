@@ -34,9 +34,9 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from lab_model.domain.component import (
     PRESENCE_BREADBOARD,
-    default_measurables,
-    default_tunables,
+    measurables_bucket,
     set_presence_and_storage,
+    tunables_bucket,
 )
 
 
@@ -77,7 +77,7 @@ def ui_pose_for_placement_tick(
     """
     with state_lock:
         comp_entry = (current_state.get("components") or {}).get(tag_id)
-        pose = dict(((comp_entry or {}).get("measurables") or {}).get("pose") or {})
+        pose = dict((measurables_bucket(comp_entry) if comp_entry else {}).get("pose") or {})
     if target_x is not None and target_y is not None:
         nx, ny = xy_robot_to_lab(float(target_x), float(target_y))
     else:
@@ -124,8 +124,8 @@ def apply_placement_ui_phase(
         comp_entry = (current_state.get("components") or {}).get(tag_id)
         if not comp_entry:
             return
-        tun = comp_entry.setdefault("tunables", default_tunables())
-        meas = comp_entry.setdefault("measurables", default_measurables())
+        tun = tunables_bucket(comp_entry)
+        meas = measurables_bucket(comp_entry)
         if phase == "ghost":
             tun["nominal_pose"] = dict(pose)
             tun["placement"] = {"mode": "NEWTON"}

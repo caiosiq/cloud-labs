@@ -35,6 +35,7 @@ from .schemas import (
     RepackStorageBody,
     ScanBody,
     ScanRotateInPlaceBody,
+    SetCobylaReferenceBody,
     StartTeleopBody,
     StoreComponentBody,
     StartLiveFeedBody,
@@ -84,6 +85,7 @@ ValidatedCommand = Union[
     PlaceFromHoverBody,
     ScanRotateInPlaceBody,
     ConfirmHoldingTagBody,
+    SetCobylaReferenceBody,
     StartTeleopBody,
     EndTeleopBody,
     StartLiveFeedBody,
@@ -95,14 +97,17 @@ ValidatedCommand = Union[
 def fetch_read_primitive(
     lab: LabCommunicator,
     primitive_id: PrimitiveId,
-    tag_id: str,
+    tag_id: str | None = None,
 ) -> Dict[str, Any]:
     """
-    Read-only primitives: tunables or measurables for one tag.
-    Validates ``tag_id`` via ``TagQuery``. Used by GET routes (not ``POST /api/command``).
+    Read-only primitives. Per-tag reads validate ``tag_id`` via ``TagQuery``.
+    Lab-wide reads (``GET_STORAGE``) ignore ``tag_id``.
+    Used by GET routes (not ``POST /api/command``).
     """
     if primitive_id not in READ_PRIMITIVE_IDS:
         raise ValueError(f"Not a read primitive: {primitive_id!r}")
+    if primitive_id == PrimitiveId.GET_STORAGE:
+        return lab.return_stored_tag_ids()
     tq = TagQuery.model_validate({"tag_id": tag_id})
     tid = tq.tag_id
     if primitive_id == PrimitiveId.GET_TUNABLES:
@@ -196,6 +201,9 @@ async def _invoke_atomic(
     elif isinstance(cmd, RecordMeasurablesBody):
         _log_primitive("RECORD_MEASURABLES", cmd.target_id, macro_parent=macro_parent)
         await lab.record_measurables_for_tag(cmd.target_id)
+    elif isinstance(cmd, SetCobylaReferenceBody):
+        _log_primitive("SET_COBYLA_REFERENCE", cmd.target_id, macro_parent=macro_parent)
+        await lab.set_cobyla_reference(cmd.target_id)
     elif isinstance(cmd, ScanBody):
         _log_primitive("SCAN", cmd.target_id, macro_parent=macro_parent)
         _LOG.warning(

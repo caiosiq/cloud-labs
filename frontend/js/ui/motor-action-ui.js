@@ -169,7 +169,7 @@ function parseActionKey(key) {
 
 function isLabSettled() {
     const labStatus = store.labState?.system_status || 'IDLE';
-    return labStatus !== 'BUSY' && labStatus !== 'OPTIMIZING' && labStatus !== 'TELEOP';
+    return labStatus !== 'BUSY' && labStatus !== 'TELEOP';
 }
 
 function scheduleDoneClear(key, kind, tagId, motorId) {

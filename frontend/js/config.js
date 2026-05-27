@@ -2,6 +2,9 @@
 export const CANVAS_WIDTH = 1000;
 export const CANVAS_HEIGHT = 700;
 
+/** Shift table content upward on canvas (px) so the bottom command console does not cover parts. */
+export const CANVAS_VIEW_OFFSET_Y_PX = -45;
+
 export let LAB_X_MIN = -500;
 export let LAB_X_MAX = 500;
 export let LAB_Y_MIN = -500;
@@ -13,7 +16,10 @@ export let DANGER_RADIUS_MM = 90;
 export let LAB_WIDTH_MM = LAB_X_MAX - LAB_X_MIN;
 export let LAB_HEIGHT_MM = LAB_Y_MAX - LAB_Y_MIN;
 export let LAB_SCALE = Math.min(CANVAS_WIDTH / LAB_WIDTH_MM, CANVAS_HEIGHT / LAB_HEIGHT_MM);
-export let LAB_CENTER_PX = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
+export let LAB_CENTER_PX = {
+    x: CANVAS_WIDTH / 2,
+    y: CANVAS_HEIGHT / 2 + CANVAS_VIEW_OFFSET_Y_PX,
+};
 
 export const QUARTER_INCH_MM = 25.4 / 4;
 export let BREADBOARD_GRID_FINE_TUNE_X_MM = -1.05;
@@ -37,7 +43,10 @@ function recomputeDerived() {
     LAB_WIDTH_MM = LAB_X_MAX - LAB_X_MIN;
     LAB_HEIGHT_MM = LAB_Y_MAX - LAB_Y_MIN;
     LAB_SCALE = Math.min(CANVAS_WIDTH / LAB_WIDTH_MM, CANVAS_HEIGHT / LAB_HEIGHT_MM);
-    LAB_CENTER_PX = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
+    LAB_CENTER_PX = {
+        x: CANVAS_WIDTH / 2,
+        y: CANVAS_HEIGHT / 2 + CANVAS_VIEW_OFFSET_Y_PX,
+    };
 }
 
 /**

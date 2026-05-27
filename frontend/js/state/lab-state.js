@@ -32,6 +32,12 @@ import {
 } from '../component-model.js';
 import { isTeleopReady, componentDataSnapshot } from '../component-state.js';
 import { syncTeleopLivePosePolls } from '../teleop-session.js';
+import { syncOptimizeLivePosePolls, stopOptimizeTelemetryWatch, isSystemOptimizing } from '../optimize-session.js';
+import { clearOptimizeReadouts } from '../optimize-live-readout.js';
+import {
+    syncLabReferenceDisplay,
+    finalizeOptimizeSession,
+} from '../ui/optimization-sidebar.js';
 import { showErrorModal } from '../ui/modals.js';
 import { maybeTriggerSessionReconciliation } from '../ui/session-reconciliation.js';
 import { fetchLayoutConflicts } from '../api/fetchers.js';
@@ -48,46 +54,6 @@ let _deps = {
 };
 
 let _pollTimerId = null;
-
-/**
- * Resolve which component tag is currently being optimized.
- *
- * Primary source: ``labState.optimization_target_id`` (set by the
- * backend during ``OPTIMIZE`` — Phase 9b). Fallback: scan
- * ``store.pendingActions`` for an in-flight ``OPTIMIZE`` command.
- *
- * @param {object | null | undefined} labState
- * @returns {string | null}
- */
-function resolveOptimizationTargetId(labState) {
-    if (!labState || typeof labState !== 'object') return null;
-    const direct = labState.optimization_target_id;
-    if (typeof direct === 'string' && direct) return direct;
-    for (const [tag, action] of store.pendingActions) {
-        if (action === 'OPTIMIZE') return tag;
-    }
-    return null;
-}
-
-function resetOptimizationFeedPreview() {
-    const preview = document.getElementById('optimization-feed-preview');
-    const img = document.getElementById('optimization-feed-img');
-    const placeholder = document.getElementById('optimization-feed-placeholder');
-    if (preview) {
-        preview.style.border = '1px solid var(--border-color)';
-        preview.style.backgroundColor = '#0f1115';
-        preview.style.boxShadow = '';
-    }
-    if (img) {
-        img.src = '';
-        img.style.display = 'none';
-    }
-    if (placeholder) {
-        placeholder.style.display = 'flex';
-        placeholder.innerHTML =
-            'Runs during OPTIMIZE — per-component optimization stream.';
-    }
-}
 
 /**
  * @param {{
@@ -125,6 +91,8 @@ export async function fetchLabState() {
         }
 
         store.labState = await response.json();
+        const prevStatus = store.previousSystemStatus;
+        const curStatus = store.labState.system_status;
         syncTeleopLivePosePolls();
         console.log(`[${new Date().toLocaleTimeString()}] Received Lab State successfully.`);
 
@@ -180,20 +148,6 @@ export async function fetchLabState() {
                             store.ghostState[name].rotation = 0;
                         }
                     }
-                    else if (store.labState.system_status === 'OPTIMIZING' && !store.isDragging && hasPose) {
-                        store.ghostState[name] = { ...dp };
-                        if (typeof store.ghostState[name].rotation !== 'number') {
-                            store.ghostState[name].rotation = 0;
-                        }
-                    }
-                    // HOLDING: only the held tag's ghost follows live intent (incl. z) —
-                    // every other component stays on the user's last committed intent.
-                    //
-                    // IMPORTANT: we deliberately do NOT overwrite the panel x/y/rot/z input
-                    // fields here. Those represent the operator's *intent* for the next
-                    // HOVER / PLACE_FROM_HOVER and must stay editable. Their initial values
-                    // are set once by `renderInAirControlsForContext` when the HOLDING panel
-                    // is rebuilt.
                     else if (
                         isHoldingState(store.labState) &&
                         isHeldTag(name, store.labState) &&
@@ -227,7 +181,7 @@ export async function fetchLabState() {
         // top-level (system_status, holding) snapshot changes. The latter is
         // what flips IDLE ↔ HOLDING so the Pick / Hover / Place buttons
         // appear/disappear without the operator re-clicking the sidebar card.
-        // Transient BUSY states are ignored so panels don't briefly revert
+        // Transient BUSY / OPTIMIZING states are ignored so panels don't briefly revert
         // mid-command — the pending overlay on canvas signals "in flight".
         //
         // Multi-panel: each open tag has its own snapshot bag in
@@ -246,11 +200,16 @@ export async function fetchLabState() {
             const statusChanged =
                 snap.status != null &&
                 snap.status !== statusKey &&
-                rawStatus !== 'BUSY';
+                rawStatus !== 'BUSY' &&
+                rawStatus !== 'OPTIMIZING';
             const dataKey = componentDataSnapshot(compCtx);
             const dataChanged =
                 snap.data != null && dataKey != null && snap.data !== dataKey;
-            if (placementChanged || statusChanged || dataChanged) {
+            const optimizingThisTag =
+                store.optimizeActiveTarget === tag
+                && (isSystemOptimizing(rawStatus) || store.pendingCommands.has(tag));
+            const skipDataRebuild = dataChanged && optimizingThisTag;
+            if ((placementChanged || statusChanged || dataChanged) && !skipDataRebuild) {
                 if (placementChanged && isOnTableComponent(compCtx) && !store.isDragging) {
                     const dp = drawPose(compCtx);
                     store.ghostState[tag] = { ...dp };
@@ -265,16 +224,18 @@ export async function fetchLabState() {
             }
         });
 
-        // Clear in-flight overlays once the system has settled into any stable (non-BUSY,
-        // non-OPTIMIZING) state. PICK_COMPONENT and HOVER land in HOLDING (not IDLE), so gating
-        // this on IDLE only would leave the amber/purple "PICKING UP..." / "HOVERING..." label
-        // forever and prevent render() from swapping in the steady-state "HOLDING" overlay.
-        const stableStatus =
-            store.labState.system_status === 'IDLE' ||
-            store.labState.system_status === 'HOLDING';
-        if (stableStatus) {
+        // Clear in-flight overlays once the system has settled — but preserve
+        // pending state for OPTIMIZE during the IDLE gap before the backend
+        // enters BUSY (async command accept).
+        const stableStatus = curStatus === 'IDLE' || curStatus === 'HOLDING';
+        const optimizeStartupGap =
+            store.optimizeActiveTarget
+            && curStatus === 'IDLE'
+            && !isSystemOptimizing(prevStatus);
+        if (stableStatus && !optimizeStartupGap) {
             store.pendingCommands.clear();
             store.pendingActions.clear();
+            store.pendingInAirPose = {};
         }
         syncMotorActionStatuses();
         // Per-tag snapshots are now written by ``updateContextPanel(tag)`` at
@@ -283,78 +244,33 @@ export async function fetchLabState() {
         // each panel's snapshot is initialized when its panel mounts and
         // refreshed when its panel rebuilds.
 
-        store.previousSystemStatus = store.labState.system_status;
+        store.previousSystemStatus = curStatus;
         store.previousTeleopReadyTags = teleopReadyNow;
-        if (store.labState.system_status === 'IDLE') {
-            if (store.isOptimizing) {
-                store.isOptimizing = false;
-                log('Optimization sequence complete.', 'info');
+        syncOptimizeLivePosePolls();
+        syncLabReferenceDisplay();
 
-                const optOverlay = document.getElementById('optimization-overlay');
-                if (optOverlay) optOverlay.style.display = 'none';
-                store.isOptimizingFeedActive = false;
-
-                resetOptimizationFeedPreview();
-            }
-        } else if (store.labState.system_status === 'OPTIMIZING') {
-            store.isOptimizing = true;
-
-            const optOverlay = document.getElementById('optimization-overlay');
-            const optStepText = document.getElementById('optimization-step-text');
-            if (optOverlay && optStepText) {
-                optOverlay.style.display = 'flex';
-                const runBit = store.labState.optimization_run_dir
-                    ? ` · ${store.labState.optimization_run_dir}`
-                    : '';
-                optStepText.innerText = `OPTIMIZING (Step ${store.labState.optimization_step || 0})${runBit}`;
-            }
-
-            const feedPreview = document.getElementById('optimization-feed-preview');
-            if (feedPreview) {
-                feedPreview.style.border = '2px solid #22c55e';
-                feedPreview.style.backgroundColor = '#0b2a19';
-                feedPreview.style.boxShadow = '0 0 0 3px rgba(34,197,94,0.25)';
-            }
-
-            if (!store.isOptimizingFeedActive) {
-                store.isOptimizingFeedActive = true;
-                const feedImg = document.getElementById('optimization-feed-img');
-                const feedPlaceholder = document.getElementById('optimization-feed-placeholder');
-                const optTarget = resolveOptimizationTargetId(store.labState);
-
-                if (feedImg && optTarget) {
-                    feedImg.src = '';
-                    feedImg.style.display = 'none';
-                    if (feedPlaceholder) {
-                        feedPlaceholder.style.display = 'flex';
-                        const runBit2 = store.labState.optimization_run_dir
-                            ? `<br><span style="font-size:9px;opacity:0.85">${store.labState.optimization_run_dir}</span>`
-                            : '';
-                        feedPlaceholder.innerHTML = `<span class="material-icons-round" style="font-size: 18px; margin-bottom: 2px;">auto_awesome</span><div>Optimizing... (Step ${store.labState.optimization_step || 0})${runBit2}</div>`;
-                    }
-
-                    feedImg.src =
-                        `/api/components/${encodeURIComponent(optTarget)}/telemetry/optimization-stream?t=${Date.now()}`;
-                    feedImg.style.display = 'block';
-                    if (feedPlaceholder) feedPlaceholder.style.display = 'none';
-                } else if (feedImg && !optTarget) {
-                    console.warn(
-                        '[UI] OPTIMIZING but optimization_target_id unknown — skipping feed swap',
-                    );
-                }
-            }
-
-            // Mock-only: synthetic beam-intensity values so the optimization plot has something
-            // to draw before the real lab metric exists.
-            if (store.labState.lab_mode === 'MOCK' && Math.random() > 0.5) {
-                store.optimizationData.push({
-                    step: store.optimizationData.length,
-                    value: Math.min(1.0, 0.2 + store.optimizationData.length * 0.05 + Math.random() * 0.1),
-                });
-            }
+        const optimizeJustFinished =
+            isSystemOptimizing(prevStatus)
+            && curStatus === 'IDLE'
+            && store.optimizeActiveTarget;
+        if (optimizeJustFinished) {
+            finalizeOptimizeSession();
+            store.optimizeActiveTarget = null;
+            store.optimizeActiveSensor = null;
+            store.optimizeRunningStrategy = null;
+            stopOptimizeTelemetryWatch();
+            clearOptimizeReadouts();
+        } else if (curStatus === 'IDLE' && !store.optimizeActiveTarget && !store.optimizeSession) {
+            stopOptimizeTelemetryWatch();
         }
 
-        if (store.labState.system_status === 'IDLE') {
+        // One-shot boot restore: first stable IDLE after page load (not after OPTIMIZE).
+        if (
+            curStatus === 'IDLE'
+            && !optimizeStartupGap
+            && !store.optimizeActiveTarget
+            && !store.optimizeSession
+        ) {
             void maybeTriggerSessionReconciliation();
         }
 

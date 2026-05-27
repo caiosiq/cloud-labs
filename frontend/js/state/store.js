@@ -21,6 +21,10 @@ export const store = {
      * cleared whenever the tag is removed from ``pendingCommands``.
      */
     pendingActions: new Map(),
+    /** Commanded in-air pose while HOVER / PLACE_FROM_HOVER is pending (BUSY). */
+    pendingInAirPose: {},
+    /** Pre-store breadboard pose (session cache until backend persists ``last_breadboard_pose``). */
+    lastBreadboardPose: {},
     /**
      * Multi-panel state.
      *
@@ -61,9 +65,19 @@ export const store = {
     /** Tags that were teleop-ready on the previous lab-state poll (ghost sync on exit). */
     previousTeleopReadyTags: new Set(),
     forceGhostSync: false,
-    isOptimizing: false,
-    isOptimizingFeedActive: false,
-    optimizationData: [],
+    /** Tag under autonomous OPTIMIZE (live pose poll target). */
+    optimizeActiveTarget: null,
+    /** Sensor camera tag selected for the active OPTIMIZE run. */
+    optimizeActiveSensor: null,
+    /** Loss samples `{ iteration, loss }` for sidebar chart. */
+    optimizeLossSeries: [],
+    /** Active OPTIMIZE session descriptor (payload-driven sidebar). */
+    optimizeSession: null,
+    optimizeTick: null,
+    /** Per-target Automated Actions form prefs. */
+    optimizeFormPrefs: {},
+    /** Strategy label shown while an OPTIMIZE run is in flight. */
+    optimizeRunningStrategy: null,
     isRecording: false,
     currentRecipeSteps: [],
     /**

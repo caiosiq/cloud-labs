@@ -736,7 +736,7 @@ class RealLabCommunicator(LabCommunicator):
         target_id: str,
         strategy_name: str,
         params: Dict[str, Any],
-        progress_callback: "Callable[..., None]",
+        live_pose_callback: "Callable[..., None]",
     ) -> Optional[Dict[str, Any]]:
         from lab_communicator.real.primitives import primitive_optimize_component
         return await primitive_optimize_component(
@@ -744,7 +744,7 @@ class RealLabCommunicator(LabCommunicator):
             target_id=target_id,
             strategy_name=strategy_name,
             params=params,
-            progress_callback=progress_callback,
+            live_pose_callback=live_pose_callback,
         )
 
     def _primitive_finalize_optimization_run(self) -> None:

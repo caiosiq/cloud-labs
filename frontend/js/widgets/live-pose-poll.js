@@ -7,7 +7,7 @@
  * while mounted so the readout tracks high-rate updates without rebuilding
  * the whole context panel.
  */
-import { widgetCard, widgetTitle, row, fmtNum, nullPlaceholder, resolveTokens } from './common.js';
+import { widgetCard, widgetTitle, row, fmtPoseMm, nullPlaceholder, resolveTokens } from './common.js';
 import { isTeleopReady } from '../component-state.js';
 import { store } from '../state/store.js';
 import { getTeleopCurrentPose } from '../teleop-pose.js';
@@ -29,11 +29,11 @@ function paintPose(card, tagId, descriptor) {
         return;
     }
 
-    body.appendChild(row('x (mm)', fmtNum(pose.x, 1)));
-    body.appendChild(row('y (mm)', fmtNum(pose.y, 1)));
-    body.appendChild(row('rotation (°)', fmtNum(pose.rotation || 0, 1)));
+    body.appendChild(row('x (mm)', fmtPoseMm(pose.x)));
+    body.appendChild(row('y (mm)', fmtPoseMm(pose.y)));
+    body.appendChild(row('rotation (°)', fmtPoseMm(pose.rotation || 0)));
     if (Number.isFinite(Number(pose.z))) {
-        body.appendChild(row('z (mm)', fmtNum(pose.z, 1)));
+        body.appendChild(row('z (mm)', fmtPoseMm(pose.z)));
     }
 
     const meta = document.createElement('div');

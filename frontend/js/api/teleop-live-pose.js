@@ -34,9 +34,12 @@ export function startTeleopLivePosePoll(tagId, opts = {}) {
             const body = await r.json();
             const pose = body && body.pose;
             if (!pose || typeof pose !== 'object') return;
-            store.teleopLivePose[tagId] = pose;
+            const merged = { ...pose };
+            if (body.iteration != null) merged.iteration = body.iteration;
+            if (body.loss != null) merged.loss = body.loss;
+            store.teleopLivePose[tagId] = merged;
             if (typeof opts.onUpdate === 'function') {
-                opts.onUpdate(pose);
+                opts.onUpdate(merged);
             }
             if (typeof store._teleopLivePoseRender === 'function') {
                 store._teleopLivePoseRender(tagId);

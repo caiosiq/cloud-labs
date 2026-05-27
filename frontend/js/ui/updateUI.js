@@ -17,7 +17,6 @@ import {
     isChromeComponent,
     isHeldTag,
     isOnTableComponent,
-    isOptimizedPlacement,
     isStoredComponent,
 } from '../component-model.js';
 import { refreshBenchChromeBar } from './bench-chrome-bar.js';
@@ -58,14 +57,16 @@ export function updateUI() {
     let badgeStyle = '';
     let badgeSuffix = '';
 
-    if (status === 'BUSY') {
+    if (status === 'BUSY' || status === 'OPTIMIZING') {
         badgeClass = '';
-        badgeColor = 'inventory';
-        badgeStyle = 'background-color: #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);';
-    } else if (status === 'OPTIMIZING') {
-        badgeClass = '';
-        badgeColor = 'placed';
-        badgeStyle = 'background-color: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);';
+        if (store.optimizeActiveTarget || status === 'OPTIMIZING') {
+            badgeColor = '';
+            badgeStyle = 'background-color: #7c3aed; box-shadow: 0 0 8px rgba(124, 58, 237, 0.45);';
+            badgeSuffix = store.optimizeActiveTarget ? ` · ${store.optimizeActiveTarget}` : '';
+        } else {
+            badgeColor = 'inventory';
+            badgeStyle = 'background-color: #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);';
+        }
     } else if (status === 'HOLDING') {
         badgeClass = '';
         badgeColor = '';
@@ -83,7 +84,11 @@ export function updateUI() {
 
     if (statusBadge) {
         statusBadge.className = `system-status ${badgeClass}`;
-        statusBadge.innerHTML = `<span class="status-dot ${badgeColor}" style="${badgeStyle}"></span> ${status}${badgeSuffix}`;
+        const displayStatus =
+            status === 'OPTIMIZING' || (status === 'BUSY' && store.optimizeActiveTarget)
+                ? 'OPTIMIZING'
+                : status;
+        statusBadge.innerHTML = `<span class="status-dot ${badgeColor}" style="${badgeStyle}"></span> ${displayStatus}${badgeSuffix}`;
     }
 
     _deps.updateHoldingBanner();
@@ -133,19 +138,12 @@ export function updateUI() {
 
         // Sidebar status-dot priority ladder (highest wins):
         //   1. HOLDING (this tag is in the gripper right now)   — purple
-        //   2. OPTIMIZED (current placement came from a strategy)— green + gold halo
-        //   3. STORED (Q3 storage region)                       — indigo
-        //   4. PLACED on breadboard                             — green
-        //   5. OFF_TABLE inventory                              — blue
-        // Note: `hasOptimizationOutcome` alone is NOT enough for "optimized" styling —
-        // `isOptimizedPlacement` also requires the current `placement.mode` to be a strategy name
-        // (i.e. the part hasn't been manually re-moved since the optimizer ran). Hovering tooltip
-        // shows the raw placement label (MANUAL / COBYLA / HOVER / etc.) for detail.
+        //   2. STORED (Q3 storage region)                       — indigo
+        //   3. PLACED on breadboard                             — green
+        //   4. OFF_TABLE inventory                              — blue
         let statusDot;
         if (isHeldTag(name, store.labState)) {
             statusDot = `<div class="status-dot holding" title="Held by gripper"></div>`;
-        } else if (isOptimizedPlacement(comp)) {
-            statusDot = `<div class="status-dot optimized" title="Optimized (${_deps.placementUiLabel(comp)})"></div>`;
         } else if (isStoredComponent(comp)) {
             statusDot = `<div class="status-dot stored" title="Stored (Q3)"></div>`;
         } else if (chrome) {

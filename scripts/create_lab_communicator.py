@@ -244,7 +244,7 @@ class {class_name}(LabCommunicator):
         target_id: str,
         strategy_name: str,
         params: Dict[str, Any],
-        progress_callback: Callable[..., None],
+        live_pose_callback: Callable[..., None],
     ):
         from lab_communicator.{module}.primitives import primitive_optimize_component
         return await primitive_optimize_component(
@@ -252,7 +252,7 @@ class {class_name}(LabCommunicator):
             target_id=target_id,
             strategy_name=strategy_name,
             params=params,
-            progress_callback=progress_callback,
+            live_pose_callback=live_pose_callback,
         )
 
     async def _primitive_add_component_to_state(
@@ -382,18 +382,20 @@ async def primitive_optimize_component(
     target_id: str,
     strategy_name: str,  # noqa: ARG001
     params: Dict[str, Any],  # noqa: ARG001
-    progress_callback: Callable[..., None],
+    live_pose_callback: Callable[..., None],
 ):
-    cur = (communicator.return_measurables_for_tag(target_id) or {{}}).get("pose") or {{}}
-    base_x = float(cur.get("x", 0.0))
-    base_y = float(cur.get("y", 0.0))
-    base_rot = float(cur.get("rotation", 0.0))
+    tun = communicator.return_tunables_for_tag(target_id)
+    np = tun.get("nominal_pose") or {{}}
+    base_x = float(np.get("x", 0.0))
+    base_y = float(np.get("y", 0.0))
+    base_rot = float(np.get("rotation", 0.0))
     for k in range(1, 4):
         await asyncio.sleep(0.05)
-        progress_callback(step=k)
+        frac = k / 3.0
+        live_pose_callback(pose={{"x": base_x, "y": base_y, "rotation": base_rot + frac}})
     return {{
         "score": 0.5,
-        "final_pose": {{"x": base_x, "y": base_y, "rotation": base_rot}},
+        "final_pose": {{"x": base_x, "y": base_y, "rotation": base_rot + 1.0}},
     }}
 
 

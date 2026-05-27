@@ -1,30 +1,18 @@
 /**
- * Context-aware Tab completions for the Command Console (small grammar).
- * @see coding_on_the_ui.md
+ * Context-aware Tab completions for the Command Console.
  */
 
-import { COBYLA_DEFAULT_OBJECTIVE, NEWTON_DEFAULTS } from './command-parse.js';
-import { isOnTableComponent } from './component-model.js';
-
-const VERBS = [
-    '?',
-    'help',
-    'refresh',
-    'tunables',
-    'get_tunables',
-    'measurables',
-    'get_measurables',
-    'record',
-    'record_measurables',
-    'move',
-    'motor',
-    'motorhome',
-    'motorset0',
-    'optimize',
-    'json',
-];
-const STRATEGIES = ['NEWTON', 'COBYLA'];
-const AXES = ['x', 'y'];
+import {
+    CONSOLE_VERBS,
+    LOSS_METRICS_BY_STRATEGY,
+    OPTIMIZE_STRATEGIES,
+    normalizeVerb,
+} from './command-grammar.js';
+import { isOnTableComponent, isStoredComponent } from './component-model.js';
+import {
+    defaultOptimizeSensor,
+    listOptimizeSensorCandidates,
+} from './optimize-session.js';
 
 /**
  * @param {string[]} list
@@ -40,11 +28,18 @@ function placedTagIds(deps) {
     const ls = deps.getLabState && deps.getLabState();
     if (!ls || !ls.components) return [];
     return Object.keys(ls.components)
-        .filter((id) => isOnTableComponent(ls.components[id]))
+        .filter((id) => isOnTableComponent(ls.components[id]) && !isStoredComponent(ls.components[id]))
         .sort();
 }
 
-/** All component keys in current lab state (for tunables/measurables queries). */
+function storedTagIds(deps) {
+    const ls = deps.getLabState && deps.getLabState();
+    if (!ls || !ls.components) return [];
+    return Object.keys(ls.components)
+        .filter((id) => isStoredComponent(ls.components[id]))
+        .sort();
+}
+
 function allTagIds(deps) {
     const ls = deps.getLabState && deps.getLabState();
     if (!ls || !ls.components) return [];
@@ -57,8 +52,78 @@ function motorIdStrings(deps, tagId) {
     return entry.motor_ids.map(String);
 }
 
+function optimizeSensorIds(deps, tagId) {
+    try {
+        return listOptimizeSensorCandidates(tagId);
+    } catch {
+        return [];
+    }
+}
+
+function lossMetricsForStrategy(strategy) {
+    return LOSS_METRICS_BY_STRATEGY[strategy] || [];
+}
+
+function cameraImageTagIds(deps) {
+    const ls = deps.getLabState && deps.getLabState();
+    if (!ls || !ls.components) return [];
+    return Object.keys(ls.components)
+        .filter((id) => {
+            const ci = ls.components[id]?.measurables?.camera_image;
+            return ci && typeof ci === 'object' && ci.path;
+        })
+        .sort();
+}
+
+/** Verbs that take a single tag argument with no further tokens. */
+const TAG_ONLY_VERBS = new Set([
+    'store',
+    'repack',
+    'recenter',
+    'affirm',
+    'pick',
+    'confirmhold',
+    'confirmholdingtag',
+    'startteleop',
+    'endteleop',
+]);
+
+const STORED_ONLY_TAG_VERBS = new Set(['repack', 'recenter', 'affirm']);
+const PLACED_ONLY_TAG_VERBS = new Set(['store', 'pick', 'confirmhold', 'confirmholdingtag']);
+const CAMERA_REFERENCE_TAG_VERBS = new Set(['setcobylareference']);
+
+/** Verbs that complete tag ids from all components. */
+const ALL_TAG_VERBS = new Set([
+    'tunables',
+    'gettunables',
+    'measurables',
+    'getmeasurables',
+    'record',
+    'recordmeasurables',
+    'setexposure',
+    'startlivefeed',
+    'endlivefeed',
+    'teleopgoto',
+]);
+
+/** Verbs that complete tag ids from placed (on-table, not stored) components. */
+const PLACED_TAG_VERBS = new Set([
+    'move',
+    'motor',
+    'motorhome',
+    'motorset0',
+    'setmotor',
+    'optimize',
+    'hover',
+    'placehover',
+    'placefromhover',
+    'scanrotate',
+]);
+
+/** Verbs that complete tag ids from stored components. */
+const STORED_TAG_VERBS = new Set(['placefromstorage', 'placefromstore']);
+
 /**
- * Parse the line fragment before the caret into tokens and the word being completed.
  * @param {string} before
  */
 export function parsePartialLine(before) {
@@ -81,7 +146,6 @@ export function parsePartialLine(before) {
 }
 
 /**
- * Character range in `line` that Tab replaces: [start, end) (end === caret before replace).
  * @param {string} line
  * @param {number} caret
  * @returns {{ start: number, end: number }}
@@ -93,8 +157,52 @@ export function getCompletionSlot(line, caret) {
     return { start, end: caret };
 }
 
+function completeTagArg(tags, tokens, endsWithSpace, current) {
+    if (tokens.length === 1 && endsWithSpace) return tags;
+    if (tokens.length === 2 && !endsWithSpace) return filterPrefix(tags, current);
+    return [];
+}
+
+function completeMotorId(deps, tokens, endsWithSpace, current) {
+    if (tokens.length === 2 && endsWithSpace) {
+        const mids = motorIdStrings(deps, tokens[1]);
+        return mids.length ? mids : [];
+    }
+    if (tokens.length === 3 && !endsWithSpace) {
+        return filterPrefix(motorIdStrings(deps, tokens[1]), current);
+    }
+    return [];
+}
+
+function completeOptimize(deps, tokens, endsWithSpace, current) {
+    const tags = placedTagIds(deps);
+    if (tokens.length === 1 && endsWithSpace) return tags;
+    if (tokens.length === 2 && !endsWithSpace) return filterPrefix(tags, current);
+    if (tokens.length === 2 && endsWithSpace) return OPTIMIZE_STRATEGIES;
+    if (tokens.length === 3 && !endsWithSpace) return filterPrefix(OPTIMIZE_STRATEGIES, current);
+
+    const strategy = tokens[2] && tokens[2].toUpperCase();
+    const target = tokens[1];
+    const sensors = optimizeSensorIds(deps, target);
+    const defaultSensor = target ? (defaultOptimizeSensor(target) || sensors[0] || '') : '';
+    const metrics = lossMetricsForStrategy(strategy);
+
+    if (tokens.length === 3 && endsWithSpace) {
+        return sensors.length ? sensors : (defaultSensor ? [defaultSensor] : []);
+    }
+    if (tokens.length === 4 && !endsWithSpace) {
+        return filterPrefix(sensors.length ? sensors : (defaultSensor ? [defaultSensor] : []), current);
+    }
+    if (tokens.length === 4 && endsWithSpace) {
+        return metrics;
+    }
+    if (tokens.length === 5 && !endsWithSpace) {
+        return filterPrefix(metrics, current);
+    }
+    return [];
+}
+
 /**
- * Return candidate strings to insert in place of `current` (or after `prefix` when starting a new token).
  * @param {string} line
  * @param {number} caret
  * @param {object} deps
@@ -103,174 +211,51 @@ export function getCompletionSlot(line, caret) {
 export function getTabCompletions(line, caret, deps) {
     const before = line.slice(0, caret);
     const { endsWithSpace, tokens, current } = parsePartialLine(before);
-    const tags = placedTagIds(deps);
-    const allTags = allTagIds(deps);
 
     if (tokens.length === 0) {
-        return filterPrefix(VERBS, current);
+        return filterPrefix(CONSOLE_VERBS, current);
     }
 
-    const verbRaw = tokens[0];
-    const verb = verbRaw.toLowerCase();
+    const verb = normalizeVerb(tokens[0]);
 
     if (tokens.length === 1 && !endsWithSpace) {
-        return filterPrefix(VERBS, current);
+        return filterPrefix(CONSOLE_VERBS, current);
     }
 
-    if (tokens.length === 1 && endsWithSpace) {
-        const v = verb;
-        if (v === 'json' || v === 'help' || v === '?' || v === 'refresh') {
-            return [];
-        }
-        if (
-            v === 'tunables' ||
-            v === 'get_tunables' ||
-            v === 'measurables' ||
-            v === 'get_measurables' ||
-            v === 'record' ||
-            v === 'record_measurables'
-        ) {
-            return allTags;
-        }
-        if (v === 'move' || v === 'motor' || v === 'motorhome' || v === 'motorset0' || v === 'optimize') {
-            return tags;
-        }
+    if (verb === 'json' || verb === 'help' || verb === '?' || verb === 'refresh' || verb === 'getstorage') {
         return [];
     }
 
-    if (verb === 'json') {
-        return [];
+    if (ALL_TAG_VERBS.has(verb)) {
+        return completeTagArg(allTagIds(deps), tokens, endsWithSpace, current);
     }
 
-    if (verb === 'help' || verb === '?') {
-        return [];
+    if (STORED_TAG_VERBS.has(verb)) {
+        return completeTagArg(storedTagIds(deps), tokens, endsWithSpace, current);
     }
 
-    if (verb === 'refresh') {
-        return [];
+    if (PLACED_TAG_VERBS.has(verb)) {
+        const tags = placedTagIds(deps);
+        if (verb === 'optimize') {
+            return completeOptimize(deps, tokens, endsWithSpace, current);
+        }
+        if (verb === 'motor' || verb === 'motorhome' || verb === 'motorset0' || verb === 'setmotor') {
+            if (tokens.length === 1 && endsWithSpace) return tags;
+            if (tokens.length === 2 && !endsWithSpace) return filterPrefix(tags, current);
+            return completeMotorId(deps, tokens, endsWithSpace, current);
+        }
+        return completeTagArg(tags, tokens, endsWithSpace, current);
     }
 
-    if (
-        verb === 'tunables' ||
-        verb === 'get_tunables' ||
-        verb === 'measurables' ||
-        verb === 'get_measurables' ||
-        verb === 'record' ||
-        verb === 'record_measurables'
-    ) {
-        if (tokens.length === 1 && endsWithSpace) {
-            return allTags;
-        }
-        if (tokens.length === 2 && !endsWithSpace) {
-            return filterPrefix(allTags, current);
-        }
-        return [];
+    if (TAG_ONLY_VERBS.has(verb)) {
+        let tags = allTagIds(deps);
+        if (STORED_ONLY_TAG_VERBS.has(verb)) tags = storedTagIds(deps);
+        else if (PLACED_ONLY_TAG_VERBS.has(verb)) tags = placedTagIds(deps);
+        return completeTagArg(tags, tokens, endsWithSpace, current);
     }
 
-    if (verb === 'move') {
-        if (tokens.length === 1 && endsWithSpace) {
-            return tags;
-        }
-        if (tokens.length === 2 && !endsWithSpace) {
-            return filterPrefix(tags, current);
-        }
-        return [];
-    }
-
-    if (verb === 'motor') {
-        if (tokens.length === 1 && endsWithSpace) {
-            return tags;
-        }
-        if (tokens.length === 2 && !endsWithSpace) {
-            return filterPrefix(tags, current);
-        }
-        if (tokens.length === 2 && endsWithSpace) {
-            const mids = motorIdStrings(deps, tokens[1]);
-            return mids.length ? mids : [];
-        }
-        if (tokens.length === 3 && !endsWithSpace) {
-            return filterPrefix(motorIdStrings(deps, tokens[1]), current);
-        }
-        return [];
-    }
-
-    if (verb === 'motorhome' || verb === 'motorset0') {
-        if (tokens.length === 1 && endsWithSpace) {
-            return tags;
-        }
-        if (tokens.length === 2 && !endsWithSpace) {
-            return filterPrefix(tags, current);
-        }
-        if (tokens.length === 2 && endsWithSpace) {
-            const mids = motorIdStrings(deps, tokens[1]);
-            return mids.length ? mids : [];
-        }
-        if (tokens.length === 3 && !endsWithSpace) {
-            return filterPrefix(motorIdStrings(deps, tokens[1]), current);
-        }
-        return [];
-    }
-
-    if (verb === 'optimize') {
-        if (tokens.length === 1 && endsWithSpace) {
-            return tags;
-        }
-        if (tokens.length === 2 && !endsWithSpace) {
-            return filterPrefix(tags, current);
-        }
-        if (tokens.length === 2 && endsWithSpace) {
-            return STRATEGIES;
-        }
-        if (tokens.length === 3 && !endsWithSpace) {
-            return filterPrefix(STRATEGIES, current);
-        }
-
-        const strategy = tokens[2] && tokens[2].toUpperCase();
-
-        if (strategy === 'NEWTON') {
-            const dCam = String(NEWTON_DEFAULTS.camera_number);
-            const dPx = String(NEWTON_DEFAULTS.target_x_pixel);
-            const dTol = String(NEWTON_DEFAULTS.tolerance_ratio);
-
-            if (tokens.length === 3 && endsWithSpace) {
-                return [dCam];
-            }
-            if (tokens.length === 4 && !endsWithSpace) {
-                return filterPrefix([dCam], current);
-            }
-            if (tokens.length === 4 && endsWithSpace) {
-                return [dPx];
-            }
-            if (tokens.length === 5 && !endsWithSpace) {
-                return filterPrefix([dPx], current);
-            }
-            if (tokens.length === 5 && endsWithSpace) {
-                return AXES;
-            }
-            if (tokens.length === 6 && !endsWithSpace) {
-                return filterPrefix(AXES, current);
-            }
-            if (tokens.length === 6 && endsWithSpace) {
-                return [dTol];
-            }
-            if (tokens.length === 7 && !endsWithSpace) {
-                return filterPrefix([dTol], current);
-            }
-            return [];
-        }
-
-        if (strategy === 'COBYLA') {
-            const dTh = String(COBYLA_DEFAULT_OBJECTIVE);
-            if (tokens.length === 3 && endsWithSpace) {
-                return [dTh];
-            }
-            if (tokens.length === 4 && !endsWithSpace) {
-                return filterPrefix([dTh], current);
-            }
-            return [];
-        }
-
-        return [];
+    if (CAMERA_REFERENCE_TAG_VERBS.has(verb)) {
+        return completeTagArg(cameraImageTagIds(deps), tokens, endsWithSpace, current);
     }
 
     return [];

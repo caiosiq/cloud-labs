@@ -78,7 +78,14 @@ class MotorIdParameters(BaseModel):
 class OptimizeParameters(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    strategy: str = "NEWTON"
+    strategy: str = "COBYLA"
+    sensor_component: str | None = None
+    loss_metric: str | None = None
+    axis: str | None = None
+    tolerance_ratio: float | None = None
+    video_exposure: float | None = None
+    tolerance: float | None = None
+    reference_measurable_id: str | None = None
 
 
 # --- Command bodies (discriminated union on action) ---
@@ -136,6 +143,14 @@ class OptimizeBody(BaseModel):
     action: Literal["OPTIMIZE"]
     target_id: str = Field(..., min_length=1)
     parameters: OptimizeParameters = Field(default_factory=OptimizeParameters)
+
+
+class SetCobylaReferenceBody(BaseModel):
+    """Pin lab ``optimization_reference`` from ``measurables.camera_image``."""
+
+    action: Literal["SET_COBYLA_REFERENCE"]
+    target_id: str = Field(..., min_length=1)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
 class StoreComponentBody(BaseModel):
@@ -357,6 +372,7 @@ ValidatedCommand = Annotated[
         MotorSendHomeBody,
         MotorSetZeroBody,
         OptimizeBody,
+        SetCobylaReferenceBody,
         StoreComponentBody,
         PlaceFromStorageBody,
         AffirmPlacedBody,

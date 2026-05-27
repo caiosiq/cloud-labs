@@ -80,6 +80,14 @@ export function fmtNum(n, digits) {
     return Number.isFinite(Number(n)) ? Number(n).toFixed(digits || 0) : '?';
 }
 
+/** Default decimal places for table / in-air pose coordinates (mm, °). */
+export const POSE_MM_DECIMALS = 2;
+
+/** Format x/y/z/rotation for move, hover, and pose readouts. */
+export function fmtPoseMm(n) {
+    return fmtNum(n, POSE_MM_DECIMALS);
+}
+
 /** Format a printf-style descriptor.format string (e.g. ".3f", "d"). */
 export function fmtByDescriptor(value, format) {
     if (value === null || value === undefined || !Number.isFinite(Number(value))) {

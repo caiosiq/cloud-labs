@@ -213,6 +213,33 @@ export function isHeldTag(tagId, labState) {
     return getHolding(labState).tag_id === tagId;
 }
 
+/**
+ * Pose to show for a held (or in-flight hover) part in panel readouts and
+ * HOVER inputs. Prefers the commanded target while BUSY, then
+ * ``holding.nominal_pose``, then canvas ghost / table intent.
+ * @param {string} tagId
+ * @param {object | null | undefined} [labState]
+ * @param {object | null | undefined} [comp]
+ */
+export function inAirDisplayPose(tagId, labState = store.labState, comp) {
+    const pending = store.pendingInAirPose?.[tagId];
+    if (pending && store.pendingCommands.has(tagId)) {
+        return { ...pending };
+    }
+    if (isHoldingState(labState) && isHeldTag(tagId, labState)) {
+        const hp = getHolding(labState).nominal_pose;
+        if (hp && typeof hp === 'object' && Number.isFinite(Number(hp.x))) {
+            return { ...hp };
+        }
+    }
+    const ghost = store.ghostState?.[tagId];
+    if (ghost && Number.isFinite(Number(ghost.x))) {
+        return { ...ghost };
+    }
+    if (comp) return drawPose(comp) || {};
+    return {};
+}
+
 /** ``true`` when HOLDING but tag is unknown / unconfirmed (UI must lock). */
 export function isHoldingUnconfirmed(labState) {
     if (!isHoldingState(labState)) return false;
