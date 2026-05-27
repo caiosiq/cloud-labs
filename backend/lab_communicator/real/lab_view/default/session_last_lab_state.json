@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "saved_at": "2026-05-26T01:44:51.045431+00:00",
+  "saved_at": "2026-05-27T19:48:53.671973+00:00",
   "lab_mode": "REAL",
   "lab_state": {
     "system_status": "IDLE",
-    "last_updated": "2026-05-25T21:44:51.045431",
+    "last_updated": "2026-05-27T15:48:53.669967",
     "components": {
       "tag_22": {
         "id": "tag_22",
@@ -13,7 +13,7 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 145.46469842362933,
+              "x": 139.3767348934128,
               "y": -202.14285714285717,
               "rotation": 0.0
             },
@@ -24,17 +24,23 @@
             },
             "placement": {
               "mode": "MANUAL"
-            }
+            },
+            "exposure_time_ms": 10.0
           },
           "measurables": {
             "pose": {
-              "x": 145.46469842362933,
+              "x": 139.3767348934128,
               "y": -202.14285714285717,
               "rotation": 0.0
             },
-            "last_optimization_score": null,
+            "last_optimization_score": 0.898,
             "last_optimized_pose": null,
-            "camera_image": null
+            "camera_image": {
+              "path": "C:\\Users\\szist\\Documents\\GitHub\\lab_automation\\Camera_Images\\tag_22_record.png",
+              "source": "real_table_cam",
+              "cam_id": 1,
+              "format": "png"
+            }
           }
         },
         "telemetry": {
@@ -56,10 +62,10 @@
           },
           "live_feed": {
             "stream": {
-              "connected": false,
-              "live": false,
-              "backend": null,
-              "resource_id": null,
+              "connected": true,
+              "live": true,
+              "backend": "table_cam",
+              "resource_id": "cam_gripper_1",
               "last_error": null
             }
           }
@@ -72,9 +78,9 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 361.05061707230186,
-              "y": -204.62420802676843,
-              "rotation": 180.0
+              "x": 359.99,
+              "y": -202.14,
+              "rotation": 178.9599999999994
             },
             "nominal_motor_positions": {},
             "storage": {
@@ -87,9 +93,9 @@
           },
           "measurables": {
             "pose": {
-              "x": 361.05061707230186,
-              "y": -204.62420802676843,
-              "rotation": 180.0
+              "x": 359.99,
+              "y": -202.14,
+              "rotation": 178.9599999999994
             },
             "last_optimization_score": null,
             "last_optimized_pose": null,
@@ -131,16 +137,13 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 466.56333874654024,
-              "y": -79.30424378152938,
-              "rotation": 182.82144436081734,
-              "roll": -180,
-              "pitch": 0,
-              "yaw": 182.82144436081734
+              "x": 453.2214675925512,
+              "y": -202.14285714285717,
+              "rotation": 180.0
             },
             "nominal_motor_positions": {
-              "1": 0.0,
-              "3": 0.0
+              "1": -1000.0,
+              "3": -4000.0
             },
             "storage": {
               "in_storage": false,
@@ -151,18 +154,7 @@
             }
           },
           "measurables": {
-            "pose": {
-              "x": 466.56333874654024,
-              "y": -79.30424378152938,
-              "rotation": 182.82144436081734,
-              "roll": -180,
-              "pitch": 0,
-              "yaw": 182.82144436081734,
-              "motor_rotations": {
-                "1": 0.0,
-                "3": 0.0
-              }
-            },
+            "pose": null,
             "last_optimization_score": null,
             "last_optimized_pose": null,
             "camera_image": null
@@ -203,17 +195,13 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 369.0298419356888,
-              "y": -383.7154386074668,
-              "z": 155.0,
-              "rotation": 88.39788656233529,
-              "roll": -180,
-              "pitch": 0,
-              "yaw": 88.39788656233529
+              "x": 359.8444714265273,
+              "y": -348.82857347265906,
+              "rotation": 90.94710645492015
             },
             "nominal_motor_positions": {
-              "1": 0.0,
-              "3": 0.0
+              "3": -3000.0,
+              "1": -500.0
             },
             "storage": {
               "in_storage": false,
@@ -283,7 +271,12 @@
             "pose": null,
             "last_optimization_score": null,
             "last_optimized_pose": null,
-            "camera_image": null
+            "camera_image": {
+              "path": "C:\\Users\\szist\\Documents\\GitHub\\lab_automation\\Camera_Images\\tag_99_record.png",
+              "source": "real_table_cam",
+              "cam_id": 0,
+              "format": "png"
+            }
           }
         },
         "telemetry": {

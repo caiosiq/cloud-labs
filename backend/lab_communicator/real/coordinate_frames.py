@@ -191,7 +191,7 @@ DEFAULT_COMPONENT_HEIGHT_MM: float = env_float(
     "DEFAULT_COMPONENT_HEIGHT_MM", 210.0, log_prefix="[REAL LAB]"
 )
 MAX_SAFE_HOVER_Z_LAB_MM: float = env_float(
-    "MAX_SAFE_HOVER_Z_LAB_MM", 200.0, log_prefix="[REAL LAB]"
+    "MAX_SAFE_HOVER_Z_LAB_MM", 500.0, log_prefix="[REAL LAB]"
 )
 
 

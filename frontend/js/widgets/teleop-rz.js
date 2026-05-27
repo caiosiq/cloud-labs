@@ -36,9 +36,13 @@ import {
 
 import { afterCommandDispatch } from '../primitives/shared.js';
 
-import { buildTeleopGotoPayload, syncTeleopTargetFromCurrent } from '../teleop-target.js';
+import { buildTeleopGotoPayload } from '../teleop-target.js';
 
-import { ensureTeleopTargetPose, getTeleopTargetPose } from '../teleop-pose.js';
+import {
+    ensureTeleopTargetPose,
+    getTeleopTargetPose,
+    seedTeleopTargetPose,
+} from '../teleop-pose.js';
 
 
 
@@ -190,7 +194,6 @@ export default function TeleopRz({
 
 
 
-    syncTeleopTargetFromCurrent(tagId);
     ensureTeleopTargetPose(tagId, state);
 
 
@@ -221,9 +224,17 @@ export default function TeleopRz({
 
         }
 
-        const payload = buildTeleopGotoPayload(tagId, comp, state, target);
+        const planned = { ...target };
+
+        const payload = buildTeleopGotoPayload(tagId, comp, state, planned);
 
         const result = await teleopGoto(tagId, payload);
+
+        if (result.ok) {
+
+            seedTeleopTargetPose(tagId, planned);
+
+        }
 
         btn.disabled = false;
 

@@ -163,15 +163,20 @@ def commit_place_from_hover(
 ) -> None:
     """After a successful PLACE_FROM_HOVER: update placed-pose, clear HOLDING.
 
-    Once a part is placed, ``z`` is no longer meaningful (it's
-    resting on the breadboard at z_lab=0 by definition) so it's
-    stripped from both ``tunables.nominal_pose`` and
-    ``measurables.pose``. Presence is reset to BREADBOARD with no
-    storage-slot bookkeeping, and the top-level ``holding`` field is
-    cleared. ``placement.mode`` becomes MANUAL because the operator
-    chose the target XY directly (vs. PICK = via gripper).
+    Records breadboard height in ``z`` (lab floor convention:
+    :data:`~lab_model.domain.holding.BREADBOARD_SURFACE_Z_LAB_MM`) so
+    later TeleOp / pick / sync paths do not default missing ``z`` to
+    floor level (0 mm). Presence is reset to BREADBOARD, ``holding``
+    is cleared, and ``placement.mode`` becomes MANUAL.
     """
-    pose = {"x": float(x), "y": float(y), "rotation": float(rotation)}
+    from lab_model.domain.holding import BREADBOARD_SURFACE_Z_LAB_MM
+
+    pose = {
+        "x": float(x),
+        "y": float(y),
+        "rotation": float(rotation),
+        "z": float(BREADBOARD_SURFACE_Z_LAB_MM),
+    }
     entry = _component_entry(state, target_id)
     if entry is not None:
         tun = tunables_bucket(entry)

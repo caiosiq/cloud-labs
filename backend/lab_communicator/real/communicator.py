@@ -53,42 +53,67 @@ from lab_communicator.base import LabCommunicator
 from lab_communicator.shared.lab_view_config import get_lab_view_paths
 from lab_model.state.snapshot import LabPose
 
-# ``lab_automation_path`` comes from ``lab_manifest.json`` (via bootstrap ? os.environ).
-LAB_AUTOMATION_PATH = os.getenv("LAB_AUTOMATION_PATH")
-if LAB_AUTOMATION_PATH and os.path.exists(LAB_AUTOMATION_PATH):
-    _lab_parent = os.path.dirname(LAB_AUTOMATION_PATH)
-    if _lab_parent not in sys.path:
-        sys.path.insert(0, _lab_parent)
-    print(
-        f"[REAL LAB] Added parent {_lab_parent} to sys.path "
-        f"(lab_automation from lab_manifest.json: {LAB_AUTOMATION_PATH})"
-    )
-else:
-    print(
-        "[REAL LAB] Warning: lab_automation_path not set in lab_manifest.json or path invalid."
-    )
+LAB_LIB_AVAILABLE = False
+OpticalExperiment: Any = None  # set by _ensure_lab_automation_imported()
+OpticalComponent: Any = None
+Pose: Any = None
+activate_cam_and_capture: Any = None
+RECORDER_CAPTURE_AVAILABLE = False
 
-# Import Real Lab Automation
-try:
-    from lab_automation.managers.experiment_manager import OpticalExperiment
-    from lab_automation.objects.base import OpticalComponent, Pose
-    # ``find_angle``, ``NewtonPlacementStrategy_cloudlab``, and
-    # ``CobylaAlignmentStrategy_cloudlab`` are imported lazily inside
-    # the matching ``primitive_*`` functions in
-    # :mod:`lab_communicator.real.primitives`; communicator.py no
-    # longer needs them at module scope.
 
-    LAB_LIB_AVAILABLE = True
-except ImportError as e:
-    print(f"[REAL LAB] Critical Error: Failed to import lab_automation: {e}")
-    LAB_LIB_AVAILABLE = False
+def _ensure_lab_automation_imported() -> bool:
+    """Add ``lab_automation`` parent to sys.path and import (idempotent)."""
+    global LAB_LIB_AVAILABLE, OpticalExperiment, OpticalComponent, Pose
+    global activate_cam_and_capture, RECORDER_CAPTURE_AVAILABLE
 
-try:
-    from lab_automation.managers.recorder_capture_helpers_cloudlab import activate_cam_and_capture
-    RECORDER_CAPTURE_AVAILABLE = True
-except ImportError:
-    activate_cam_and_capture = None
-    RECORDER_CAPTURE_AVAILABLE = False
+    if LAB_LIB_AVAILABLE:
+        return True
+
+    lab_path = (os.getenv("LAB_AUTOMATION_PATH") or "").strip()
+    if lab_path and os.path.isdir(lab_path):
+        lab_parent = os.path.dirname(os.path.abspath(lab_path))
+        if lab_parent not in sys.path:
+            sys.path.insert(0, lab_parent)
+        print(
+            f"[REAL LAB] Added parent {lab_parent} to sys.path "
+            f"(lab_automation from lab_manifest.json: {lab_path})",
+            flush=True,
+        )
+    else:
+        print(
+            "[REAL LAB] Warning: LAB_AUTOMATION_PATH not set or invalid "
+            "(bootstrap lab_view before starting RealLabCommunicator).",
+            flush=True,
+        )
+        return False
+
+    try:
+        from lab_automation.managers.experiment_manager import OpticalExperiment as _OE
+        from lab_automation.objects.base import OpticalComponent as _OC, Pose as _Pose
+
+        OpticalExperiment = _OE
+        OpticalComponent = _OC
+        Pose = _Pose
+        LAB_LIB_AVAILABLE = True
+    except ImportError as e:
+        print(f"[REAL LAB] Critical Error: Failed to import lab_automation: {e}", flush=True)
+        LAB_LIB_AVAILABLE = False
+        return False
+
+    try:
+        from lab_automation.managers.recorder_capture_helpers_cloudlab import (
+            activate_cam_and_capture as _acc,
+        )
+
+        activate_cam_and_capture = _acc
+        RECORDER_CAPTURE_AVAILABLE = True
+    except ImportError:
+        activate_cam_and_capture = None
+        RECORDER_CAPTURE_AVAILABLE = False
+    return True
+
+
+_ensure_lab_automation_imported()
 
 # --- Coordinate frames + utility helpers (Phase 1 of the communicator
 # refactor; see ``communicator_refactor.md`` ?10) ---
@@ -132,8 +157,11 @@ class RealLabCommunicator(LabCommunicator):
     max_safe_hover_z_lab_mm = MAX_SAFE_HOVER_Z_LAB_MM
 
     def __init__(self):
-        if not LAB_LIB_AVAILABLE:
-            raise RuntimeError("lab_automation library not available. Cannot start RealLabCommunicator.")
+        if not _ensure_lab_automation_imported():
+            raise RuntimeError(
+                "lab_automation library not available. Cannot start RealLabCommunicator. "
+                "Check lab_manifest.json lab_automation_path and that the package imports."
+            )
 
         # Base seeds ``current_state`` (with empty components / IDLE),
         # ``catalog_map``, and the state lock. Phase 2A made base the
@@ -884,6 +912,25 @@ class RealLabCommunicator(LabCommunicator):
         cobj = self.get_manipulable(target_id)
         if cobj is not None:
             cobj.is_placed = bool(value)
+
+    def _sync_registry_pose_from_lab_state(self, target_id: str) -> None:
+        """Align ``OpticalComponent.current_location`` with lab-state pose."""
+        from lab_communicator.real.teleop_bridge import sync_component_from_lab_state
+
+        try:
+            sync_component_from_lab_state(self, target_id)
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"{self.log_prefix} Registry pose sync failed for {target_id}: {exc}"
+            )
+            return
+        comp = self.get_manipulable(target_id)
+        loc = getattr(comp, "current_location", None) if comp is not None else None
+        if loc is not None:
+            print(
+                f"{self.log_prefix} Registry pose synced for {target_id}: "
+                f"robot xyz=({float(loc.x):.2f}, {float(loc.y):.2f}, {float(loc.z):.2f})"
+            )
 
     # --- In-air manipulation (see ``new_primitives.md`` ?6 and ?8.3) ---
     #

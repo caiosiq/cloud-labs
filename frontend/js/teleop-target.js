@@ -5,7 +5,7 @@
  */
 import { store } from './state/store.js';
 import { isBreadboardIntent, isHeldTag } from './component-model.js';
-import { getTelemetry } from './component-state.js';
+import { getTelemetry, isTeleopReady } from './component-state.js';
 import {
     clearTeleopTargetAwaitingLive,
     getTeleopCurrentPose,
@@ -71,8 +71,28 @@ export function buildTeleopGotoPayload(tagId, comp, labState, target) {
     };
 }
 
-/** Seed target from live current when starting to plan. */
-export function syncTeleopTargetFromCurrent(tagId) {
+/** True while a TELEOP_GOTO frame is still executing on the server. */
+export function isTeleopMotionInProgress(tagId, labState = store.labState) {
+    const comp = labState?.components?.[tagId];
+    if (!comp || !isTeleopReady(comp)) return false;
+    return getTelemetry(comp)?.teleop?.command?.phase === 'executing';
+}
+
+/**
+ * Seed target from live current (START_TELEOP / first live tick only).
+ *
+ * Does **not** overwrite an existing operator plan or TARGET during an in-flight
+ * goto — panel rebuilds after ``Go`` must keep the commanded target visible.
+ *
+ * @param {string} tagId
+ * @param {{ force?: boolean }} [opts] Pass ``force: true`` on START_TELEOP.
+ */
+export function syncTeleopTargetFromCurrent(tagId, opts = {}) {
+    const force = opts.force === true;
+    const existing = getTeleopTargetPose(tagId);
+    if (!force && (existing || isTeleopMotionInProgress(tagId))) {
+        return existing;
+    }
     markTeleopTargetAwaitingLive(tagId);
     const current = getTeleopCurrentPose(tagId);
     if (current && canSeedTargetFromCurrent(current)) {

@@ -47,7 +47,7 @@ export async function startTeleop(tagId) {
         if (body && body.telemetry) {
             applyComponentTelemetryFromServer(tagId, body.telemetry);
         }
-        syncTeleopTargetFromCurrent(tagId);
+        syncTeleopTargetFromCurrent(tagId, { force: true });
         log(`START_TELEOP ${tagId} (target will sync from live pose)`, 'info');
         return { ok: true, tunables: body && body.tunables, telemetry: body && body.telemetry };
     } catch (e) {

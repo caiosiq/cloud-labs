@@ -21,6 +21,7 @@ async def run_move_to_breadboard(
     """BUSY → hardware move → BREADBOARD commit → IDLE."""
     host._null_measurables_for_targets([target_id], persist=False)
     host._set_status(SYSTEM_STATUS_BUSY)
+    host._sync_registry_pose_from_lab_state(target_id)
     actual: Optional[LabPose] = None
     try:
         actual = await host._primitive_move_component(target_id, commanded)
@@ -42,6 +43,7 @@ async def run_move_to_breadboard(
     if exiting_storage:
         host._after_move_out_of_storage(target_id)
     host._apply_is_placed_flag(target_id, True)
+    host._sync_registry_pose_from_lab_state(target_id)
     host._set_status(SYSTEM_STATUS_IDLE)
 
 
@@ -55,6 +57,7 @@ async def run_move_to_storage(
     """BUSY → hardware move → STORAGE commit → IDLE."""
     host._null_measurables_for_targets([target_id], persist=False)
     host._set_status(SYSTEM_STATUS_BUSY)
+    host._sync_registry_pose_from_lab_state(target_id)
     actual: Optional[LabPose] = None
     try:
         actual = await host._primitive_move_component(target_id, commanded)

@@ -196,6 +196,8 @@ async def run_place_from_hover(
             rotation=commanded.rotation,
         )
         host.current_state["last_updated"] = datetime.now().isoformat()
+    host._sync_registry_pose_from_lab_state(target_id)
+    host._apply_is_placed_flag(target_id, True)
     host._set_status(SYSTEM_STATUS_IDLE)
     print(
         f"{host.log_prefix} Placed {target_id} from hover at "

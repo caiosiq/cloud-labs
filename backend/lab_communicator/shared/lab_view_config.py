@@ -193,8 +193,11 @@ def _infer_communicator_from_bundle_path(bundle_root: str) -> str:
     return "mock"
 
 
+_BUILTIN_COMMUNICATOR_IDS = frozenset({"mock", "real"})
+
+
 def _load_lab_manifest(paths: LabViewPaths, project_root: str) -> LabViewManifest:
-    from lab_communicator.shared.communicator_factory import known_communicator_ids
+    """Load manifest without importing backend modules (``LAB_AUTOMATION_PATH`` not set yet)."""
 
     p = paths.lab_manifest_json
     if not os.path.isfile(p):
@@ -229,10 +232,10 @@ def _load_lab_manifest(paths: LabViewPaths, project_root: str) -> LabViewManifes
     comm = str(raw.get("communicator", "")).strip().lower()
     if not comm:
         raise SystemExit(f"[CONFIG] lab_manifest.json missing required field 'communicator': {p}")
-    if comm not in known_communicator_ids():
+    if comm not in _BUILTIN_COMMUNICATOR_IDS:
         raise SystemExit(
             f"[CONFIG] lab_manifest.json communicator {comm!r} is not supported "
-            f"(use one of: {', '.join(sorted(known_communicator_ids()))})"
+            f"(use one of: {', '.join(sorted(_BUILTIN_COMMUNICATOR_IDS))})"
         )
 
     lab_auto: Optional[str] = None
@@ -414,6 +417,25 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
                 ),
                 **_DEFAULT_TABLE_CAM_PREVIEW.as_dict(),
             },
+        )
+
+    if not os.path.isfile(paths.lab_state_json):
+        from lab_model.domain.holding import empty_holding
+
+        atomic_write_json(
+            paths.lab_state_json,
+            {
+                "system_status": "IDLE",
+                "last_updated": datetime.now().isoformat(),
+                "optimization_step": 0,
+                "optimization_run_dir": None,
+                "components": {},
+                "holding": empty_holding(),
+            },
+        )
+        print(
+            f"[CONFIG] Created empty lab_state.json ({paths.lab_state_json})",
+            flush=True,
         )
 
     manifest = _load_lab_manifest(paths, project_root)

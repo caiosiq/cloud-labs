@@ -6,7 +6,12 @@ import threading
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from lab_model.domain.component import meas_pose, nominal_pose, presence_of, PRESENCE_BREADBOARD
-from lab_model.domain.holding import held_tag, is_holding
+from lab_model.domain.holding import (
+    DEFAULT_HOVER_Z_MM,
+    get_holding,
+    held_tag,
+    is_holding,
+)
 from lab_model.state.commits import _resolve_teleop_mode
 from lab_model.state.snapshot import LabPose
 
@@ -84,6 +89,33 @@ def warn_if_lab_hardware_pose_diverged(
         )
 
 
+def _lab_pose_for_hardware_sync(
+    communicator: "RealLabCommunicator", tag_id: str
+) -> LabPose:
+    """Lab-frame pose for registry sync — prefer HOLDING nominal when in-gripper."""
+    with communicator._state_lock:
+        state = communicator.current_state
+        entry = (state.get("components") or {}).get(tag_id)
+
+    if is_holding(state) and held_tag(state) == tag_id:
+        hp = get_holding(state).get("nominal_pose") or {}
+        if isinstance(hp, dict) and (
+            hp.get("x") is not None or hp.get("y") is not None
+        ):
+            z_raw = hp.get("z")
+            z = float(z_raw) if z_raw is not None else float(DEFAULT_HOVER_Z_MM)
+            return LabPose(
+                x=float(hp.get("x", 0.0)),
+                y=float(hp.get("y", 0.0)),
+                z=z,
+                rotation=float(hp.get("rotation", 0.0)),
+            )
+
+    if not isinstance(entry, dict):
+        raise RuntimeError(f"{tag_id!r} not in lab state")
+    return LabPose.from_entry(entry)
+
+
 def sync_component_for_teleop_prepare(
     communicator: "RealLabCommunicator", tag_id: str
 ) -> None:
@@ -102,20 +134,7 @@ def sync_component_for_teleop_prepare(
         raise RuntimeError("lab_automation experiment not initialized")
     exp.sync_component_location_from_initial_scan(comp)
 
-    with communicator._state_lock:
-        entry = (communicator.current_state.get("components") or {}).get(tag_id)
-    if not isinstance(entry, dict):
-        raise RuntimeError(f"sync_component_for_teleop_prepare: {tag_id!r} not in lab state")
-
-    mp = meas_pose(entry)
-    np = nominal_pose(entry)
-    src = mp if mp.get("x") is not None or mp.get("y") is not None else np
-    lab_pose = LabPose(
-        x=float(src.get("x", 0.0)),
-        y=float(src.get("y", 0.0)),
-        z=float(src.get("z", 0.0)),
-        rotation=float(src.get("rotation", 0.0)),
-    )
+    lab_pose = _lab_pose_for_hardware_sync(communicator, tag_id)
     warn_if_lab_hardware_pose_diverged(communicator, tag_id, lab_pose)
 
 
@@ -128,15 +147,7 @@ def sync_component_from_lab_state(
     if not isinstance(entry, dict):
         raise RuntimeError(f"sync_component_from_lab_state: {tag_id!r} not in lab state")
 
-    mp = meas_pose(entry)
-    np = nominal_pose(entry)
-    src = mp if mp.get("x") is not None or mp.get("y") is not None else np
-    lab_pose = LabPose(
-        x=float(src.get("x", 0.0)),
-        y=float(src.get("y", 0.0)),
-        z=float(src.get("z", 0.0)),
-        rotation=float(src.get("rotation", 0.0)),
-    )
+    lab_pose = _lab_pose_for_hardware_sync(communicator, tag_id)
     is_placed = _is_placed_from_lab_state(communicator, tag_id, entry)
     warn_if_lab_hardware_pose_diverged(communicator, tag_id, lab_pose)
     communicator._apply_loaded_pose_to_hardware(

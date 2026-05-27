@@ -8,17 +8,20 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from lab_model.domain.component import (
+    PRESENCE_BREADBOARD,
     is_teleop_active,
     is_teleop_ready,
     meas_pose,
     nominal_pose,
+    presence_of,
 )
 from lab_model.domain.holding import (
+    BREADBOARD_SURFACE_Z_LAB_MM,
+    DEFAULT_HOVER_Z_MM,
     SYSTEM_STATUS_BUSY,
     SYSTEM_STATUS_HOLDING,
     SYSTEM_STATUS_IDLE,
     SYSTEM_STATUS_OPTIMIZING,
-    DEFAULT_HOVER_Z_MM,
     get_holding,
     held_tag,
 )
@@ -87,33 +90,48 @@ def refuse_teleop_start(state: Dict[str, Any], target_id: str) -> Optional[str]:
     return None
 
 
+def _default_z_lab(state: Dict[str, Any], tag_id: str, entry: Optional[Dict[str, Any]]) -> float:
+    if held_tag(state) == tag_id:
+        return float(DEFAULT_HOVER_Z_MM)
+    if isinstance(entry, dict) and presence_of(entry) == PRESENCE_BREADBOARD:
+        return float(BREADBOARD_SURFACE_Z_LAB_MM)
+    return 0.0
+
+
+def _pose_z_or_default(raw: Dict[str, Any], default_z: float) -> float:
+    z_raw = raw.get("z")
+    return float(z_raw) if z_raw is not None else float(default_z)
+
+
 def _initial_live_pose(state: Dict[str, Any], tag_id: str) -> Dict[str, float]:
+    components = state.get("components") or {}
+    entry = components.get(tag_id) if isinstance(components, dict) else None
+    z_def = _default_z_lab(state, tag_id, entry if isinstance(entry, dict) else None)
+
     if held_tag(state) == tag_id:
         hp = get_holding(state).get("nominal_pose") or {}
         return {
             "x": float(hp.get("x", 0.0)),
             "y": float(hp.get("y", 0.0)),
             "rotation": float(hp.get("rotation", 0.0)),
-            "z": float(hp.get("z", DEFAULT_HOVER_Z_MM)),
+            "z": _pose_z_or_default(hp, DEFAULT_HOVER_Z_MM),
         }
-    components = state.get("components") or {}
-    entry = components.get(tag_id) if isinstance(components, dict) else None
     if not isinstance(entry, dict):
-        return {"x": 0.0, "y": 0.0, "rotation": 0.0, "z": DEFAULT_HOVER_Z_MM}
+        return {"x": 0.0, "y": 0.0, "rotation": 0.0, "z": z_def}
     mp = meas_pose(entry)
     if mp.get("x") is not None or mp.get("y") is not None:
         return {
             "x": float(mp.get("x", 0.0)),
             "y": float(mp.get("y", 0.0)),
             "rotation": float(mp.get("rotation", 0.0)),
-            "z": float(mp.get("z", DEFAULT_HOVER_Z_MM)),
+            "z": _pose_z_or_default(mp, z_def),
         }
     np = nominal_pose(entry)
     return {
         "x": float(np.get("x", 0.0)),
         "y": float(np.get("y", 0.0)),
         "rotation": float(np.get("rotation", 0.0)),
-        "z": float(np.get("z", DEFAULT_HOVER_Z_MM)),
+        "z": _pose_z_or_default(np, z_def),
     }
 
 

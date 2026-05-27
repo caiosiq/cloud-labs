@@ -209,13 +209,13 @@ def refuse_if_z_lab_out_of_bounds(
     Catches runaway HTTP payloads (e.g. someone sending a robot-frame
     z=600 by mistake) before the orchestrator forward-transforms and
     hands it to the robot. ``z_lab`` is the height of the component
-    base above the breadboard surface, in millimeters.
+    base above the lab floor, in millimeters.
     """
     if not (0.0 <= float(z_lab) <= float(max_safe_z_lab_mm)):
         return refuse(
             f"z_lab={float(z_lab):.1f} mm outside safe range "
             f"[0, {float(max_safe_z_lab_mm):.1f}]; cannot {primitive_name}. "
-            f"Interpret z as height of the component base above the table."
+            f"Interpret z as height of the component base above the lab floor."
         )
     return ok()
 

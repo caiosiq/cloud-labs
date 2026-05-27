@@ -65,11 +65,14 @@ from lab_communicator.shared.lab_view_config import (
     two_points_to_ab,
     write_laser_lines_doc,
 )
-from lab_communicator.shared.communicator_factory import create_communicator
 from lab_model import motor_rotation_store as motor_rot
 
+# Bootstrap before importing backends so ``LAB_AUTOMATION_PATH`` is on sys.path
+# when ``real/communicator.py`` loads ``lab_automation``.
 bootstrap_lab_view(_project_root)
 motor_rot.configure(get_lab_view_paths().motor_rotations_json)
+
+from lab_communicator.shared.communicator_factory import create_communicator
 
 from lab_model.state.state_machine import PrimitiveRefusalError
 from lab_model.primitives import (

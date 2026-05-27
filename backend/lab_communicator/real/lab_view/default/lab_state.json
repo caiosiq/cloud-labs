@@ -1,0 +1,12 @@
+{
+  "system_status": "IDLE",
+  "last_updated": "2026-05-27T14:15:40.456261",
+  "optimization_step": 0,
+  "optimization_run_dir": null,
+  "components": {},
+  "holding": {
+    "tag_id": null,
+    "nominal_pose": null,
+    "requires_operator_confirm": false
+  }
+}

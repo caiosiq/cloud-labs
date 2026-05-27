@@ -138,7 +138,7 @@ class LabCommunicator:
     #: Subclasses with a calibrated robot frame override (real uses
     #: ``MAX_SAFE_HOVER_Z_LAB_MM`` from ``coordinate_frames.py``); mock
     #: overrides with a generous band (see ``MockLabCommunicator``).
-    max_safe_hover_z_lab_mm: float = 200.0
+    max_safe_hover_z_lab_mm: float = 500.0
 
     # --- State (subclasses populate in __init__) ---
     current_state: Dict[str, Any]
@@ -1106,6 +1106,15 @@ class LabCommunicator:
         agrees with the lab-state view. The Stage C lint allows this
         attribute write here and in :meth:`_apply_loaded_pose_to_hardware`
         only.
+        """
+        return
+
+    def _sync_registry_pose_from_lab_state(self, target_id: str) -> None:
+        """Push cloud-labs nominal/meas pose into ``current_location``.
+
+        Default: no-op. Real overrides after place/move commits so
+        ``lab_automation`` pick/place does not use a stale TCP ``z`` left
+        over from TeleOp or an earlier grasp.
         """
         return
 
