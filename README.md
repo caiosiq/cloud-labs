@@ -371,6 +371,31 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - **Main UI:** http://localhost:8000/  
 - **Debug:** http://localhost:8000/debug  
 
+### MuJoCo component profiles
+
+The default simulator profile preserves the colored demo boxes:
+
+```powershell
+$env:CLOUDLAB_SIM_PROFILE = "demo_boxes"
+& "..\.venv\Scripts\python.exe" "backend\main.py"
+```
+
+To use the shared optical housing CAD for every movable optical component:
+
+```powershell
+$env:CLOUDLAB_SIM_PROFILE = "optical_housings"
+& "..\.venv\Scripts\python.exe" "backend\main.py"
+```
+
+Profiles live under `simulation_profiles/`. The optical housing profile keeps
+the existing UI catalog, icons, tags, and poses; it changes only MuJoCo
+geometry, mass, collision dimensions, and grasp height.
+
+The xArm7 MJCF model is vendored from MuJoCo Menagerie under
+`third_party/mujoco_menagerie/ufactory_xarm7/`, so MuJoCo mode works from a
+plain `cloud-labs` checkout. To test against a different local copy, set
+`MUJOCO_XARM7_XML` to the desired `xarm7.xml` path before starting the backend.
+
 ### 4. Real lab mode
 
 Set `LAB_MODE=REAL` and a valid `LAB_AUTOMATION_PATH` so `from lab_automation...` imports work. Expect robot/camera initialization, optional recorder subprocesses, and live streams when hardware is available. If initialization fails, the process **logs the error and stays in mock**.

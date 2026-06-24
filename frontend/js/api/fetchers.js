@@ -33,6 +33,7 @@ export async function fetchCatalogMap() {
         const response = await fetch('/api/catalog');
         if (response.ok) {
             const catalog = await response.json();
+            store.catalogMap = {};
             catalog.forEach((item) => {
                 store.catalogMap[item.tag_id] = item;
             });

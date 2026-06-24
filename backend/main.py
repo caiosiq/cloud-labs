@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import io
 import logging
 import functools
+import inspect
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +107,14 @@ COMMUNICATOR_ID = _manifest.communicator
 print(f"LAB_MODE: {LAB_MODE} (communicator={COMMUNICATOR_ID!r})")
 
 lab = None
+runtime_manager = None
 try:
     lab = create_communicator(COMMUNICATOR_ID)
+    if COMMUNICATOR_ID == "mock":
+        from lab_communicator.runtime_mode import RuntimeLabProxy
+
+        runtime_manager = RuntimeLabProxy(lab)
+        lab = runtime_manager
     print(f">>> STARTING WITH {COMMUNICATOR_ID.upper()} COMMUNICATOR <<<")
 except ImportError as e:
     print(f"CRITICAL ERROR: Failed to import communicator {COMMUNICATOR_ID!r}: {e}")
@@ -180,6 +187,11 @@ class Recipe(BaseModel):
 
 class StateName(BaseModel):
     name: str
+    ui_state: Optional[Dict[str, Any]] = None
+
+
+class RuntimeModeBody(BaseModel):
+    mode: str
 
 
 class SessionReconcileApplyBody(BaseModel):
@@ -190,6 +202,47 @@ class RefreshPoseBody(BaseModel):
     """Optional tag ids whose full component rows are left unchanged after a scan."""
 
     preserve_tag_ids: List[str] = Field(default_factory=list)
+
+
+async def _run_reserved_background_task(
+    manager: Any,
+    token: str,
+    function: Any,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+) -> None:
+    try:
+        result = function(*args, **kwargs)
+        if inspect.isawaitable(result):
+            await result
+    finally:
+        manager.release_operation(token)
+
+
+class _ReservedBackgroundTasks:
+    """BackgroundTasks facade that releases a runtime reservation afterward."""
+
+    def __init__(
+        self,
+        delegate: BackgroundTasks,
+        manager: Any,
+        token: str,
+    ) -> None:
+        self.delegate = delegate
+        self.manager = manager
+        self.token = token
+        self.scheduled = False
+
+    def add_task(self, function: Any, *args: Any, **kwargs: Any) -> None:
+        self.scheduled = True
+        self.delegate.add_task(
+            _run_reserved_background_task,
+            self.manager,
+            self.token,
+            function,
+            args,
+            kwargs,
+        )
 
 
 def _session_reconciliation_offers_dict() -> Dict[str, Any]:
@@ -281,7 +334,8 @@ def _session_reconciliation_offers_dict() -> Dict[str, Any]:
 
 # --- Recipe Executor (Uses Communicator) ---
 
-async def execute_recipe(recipe: Recipe):
+async def execute_recipe(recipe: Recipe, target_lab: Any = None):
+    recipe_lab = target_lab if target_lab is not None else lab
     print(f"[RECIPE] Starting recipe: {recipe.name}")
     
     for step in recipe.steps:
@@ -298,7 +352,7 @@ async def execute_recipe(recipe: Recipe):
         except ValidationError as e:
             print(f"[RECIPE] Invalid step {step.step}: {validation_error_detail(e)}")
             raise
-        await execute_validated_command(lab, cmd)
+        await execute_validated_command(recipe_lab, cmd)
 
         await asyncio.sleep(0.5)
         
@@ -309,7 +363,7 @@ async def execute_recipe(recipe: Recipe):
     # PLACE_FROM_HOVER) are reproducible, and so the compare endpoint can
     # flag an unexpected held tag on replay. Older goldens predating this
     # field are still valid and compare fine -- see ``compare_golden_state``.
-    state = lab.get_lab_state()
+    state = recipe_lab.get_lab_state()
     golden_state = {
         "recipe_id": recipe.id,
         "timestamp": datetime.now().isoformat(),
@@ -392,6 +446,79 @@ async def get_component_catalog():
     except Exception as e:
         logger.exception("GET /api/catalog failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read catalog: {e}")
+
+
+def _locked_runtime_mode_info() -> Dict[str, Any]:
+    physical_armed = (
+        COMMUNICATOR_ID == "real"
+        and lab is not None
+        and type(lab).__name__ == "RealLabCommunicator"
+    )
+    active_mode = "physical" if physical_armed else "mock"
+    reason = (
+        "runtime mode is fixed by the startup manifest"
+        if physical_armed
+        else "physical backend failed to initialize"
+    )
+    return {
+        "active_mode": active_mode,
+        "physical_armed": physical_armed,
+        "locked": True,
+        "available_modes": [
+            {"id": "mock", "label": "Mock UI", "enabled": False, "reason": reason},
+            {
+                "id": "mujoco",
+                "label": "Simulator: MuJoCo",
+                "enabled": False,
+                "reason": reason,
+            },
+            {
+                "id": "physical",
+                "label": "Physical Experiment",
+                "enabled": physical_armed,
+                "reason": None if physical_armed else reason,
+            },
+        ],
+        "simulator": {
+            "running": False,
+            "pid": None,
+            "viewer": False,
+            "realtime": False,
+            "last_error": None,
+        },
+        "last_simulator_error": None,
+    }
+
+
+@app.get("/api/runtime-mode")
+async def get_runtime_mode():
+    if runtime_manager is None:
+        return _locked_runtime_mode_info()
+    return runtime_manager.mode_info()
+
+
+@app.post("/api/runtime-mode")
+async def set_runtime_mode(payload: RuntimeModeBody):
+    if runtime_manager is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Runtime mode is locked by the startup manifest",
+        )
+    if payload.mode.strip().lower() == "physical":
+        raise HTTPException(
+            status_code=403,
+            detail="Physical mode can only be armed by the startup manifest",
+        )
+    try:
+        return await asyncio.to_thread(runtime_manager.switch_mode, payload.mode)
+    except Exception as exc:
+        from lab_communicator.runtime_mode import RuntimeModeError
+
+        if isinstance(exc, RuntimeModeError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        logger.exception("Runtime mode switch failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
 
 @app.post("/api/components")
 async def add_component(payload: Dict[str, Any], background_tasks: BackgroundTasks):
@@ -895,6 +1022,9 @@ async def ws_component_teleop_session(websocket: WebSocket, tag_id: str):
     if lab is None:
         await websocket.close(code=1013, reason="Lab not initialized")
         return
+    if runtime_manager is not None and runtime_manager.mode == "mujoco":
+        await websocket.close(code=4403, reason="TeleOp is unavailable in MuJoCo v1")
+        return
     catalog_row = (lab.catalog_map or {}).get(tag_id)
     if not isinstance(catalog_row, dict):
         await websocket.close(code=4404, reason=f"Unknown tag {tag_id!r}")
@@ -987,7 +1117,16 @@ async def get_lab_state():
         state = lab.get_lab_state()
         logger.debug("GET /api/lab-state: ok")
         if isinstance(state, dict):
-            state = {**state, "lab_mode": LAB_MODE}
+            active_runtime = (
+                runtime_manager.mode.upper()
+                if runtime_manager is not None
+                else LAB_MODE
+            )
+            state = {
+                **state,
+                "lab_mode": active_runtime,
+                "runtime_mode": active_runtime.lower(),
+            }
         return JSONResponse(content=state)
     except Exception as e:
         logger.exception("GET /api/lab-state failed: %s", e)
@@ -1114,7 +1253,12 @@ async def save_lab_state(payload: StateName):
         raise HTTPException(status_code=400, detail="Invalid state name")
 
     file_path = os.path.join(STATES_DIR, f"{safe}.json")
-    state = lab.get_lab_state()
+    from lab_model.state.saved_workspace import build_workspace_state
+
+    state = build_workspace_state(
+        lab.get_lab_state(),
+        payload.ui_state,
+    )
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
     return {"status": "success", "name": safe, "path": file_path}
@@ -1123,6 +1267,11 @@ async def save_lab_state(payload: StateName):
 async def load_lab_state(payload: StateName):
     if lab is None:
         raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
+    if runtime_manager is not None and runtime_manager.mode == "mujoco":
+        raise HTTPException(
+            status_code=409,
+            detail="Loading snapshots is unavailable in MuJoCo v1",
+        )
 
     if hasattr(lab, "get_lab_state"):
         st = lab.get_lab_state() or {}
@@ -1139,14 +1288,24 @@ async def load_lab_state(payload: StateName):
         raise HTTPException(status_code=404, detail=f"State not found: {safe}")
 
     with open(file_path, "r", encoding="utf-8") as f:
-        state = json.load(f)
+        document = json.load(f)
+
+    from lab_model.state.saved_workspace import unpack_workspace_state
+
+    state, ui_state, has_ui_state = unpack_workspace_state(document)
 
     if hasattr(lab, "set_lab_state"):
         lab.set_lab_state(state)
 
     # Return merged lab state (e.g. catalog parts not in the file are preserved on load).
     out_state = lab.get_lab_state() if hasattr(lab, "get_lab_state") else state
-    return {"status": "success", "name": safe, "state": out_state}
+    return {
+        "status": "success",
+        "name": safe,
+        "state": out_state,
+        "ui_state": ui_state,
+        "has_ui_state": has_ui_state,
+    }
 
 def _lab_component_wh(tag_id: str) -> Tuple[float, float]:
     """Catalog width/height in mm for layout analysis (mock vs real)."""
@@ -1388,6 +1547,8 @@ def _enforce_holding_rules(cmd, state: Dict[str, Any]) -> None:
 async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundTasks):
     print(f"Received Command: {payload}")
 
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab Communicator not initialized")
     state = lab.get_lab_state()
     current_status = state.get("system_status")
     if current_status == "BUSY" or current_status == "OPTIMIZING":
@@ -1399,13 +1560,56 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
         raise HTTPException(status_code=400, detail=validation_error_detail(e))
 
     _enforce_holding_rules(cmd, state)
+    if runtime_manager is not None and not runtime_manager.supports_primitive(cmd.action):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{cmd.action} is unavailable in {runtime_manager.mode} mode",
+        )
 
     if isinstance(cmd, RecordMeasurablesBody):
-        await execute_validated_command(lab, cmd)
-        meas = fetch_read_primitive(lab, PrimitiveId.GET_MEASURABLES, cmd.target_id)
+        if runtime_manager is None:
+            await execute_validated_command(lab, cmd)
+            meas = fetch_read_primitive(
+                lab,
+                PrimitiveId.GET_MEASURABLES,
+                cmd.target_id,
+            )
+            return {"status": "ok", "measurables": meas}
+        try:
+            target_lab, token = runtime_manager.reserve_operation()
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        try:
+            await execute_validated_command(target_lab, cmd)
+            meas = fetch_read_primitive(
+                target_lab,
+                PrimitiveId.GET_MEASURABLES,
+                cmd.target_id,
+            )
+        finally:
+            runtime_manager.release_operation(token)
         return {"status": "ok", "measurables": meas}
 
-    return schedule_validated_command(lab, cmd, background_tasks)
+    if runtime_manager is None:
+        return schedule_validated_command(lab, cmd, background_tasks)
+
+    try:
+        target_lab, token = runtime_manager.reserve_operation()
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    reserved_tasks = _ReservedBackgroundTasks(
+        background_tasks,
+        runtime_manager,
+        token,
+    )
+    try:
+        response = schedule_validated_command(target_lab, cmd, reserved_tasks)
+    except Exception:
+        runtime_manager.release_operation(token)
+        raise
+    if not reserved_tasks.scheduled:
+        runtime_manager.release_operation(token)
+    return response
 
 # --------------------------------------------------------------------------
 # Lab-wide ``/api/table-cam/*`` HTTP surface removed in Phase 9d.
@@ -1478,6 +1682,11 @@ async def save_recipe(recipe: Recipe):
 
 @app.post("/api/recipes/{recipe_id}/play")
 async def play_recipe(recipe_id: str, background_tasks: BackgroundTasks):
+    if runtime_manager is not None and runtime_manager.mode == "mujoco":
+        raise HTTPException(
+            status_code=409,
+            detail="Recipes are unavailable in MuJoCo v1",
+        )
     file_path = os.path.join(RECIPES_DIR, f"{recipe_id}.json")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Recipe not found")
@@ -1490,7 +1699,21 @@ async def play_recipe(recipe_id: str, background_tasks: BackgroundTasks):
     if state.get("system_status") != "IDLE" and state.get("system_status") is not None:
          raise HTTPException(status_code=409, detail="System is busy")
 
-    background_tasks.add_task(execute_recipe, recipe)
+    if runtime_manager is None:
+        background_tasks.add_task(execute_recipe, recipe)
+    else:
+        try:
+            target_lab, token = runtime_manager.reserve_operation()
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        background_tasks.add_task(
+            _run_reserved_background_task,
+            runtime_manager,
+            token,
+            execute_recipe,
+            (recipe, target_lab),
+            {},
+        )
     return {"status": "accepted", "message": f"Recipe {recipe.name} started"}
 
 @app.get("/api/recipes/{recipe_id}/golden")

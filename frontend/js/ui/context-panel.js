@@ -44,6 +44,7 @@ import {
 } from '../component-model.js';
 import { componentDataSnapshot } from '../component-state.js';
 import { renderComponentPanel } from './component-popup.js';
+import { hideSelectedPartTab, showSelectedPartTab } from './workspace-tabs.js';
 
 let _render = () => {};
 let _checkCollision = () => ({ detected: false });
@@ -87,21 +88,19 @@ export function placementUiLabel(comp) {
  * @param {string} tagId
  * @param {{ add?: boolean }} [opts]
  */
-export function openPanel(tagId, opts = {}) {
+export function openPanel(tagId, _opts = {}) {
     if (!tagId) return;
-    const add = !!opts.add;
-    if (!add) {
-        const toClose = store.openPanels.filter((t) => t !== tagId);
-        toClose.forEach((t) => _removePanelDom(t));
-        store.openPanels = store.openPanels.filter((t) => t === tagId);
-        const stale = [...store.contextPanelSnapshots.keys()].filter((k) => k !== tagId);
-        stale.forEach((k) => store.contextPanelSnapshots.delete(k));
-    }
+    const toClose = store.openPanels.filter((t) => t !== tagId);
+    toClose.forEach((t) => _removePanelDom(t));
+    store.openPanels = store.openPanels.filter((t) => t === tagId);
+    const stale = [...store.contextPanelSnapshots.keys()].filter((k) => k !== tagId);
+    stale.forEach((k) => store.contextPanelSnapshots.delete(k));
     if (!store.openPanels.includes(tagId)) {
         store.openPanels.push(tagId);
     }
     _mountOrRebuildPanel(tagId);
     focusPanel(tagId);
+    showSelectedPartTab();
     _render();
 }
 
@@ -141,6 +140,7 @@ export function closePanel(tagId) {
         store.focusedPanel = store.openPanels[store.openPanels.length - 1] || null;
         _applyFocusStyling();
     }
+    if (store.openPanels.length === 0) hideSelectedPartTab();
     _render();
 }
 
@@ -153,6 +153,7 @@ export function closeAllPanels() {
     _panelScrollMemory.clear();
     store.dragFromStorageTag = null;
     store.dragFromStorageStartPose = null;
+    hideSelectedPartTab();
     _render();
 }
 
@@ -162,7 +163,7 @@ export function closeAllPanels() {
  * the X button on each one.
  */
 export function clearSelectionAndHideContextPanel() {
-    focusPanel(null);
+    // Empty-canvas clicks intentionally leave the latest Selected Part open.
 }
 
 /**

@@ -227,18 +227,13 @@ function onMouseDown(canvas, e) {
     const mouseY = e.clientY - rect.top;
 
     const hit = getComponentAtPosition(mouseX, mouseY);
-    // Ctrl/Cmd+click opens an ADDITIONAL panel without closing the current
-    // ones (operator request: "Ctrl+click adds a window to the left").
-    // Plain click keeps the legacy "click replaces" semantics.
-    const addPanel = !!(e.ctrlKey || e.metaKey);
-
     if (hit) {
         // Drag-from-storage is "sticky" to a single tag. If the user clicks any other component
         // while drag-from-storage mode is active, exit drag mode and open the new component's panel.
         if (store.dragFromStorageTag && hit.name !== store.dragFromStorageTag) {
             store.dragFromStorageTag = null;
             store.dragFromStorageStartPose = null;
-            openPanel(hit.name, { add: addPanel });
+            openPanel(hit.name);
             log('Drag from storage cancelled (another part was selected).', 'info');
             return;
         }
@@ -248,11 +243,10 @@ function onMouseDown(canvas, e) {
         //   2. Second click on the same (already-focused) component: drag.
         // Ctrl+click is always pure panel-management — never starts a drag.
         const alreadyFocused =
-            !addPanel && store.focusedPanel === hit.name && store.openPanels.includes(hit.name);
+            store.focusedPanel === hit.name && store.openPanels.includes(hit.name);
         if (!alreadyFocused) {
-            openPanel(hit.name, { add: addPanel });
-            if (!addPanel) log(`Selected ${hit.name}`, 'info');
-            return;
+            openPanel(hit.name);
+            log(`Selected ${hit.name}`, 'info');
         }
         {
             if (labBusy) return;
@@ -298,7 +292,11 @@ function onMouseDown(canvas, e) {
             const g0 = teleopAllowsCanvasXY(hit.name)
                 ? store.teleopTarget[hit.name]
                 : store.ghostState[hit.name];
-            store.dragComponentStartLab = { x: g0.x, y: g0.y };
+            store.dragComponentStartLab = {
+                x: g0.x,
+                y: g0.y,
+                rotation: typeof g0.rotation === 'number' ? g0.rotation : 0,
+            };
             const p = mmToPx(store.ghostState[hit.name].x, store.ghostState[hit.name].y);
             store.dragOffset = { x: mouseX - p.x, y: mouseY - p.y };
         }
@@ -411,6 +409,17 @@ async function onMouseUp(_canvas, _e) {
         resetDragAlignmentSticky();
         const dc = store.draggingComponent;
         const current = store.ghostState[dc];
+        const start = store.dragComponentStartLab;
+        const poseChanged =
+            !start ||
+            Math.hypot(current.x - start.x, current.y - start.y) > 0.5 ||
+            Math.abs((current.rotation || 0) - (start.rotation || 0)) > 0.1;
+        if (!poseChanged) {
+            store.draggingComponent = null;
+            store.dragComponentStartLab = null;
+            _render();
+            return;
+        }
 
         if (isTagInTeleop(dc)) {
             // TeleOp: drag only plans TARGET — operator commits with Go.

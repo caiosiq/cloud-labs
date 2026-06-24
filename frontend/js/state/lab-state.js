@@ -128,6 +128,18 @@ export async function fetchLabState() {
         syncTeleopLivePosePolls();
         console.log(`[${new Date().toLocaleTimeString()}] Received Lab State successfully.`);
 
+        const runtimeError = store.labState.last_runtime_error;
+        const runtimeErrorKey =
+            runtimeError && typeof runtimeError === 'object'
+                ? `${runtimeError.timestamp || ''}|${runtimeError.target_id || ''}|${runtimeError.message || ''}`
+                : null;
+        const newRuntimeFailure =
+            !!runtimeErrorKey && runtimeErrorKey !== store.previousRuntimeErrorKey;
+        if (newRuntimeFailure) {
+            const target = runtimeError.target_id ? ` for ${runtimeError.target_id}` : '';
+            log(`Simulator move failed${target}: ${runtimeError.message || 'unknown error'}`, 'error');
+        }
+
         const teleopReadyNow = new Set();
         if (store.labState.components) {
             Object.entries(store.labState.components).forEach(([name, comp]) => {
@@ -160,7 +172,7 @@ export async function fetchLabState() {
         //   3. Initial load (handled by `!store.ghostState[name]` check).
         if (store.labState.components) {
             const justFinishedCommand = (store.previousSystemStatus !== 'IDLE' && store.labState.system_status === 'IDLE');
-            const shouldSync = store.forceGhostSync || justFinishedCommand;
+            const shouldSync = store.forceGhostSync || justFinishedCommand || newRuntimeFailure;
 
             if (shouldSync) {
                 log('Syncing ghost state with lab state...', 'info');
@@ -284,6 +296,7 @@ export async function fetchLabState() {
         // refreshed when its panel rebuilds.
 
         store.previousSystemStatus = store.labState.system_status;
+        store.previousRuntimeErrorKey = runtimeErrorKey;
         store.previousTeleopReadyTags = teleopReadyNow;
         if (store.labState.system_status === 'IDLE') {
             if (store.isOptimizing) {

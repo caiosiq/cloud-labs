@@ -104,6 +104,7 @@ export async function executeSendCommand(command) {
         if (command.target_id) {
             store.pendingCommands.add(command.target_id);
             if (command.action) store.pendingActions.set(command.target_id, command.action);
+            _render();
         }
 
         const response = await fetch('/api/command', {

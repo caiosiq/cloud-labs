@@ -1,6 +1,7 @@
 /** Mutable application state (single source for lab UI). */
 export const store = {
     labState: null,
+    runtimeMode: null,
     /**
      * Ghost (canvas-truth) pose per tag: ``{x, y, rotation}``.
      * TeleOp v2 planning uses ``teleopTarget``; hardware truth uses ``teleopLivePose``.
@@ -58,6 +59,7 @@ export const store = {
     /** Legacy single-line coeffs for snap fallback / logging (derived from doc). */
     laserLineCoeffs: null,
     previousSystemStatus: 'IDLE',
+    previousRuntimeErrorKey: null,
     /** Tags that were teleop-ready on the previous lab-state poll (ghost sync on exit). */
     previousTeleopReadyTags: new Set(),
     forceGhostSync: false,

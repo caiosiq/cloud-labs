@@ -77,6 +77,28 @@ export function saveGuideLinesToStorage() {
     }
 }
 
+export function replaceGuideLines(guides) {
+    const source = Array.isArray(guides) ? guides : [];
+    store.guideLines = source
+        .filter(
+            (g) =>
+                g &&
+                g.p1 &&
+                g.p2 &&
+                [g.p1.x, g.p1.y, g.p2.x, g.p2.y].every((v) =>
+                    Number.isFinite(Number(v)),
+                ),
+        )
+        .map((g) => ({
+            id: String(g.id || `g_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`),
+            p1: { x: Number(g.p1.x), y: Number(g.p1.y) },
+            p2: { x: Number(g.p2.x), y: Number(g.p2.y) },
+        }));
+    saveGuideLinesToStorage();
+    refreshAlignmentIntersectionCache();
+    _render();
+}
+
 function drawAlignmentIntersectionDot(px, py, { fill, stroke, r = 4 }) {
     _ctx.save();
     _ctx.fillStyle = fill;
