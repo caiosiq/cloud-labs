@@ -96,17 +96,56 @@ export function resetDragAlignmentSticky() {
 }
 
 /**
- * With Shift: lock second endpoint to horizontal or vertical through start.
- * Same rule used by guide drawing and by component drag.
+ * With Shift: lock the free end to horizontal, vertical, or — when
+ * ``refDirection`` is supplied — the segment's existing direction through
+ * the anchor. The constraint whose projection is closest to the pointer wins,
+ * so a sloped line stays sloped until the cursor clearly favors H or V.
+ *
+ * Used by guide drawing (H/V only) and endpoint resize (H/V + current angle).
+ *
+ * @param {number} sx anchor x (fixed point)
+ * @param {number} sy anchor y
+ * @param {number} cx cursor x
+ * @param {number} cy cursor y
+ * @param {boolean} shiftKey
+ * @param {{ refDx?: number, refDy?: number } | null} [refDirection] existing direction from anchor (endpoint resize)
  */
-export function constrainGuideEndWithShift(sx, sy, cx, cy, shiftKey) {
+export function constrainGuideEndWithShift(sx, sy, cx, cy, shiftKey, refDirection = null) {
     if (!shiftKey) return { x: cx, y: cy };
+
     const dx = cx - sx;
     const dy = cy - sy;
-    if (Math.abs(dx) >= Math.abs(dy)) {
-        return { x: cx, y: sy };
+
+    /** @type {{ x: number, y: number }[]} */
+    const candidates = [
+        { x: cx, y: sy },
+        { x: sx, y: cy },
+    ];
+
+    const refDx = refDirection?.refDx;
+    const refDy = refDirection?.refDy;
+    if (Number.isFinite(refDx) && Number.isFinite(refDy)) {
+        const len2 = refDx * refDx + refDy * refDy;
+        if (len2 > 1e-12) {
+            const len = Math.sqrt(len2);
+            const ux = refDx / len;
+            const uy = refDy / len;
+            const t = dx * ux + dy * uy;
+            candidates.push({ x: sx + t * ux, y: sy + t * uy });
+        }
     }
-    return { x: sx, y: cy };
+
+    let best = candidates[0];
+    let bestD2 = (cx - best.x) ** 2 + (cy - best.y) ** 2;
+    for (let i = 1; i < candidates.length; i++) {
+        const c = candidates[i];
+        const d2 = (cx - c.x) ** 2 + (cy - c.y) ** 2;
+        if (d2 < bestD2) {
+            bestD2 = d2;
+            best = c;
+        }
+    }
+    return best;
 }
 
 /**

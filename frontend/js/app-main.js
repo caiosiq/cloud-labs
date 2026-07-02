@@ -10,10 +10,9 @@ import {
     getAlignmentSnapThresholdMm,
 } from './canvas/alignment-snap.js';
 import {
+    clearAllGuides,
     initGuides,
-    loadGuideLinesFromStorage,
-    replaceGuideLines,
-    saveGuideLinesToStorage,
+    migrateLocalGuidesOnce,
     updatePencilToolButtonUi,
 } from './canvas/guides.js';
 import {
@@ -23,7 +22,7 @@ import {
     fetchStrategies,
     initApiFetchers,
 } from './api/fetchers.js';
-import { showConfirmationModal, showErrorModal } from './ui/modals.js';
+import { showErrorModal } from './ui/modals.js';
 import { initSessionReconciliation } from './ui/session-reconciliation.js';
 import { initLayoutConflicts } from './ui/layout-conflicts.js';
 import { initRecipes, renderRecipes } from './ui/recipes.js';
@@ -33,6 +32,7 @@ import {
     initLaserLinesPanelDeps,
 } from './ui/laser-lines-panel.js';
 import { initPoseRefresh, runLabPoseRefresh } from './ui/pose-refresh.js';
+import { runtimeEditableOrMessage } from './control/control-state.js';
 import { getTableCamExposureSeconds } from './camera-exposure.js';
 import {
     executeSendCommand,
@@ -41,10 +41,10 @@ import {
 } from './api/commands.js';
 import { endTeleopBeacon } from './api/teleop.js';
 import { fetchLabState, initLabState, startLabStatePolling } from './state/lab-state.js';
-import { initBenchChromeBar } from './ui/bench-chrome-bar.js';
-import { initRuntimeMode, switchRuntimeMode } from './ui/runtime-mode.js';
+import { initBenchChromeBar, initBenchChromeBarInteraction } from './ui/bench-chrome-bar.js';
+import { initRuntimeMode } from './ui/runtime-mode.js';
 import { initWorkspaceTabs } from './ui/workspace-tabs.js';
-import { initUpdateUI, updateUI } from './ui/updateUI.js';
+import { initUpdateUI, initComponentSidebarInteraction, updateUI } from './ui/updateUI.js';
 import {
     initContextPanel,
     openPanel,
@@ -52,10 +52,13 @@ import {
     updateContextPanel,
     updateHoldingBanner,
     updateMotorAngleLabels,
+    closePanel,
 } from './ui/context-panel.js';
 import { checkCollision, initCanvasInteraction } from './canvas/interaction.js';
 import { initRender, render } from './canvas/render.js';
 import { loadPlatformRegistries } from './lab-capabilities.js';
+import { initControlPanel, refreshControlWorkingState } from './ui/control-panel.js';
+import { initInventoryAdd } from './ui/inventory-add.js';
 
 
 const _frontendBuild =
@@ -82,12 +85,9 @@ initGuides({
     mmToPx,
     pxToMm,
     render: () => render(),
+    refreshControlWorkingState: () => refreshControlWorkingState(),
 });
 const refreshBtn = document.getElementById('refresh-btn');
-const saveStateBtn = document.getElementById('save-state-btn');
-const loadStateBtn = document.getElementById('load-state-btn');
-const savedStateSelect = document.getElementById('saved-state-select');
-const resetOriginalStateBtn = document.getElementById('reset-original-state-btn');
 const recipeList = document.getElementById('recipe-list');
 
 // Each per-tag panel renders its own close button now (see ui/component-popup.js).
@@ -105,7 +105,7 @@ const recIndicator = document.getElementById('rec-indicator');
 // --- Module wiring ---
 
 initApiFetchers({
-    onCatalogLoaded: () => updateUI(),
+    onCatalogLoaded: () => updateUI({ forceSidebar: true }),
     onRecipesLoaded: () => renderRecipes(),
 });
 void initRuntimeMode({
@@ -116,13 +116,18 @@ void initRuntimeMode({
 });
 initWorkspaceTabs();
 
-// Load guides before first render so junction scan includes pencil lines.
-loadGuideLinesFromStorage();
+// Guides are now versioned server state: they arrive via lab-state polling
+// (synced into store.guideLines) rather than localStorage.
 fetchCatalogMap();
 fetchLaserLines();
 
 
 initSessionReconciliation({ fetchLabState: () => fetchLabState() });
+initInventoryAdd({
+    fetchLabState: () => fetchLabState(),
+    updateUI: () => updateUI({ forceSidebar: true }),
+    closePanel: (tagId) => closePanel(tagId),
+});
 initLayoutConflicts({ executeSendCommand: (cmd) => executeSendCommand(cmd) });
 initRecipes({
     recipeList,
@@ -133,7 +138,10 @@ initRecipes({
     recIndicator,
     recordBtn,
 });
-initLaserLinesPanelDeps({ render: () => render() });
+initLaserLinesPanelDeps({
+    render: () => render(),
+    refreshControlWorkingState: () => refreshControlWorkingState(),
+});
 initPoseRefresh({
     fetchLabState: () => fetchLabState(),
 });
@@ -146,6 +154,11 @@ initLabState({
     updateContextPanel: (tagId) => updateContextPanel(tagId),
     updateMotorAngleLabels: (tagId) => updateMotorAngleLabels(tagId),
     updateUI: () => updateUI(),
+    refreshControlWorkingState: () => refreshControlWorkingState(),
+});
+initControlPanel({
+    fetchLabState: () => fetchLabState(),
+    render: () => render(),
 });
 initBenchChromeBar({
     // Chrome bar click → open (or focus) a panel for the chrome tag.
@@ -154,6 +167,7 @@ initBenchChromeBar({
         openPanel(tagId, opts || {});
     },
 });
+initBenchChromeBarInteraction();
 initUpdateUI({
     placementUiLabel,
     updateContextPanel: (tagId) => updateContextPanel(tagId),
@@ -162,6 +176,7 @@ initUpdateUI({
     render: () => render(),
     openPanel: (tagId, opts) => openPanel(tagId, opts || {}),
 });
+initComponentSidebarInteraction();
 initContextPanel({
     render: () => render(),
     checkCollision: (id, x, y, opts) => checkCollision(id, x, y, opts),
@@ -185,11 +200,15 @@ function ensureGhostForConsole(tagId) {
 }
 
 function initAlignmentDockTools() {
-    loadGuideLinesFromStorage();
     const pencil = document.getElementById('pencil-tool-btn');
     const clearBtn = document.getElementById('clear-guides-btn');
     if (pencil) {
         pencil.addEventListener('click', () => {
+            const blocked = runtimeEditableOrMessage();
+            if (blocked) {
+                log(blocked, 'warn');
+                return;
+            }
             store.pencilToolActive = !store.pencilToolActive;
             updatePencilToolButtonUi();
             log(
@@ -202,60 +221,16 @@ function initAlignmentDockTools() {
     }
     if (clearBtn) {
         clearBtn.addEventListener('click', () => {
-            store.guideLines = [];
-            saveGuideLinesToStorage();
-            log('Cleared drawn alignment guides.', 'info');
-            render();
+            const blocked = runtimeEditableOrMessage();
+            if (blocked) {
+                log(blocked, 'warn');
+                return;
+            }
+            void clearAllGuides();
         });
     }
     updatePencilToolButtonUi();
 }
-
-async function refreshSavedStateOptions(preferredName = null) {
-    if (!savedStateSelect) return;
-    const response = await fetch('/api/states');
-    const names = response.ok ? await response.json() : [];
-    savedStateSelect.innerHTML = '';
-    if (!Array.isArray(names) || names.length === 0) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No saved snapshots';
-        savedStateSelect.appendChild(option);
-        return;
-    }
-    names.forEach((name) => {
-        const option = document.createElement('option');
-        option.value = name;
-        option.textContent = name === 'original_demo' ? 'Original Demo' : name;
-        savedStateSelect.appendChild(option);
-    });
-    const selected =
-        preferredName && names.includes(preferredName)
-            ? preferredName
-            : names.includes('original_demo')
-              ? 'original_demo'
-              : names[0];
-    savedStateSelect.value = selected;
-}
-
-async function restoreSavedState(name) {
-    if (!name) throw new Error('Choose a saved snapshot first.');
-    const res = await fetch('/api/states/load', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || 'Restore failed');
-    if (data.has_ui_state) {
-        replaceGuideLines(data.ui_state?.alignment_guides || []);
-    }
-    store.forceGhostSync = true;
-    await fetchLabState();
-    log(`Restored workspace snapshot: ${data.name || name}`, 'info');
-    return data;
-}
-
 
 function init() {
     log("Interface loaded.");
@@ -270,10 +245,16 @@ function init() {
     fetchStorageGridSpec();
     fetchStrategies();
     fetchRecipes();
-    fetchLabState();
-    refreshSavedStateOptions().catch((e) =>
-        console.warn('Saved snapshot list failed:', e),
-    );
+    // First fetch seeds runtime overlays server-side; then run the one-time
+    // localStorage→server guide migration + backfill of existing commits, and
+    // refresh once more so the canvas + control flags reflect the migrated set.
+    fetchLabState()
+        .then(() => migrateLocalGuidesOnce())
+        .then(() => {
+            fetchLabState();
+            return refreshControlWorkingState();
+        })
+        .catch((e) => console.warn('Initial line migration sequence failed', e));
     startLabStatePolling();
     refreshBtn.addEventListener('click', async () => {
         try {
@@ -285,76 +266,6 @@ function init() {
         }
     });
 
-    // Each per-tag panel renders its own close button now; the legacy
-    // global #ctx-panel-close listener that used to live here is gone.
-
-    if (saveStateBtn) {
-        saveStateBtn.addEventListener('click', async () => {
-            try {
-                const defaultName = `state_${new Date().toISOString().replace(/[:.]/g, '-')}`;
-                const name = prompt("Save current lab state as:", defaultName);
-                if (!name) return;
-
-                const res = await fetch('/api/states/save', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name,
-                        ui_state: {
-                            alignment_guides: store.guideLines || [],
-                        },
-                    }),
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.detail || 'Save failed');
-
-                await refreshSavedStateOptions(data.name || name);
-                log(`Saved workspace snapshot: ${data.name || name}`, "info");
-            } catch (e) {
-                console.error("Save state failed:", e);
-                showErrorModal("Save Failed", e.message || String(e));
-            }
-        });
-    }
-
-    if (loadStateBtn) {
-        loadStateBtn.addEventListener('click', async () => {
-            try {
-                await restoreSavedState(savedStateSelect?.value);
-            } catch (e) {
-                console.error("Restore snapshot failed:", e);
-                showErrorModal("Restore Failed", e.message || String(e));
-            }
-        });
-    }
-
-    if (resetOriginalStateBtn) {
-        const resetOriginalDemo = async () => {
-            try {
-                if (store.runtimeMode?.active_mode === 'mujoco') {
-                    const switched = await switchRuntimeMode('mock');
-                    if (!switched || switched.active_mode !== 'mock') return;
-                }
-                await restoreSavedState('original_demo');
-                if (savedStateSelect) savedStateSelect.value = 'original_demo';
-            } catch (e) {
-                console.error('Original demo restore failed:', e);
-                showErrorModal('Original Demo Restore Failed', e.message || String(e));
-            }
-        };
-
-        resetOriginalStateBtn.addEventListener('click', () => {
-            if (store.runtimeMode?.active_mode !== 'mujoco') {
-                void resetOriginalDemo();
-                return;
-            }
-            showConfirmationModal(
-                'Resetting will close the MuJoCo viewer, discard the current simulated positions, switch to <strong>Mock UI</strong>, and restore <strong>Original Demo</strong>. Continue?',
-                () => void resetOriginalDemo(),
-            );
-        });
-    }
-    
     initAlignmentDockTools();
     initLaserLinesPanel();
     // Phase 9c removed the lab-wide LIVE FEED pane.

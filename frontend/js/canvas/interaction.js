@@ -18,6 +18,9 @@
  */
 import { DANGER_RADIUS_MM } from '../config.js';
 import { mmToPx, pxToMm } from './coordinates.js';
+import { isConfigViewMode } from '../ui/config-view-mode.js';
+import { isDetached } from '../control/control-state.js';
+import { runtimeEditableOrMessage } from '../control/control-state.js';
 import { store } from '../state/store.js';
 import { log } from '../ui/log.js';
 import {
@@ -30,7 +33,22 @@ import {
 } from '../component-model.js';
 import { isTeleopActive, isTeleopReady } from '../component-state.js';
 import { isPlacedRegion, regionMoveBlocked } from '../storage-region.js';
-import { bindGuideDrawListeners } from './guides.js';
+import {
+    beginGuideDrag,
+    beginGuideEndpointDrag,
+    bindGuideDrawListeners,
+    clearGuideSelection,
+    deleteSelectedGuide,
+    finishGuideDrag,
+    finishGuideEndpointDrag,
+    hitTestGuide,
+    hitTestGuideEndpoint,
+    requestGuideRedo,
+    requestGuideUndo,
+    selectGuide,
+    updateGuideDrag,
+    updateGuideEndpointDrag,
+} from './guides.js';
 import {
     getDragAlignmentStickyIntersection,
     getDragAlignmentStickySegIdx,
@@ -98,6 +116,44 @@ export function initCanvasInteraction(deps) {
     canvas.addEventListener('mouseup', (e) => onMouseUp(canvas, e));
     canvas.addEventListener('dragover', (e) => e.preventDefault());
     canvas.addEventListener('drop', (e) => onDrop(canvas, e));
+
+    // Guide editing shortcuts (Delete, Ctrl+Z undo, Ctrl+Y redo) when a guide
+    // is selected and focus is not in a text field.
+    window.addEventListener('keydown', (e) => {
+        const tag = (e.target && e.target.tagName) || '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) {
+            return;
+        }
+
+        if (e.ctrlKey || e.metaKey) {
+            if ((e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+                if (!store.selectedGuideId) return;
+                e.preventDefault();
+                requestGuideUndo();
+                return;
+            }
+            if (
+                e.key === 'y' ||
+                e.key === 'Y' ||
+                ((e.key === 'z' || e.key === 'Z') && e.shiftKey)
+            ) {
+                if (!store.selectedGuideId) return;
+                e.preventDefault();
+                requestGuideRedo();
+                return;
+            }
+        }
+
+        if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+        if (!store.selectedGuideId) return;
+        const blocked = runtimeEditableOrMessage();
+        if (blocked) {
+            log(blocked, 'warn');
+            return;
+        }
+        e.preventDefault();
+        void deleteSelectedGuide();
+    });
 }
 
 // --- Collision + hit-test ---
@@ -214,6 +270,7 @@ function nextWheelRotationDeg(current, directionSign) {
 // --- Event handlers ---
 
 function onMouseDown(canvas, e) {
+    if (isConfigViewMode()) return;
     // The lab being non-IDLE (BUSY / OPTIMIZING / HOLDING) used to block this
     // entire handler so the operator couldn't accidentally start a drag
     // mid-command. Multi-panel mode loosens that: *opening* a panel (e.g. to
@@ -250,6 +307,12 @@ function onMouseDown(canvas, e) {
         }
         {
             if (labBusy) return;
+            // Detached HEAD: opening the panel above is fine (read-only
+            // inspection), but moving parts is not — fork a branch first.
+            if (isDetached()) {
+                log('You are on an older commit (detached). Fork a branch here before moving parts.', 'warn');
+                return;
+            }
             const stComp = store.labState.components[hit.name];
             if (isStoredComponent(stComp)) {
                 // STORED parts can only be dragged once the user explicitly opts into drag mode
@@ -311,11 +374,47 @@ function onMouseDown(canvas, e) {
             _render();
             return;
         }
+        // Click an existing alignment guide → select it (and, when editable,
+        // start dragging the whole segment; move = uncommitted change).
+        const guideId = hitTestGuide(mouseX, mouseY);
+        if (guideId) {
+            selectGuide(guideId);
+            if (!labBusy && !isDetached()) {
+                const blocked = runtimeEditableOrMessage();
+                if (!blocked) {
+                    const lab = pxToMm(mouseX, mouseY);
+                    const endpoint = hitTestGuideEndpoint(mouseX, mouseY);
+                    if (endpoint) {
+                        beginGuideEndpointDrag(guideId, endpoint, lab);
+                    } else {
+                        beginGuideDrag(guideId, lab);
+                    }
+                }
+            }
+            return;
+        }
+        clearGuideSelection();
         clearSelectionAndHideContextPanel();
     }
 }
 
 function onMouseMove(canvas, e) {
+    if (isConfigViewMode()) return;
+
+    if (store.guideEndpointDrag) {
+        const rect = canvas.getBoundingClientRect();
+        const lab = pxToMm(e.clientX - rect.left, e.clientY - rect.top);
+        updateGuideEndpointDrag(lab, e.shiftKey);
+        return;
+    }
+
+    if (store.guideDrag) {
+        const rect = canvas.getBoundingClientRect();
+        const lab = pxToMm(e.clientX - rect.left, e.clientY - rect.top);
+        updateGuideDrag(lab);
+        return;
+    }
+
     if (!store.isDragging || !store.draggingComponent) return;
 
     const rect = canvas.getBoundingClientRect();
@@ -368,6 +467,7 @@ function onMouseMove(canvas, e) {
 }
 
 function onWheel(e) {
+    if (isConfigViewMode()) return;
     const tag = resolveWheelTag();
     if (!tag || !store.labState?.components?.[tag]) return;
 
@@ -404,6 +504,14 @@ function onWheel(e) {
 }
 
 async function onMouseUp(_canvas, _e) {
+    if (store.guideEndpointDrag) {
+        await finishGuideEndpointDrag();
+        return;
+    }
+    if (store.guideDrag) {
+        finishGuideDrag();
+        return;
+    }
     if (store.isDragging && store.draggingComponent) {
         store.isDragging = false;
         resetDragAlignmentSticky();
@@ -488,6 +596,7 @@ async function onMouseUp(_canvas, _e) {
 }
 
 function onDrop(canvas, e) {
+    if (isConfigViewMode()) return;
     e.preventDefault();
     if (store.labState && store.labState.system_status !== 'IDLE') return;
 

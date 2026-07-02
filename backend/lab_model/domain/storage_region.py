@@ -20,6 +20,7 @@ from .component import (
     PRESENCE_STORAGE,
     is_stored,
     meas_pose,
+    nominal_pose,
     presence_of,
     storage_slot,
 )
@@ -355,6 +356,16 @@ def storage_grid_spec() -> Dict[str, Any]:
     }
 
 
+def intent_layout_pose(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Pose for layout checks: tunables intent when present, else measurables."""
+    np = nominal_pose(entry)
+    if isinstance(np, dict):
+        nx, ny = np.get("x"), np.get("y")
+        if isinstance(nx, (int, float)) and isinstance(ny, (int, float)):
+            return np
+    return meas_pose(entry)
+
+
 def analyze_layout_issues(
     components: Dict[str, Any],
     get_size_for_tag: Callable[[str], Tuple[float, float]],
@@ -369,7 +380,7 @@ def analyze_layout_issues(
         if not isinstance(entry, dict):
             continue
         pres = presence_of(entry)
-        pose = meas_pose(entry)
+        pose = intent_layout_pose(entry)
         try:
             px = float(pose.get("x", 0.0))
             py = float(pose.get("y", 0.0))
@@ -384,7 +395,7 @@ def analyze_layout_issues(
                 {
                     "tag_id": tag_id,
                     "kind": "PLACED_IN_Q3",
-                    "message": f"{tag_id} is intended on the breadboard but its measured center lies in the inventory storage rectangle.",
+                    "message": f"{tag_id} is intended on the breadboard but its committed center lies in the inventory storage rectangle.",
                 }
             )
             continue
@@ -397,7 +408,7 @@ def analyze_layout_issues(
                 {
                     "tag_id": tag_id,
                     "kind": "STORED_OUTSIDE_Q3",
-                    "message": f"{tag_id} is STORED but its measured center is outside the inventory storage rectangle (see layout.json).",
+                    "message": f"{tag_id} is STORED but its committed center is outside the inventory storage rectangle (see layout.json).",
                 }
             )
             continue
@@ -429,7 +440,7 @@ def analyze_layout_issues(
                         "tag_id": tag_id,
                         "kind": "STORED_WRONG_SLOT",
                         "message": (
-                            f"{tag_id} is recorded as stored in cell ({ei},{ej}) but the measured center "
+                            f"{tag_id} is recorded as stored in cell ({ei},{ej}) but the committed center "
                             f"maps to cell ({i},{j})."
                         ),
                         "expected_cell": {"i": ei, "j": ej},

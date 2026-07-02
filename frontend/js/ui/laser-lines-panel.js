@@ -16,15 +16,152 @@ import { store } from '../state/store.js';
 import { log } from './log.js';
 import { twoPointsToLineModel } from '../geometry/lines.js';
 import { refreshAlignmentIntersectionCache } from '../canvas/alignment-snap.js';
+import { isBenchHeaderHovered, onBenchHeaderPointerLeave } from './bench-chrome-bar.js';
 
 let _render = () => {};
+let _refreshControlWorkingState = async () => {};
+let _lastPanelSnapshot = '';
+let _pendingPanelRebuild = false;
 
 /**
- * @param {{ render: () => void }} deps
+ * @param {{ render: () => void, refreshControlWorkingState?: () => Promise<void> }} deps
  */
 export function initLaserLinesPanelDeps(deps) {
     if (deps && typeof deps.render === 'function') _render = deps.render;
+    if (deps && typeof deps.refreshControlWorkingState === 'function') {
+        _refreshControlWorkingState = deps.refreshControlWorkingState;
+    }
 }
+
+/**
+ * Mirror the runtime's laser overlay (from lab-state polling) into the dock /
+ * canvas so checkout / commit / stash changes show up without a manual refetch.
+ * Laser lines are versioned configuration carried on the runtime.
+ */
+export function syncLaserLinesFromLabState() {
+    const incoming = store.labState && store.labState.laser_lines;
+    if (!incoming || !Array.isArray(incoming.lines)) return;
+    const prev = store.laserLinesDoc || {};
+    const next = {
+        ...prev,
+        version: incoming.version != null ? incoming.version : prev.version,
+        snap_line_id: incoming.snap_line_id,
+        lines: incoming.lines,
+    };
+    if (JSON.stringify(next) === JSON.stringify(prev)) return;
+    store.laserLinesDoc = next;
+    store.laserLineCoeffs = coeffsFromLaserLinesDoc(store.laserLinesDoc);
+    refreshAlignmentIntersectionCache();
+    maybeRenderLaserLinesPanel();
+    _render();
+}
+
+function computeLaserPanelSnapshot(doc) {
+    if (!doc || !Array.isArray(doc.lines)) return '';
+    const snap = doc.snap_line_id || '';
+    const parts = [snap];
+    doc.lines.forEach((line) => {
+        if (!line || !line.id) return;
+        const en = line.enabled !== false;
+        const rawC = (line.color && String(line.color).trim()) || '#ff3b3b';
+        const c = /^#[0-9A-Fa-f]{3,8}$/i.test(rawC) ? rawC : '#ff3b3b';
+        parts.push(`${line.id}:${en ? '1' : '0'}:${c}:${line.name || ''}`);
+    });
+    return parts.join('|');
+}
+
+/** Update icon enabled/snap styling without recreating buttons. */
+function syncLaserLinesPanelHighlights() {
+    const root = document.getElementById('laser-lines-list');
+    const doc = store.laserLinesDoc;
+    if (!root || !doc || !Array.isArray(doc.lines)) return;
+    const snap = doc.snap_line_id;
+    const byId = {};
+    doc.lines.forEach((ln) => {
+        if (ln && ln.id) byId[ln.id] = ln;
+    });
+    root.querySelectorAll('.laser-line-icon[data-line-id]').forEach((icon) => {
+        const id = icon.getAttribute('data-line-id');
+        const line = byId[id];
+        if (!line) return;
+        const en = line.enabled !== false;
+        icon.classList.toggle('is-enabled', en);
+        icon.classList.toggle('is-snap', id === snap);
+        icon.setAttribute('aria-pressed', en ? 'true' : 'false');
+    });
+}
+
+function rebuildLaserLinesPanel() {
+    const root = document.getElementById('laser-lines-list');
+    const dock = document.getElementById('laser-lines-dock');
+    if (!root) return;
+    const doc = store.laserLinesDoc;
+    if (dock) dock.style.display = '';
+    if (!doc || !Array.isArray(doc.lines) || doc.lines.length === 0) {
+        root.innerHTML = '';
+        _lastPanelSnapshot = computeLaserPanelSnapshot(doc);
+        return;
+    }
+    const snap = doc.snap_line_id;
+    root.innerHTML = doc.lines
+        .map((line) => {
+            const id = line.id || '';
+            const name = (line.name || id).replace(/</g, '\u003c');
+            const en = line.enabled !== false;
+            const rawC = (line.color && String(line.color).trim()) || '#ff3b3b';
+            const c = /^#[0-9A-Fa-f]{3,8}$/i.test(rawC) ? rawC : '#ff3b3b';
+            const idA = _laserLineAttrEscape(id);
+            const isSnap = id === snap;
+            const tip =
+                `${name}${isSnap ? ' (snap)' : ''} — click to ${en ? 'hide' : 'show'}, double-click to edit`;
+            return (
+                `<button type="button" class="laser-line-icon${en ? ' is-enabled' : ''}${isSnap ? ' is-snap' : ''}" ` +
+                `data-line-id="${idA}" ` +
+                `style="--laser-line-color:${c}" ` +
+                `title="${tip}" ` +
+                `aria-pressed="${en ? 'true' : 'false'}" ` +
+                `aria-label="${name}${isSnap ? ' (snap line)' : ''}">` +
+                `<span class="material-icons-round" aria-hidden="true">my_location</span>` +
+                `</button>`
+            );
+        })
+        .join('');
+    _lastPanelSnapshot = computeLaserPanelSnapshot(doc);
+}
+
+/**
+ * Refresh laser line icons when the doc changes. Defers full rebuilds while the
+ * pointer is over the bench header (camera + laser strip).
+ * @param {{ force?: boolean }} [opts]
+ */
+export function maybeRenderLaserLinesPanel({ force = false } = {}) {
+    const doc = store.laserLinesDoc;
+    const snapshot = computeLaserPanelSnapshot(doc);
+    if (!force && snapshot === _lastPanelSnapshot) {
+        syncLaserLinesPanelHighlights();
+        return;
+    }
+    if (!force && isBenchHeaderHovered()) {
+        _pendingPanelRebuild = true;
+        syncLaserLinesPanelHighlights();
+        return;
+    }
+    _pendingPanelRebuild = false;
+    rebuildLaserLinesPanel();
+}
+
+/** Force a full laser dock rebuild (boot / explicit fetch). */
+export function renderLaserLinesPanel() {
+    maybeRenderLaserLinesPanel({ force: true });
+}
+
+function flushDeferredLaserLinesPanel() {
+    if (!_pendingPanelRebuild) return;
+    _pendingPanelRebuild = false;
+    rebuildLaserLinesPanel();
+}
+
+onBenchHeaderPointerLeave(flushDeferredLaserLinesPanel);
 
 function _laserLineAttrEscape(s) {
     return String(s)
@@ -105,44 +242,6 @@ export async function fetchLaserLines() {
     }
 }
 
-export function renderLaserLinesPanel() {
-    const root = document.getElementById('laser-lines-list');
-    const dock = document.getElementById('laser-lines-dock');
-    if (!root) return;
-    const doc = store.laserLinesDoc;
-    if (dock) dock.style.display = '';
-    if (!doc || !Array.isArray(doc.lines) || doc.lines.length === 0) {
-        root.innerHTML = '';
-        return;
-    }
-    const snap = doc.snap_line_id;
-    root.innerHTML = doc.lines
-        .map((line) => {
-            const id = line.id || '';
-            const name = (line.name || id).replace(/</g, '\u003c');
-            const en = line.enabled !== false;
-            const rawC = (line.color && String(line.color).trim()) || '#ff3b3b';
-            const c = /^#[0-9A-Fa-f]{3,8}$/i.test(rawC) ? rawC : '#ff3b3b';
-            const idA = _laserLineAttrEscape(id);
-            const isSnap = id === snap;
-            // Tooltip carries name + behavior hint + snap marker (no on-screen label
-            // because the dock is icons-only; hover surfaces the label cheaply).
-            const tip =
-                `${name}${isSnap ? ' (snap)' : ''} — click to ${en ? 'hide' : 'show'}, double-click to edit`;
-            return (
-                `<button type="button" class="laser-line-icon${en ? ' is-enabled' : ''}${isSnap ? ' is-snap' : ''}" ` +
-                `data-line-id="${idA}" ` +
-                `style="--laser-line-color:${c}" ` +
-                `title="${tip}" ` +
-                `aria-pressed="${en ? 'true' : 'false'}" ` +
-                `aria-label="${name}${isSnap ? ' (snap line)' : ''}">` +
-                `<span class="material-icons-round" aria-hidden="true">my_location</span>` +
-                `</button>`
-            );
-        })
-        .join('');
-}
-
 function closeLaserLineEditModal() {
     const m = document.getElementById('laser-line-edit-modal');
     if (m) {
@@ -206,8 +305,9 @@ async function applyLaserLineGeometryEdit() {
         if (!res.ok) throw new Error(data.detail || res.statusText);
         closeLaserLineEditModal();
         await fetchLaserLines();
+        void _refreshControlWorkingState();
         _render();
-        log(`Laser line "${lineId}" geometry updated.`, 'info');
+        log(`Laser line "${lineId}" geometry updated (uncommitted change).`, 'info');
     } catch (e) {
         console.error(e);
         log(`Laser line update failed: ${e.message || e}`, 'error');
@@ -225,7 +325,10 @@ async function toggleLaserLineEnabled(id, nextEnabled) {
         if (!res.ok) throw new Error(data.detail || res.statusText);
         store.laserLinesDoc = data;
         store.laserLineCoeffs = coeffsFromLaserLinesDoc(store.laserLinesDoc);
-        renderLaserLinesPanel();
+        _lastPanelSnapshot = computeLaserPanelSnapshot(store.laserLinesDoc);
+        syncLaserLinesPanelHighlights();
+        refreshAlignmentIntersectionCache();
+        void _refreshControlWorkingState();
         _render();
         log(`Laser line "${id}" ${nextEnabled ? 'shown' : 'hidden'}.`, 'info');
     } catch (err) {

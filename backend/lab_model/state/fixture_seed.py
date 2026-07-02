@@ -71,6 +71,30 @@ def build_fixture_component_entry(catalog_row: Dict[str, Any]) -> Dict[str, Any]
     return entry
 
 
+def enrich_runtime_entry_from_catalog(
+    entry: Dict[str, Any],
+    catalog_row: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply catalog defaults (exposure, stream backend) to a table/runtime row."""
+    exp_ms = _default_exposure_ms(catalog_row)
+    if exp_ms is not None:
+        sc = entry.setdefault("statecontrol", {})
+        tun = sc.setdefault("tunables", {})
+        if isinstance(tun, dict):
+            tun.setdefault("exposure_time_ms", exp_ms)
+
+    stream_backend = resolve_telemetry_stream_backend(catalog_row)
+    if stream_backend != "none":
+        tel = entry.setdefault("telemetry", default_telemetry())
+        lf = tel.setdefault("live_feed", default_telemetry()["live_feed"])
+        stream = lf.setdefault("stream", {})
+        if isinstance(stream, dict):
+            stream["backend"] = stream_backend
+            stream["resource_id"] = catalog_row.get("id")
+
+    return entry
+
+
 def merge_fixture_components(
     components: Dict[str, Any],
     catalog_rows: Iterable[Dict[str, Any]],

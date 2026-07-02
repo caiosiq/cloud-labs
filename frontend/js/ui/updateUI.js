@@ -1,28 +1,26 @@
 /**
- * `updateUI()` — the "I just refetched lab state, now repaint everything" routine.
+ * `updateUI()` — refresh chrome after lab state / catalog changes.
  *
- * This is the single entry-point that every poll tick calls after mirroring `store.labState`. It
- * is intentionally side-effect-heavy: it updates the system status badge, rebuilds the inventory
- * sidebar from scratch, refreshes motor labels, runs the layout-warning
- * banner sync, and finally requests a canvas redraw.
- *
- * Callbacks for the still-in-app-main pieces (context panel, holding banner, motor labels, the
- * canvas `render()` itself) are injected via `initUpdateUI` so this file stays decoupled.
+ * The component sidebar is rebuilt only when its snapshot changes (not every
+ * 500 ms poll). While the pointer is over the list, rebuilds are deferred so
+ * hover and clicks stay stable.
  */
 import { store } from '../state/store.js';
 import {
-    catalogDeclaresTablePose,
     getCatalogRow,
     getHolding,
-    isChromeComponent,
+    isComponentControlled,
     isHeldTag,
     isOnTableComponent,
     isOptimizedPlacement,
     isStoredComponent,
+    physicalMountLabel,
 } from '../component-model.js';
-import { refreshBenchChromeBar } from './bench-chrome-bar.js';
+import { maybeRefreshBenchChromeBar } from './bench-chrome-bar.js';
 import { getComponentIcon } from './icons.js';
 import { updateLayoutWarningBanner } from './layout-conflicts.js';
+import { createTrackToggleButton, listLibraryOnlyTags } from './inventory-add.js';
+
 let _deps = {
     placementUiLabel: () => 'PLACED',
     updateContextPanel: () => {},
@@ -31,6 +29,11 @@ let _deps = {
     render: () => {},
     openPanel: () => {},
 };
+
+let _lastSidebarSnapshot = '';
+let _sidebarPointerInside = false;
+let _sidebarPendingRebuild = false;
+let _sidebarInteractionInit = false;
 
 /**
  * @param {{
@@ -46,12 +49,230 @@ export function initUpdateUI(deps) {
     _deps = { ..._deps, ...deps };
 }
 
-export function updateUI() {
+/** Defer sidebar DOM rebuilds while the operator hovers the inventory list. */
+export function initComponentSidebarInteraction() {
+    if (_sidebarInteractionInit) return;
+    const list = document.getElementById('component-list');
+    if (!list) return;
+    _sidebarInteractionInit = true;
+    list.addEventListener('pointerenter', () => {
+        _sidebarPointerInside = true;
+    });
+    list.addEventListener('pointerleave', () => {
+        _sidebarPointerInside = false;
+        if (_sidebarPendingRebuild) {
+            _sidebarPendingRebuild = false;
+            rebuildComponentSidebar();
+            syncComponentSidebarHighlights();
+        }
+    });
+}
+
+function sidebarCardContentKey(tagId, comp, { libraryOnlyCard = false } = {}) {
+    const controlled = isComponentControlled(tagId, { libraryOnly: libraryOnlyCard });
+    const catalogRow = getCatalogRow(tagId);
+    const displayName =
+        catalogRow && catalogRow.name ? catalogRow.name : `Unknown (${comp?.id || tagId})`;
+    const parts = [
+        controlled ? '1' : '0',
+        isHeldTag(tagId, store.labState) ? '1' : '0',
+        comp && isOptimizedPlacement(comp) ? '1' : '0',
+        comp && isStoredComponent(comp) ? '1' : '0',
+        comp && isOnTableComponent(comp) ? '1' : '0',
+        comp ? _deps.placementUiLabel(comp) : '',
+        physicalMountLabel(tagId, comp),
+        displayName,
+        comp?.type || catalogRow?.type || 'UNKNOWN',
+        catalogRow?.motor_ids?.length ? '1' : '0',
+    ];
+    return parts.join(':');
+}
+
+function computeSidebarSnapshot() {
+    const components = store.labState?.components || {};
+    const libraryOnly = listLibraryOnlyTags();
+    const runtimeTags = Object.keys(components).sort();
+    const hld = getHolding(store.labState);
+    const parts = [
+        runtimeTags.join(','),
+        libraryOnly.join(','),
+        (store.activeCatalogTags || []).join(','),
+        store.openPanels.join(','),
+        store.focusedPanel || '',
+        `${hld.tag_id || ''}|${hld.requires_operator_confirm ? '1' : '0'}`,
+    ];
+    runtimeTags.forEach((tagId) => {
+        parts.push(`${tagId}=${sidebarCardContentKey(tagId, components[tagId])}`);
+    });
+    libraryOnly.forEach((tagId) => {
+        parts.push(
+            `${tagId}=lib:${sidebarCardContentKey(tagId, null, { libraryOnlyCard: true })}`,
+        );
+    });
+    return parts.join('|');
+}
+
+/** Cheap pass: panel open/focus borders without tearing down card nodes. */
+export function syncComponentSidebarHighlights() {
+    const list = document.getElementById('component-list');
+    if (!list) return;
+    list.querySelectorAll('.component-card[data-tag-id]').forEach((card) => {
+        const tagId = card.dataset.tagId;
+        if (store.openPanels.includes(tagId)) {
+            card.style.borderColor = 'rgba(59, 130, 246, 0.45)';
+        } else {
+            card.style.borderColor = '';
+        }
+        if (tagId === store.focusedPanel) {
+            card.style.borderColor = '#3b82f6';
+        }
+    });
+}
+
+function rebuildComponentSidebar() {
+    const componentList = document.getElementById('component-list');
+    if (!componentList) return;
+
+    componentList.innerHTML = '';
+
+    const components = store.labState.components || {};
+    const libraryOnly = listLibraryOnlyTags();
+    const placedCount = Object.keys(components).length;
+    if (placedCount === 0 && libraryOnly.length === 0) {
+        componentList.innerHTML =
+            '<div style="padding: 20px; text-align: center; color: #64748b; font-size: 11px;">No components placed.</div>';
+        _lastSidebarSnapshot = computeSidebarSnapshot();
+        return;
+    }
+
+    const appendComponentCard = (name, comp, { libraryOnlyCard = false } = {}) => {
+        const card = document.createElement('div');
+        card.className = 'component-card';
+        card.dataset.tagId = name;
+
+        if (store.openPanels.includes(name)) {
+            card.style.borderColor = 'rgba(59, 130, 246, 0.45)';
+        }
+        if (name === store.focusedPanel) {
+            card.style.borderColor = '#3b82f6';
+        }
+
+        const isPlaced = comp ? isOnTableComponent(comp) : false;
+        const controlled = isComponentControlled(name, { libraryOnly: libraryOnlyCard });
+
+        let displayName = name;
+        let displayType = comp?.type || getCatalogRow(name)?.type || 'UNKNOWN';
+        let unknownTag = false;
+
+        const catalogRow = getCatalogRow(name) || (comp && getCatalogRow(comp.id));
+        if (catalogRow && catalogRow.name) {
+            displayName = catalogRow.name;
+        } else {
+            displayName = `Unknown (${comp?.id || name})`;
+            unknownTag = true;
+        }
+
+        const icon = getComponentIcon(displayType);
+        const mount = physicalMountLabel(name, comp);
+
+        let statusDot;
+        if (isHeldTag(name, store.labState)) {
+            statusDot = `<div class="status-dot holding" title="Held by gripper"></div>`;
+        } else if (isOptimizedPlacement(comp)) {
+            statusDot = `<div class="status-dot optimized" title="Optimized (${_deps.placementUiLabel(comp)})"></div>`;
+        } else if (isStoredComponent(comp)) {
+            statusDot = `<div class="status-dot stored" title="Stored (Q3)"></div>`;
+        } else if (libraryOnlyCard) {
+            statusDot = '<div class="status-dot inventory" title="In library"></div>';
+        } else if (!controlled) {
+            statusDot = '<div class="status-dot inventory" title="Not controlled"></div>';
+        } else {
+            const label = comp?.statecontrol ? _deps.placementUiLabel(comp) : 'INVENTORY';
+            statusDot = `<div class="status-dot ${isPlaced ? 'placed' : 'inventory'}" title="${label}"></div>`;
+        }
+
+        const controlBadge = controlled
+            ? '<span class="inv-badge inv-badge--tracked">Controlled</span>'
+            : '<span class="inv-badge inv-badge--idle">Not controlled</span>';
+        const mountBadge = libraryOnlyCard
+            ? '<span class="inv-badge inv-badge--mount">In library</span>'
+            : `<span class="inv-badge inv-badge--mount">${mount}</span>`;
+
+        let motorBadge = '';
+        if (catalogRow && catalogRow.motor_ids && catalogRow.motor_ids.length > 0) {
+            motorBadge =
+                '<span class="material-icons-round" style="font-size: 12px; color: #f59e0b; margin-right: 4px;" title="Motorized">settings_input_component</span>';
+        }
+
+        card.innerHTML = `
+            <div class="comp-icon material-icons-round">${icon}</div>
+            <div class="comp-info">
+                <span class="comp-name" style="${unknownTag ? 'color: #f59e0b;' : ''}">${displayName}</span>
+                <span class="comp-meta">${controlBadge}${mountBadge}${motorBadge}${displayType.replace('OPTICAL_', '')} • ${name}</span>
+            </div>
+            ${statusDot}
+        `;
+
+        card.appendChild(createTrackToggleButton(name, controlled));
+
+        if (!libraryOnlyCard) {
+            card.addEventListener('click', (ev) => {
+                const add = !!(ev.ctrlKey || ev.metaKey);
+                _deps.openPanel(name, { add });
+            });
+        } else {
+            card.classList.add('library-only');
+            card.style.cursor = 'default';
+        }
+
+        componentList.appendChild(card);
+    };
+
+    Object.entries(components).forEach(([name, comp]) => {
+        appendComponentCard(name, comp);
+    });
+
+    if (libraryOnly.length > 0) {
+        const header = document.createElement('div');
+        header.className = 'inventory-section-label';
+        header.textContent = 'In library';
+        componentList.appendChild(header);
+
+        libraryOnly.forEach((tagId) => {
+            const row = getCatalogRow(tagId) || {};
+            appendComponentCard(
+                tagId,
+                { id: tagId, type: row.type || 'UNKNOWN' },
+                { libraryOnlyCard: true },
+            );
+        });
+    }
+
+    _lastSidebarSnapshot = computeSidebarSnapshot();
+}
+
+function maybeRebuildComponentSidebar({ force = false } = {}) {
+    const snapshot = computeSidebarSnapshot();
+    if (!force && snapshot === _lastSidebarSnapshot) {
+        syncComponentSidebarHighlights();
+        return;
+    }
+    if (!force && _sidebarPointerInside) {
+        _sidebarPendingRebuild = true;
+        syncComponentSidebarHighlights();
+        return;
+    }
+    _sidebarPendingRebuild = false;
+    rebuildComponentSidebar();
+}
+
+/**
+ * @param {{ forceSidebar?: boolean }} [opts]
+ */
+export function updateUI(opts = {}) {
     if (!store.labState) return;
 
     const statusBadge = document.getElementById('system-status-badge');
-    const componentList = document.getElementById('component-list');
-
     const status = store.labState.system_status;
     let badgeClass = 'active';
     let badgeColor = 'placed';
@@ -70,8 +291,6 @@ export function updateUI() {
         badgeClass = '';
         badgeColor = '';
         const hld = getHolding(store.labState);
-        // UNCONFIRMED HOLDING is a special red state: the gripper closed but the operator needs
-        // to acknowledge before the next motion proceeds.
         if (hld.requires_operator_confirm) {
             badgeStyle = 'background-color: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);';
             badgeSuffix = ' · UNCONFIRMED';
@@ -87,105 +306,8 @@ export function updateUI() {
     }
 
     _deps.updateHoldingBanner();
-
-    if (!componentList) return;
-    componentList.innerHTML = '';
-
-    const components = store.labState.components || {};
-    const placedCount = Object.keys(components).length;
-    if (placedCount === 0) {
-        componentList.innerHTML = '<div style="padding: 20px; text-align: center; color: #64748b; font-size: 11px;">No components placed.</div>';
-    }
-
-    Object.entries(components).forEach(([name, comp]) => {
-        const card = document.createElement('div');
-        card.className = 'component-card';
-        // Multi-panel: any open card gets a soft outline; the focused panel's
-        // card gets the bright primary-accent border so the operator can see
-        // at a glance which sidebar items have a dock panel and which one is
-        // currently interactive.
-        if (store.openPanels.includes(name)) {
-            card.style.borderColor = 'rgba(59, 130, 246, 0.45)';
-        }
-        if (name === store.focusedPanel) {
-            card.style.borderColor = '#3b82f6';
-        }
-
-        const isPlaced = isOnTableComponent(comp);
-
-        // Resolve display name from catalog using Tag ID; fall back to "Unknown (id)" with a
-        // yellow accent so the operator notices catalog mismatches.
-        let displayName = name;
-        let displayType = comp.type;
-        let unknownTag = false;
-
-        const catalogRow = getCatalogRow(name) || getCatalogRow(comp.id);
-        if (catalogRow && catalogRow.name) {
-            displayName = catalogRow.name;
-        } else {
-            displayName = `Unknown (${comp.id})`;
-            unknownTag = true;
-        }
-
-        const icon = getComponentIcon(comp.type);
-        const chrome = isChromeComponent(name);
-        const onCanvas = catalogDeclaresTablePose(name) && isOnTableComponent(comp);
-
-        // Sidebar status-dot priority ladder (highest wins):
-        //   1. HOLDING (this tag is in the gripper right now)   — purple
-        //   2. OPTIMIZED (current placement came from a strategy)— green + gold halo
-        //   3. STORED (Q3 storage region)                       — indigo
-        //   4. PLACED on breadboard                             — green
-        //   5. OFF_TABLE inventory                              — blue
-        // Note: `hasOptimizationOutcome` alone is NOT enough for "optimized" styling —
-        // `isOptimizedPlacement` also requires the current `placement.mode` to be a strategy name
-        // (i.e. the part hasn't been manually re-moved since the optimizer ran). Hovering tooltip
-        // shows the raw placement label (MANUAL / COBYLA / HOVER / etc.) for detail.
-        let statusDot;
-        if (isHeldTag(name, store.labState)) {
-            statusDot = `<div class="status-dot holding" title="Held by gripper"></div>`;
-        } else if (isOptimizedPlacement(comp)) {
-            statusDot = `<div class="status-dot optimized" title="Optimized (${_deps.placementUiLabel(comp)})"></div>`;
-        } else if (isStoredComponent(comp)) {
-            statusDot = `<div class="status-dot stored" title="Stored (Q3)"></div>`;
-        } else if (chrome) {
-            statusDot = `<div class="status-dot inventory" style="background:#0ea5e9;box-shadow:0 0 6px rgba(14,165,233,0.45);" title="Fixed bench (chrome bar)"></div>`;
-        } else {
-            statusDot = `<div class="status-dot ${isPlaced ? 'placed' : 'inventory'}" title="${_deps.placementUiLabel(comp)}"></div>`;
-        }
-
-        const roleBadge = chrome
-            ? '<span style="font-size:9px;color:#38bdf8;margin-right:4px;" title="Chrome bar">FIXED</span>'
-            : onCanvas
-              ? ''
-              : '<span style="font-size:9px;color:#94a3b8;margin-right:4px;">OFF TABLE</span>';
-
-        let motorBadge = '';
-        if (catalogRow && catalogRow.motor_ids && catalogRow.motor_ids.length > 0) {
-            motorBadge = `<span class="material-icons-round" style="font-size: 12px; color: #f59e0b; margin-right: 4px;" title="Motorized">settings_input_component</span>`;
-        }
-
-        card.innerHTML = `
-            <div class="comp-icon material-icons-round">${icon}</div>
-            <div class="comp-info">
-                <span class="comp-name" style="${unknownTag ? 'color: #f59e0b;' : ''}">${displayName}</span>
-                <span class="comp-meta">${roleBadge}${motorBadge}${displayType.replace('OPTICAL_', '')} • ${name}</span>
-            </div>
-            ${statusDot}
-        `;
-
-        // Ctrl/Cmd+click opens an additional panel without closing existing
-        // ones (matches the canvas-side multi-panel rule). Plain click keeps
-        // the legacy "replace" semantics.
-        card.addEventListener('click', (ev) => {
-            const add = !!(ev.ctrlKey || ev.metaKey);
-            _deps.openPanel(name, { add });
-        });
-
-        componentList.appendChild(card);
-    });
-
-    refreshBenchChromeBar();
+    maybeRebuildComponentSidebar({ force: !!opts.forceSidebar });
+    maybeRefreshBenchChromeBar();
     _deps.updateMotorAngleLabels(store.selectedComponent);
     updateLayoutWarningBanner();
     _deps.render();

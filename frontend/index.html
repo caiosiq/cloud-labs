@@ -263,14 +263,817 @@
             background: #f59e0b;
         }
 
-        .saved-state-select {
+        .control-panel {
+            padding: 0 16px 12px;
+            border-top: 1px solid var(--border-color);
+            background: rgba(0, 0, 0, 0.08);
+        }
+
+        .control-panel-head {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin: 8px 0 6px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .control-branch-select {
             width: 100%;
             padding: 6px 8px;
             border: 1px solid var(--border-color);
             border-radius: 5px;
             background: #11141a;
-            color: var(--text-main);
+            color: var(--text-primary);
             font-size: 11px;
+            margin-bottom: 8px;
+        }
+
+        .control-timeline {
+            max-height: 180px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 8px;
+            padding-right: 2px;
+        }
+
+        .control-timeline-empty {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+            padding: 8px 4px;
+        }
+
+        .control-timeline-node {
+            text-align: left;
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+        }
+
+        .control-timeline-node:hover {
+            border-color: var(--primary-accent);
+            background: rgba(59, 130, 246, 0.08);
+        }
+
+        .control-timeline-node.is-head {
+            border-left: 3px solid var(--status-success);
+        }
+
+        .control-timeline-node.is-selected {
+            box-shadow: inset 0 0 0 1px var(--primary-accent);
+        }
+
+        .control-timeline-node.is-viewing:not(.is-head) {
+            border-color: var(--status-warning);
+            background: rgba(245, 158, 11, 0.08);
+        }
+
+        .control-timeline-node-title {
+            font-size: 11px;
+            font-weight: 500;
+            line-height: 1.3;
+            margin-bottom: 2px;
+        }
+
+        .control-timeline-node-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .canvas-stage {
+            align-self: center;
+            width: min(1000px, calc(100% - 24px));
+            max-width: 100%;
+            flex-shrink: 0;
+        }
+
+        .canvas-stage__row {
+            position: relative;
+            width: 100%;
+        }
+
+        .canvas-stage.is-config-view #bench-tools-strip {
+            opacity: 0.45;
+            pointer-events: none;
+        }
+
+        .control-graph-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        #canvas-wrapper.is-config-view {
+            border-color: #f59e0b;
+            box-shadow:
+                0 0 0 2px rgba(245, 158, 11, 0.85),
+                0 0 28px rgba(245, 158, 11, 0.18),
+                0 0 50px rgba(0, 0, 0, 0.5);
+        }
+
+        .canvas-view-shield {
+            position: absolute;
+            inset: 0;
+            z-index: 4;
+            cursor: not-allowed;
+            border-radius: inherit;
+            background: rgba(245, 158, 11, 0.05);
+        }
+
+        .canvas-view-shield[hidden] {
+            display: none !important;
+        }
+
+        .config-view-badge {
+            position: absolute;
+            top: 8px;
+            left: calc(100% + 10px);
+            width: max-content;
+            max-width: 240px;
+            min-width: 168px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(245, 158, 11, 0.45);
+            background: rgba(15, 18, 24, 0.94);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+            font-size: 10px;
+            line-height: 1.35;
+            color: #fcd34d;
+        }
+
+        .config-view-badge.is-applying {
+            border-color: rgba(245, 158, 11, 0.65);
+        }
+
+        .config-view-badge[hidden] {
+            display: none !important;
+        }
+
+        .config-view-badge__label {
+            display: block;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #fbbf24;
+            margin-bottom: 2px;
+        }
+
+        .config-view-badge__id {
+            display: block;
+            font-family: ui-monospace, monospace;
+            font-size: 11px;
+            color: #fde68a;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+
+        .config-view-badge__actions {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .config-view-badge__btn {
+            width: 100%;
+            margin: 0;
+            padding: 4px 8px;
+            font-size: 10px;
+            border-radius: 4px;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            background: transparent;
+            color: #fcd34d;
+            cursor: pointer;
+        }
+
+        .config-view-badge__btn:hover {
+            background: rgba(245, 158, 11, 0.12);
+        }
+
+        .config-view-badge__btn--primary {
+            border-color: rgba(245, 158, 11, 0.65);
+            background: rgba(245, 158, 11, 0.15);
+            font-weight: 600;
+        }
+
+        .config-view-reconcile__progress {
+            display: block;
+            margin: 6px 0 4px;
+            font-size: 10px;
+            font-weight: 600;
+            color: #93c5fd;
+        }
+
+        .config-view-reconcile__steps {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        .config-view-reconcile__step {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            padding: 3px 0;
+            font-size: 10px;
+            line-height: 1.35;
+            color: #64748b;
+        }
+
+        .config-view-reconcile__step.is-active {
+            color: #fde68a;
+            font-weight: 600;
+        }
+
+        .config-view-reconcile__step.is-done {
+            color: #86efac;
+        }
+
+        .config-view-reconcile__step.is-error {
+            color: #fca5a5;
+        }
+
+        .config-view-reconcile__marker {
+            flex-shrink: 0;
+            width: 14px;
+            text-align: center;
+            font-size: 9px;
+            line-height: 1.5;
+        }
+
+        .config-view-reconcile__label {
+            word-break: break-word;
+        }
+
+        @media (max-width: 1120px) {
+            .config-view-badge {
+                left: auto;
+                right: 0;
+                top: -2px;
+                transform: translateY(-100%);
+            }
+        }
+
+        .btn-control {
+            margin-top: 6px;
+            font-size: 11px;
+            padding: 7px 8px;
+        }
+
+        .control-plan-preview {
+            margin-top: 8px;
+            padding: 8px;
+            font-size: 10px;
+            line-height: 1.4;
+            color: var(--text-muted);
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 6px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .control-plan-preview ol {
+            margin: 4px 0 0;
+            padding-left: 18px;
+        }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        .control-graph-panel {
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-self: center;
+            width: min(1000px, calc(100% - 24px));
+            max-width: 100%;
+            margin: 8px auto 0;
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 8px;
+            background: rgba(20, 24, 32, 0.92);
+            overflow: hidden;
+        }
+
+        .control-graph-toolbar {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+        }
+
+        /* Opt-in version control: when inactive, only the start screen shows. */
+        .control-graph-panel.vc-inactive .control-graph-toolbar,
+        .control-graph-panel.vc-inactive #control-plan-preview {
+            display: none;
+        }
+
+        .control-vc-start {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+        }
+
+        .control-graph-panel:not(.vc-inactive) .control-vc-start {
+            display: none;
+        }
+
+        .control-vc-start-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-graph-toolbar-start {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            flex-shrink: 0;
+        }
+
+        .control-graph-toolbar-select,
+        .control-graph-branch-select,
+        .control-graph-repo-select {
+            box-sizing: border-box;
+            height: 32px;
+            padding: 0 28px 0 10px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 6px;
+            background: rgba(15, 20, 28, 0.95);
+            color: #f1f5f9;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 1;
+            min-width: 0;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+        }
+
+        .control-graph-repo-select {
+            min-width: 128px;
+            max-width: 168px;
+        }
+
+        .control-graph-branch-select {
+            min-width: 84px;
+            max-width: 132px;
+        }
+
+        .control-graph-toolbar-select:focus,
+        .control-graph-branch-select:focus,
+        .control-graph-repo-select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.22);
+        }
+
+        .control-new-repo-btn {
+            box-sizing: border-box;
+            width: 32px;
+            min-width: 32px;
+            height: 32px;
+            padding: 0;
+            margin: 0;
+            border-radius: 6px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            background: rgba(15, 20, 28, 0.95);
+            color: #94a3b8;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .control-new-repo-btn:hover {
+            color: #e2e8f0;
+            border-color: #64748b;
+            background: rgba(30, 41, 59, 0.95);
+        }
+
+        .control-new-repo-btn .material-icons-round {
+            font-size: 18px;
+        }
+
+        .control-graph-head-pill {
+            box-sizing: border-box;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            height: 32px;
+            padding: 0 12px;
+            margin-left: 4px;
+            border-radius: 6px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            background: rgba(15, 20, 28, 0.95);
+            border: 1px solid rgba(34, 197, 94, 0.35);
+            border-left: 1px solid rgba(148, 163, 184, 0.12);
+        }
+
+        .control-graph-head-pill__tag {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #64748b;
+        }
+
+        .control-graph-head-pill__id {
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 12px;
+            font-weight: 500;
+            color: #4ade80;
+            letter-spacing: 0.02em;
+        }
+
+        .control-graph-head-pill.is-uncommitted {
+            border-color: rgba(148, 163, 184, 0.28);
+        }
+
+        .control-graph-head-pill.is-uncommitted .control-graph-head-pill__tag {
+            color: #94a3b8;
+        }
+
+        .control-graph-head-pill.is-uncommitted .control-graph-head-pill__id {
+            color: #e2e8f0;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0;
+        }
+
+        /* Commit button — muted until there is something to commit, then it
+           lights up blue. (Orange is reserved exclusively for an active stash.) */
+        .control-graph-panel .control-commit-btn {
+            background: rgba(15, 20, 28, 0.95);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            color: #94a3b8;
+        }
+
+        .control-graph-panel .control-commit-btn:hover:not(:disabled) {
+            color: #e2e8f0;
+            border-color: #64748b;
+        }
+
+        .control-graph-panel .control-commit-btn.is-active {
+            background: #2563eb;
+            border-color: #3b82f6;
+            color: #fff;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+
+        .control-graph-panel .control-commit-btn.is-active:hover:not(:disabled) {
+            background: #1d4ed8;
+            color: #fff;
+        }
+
+        .control-graph-panel .control-commit-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Fork / branch — kept prominent (violet) so branching is discoverable. */
+        .control-graph-panel .control-fork-btn {
+            background: rgba(139, 92, 246, 0.16);
+            border: 1px solid rgba(139, 92, 246, 0.6);
+            color: #c4b5fd;
+        }
+
+        .control-graph-panel .control-fork-btn:hover:not(:disabled) {
+            background: rgba(139, 92, 246, 0.30);
+            color: #ede9fe;
+        }
+
+        /* Detached: forking is the escape hatch — make it solid. */
+        .control-graph-panel.is-detached .control-fork-btn {
+            background: #7c3aed;
+            border-color: #8b5cf6;
+            color: #fff;
+            box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.3);
+        }
+
+        /* Detached HEAD (on an older commit) — dashed neutral pill. */
+        .control-graph-panel.is-detached .control-graph-head-pill {
+            border-color: rgba(148, 163, 184, 0.45);
+            border-style: dashed;
+        }
+
+        .control-graph-panel.is-detached .control-graph-head-pill__id {
+            color: #cbd5e1;
+        }
+
+        /* Combined stash box: neutral while it only offers "Stash"; turns amber
+           once a stash actually exists (so orange == there is a stash). */
+        .control-stash-box {
+            box-sizing: border-box;
+            display: inline-flex;
+            align-items: center;
+            height: 32px;
+            border-radius: 6px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            background: rgba(15, 20, 28, 0.95);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+        }
+
+        .control-stash-box.has-stash {
+            background: rgba(245, 158, 11, 0.12);
+            border-color: rgba(245, 158, 11, 0.5);
+        }
+
+        /* The explicit display values below override the `hidden` attribute, so
+           re-assert display:none for the hidden state (otherwise the "Stash"
+           create button shows next to the pop/drop box). */
+        .control-stash-box[hidden],
+        .control-stash-create[hidden],
+        .control-stash-present[hidden] {
+            display: none;
+        }
+
+        .control-stash-create {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            height: 100%;
+            padding: 0 10px;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: #94a3b8;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+
+        .control-stash-create:hover:not(:disabled) {
+            color: #e2e8f0;
+        }
+
+        .control-stash-create__label {
+            line-height: 1;
+        }
+
+        .control-stash-present {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            height: 100%;
+            padding: 0 6px 0 10px;
+        }
+
+        .control-stash-present__icon {
+            font-size: 16px;
+            color: #fbbf24;
+        }
+
+        .control-stash-present__label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #fbbf24;
+        }
+
+        .control-stash-action {
+            box-sizing: border-box;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: none;
+            border-radius: 4px;
+            background: transparent;
+            color: #fcd34d;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .control-stash-action .material-icons-round {
+            font-size: 16px;
+        }
+
+        .control-stash-action:hover:not(:disabled) {
+            background: rgba(245, 158, 11, 0.25);
+            color: #fff7ed;
+        }
+
+        .control-stash-action--danger:hover:not(:disabled) {
+            background: rgba(239, 68, 68, 0.22);
+            color: #fca5a5;
+        }
+
+        .control-stash-action:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .control-graph-panel.is-uncommitted-runtime {
+            border-color: rgba(148, 163, 184, 0.22);
+        }
+
+        .canvas-stage.is-uncommitted-runtime:not(.is-config-view) #canvas-wrapper {
+            box-shadow:
+                0 0 0 1px rgba(148, 163, 184, 0.2),
+                0 0 50px rgba(0, 0, 0, 0.5);
+        }
+
+        body.is-config-view #sidebar .controls-area,
+        body.is-config-view #sidebar .sidebar-component-list,
+        body.is-config-view #sidebar-right-scroll,
+        body.is-config-view #panel-dock {
+            pointer-events: none;
+            opacity: 0.55;
+        }
+
+        body.is-config-view .config-view-badge,
+        body.is-config-view .config-view-badge button {
+            pointer-events: auto;
+            opacity: 1;
+        }
+
+        .control-graph-wrap {
+            position: relative;
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            overflow-x: auto;
+            overflow-y: hidden;
+            min-height: 56px;
+            max-height: 160px;
+            padding: 6px 8px;
+            scrollbar-width: thin;
+            scrollbar-color: #475569 transparent;
+            border-left: 1px solid rgba(148, 163, 184, 0.08);
+        }
+
+        .control-graph-actions {
+            display: flex;
+            flex-wrap: nowrap;
+            flex-shrink: 0;
+            align-items: center;
+            gap: 8px;
+            margin-left: 8px;
+            padding-left: 10px;
+            border-left: 1px solid rgba(148, 163, 184, 0.08);
+        }
+
+        .control-graph-panel .btn,
+        .control-graph-panel .control-graph-btn {
+            width: auto;
+            margin-top: 0;
+            min-height: 32px;
+            padding: 0 8px;
+            font-size: 11px;
+            gap: 0;
+            border-radius: 6px;
+            box-shadow: none;
+        }
+
+        .control-graph-btn .material-icons-round {
+            font-size: 18px;
+        }
+
+        .control-graph-btn--icon {
+            width: 32px;
+            min-width: 32px;
+            height: 32px;
+            padding: 0;
+            justify-content: center;
+        }
+
+        .control-graph-panel .btn-primary {
+            background: rgba(59, 130, 246, 0.85);
+        }
+
+        .control-graph-panel .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .control-graph-panel .btn-secondary {
+            border-color: rgba(148, 163, 184, 0.25);
+        }
+
+        .control-graph-panel .btn-accent {
+            background: rgba(245, 158, 11, 0.9);
+            border: 1px solid rgba(180, 83, 9, 0.6);
+            color: #1c1917;
+            font-weight: 600;
+        }
+
+        .control-graph-panel .btn-accent:hover {
+            background: #f59e0b;
+        }
+
+        .control-graph-wrap::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .control-graph-wrap::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+
+        .control-graph-svg {
+            display: block;
+            height: auto;
+            max-height: 152px;
+            vertical-align: middle;
+        }
+
+        .control-graph-empty {
+            padding: 6px 2px;
+            font-size: 10px;
+            color: #64748b;
+            line-height: 1.3;
+            white-space: nowrap;
+        }
+
+        .control-graph-tooltip {
+            position: absolute;
+            z-index: 30;
+            max-width: 240px;
+            padding: 8px 10px;
+            font-size: 11px;
+            line-height: 1.45;
+            color: #e2e8f0;
+            background: #0f172a;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+        }
+
+        .control-graph-tooltip[hidden] {
+            display: none !important;
+        }
+
+        #control-plan-preview {
+            margin: 0 8px 6px;
+            padding: 6px 8px;
+            font-size: 10px;
+            border-radius: 4px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        #control-plan-preview[hidden] {
+            display: none !important;
+        }
+
+        .control-adopt-notice {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0 8px 6px;
+            padding: 7px 10px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #fbbf24;
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            border-radius: 6px;
+        }
+
+        .control-adopt-notice .material-icons-round {
+            font-size: 16px;
+        }
+
+        .control-adopt-notice[hidden] {
+            display: none !important;
+        }
+
+        .control-graph-panel.vc-inactive .control-adopt-notice {
+            display: none !important;
         }
 
         .section-header {
@@ -330,6 +1133,76 @@
         .comp-info { flex-grow: 1; }
         .comp-name { font-weight: 500; display: block; margin-bottom: 2px; }
         .comp-meta { font-size: 11px; color: var(--text-muted); display: block; }
+
+        .inventory-section-label {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            padding: 12px 4px 6px;
+            margin-top: 4px;
+        }
+
+        .component-card .inventory-add-btn,
+        .component-card .track-toggle-btn {
+            flex-shrink: 0;
+            width: 22px;
+            height: 22px;
+            border: 1px solid rgba(100, 116, 139, 0.45);
+            border-radius: 5px;
+            background: rgba(15, 17, 21, 0.6);
+            color: #94a3b8;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+            transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+        }
+
+        .component-card .track-toggle-btn:hover {
+            border-color: rgba(59, 130, 246, 0.55);
+            color: #93c5fd;
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .component-card .track-toggle-btn.is-tracked {
+            border-color: rgba(248, 113, 113, 0.45);
+            color: #fca5a5;
+        }
+
+        .component-card .track-toggle-btn.is-tracked:hover {
+            border-color: rgba(248, 113, 113, 0.7);
+            background: rgba(248, 113, 113, 0.12);
+        }
+
+        .component-card .track-toggle-btn .material-icons-round {
+            font-size: 14px;
+        }
+
+        .inv-badge {
+            font-size: 9px;
+            margin-right: 4px;
+            letter-spacing: 0.02em;
+        }
+
+        .inv-badge--tracked { color: #34d399; }
+        .inv-badge--idle { color: #64748b; }
+        .inv-badge--mount { color: #94a3b8; }
+
+        body.is-config-view .track-toggle-btn,
+        body.is-config-view .inventory-add-btn {
+            opacity: 0.35;
+            pointer-events: none;
+        }
+
+        .component-card.library-only:hover {
+            transform: none;
+            border-color: var(--border-color);
+            box-shadow: none;
+        }
 
         .status-dot {
             width: 8px;
@@ -462,10 +1335,29 @@
                 radial-gradient(circle at 50% 50%, #1a1d24 0%, var(--bg-dark) 100%);
             display: flex;
             flex-direction: column;
-            align-items: center;
-            justify-content: center;
+            align-items: stretch;
+            justify-content: flex-start;
             overflow: hidden;
             gap: 0;
+        }
+
+        .bench-header {
+            width: 100%;
+            max-width: 100%;
+            margin: 8px 0 0;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 8px;
+            overflow: hidden;
+            background: rgba(20, 24, 32, 0.95);
+            box-shadow: 0 2px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .bench-header:has(#bench-chrome-bar[hidden]):has(#bench-tools-strip:empty) {
+            display: none;
         }
 
         #bench-chrome-bar {
@@ -473,18 +1365,43 @@
             flex-wrap: wrap;
             align-items: center;
             gap: 8px;
-            width: min(1000px, calc(100% - 24px));
-            max-width: 100%;
-            padding: 8px 10px;
-            margin: 8px 12px 0;
+            width: 100%;
+            padding: 8px 12px;
             box-sizing: border-box;
-            background: rgba(24, 27, 33, 0.92);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            margin: 0;
             flex-shrink: 0;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
         }
         #bench-chrome-bar[hidden] {
             display: none !important;
+        }
+
+        #bench-tools-strip {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 8px 12px;
+            box-sizing: border-box;
+            background: rgba(15, 18, 24, 0.6);
+        }
+
+        #bench-tools-strip:empty {
+            display: none;
+        }
+
+        .bench-tools-strip__label {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-right: 2px;
+            white-space: nowrap;
         }
         .bench-chrome-bar__label {
             font-size: 9px;
@@ -531,7 +1448,10 @@
             border: 1px solid var(--border-color);
             border-radius: 4px;
             position: relative;
-            background-color: #13151a; 
+            background-color: #13151a;
+            width: 100%;
+            margin: 8px 0 16px;
+            flex-shrink: 0;
         }
 
         /* --- Component controls (floating multi-panel dock over canvas) ---
@@ -800,49 +1720,124 @@
             <button id="refresh-btn" class="btn btn-secondary" title="Re-localize component poses from the overhead / table camera (updates measurables.pose).">
                 <span class="material-icons-round">sync</span> Refresh Pose
             </button>
-            <div style="height: 8px;"></div>
-            <select id="saved-state-select" class="saved-state-select" aria-label="Saved workspace state">
-                <option value="">No saved snapshots</option>
-            </select>
-            <div style="height: 6px;"></div>
-            <button id="save-state-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px; width: 100%;">
-                <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">save</span> Save Snapshot
-            </button>
-            <div style="height: 6px;"></div>
-            <button id="load-state-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px; width: 100%;">
-                <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">folder_open</span> Restore Selected
-            </button>
-            <div style="height: 6px;"></div>
-            <button id="reset-original-state-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px; width: 100%;">
-                <span class="material-icons-round" style="font-size: 14px; vertical-align: middle;">restart_alt</span> Reset Original Demo
-            </button>
         </div>
+
+        <div class="section-header">
+            <span>Configuration</span>
+        </div>
+        <p style="padding: 0 16px 12px; margin: 0; font-size: 11px; line-height: 1.45; color: var(--text-muted);">
+            Branch graph and commits are above the optical table. Save, fork, and travel history there.
+        </p>
     </div>
 
     <!-- MAIN CANVAS AREA -->
     <div id="main-content">
-        <div id="bench-chrome-bar" role="toolbar" aria-label="Fixed bench components" hidden></div>
-        <div id="canvas-wrapper">
-            <canvas id="optical-table" width="1000" height="700"></canvas>
-        </div>
-
-        <!--
-            Alignment dock (left of table): pencil + clear drawn guides, then
-            laser-line toggles. Pencil: drag on empty canvas to draw guides
-            (Shift = lock horizontal / vertical). Snapping uses laser segments
-            + drawn guides (intersection priority = nearest snap point). Laser
-            icons: click = visibility, double-click = edit P1/P2.
-        -->
-        <div id="laser-lines-dock" role="toolbar" aria-label="Alignment and laser lines">
-            <div id="alignment-dock-tools" class="alignment-dock-tools">
-                <button type="button" id="pencil-tool-btn" class="laser-dock-tool-btn" title="Pencil: draw alignment guides on the table. Drag on empty canvas. Hold Shift for horizontal or vertical. Snapping applies to laser lines and guides." aria-pressed="false">
-                    <span class="material-icons-round" aria-hidden="true">edit</span>
-                </button>
-                <button type="button" id="clear-guides-btn" class="laser-dock-tool-btn" title="Clear all drawn guides">
-                    <span class="material-icons-round" aria-hidden="true">delete_sweep</span>
+        <div id="control-graph-panel" class="control-graph-panel vc-inactive" aria-label="Configuration branch graph">
+            <div id="control-vc-start" class="control-vc-start">
+                <button id="control-vc-start-btn" type="button" class="btn btn-primary control-vc-start-btn">
+                    <span class="material-icons-round" aria-hidden="true">account_tree</span>
+                    Start version control
                 </button>
             </div>
-            <div id="laser-lines-list"></div>
+            <div class="control-graph-toolbar">
+                <div class="control-graph-toolbar-start">
+                    <select id="control-repo-select" class="control-graph-repo-select control-graph-toolbar-select" aria-label="Configuration repo">
+                        <option value="default">optical-cavity</option>
+                    </select>
+                    <button id="control-new-repo-btn" type="button" class="control-new-repo-btn" title="New configuration repo">
+                        <span class="material-icons-round" aria-hidden="true">add</span>
+                        <span class="sr-only">New repo</span>
+                    </button>
+                    <button id="control-stop-vc-btn" type="button" class="control-new-repo-btn" title="Stop version control">
+                        <span class="material-icons-round" aria-hidden="true">power_settings_new</span>
+                        <span class="sr-only">Stop version control</span>
+                    </button>
+                </div>
+                <div class="control-graph-wrap">
+                    <div id="control-graph-empty" class="control-graph-empty">Loading…</div>
+                </div>
+                <button id="control-save-config-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-commit-btn" title="Commit layout">
+                    <span class="material-icons-round" aria-hidden="true">save</span>
+                    <span class="sr-only">Commit</span>
+                </button>
+                <span id="control-head-label" class="control-graph-head-pill" title="Branch HEAD">
+                    <span class="control-graph-head-pill__tag">HEAD</span>
+                    <code class="control-graph-head-pill__id">—</code>
+                </span>
+                <div class="control-graph-actions">
+                    <span id="control-stash-box" class="control-stash-box" title="Stash" hidden>
+                        <button id="control-stash-btn" type="button" class="control-stash-create" title="Stash uncommitted changes">
+                            <span class="material-icons-round" aria-hidden="true">inventory_2</span>
+                            <span class="control-stash-create__label">Stash</span>
+                        </button>
+                        <span id="control-stash-present" class="control-stash-present" hidden>
+                            <span class="material-icons-round control-stash-present__icon" aria-hidden="true">inventory_2</span>
+                            <span class="control-stash-present__label">Stash</span>
+                            <button id="control-stash-pop-btn" type="button" class="control-stash-action" title="Pop stash">
+                                <span class="material-icons-round" aria-hidden="true">unarchive</span>
+                                <span class="sr-only">Pop stash</span>
+                            </button>
+                            <button id="control-stash-drop-btn" type="button" class="control-stash-action control-stash-action--danger" title="Drop stash">
+                                <span class="material-icons-round" aria-hidden="true">delete</span>
+                                <span class="sr-only">Drop stash</span>
+                            </button>
+                        </span>
+                    </span>
+                    <button id="control-fork-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-fork-btn" title="Fork branch">
+                        <span class="material-icons-round" aria-hidden="true">call_split</span>
+                        <span class="sr-only">Fork</span>
+                    </button>
+                    <select id="control-branch-select" class="control-graph-branch-select control-graph-toolbar-select" aria-label="Configuration branch">
+                        <option value="main">main</option>
+                    </select>
+                </div>
+            </div>
+            <div id="control-adopt-notice" class="control-adopt-notice" hidden>
+                <span class="material-icons-round" aria-hidden="true">touch_app</span>
+                <span>No current node yet — click a node above to set where your bench is.</span>
+            </div>
+            <div id="control-plan-preview" class="control-plan-preview" hidden></div>
+        </div>
+        <div id="canvas-stage" class="canvas-stage">
+            <div id="bench-header" class="bench-header">
+                <div id="bench-chrome-bar" role="toolbar" aria-label="Fixed bench components" hidden></div>
+                <div id="bench-tools-strip" class="bench-tools-strip">
+                    <span class="bench-tools-strip__label">Lines</span>
+                    <div id="laser-lines-dock" role="toolbar" aria-label="Alignment and laser lines">
+                        <div id="alignment-dock-tools" class="alignment-dock-tools">
+                            <button type="button" id="pencil-tool-btn" class="laser-dock-tool-btn" title="Pencil: draw alignment guides on the table. Drag on empty canvas. Hold Shift for horizontal or vertical. Snapping applies to laser lines and guides." aria-pressed="false">
+                                <span class="material-icons-round" aria-hidden="true">edit</span>
+                            </button>
+                            <button type="button" id="clear-guides-btn" class="laser-dock-tool-btn" title="Clear all drawn guides">
+                                <span class="material-icons-round" aria-hidden="true">delete_sweep</span>
+                            </button>
+                        </div>
+                        <div id="laser-lines-list"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="canvas-stage__row">
+                <div id="canvas-wrapper">
+                    <canvas id="optical-table" width="1000" height="700"></canvas>
+                    <div id="canvas-view-shield" class="canvas-view-shield" hidden aria-hidden="true" title="Read-only configuration preview"></div>
+                </div>
+                <aside id="config-view-badge" class="config-view-badge" hidden aria-live="polite">
+                    <div id="config-view-viewing" class="config-view-badge__viewing">
+                        <span class="config-view-badge__label">Viewing</span>
+                        <code id="config-view-commit-id" class="config-view-badge__id">—</code>
+                        <div class="config-view-badge__actions">
+                            <button id="config-view-apply-btn" type="button" class="config-view-badge__btn config-view-badge__btn--primary">Apply on bench</button>
+                            <button id="config-view-return-btn" type="button" class="config-view-badge__btn">Return to bench</button>
+                        </div>
+                    </div>
+                    <div id="config-view-applying" class="config-view-badge__applying" hidden>
+                        <span class="config-view-badge__label">Applying</span>
+                        <code id="config-view-applying-id" class="config-view-badge__id">—</code>
+                        <span id="config-view-reconcile-progress" class="config-view-reconcile__progress">Step 1 of 1</span>
+                        <ol id="config-view-reconcile-steps" class="config-view-reconcile__steps"></ol>
+                    </div>
+                </aside>
+            </div>
         </div>
 
         <!--
@@ -1086,24 +2081,21 @@
         .step-del { color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; font-size: 14px; }
         .step-del:hover { background: rgba(239, 68, 68, 0.1); }
 
-        /* --- Laser-lines floating dock (left of canvas-wrapper, over #main-content) ---
-           Vertical strip of color-coded toggle icons. Mirrors the absolute-
-           positioning pattern used by #context-panel on the opposite side. */
+        /* --- Laser-lines dock: horizontal strip below bench chrome bar --- */
         #laser-lines-dock {
-            position: absolute;
-            top: 12px;
-            left: 12px;
             display: flex;
-            flex-direction: column;
-            gap: 10px;
-            z-index: 5;
-            pointer-events: none; /* let canvas-wrapper own clicks outside controls */
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
         }
-        #laser-lines-dock > * { pointer-events: auto; }
         .alignment-dock-tools {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             gap: 8px;
+            padding-right: 8px;
+            border-right: 1px solid rgba(148, 163, 184, 0.15);
         }
         .laser-dock-tool-btn {
             width: 36px;
@@ -1146,7 +2138,9 @@
         }
         #laser-lines-list {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
+            flex-wrap: wrap;
+            align-items: center;
             gap: 8px;
         }
         .laser-line-icon {

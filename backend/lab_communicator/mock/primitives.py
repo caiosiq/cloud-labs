@@ -50,6 +50,23 @@ if TYPE_CHECKING:
     from lab_communicator.mock.communicator import MockLabCommunicator
 
 
+def _mock_breadboard_position(
+    communicator: "MockLabCommunicator",
+    existing_components: Dict[str, Any],
+    tag_id: str,
+    width_mm: float,
+    height_mm: float,
+) -> Optional[tuple[float, float]]:
+    """Random valid breadboard pose (placed region, no overlaps)."""
+    return random_placed_position(
+        existing_components,
+        tag_id,
+        width_mm,
+        height_mm,
+        lambda tid: communicator._get_component_wh(tid),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Motor primitives
 # ---------------------------------------------------------------------------
@@ -310,18 +327,12 @@ async def primitive_add_component_to_state(
             slot={"i": si, "j": sj},
         )
 
-    pos = random_placed_position(
-        existing_components,
-        tag_id,
-        w,
-        h,
-        lambda tid: communicator._get_component_wh(tid),
-    )
+    pos = _mock_breadboard_position(communicator, existing_components, tag_id, w, h)
     if not pos:
         print("[MOCK LAB] FAILED to find free pose for component.")
         return None
     x, y = pos
-    return new_component_entry(
+    entry = new_component_entry(
         tag_id,
         comp_type,
         presence=PRESENCE_BREADBOARD,
@@ -331,6 +342,74 @@ async def primitive_add_component_to_state(
         in_storage=False,
         slot=None,
     )
+    return _enrich_from_catalog(tag_id, entry)
+
+
+def _enrich_from_catalog(tag_id: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+    from lab_model.catalog.bundle import library_by_tag
+    from lab_model.state.fixture_seed import enrich_runtime_entry_from_catalog
+
+    lib_row = library_by_tag().get(tag_id)
+    if isinstance(lib_row, dict):
+        enrich_runtime_entry_from_catalog(entry, lib_row)
+    return entry
+
+
+async def primitive_reactivate_off_table_component(
+    communicator: "MockLabCommunicator",
+    tag_id: str,
+    existing_entry: Dict[str, Any],
+    component_data: Dict[str, Any],
+    existing_components: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Re-place an OFF_TABLE runtime entry on the breadboard or in storage."""
+    import copy
+
+    from lab_model.domain.component import (
+        PRESENCE_BREADBOARD,
+        PRESENCE_STORAGE,
+        measurables_bucket,
+        tunables_bucket,
+    )
+
+    placement_mode = (component_data.get("placement_mode") or "breadboard").lower()
+    entry = copy.deepcopy(existing_entry)
+    if component_data.get("type"):
+        entry["type"] = component_data["type"]
+    w, h = communicator._get_component_wh(tag_id)
+    tun = tunables_bucket(entry)
+    meas = measurables_bucket(entry)
+
+    if placement_mode == "storage":
+        slot = find_storage_slot_and_center(
+            existing_components,
+            tag_id,
+            w,
+            h,
+            lambda tid: communicator._get_component_wh(tid),
+        )
+        if not slot:
+            print("[MOCK LAB] FAILED to find free storage slot.")
+            return None
+        x, y, si, sj = slot
+        tun["presence"] = PRESENCE_STORAGE
+        tun["nominal_pose"] = {"x": x, "y": y, "rotation": 0.0}
+        tun["storage"] = {"in_storage": True, "slot": {"i": si, "j": sj}}
+        tun["placement"] = {"mode": "STORAGE"}
+        meas["pose"] = {"x": x, "y": y, "rotation": 0.0}
+        return _enrich_from_catalog(tag_id, entry)
+
+    pos = _mock_breadboard_position(communicator, existing_components, tag_id, w, h)
+    if not pos:
+        print("[MOCK LAB] FAILED to find free pose for component.")
+        return None
+    x, y = pos
+    tun["presence"] = PRESENCE_BREADBOARD
+    tun["nominal_pose"] = {"x": x, "y": y, "rotation": 0.0}
+    tun["storage"] = {"in_storage": False, "slot": None}
+    tun["placement"] = {"mode": "MANUAL"}
+    meas["pose"] = {"x": x, "y": y, "rotation": 0.0}
+    return _enrich_from_catalog(tag_id, entry)
 
 
 __all__ = [
@@ -343,4 +422,5 @@ __all__ = [
     "primitive_record_measurables",
     "primitive_optimize_component",
     "primitive_add_component_to_state",
+    "primitive_reactivate_off_table_component",
 ]

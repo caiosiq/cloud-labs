@@ -95,6 +95,7 @@ from lab_model.state.snapshot import (
     merge_snapshot_components,
     normalize_loaded_state,
 )
+from lab_model.state.runtime_manager import MutationKind, RuntimeManager, default_runtime_state
 
 class LabCommunicator:
     """Concrete template: owns state + orchestrates every primitive.
@@ -139,26 +140,22 @@ class LabCommunicator:
     #: leaves a generous default so tests don't need a calibration.
     max_safe_hover_z_lab_mm: float = 200.0
 
-    # --- State (subclasses populate in __init__) ---
-    current_state: Dict[str, Any]
+    # --- State (subclasses populate via RuntimeManager in __init__) ---
+    _lab_runtime: RuntimeManager
     catalog_map: Dict[str, Dict[str, Any]]
 
+    @property
+    def current_state(self) -> Dict[str, Any]:
+        return self._lab_runtime.state
+
+    @property
+    def _lab_runtime_manager(self) -> RuntimeManager:
+        """Public alias for tests and ControlManager integration."""
+        return self._lab_runtime
+
     def __init__(self) -> None:
-        # Subclasses are expected to fully populate ``self.current_state``
-        # and ``self.catalog_map`` before any orchestrator runs. This
-        # default just makes the attributes safe to access if a subclass
-        # forgets a field -- a missing ``components`` block manifests
-        # as "empty inventory" rather than a hard AttributeError.
-        self._state_lock: threading.RLock = threading.RLock()
-        self.current_state = {
-            "system_status": SYSTEM_STATUS_IDLE,
-            "last_updated": datetime.now().isoformat(),
-            "components": {},
-            "optimization_step": 0,
-            "optimization_run_dir": None,
-            "optimization_target_id": None,
-            "holding": empty_holding(),
-        }
+        self._lab_runtime = RuntimeManager(default_runtime_state())
+        self._state_lock = self._lab_runtime.lock
         self.catalog_map = {}
         self._teleop_live_pose = TeleopLivePoseStore(
             on_motion_idle=self._on_teleop_motion_idle,
@@ -212,14 +209,18 @@ class LabCommunicator:
         """Return merged catalog rows (``component_library`` ∩ ``active_catalog``).
 
         Reloads from disk on every call so edits to ``lab_view`` JSON are visible
-        without a restart. In-memory :attr:`catalog_map` is refreshed by mock
+        without a restart. Runtime component tags not listed in ``active_catalog``
+        are unioned in so OFF_TABLE inventory remains addressable in the UI.
+
+        In-memory :attr:`catalog_map` is refreshed by mock
         via :meth:`~lab_communicator.mock.communicator.MockLabCommunicator._load_catalog`
         when primitives need a fresh mirror.
         """
         from lab_model.catalog.bundle import merged_catalog_rows
 
         try:
-            return merged_catalog_rows()
+            runtime_ids = list((self.current_state.get("components") or {}).keys())
+            return merged_catalog_rows(runtime_tag_ids=runtime_ids)
         except Exception:
             return []
 
@@ -269,6 +270,32 @@ class LabCommunicator:
     # that touches ``self.current_state``)
     # ---------------------------------------------------------------
 
+    def _ensure_overlay_fields_locked(self) -> None:
+        """Seed versioned alignment overlays onto ``current_state`` in place.
+
+        Caller must hold ``self._state_lock``. ``alignment_guides`` defaults to
+        an empty list; ``laser_lines`` is seeded from the lab-view bundle file
+        (``laser_lines.json``) on first access for an existing lab whose state
+        predates line-versioning. Absence (not emptiness) triggers the seed, so
+        a user who deletes every laser line keeps an empty set.
+        """
+        st = self.current_state
+        if not isinstance(st.get("alignment_guides"), list):
+            st["alignment_guides"] = []
+        ll = st.get("laser_lines")
+        if not isinstance(ll, dict) or not isinstance(ll.get("lines"), list):
+            seed: Dict[str, Any] = {}
+            try:
+                from lab_communicator.shared.lab_view_config import read_laser_lines_doc
+
+                seed = read_laser_lines_doc()
+            except Exception:
+                seed = {}
+            st["laser_lines"] = {
+                "snap_line_id": seed.get("snap_line_id"),
+                "lines": json.loads(json.dumps(seed.get("lines") or [])),
+            }
+
     def get_lab_state(self) -> Dict[str, Any]:
         """Deep-copy snapshot of ``self.current_state`` for the UI.
 
@@ -283,6 +310,7 @@ class LabCommunicator:
           ``undefined`` for held tag / requires_operator_confirm.
         """
         with self._state_lock:
+            self._ensure_overlay_fields_locked()
             state = json.loads(json.dumps(self.current_state))
         normalize_components_map(state.get("components") or {})
         inject_motor_rotations_into_state(state, self._catalog_meta_for_tag)
@@ -689,8 +717,12 @@ class LabCommunicator:
 
         new_state = normalize_loaded_state(state, merged)
 
+        self._lab_runtime.replace_state(
+            new_state,
+            kind=MutationKind.ADMINISTRATIVE_LOAD,
+            source="set_lab_state",
+        )
         with self._state_lock:
-            self.current_state = new_state
             components_to_apply = dict(self.current_state.get("components") or {})
 
         for tag_id, entry in components_to_apply.items():
@@ -863,8 +895,202 @@ class LabCommunicator:
             comps[tag_id] = entry
             self.current_state["last_updated"] = datetime.now().isoformat()
         self._persist_state()
-        pres = (entry.get("tunables") or {}).get("presence")
+        from lab_model.domain.component import presence_of
+
+        pres = presence_of(entry)
         print(f"{self.log_prefix} Added {tag_id} presence={pres}")
+
+    async def add_component_from_inventory(
+        self,
+        component_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Place a catalog part on the bench from inventory (OFF_TABLE or library-only).
+
+        Ensures the tag is listed in ``active_catalog.json``, then either
+        reactivates an existing OFF_TABLE entry or inserts a new component.
+        Writes through :class:`~lab_model.state.runtime_manager.RuntimeManager`.
+        """
+        from lab_model.catalog.active_catalog_store import ensure_tag_in_active_catalog
+        from lab_model.catalog.bundle import library_by_tag
+        from lab_model.domain.component import is_off_table, presence_of
+        from lab_model.state.runtime_manager import MutationKind
+
+        tag_id = (component_data or {}).get("tag_id")
+        if not tag_id:
+            raise ValueError("tag_id is required")
+
+        by_tag = library_by_tag()
+        lib_row = by_tag.get(tag_id)
+        if lib_row is None:
+            raise ValueError(f"Unknown tag_id: {tag_id}")
+
+        catalog_updated = ensure_tag_in_active_catalog(tag_id)
+        if catalog_updated and hasattr(self, "_load_catalog"):
+            self._load_catalog()
+
+        payload = dict(component_data or {})
+        if not payload.get("type"):
+            payload["type"] = lib_row.get("type", "OPTICAL_MIRROR")
+
+        with self._state_lock:
+            existing = dict(self.current_state.get("components") or {})
+
+        if tag_id in existing:
+            entry = existing[tag_id]
+            if not is_off_table(entry):
+                raise ValueError(f"Component {tag_id} is already on the layout")
+            new_entry = await self._primitive_reactivate_off_table_component(
+                tag_id,
+                entry,
+                payload,
+                existing,
+            )
+            if new_entry is None:
+                raise RuntimeError(
+                    f"Cannot reactivate {tag_id} from inventory on this backend"
+                )
+        else:
+            new_entry = await self._primitive_add_component_to_state(payload, existing)
+            if new_entry is None:
+                raise RuntimeError(f"Cannot add {tag_id} from inventory on this backend")
+
+        def _apply(state: Dict[str, Any]) -> None:
+            comps = state.setdefault("components", {})
+            comps[tag_id] = new_entry
+
+        self._lab_runtime.mutate(
+            _apply,
+            kind=MutationKind.ADMINISTRATIVE_LOAD,
+            source=f"inventory_add:{tag_id}",
+        )
+        self._persist_state()
+
+        return {
+            "status": "ok",
+            "tag_id": tag_id,
+            "presence": presence_of(new_entry),
+            "catalog_updated": catalog_updated,
+        }
+
+    async def track_component(self, component_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Enable operator control for a part (active catalog) without moving it on the table."""
+        from lab_model.catalog.active_catalog_store import ensure_tag_in_active_catalog
+        from lab_model.catalog.bundle import library_by_tag
+        from lab_model.domain.component import (
+            PRESENCE_OFF_TABLE,
+            new_component_entry,
+            presence_of,
+        )
+        from lab_model.state.runtime_manager import MutationKind
+
+        tag_id = (component_data or {}).get("tag_id")
+        if not tag_id:
+            raise ValueError("tag_id is required")
+
+        by_tag = library_by_tag()
+        lib_row = by_tag.get(tag_id)
+        if lib_row is None:
+            raise ValueError(f"Unknown tag_id: {tag_id}")
+
+        catalog_updated = ensure_tag_in_active_catalog(tag_id)
+        if catalog_updated and hasattr(self, "_load_catalog"):
+            self._load_catalog()
+
+        comp_type = (component_data or {}).get("type") or lib_row.get("type", "OPTICAL_MIRROR")
+
+        with self._state_lock:
+            existing = dict(self.current_state.get("components") or {})
+
+        if tag_id in existing:
+            entry = existing[tag_id]
+            return {
+                "status": "ok",
+                "tag_id": tag_id,
+                "tracked": True,
+                "presence": presence_of(entry),
+                "catalog_updated": catalog_updated,
+                "action": "catalog_only",
+            }
+
+        new_entry = new_component_entry(
+            tag_id,
+            comp_type,
+            presence=PRESENCE_OFF_TABLE,
+            nominal_pose={"x": 0.0, "y": 0.0, "rotation": 0.0},
+            meas_pose={"x": 0.0, "y": 0.0, "rotation": 0.0},
+            placement_mode="MANUAL",
+            in_storage=False,
+            slot=None,
+        )
+
+        def _apply(state: Dict[str, Any]) -> None:
+            comps = state.setdefault("components", {})
+            comps[tag_id] = new_entry
+
+        self._lab_runtime.mutate(
+            _apply,
+            kind=MutationKind.ADMINISTRATIVE_LOAD,
+            source=f"track_component:{tag_id}",
+        )
+        self._persist_state()
+
+        return {
+            "status": "ok",
+            "tag_id": tag_id,
+            "tracked": True,
+            "presence": PRESENCE_OFF_TABLE,
+            "catalog_updated": catalog_updated,
+            "action": "created_off_table",
+        }
+
+    async def untrack_component(self, tag_id: str) -> Dict[str, Any]:
+        """Remove a part from the active (controlled) catalog without deleting runtime state."""
+        from lab_model.catalog.active_catalog_store import remove_tag_from_active_catalog
+
+        tid = (tag_id or "").strip()
+        if not tid:
+            raise ValueError("tag_id is required")
+
+        catalog_updated = remove_tag_from_active_catalog(tid)
+        if catalog_updated and hasattr(self, "_load_catalog"):
+            self._load_catalog()
+
+        return {
+            "status": "ok",
+            "tag_id": tid,
+            "tracked": False,
+            "catalog_updated": catalog_updated,
+        }
+
+    async def _primitive_reactivate_off_table_component(
+        self,
+        tag_id: str,
+        existing_entry: Dict[str, Any],
+        component_data: Dict[str, Any],
+        existing_components: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Hook: move an OFF_TABLE entry onto the breadboard or into storage."""
+        import copy
+
+        from lab_model.domain.component import (
+            PRESENCE_BREADBOARD,
+            measurables_bucket,
+            tunables_bucket,
+        )
+
+        placement_mode = (component_data.get("placement_mode") or "breadboard").lower()
+        entry = copy.deepcopy(existing_entry)
+        if component_data.get("type"):
+            entry["type"] = component_data["type"]
+        tun = tunables_bucket(entry)
+        meas = measurables_bucket(entry)
+        pose = {"x": 0.0, "y": 0.0, "rotation": 0.0}
+        tun["presence"] = PRESENCE_BREADBOARD
+        tun["nominal_pose"] = dict(pose)
+        tun["storage"] = {"in_storage": False, "slot": None}
+        tun["placement"] = {"mode": "MANUAL"}
+        meas["pose"] = dict(pose)
+        return entry
 
     async def _primitive_add_component_to_state(
         self,
@@ -1199,6 +1425,18 @@ class LabCommunicator:
         """Latest JPEG for per-component ``telemetry/preview`` when implemented."""
         return None
 
-    def refresh_pose_from_camera(self, preserve_tag_ids: Optional[List[str]] = None) -> None:
+    def refresh_pose_from_camera(
+        self,
+        preserve_tag_ids: Optional[List[str]] = None,
+        apply_tag_ids: Optional[List[str]] = None,
+        tag_ids: Optional[List[str]] = None,
+    ) -> None:
         """Re-localize component poses from the camera. Default no-op."""
         return
+
+    def preview_refresh_pose_candidates(
+        self,
+        tag_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Dict[str, float]]:
+        """Dry-run scan poses for refresh offers. Default: unsupported (empty)."""
+        return {}

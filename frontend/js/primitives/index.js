@@ -24,7 +24,7 @@ import { renderOptimize } from './optimize.js';
 import { renderScanRotate } from './scan-rotate.js';
 import { getWidget } from '../widgets/index.js';
 import { isLiveFeedActive, isTeleopActive, normalizeCapabilities } from '../component-state.js';
-import { isHeldTag } from '../component-model.js';
+import { isHeldTag, isStoredComponent } from '../component-model.js';
 import { store } from '../state/store.js';
 import { primitiveRegion, sessionHint } from './shared.js';
 
@@ -112,6 +112,9 @@ const PRIMITIVE_DISPLAY_ORDER = [
     ...TELEMETRY_BOTTOM_PRIMITIVES,
 ];
 
+/** When a part is in inventory Q3, only these primitive forms are shown. */
+const STORED_COMPONENT_PRIMITIVES = new Set(['PLACE_FROM_STORAGE']);
+
 function sortPrimitivesForDisplay(allowList) {
     const rank = new Map(PRIMITIVE_DISPLAY_ORDER.map((p, i) => [p, i]));
     const seen = new Set();
@@ -145,7 +148,13 @@ export function renderPrimitiveRegions(tagId, allowList, ctx) {
     root.style.flexDirection = 'column';
     root.style.gap = '4px';
 
-    const list = sortPrimitivesForDisplay(allowList);
+    const list = sortPrimitivesForDisplay(
+        ctx.placementState === 'STORED' || isStoredComponent(ctx.comp)
+            ? (Array.isArray(allowList) ? allowList : []).filter((p) =>
+                  STORED_COMPONENT_PRIMITIVES.has(p),
+              )
+            : allowList,
+    );
     const seen = new Set();
     let count = 0;
 
@@ -156,11 +165,13 @@ export function renderPrimitiveRegions(tagId, allowList, ctx) {
 
     const teleopActive = isTeleopActive(ctx.comp);
     const liveFeedActive = isLiveFeedActive(ctx.comp, liveFeedChannel);
+    const storedOnly =
+        ctx.placementState === 'STORED' || isStoredComponent(ctx.comp);
 
-    if (teleopActive) {
+    if (!storedOnly && teleopActive) {
         root.appendChild(sessionHint('Tunable writes hidden while TeleOp is active.'));
     }
-    if (liveFeedActive) {
+    if (!storedOnly && liveFeedActive) {
         root.appendChild(sessionHint('Record measurables hidden while live feed is on.'));
     }
 

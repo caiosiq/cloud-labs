@@ -543,6 +543,21 @@ async def primitive_add_component_to_state(
     return None
 
 
+async def primitive_reactivate_off_table_component(
+    communicator: "RealLabCommunicator",  # noqa: ARG001
+    tag_id: str,
+    existing_entry: Dict[str, Any],  # noqa: ARG001
+    component_data: Dict[str, Any],  # noqa: ARG001
+    existing_components: Dict[str, Any],  # noqa: ARG001
+) -> Optional[Dict[str, Any]]:
+    """Real backend: refuse inventory reactivation via API."""
+    print(
+        f"[REAL LAB] User requested to add {tag_id} from inventory. "
+        f"Please place it on the table and Rescan."
+    )
+    return None
+
+
 __all__ = [
     "primitive_move_motor",
     "primitive_pick_component",
@@ -555,4 +570,5 @@ __all__ = [
     "primitive_optimize_component",
     "primitive_finalize_optimization_run",
     "primitive_add_component_to_state",
+    "primitive_reactivate_off_table_component",
 ]

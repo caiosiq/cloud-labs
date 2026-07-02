@@ -33,6 +33,21 @@ export let STORAGE_RECT_Y_MIN = -500;
 
 export const POLLING_INTERVAL = 500;
 
+/**
+ * Minimum pause (ms) the reconcile plan runner holds between primitive steps
+ * when applying a configuration / stashing / popping, so each step is visible
+ * (component highlight + System Monitor line) instead of blurring together.
+ * The mock already adds ~2s of hardware latency per move; this is purely the
+ * inter-step breather. Set to 0 to disable pacing.
+ */
+export const RECONCILE_STEP_DELAY_MS = 600;
+
+/** How often the plan runner polls lab-state while waiting for a step to finish. */
+export const RECONCILE_POLL_INTERVAL_MS = 200;
+
+/** Max time (ms) to wait for a single primitive step to leave BUSY before giving up. */
+export const RECONCILE_STEP_TIMEOUT_MS = 30000;
+
 function recomputeDerived() {
     LAB_WIDTH_MM = LAB_X_MAX - LAB_X_MIN;
     LAB_HEIGHT_MM = LAB_Y_MAX - LAB_Y_MIN;

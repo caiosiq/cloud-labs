@@ -168,6 +168,17 @@ Orchestration: `frontend/js/ui/component-popup.js` (read-only panel + PRIMITIVES
 
 Historical one-shot migration scripts live under `scripts/archive/`.
 
+## Planned: RuntimeManager & ControlManager
+
+**Status:** proposal — full spec in [`../../docs/CONTROL_RUNTIME_AND_VERSIONING.md`](../../docs/CONTROL_RUNTIME_AND_VERSIONING.md).
+
+| Manager | Role |
+|---------|------|
+| **RuntimeManager** | Single write gate for live runtime JSON; wired in shared `lab_communicator/base.py` (mock/real/mujoco inherit without rewrite). |
+| **ControlManager** | Configuration version history (commits, branches, setups). **Not** `lab_automation`'s `OpticalExperiment`. |
+
+Aggregates: **Configuration** (tunables), **Observations** (measurables), **Setup** (both), **Runtime** (working tree). See Universal Component Part IX in [`../../docs/universal_component_architecture.md`](../../docs/universal_component_architecture.md).
+
 ## Repository layout
 
 | Path | Role |
@@ -185,4 +196,5 @@ Historical one-shot migration scripts live under `scripts/archive/`.
 - [`../lab_communicator/README.md`](../lab_communicator/README.md) — mock/real bridge
 - [`../../capability_contract.md`](../../capability_contract.md) — catalog JSON spec
 - [`../../docs/primitive_ui_contract.md`](../../docs/primitive_ui_contract.md) — UI rules
-- [`../../universal_component_architecture.md`](../../universal_component_architecture.md) — design rationale (with implementation notes)
+- [`../../docs/CONTROL_RUNTIME_AND_VERSIONING.md`](../../docs/CONTROL_RUNTIME_AND_VERSIONING.md) — RuntimeManager, ControlManager, VC (planned)
+- [`../../docs/universal_component_architecture.md`](../../docs/universal_component_architecture.md) — design rationale (with implementation notes)

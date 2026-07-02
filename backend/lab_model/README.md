@@ -2,7 +2,18 @@
 
 This folder is the **`lab_model`** Python package: shared domain logic for the digital twin (not hardware I/O). It defines how each **Universal Component** splits **slow/formal state** (StateControl) from **fast/live sessions** (Telemetry).
 
-**Platform map:** [`ARCHITECTURE.md`](ARCHITECTURE.md) · **UI rules:** [`../../docs/primitive_ui_contract.md`](../../docs/primitive_ui_contract.md) · **Commands:** [`primitives/README.md`](primitives/README.md)
+**Platform map:** [`ARCHITECTURE.md`](ARCHITECTURE.md) · **UI rules:** [`../../docs/primitive_ui_contract.md`](../../docs/primitive_ui_contract.md) · **Commands:** [`primitives/README.md`](primitives/README.md) · **Runtime / VC (planned):** [`../../docs/CONTROL_RUNTIME_AND_VERSIONING.md`](../../docs/CONTROL_RUNTIME_AND_VERSIONING.md)
+
+### Naming (aggregates)
+
+| Term | Meaning |
+|------|---------|
+| **Runtime** | Live working-tree JSON (`current_state`) |
+| **Configuration** | All tunables (+ holding intent) — versioned by **ControlManager** |
+| **Observations** | All measurables — pinned, not branched (JSON field stays `measurables`) |
+| **Setup** | Configuration + observations at a tagged checkpoint |
+
+**ControlManager** (cloud-labs) is **not** `lab_automation`'s `OpticalExperiment` / experiment manager.
 
 ---
 

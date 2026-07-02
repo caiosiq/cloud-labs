@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 def initialize_state(
     communicator: "RealLabCommunicator",
     preserve_component_ids: Optional[Iterable[str]] = None,
+    scan_tag_ids: Optional[Iterable[str]] = None,
 ) -> None:
     """Boot-time scan: load catalog, scan the table, populate components.
 
@@ -93,12 +94,16 @@ def initialize_state(
     preserve_frozen = frozenset(
         str(x).strip() for x in (preserve_component_ids or ()) if isinstance(x, str) and x.strip()
     )
+    scan_only = frozenset(
+        str(x).strip() for x in (scan_tag_ids or ()) if isinstance(x, str) and x.strip()
+    )
 
     from lab_model.catalog.bundle import active_tag_ids, merged_catalog_rows
 
     try:
         catalog = merged_catalog_rows()
-        scan_tag_ids = frozenset(active_tag_ids())
+        active_ids = frozenset(active_tag_ids())
+        scan_tag_ids_effective = scan_only if scan_tag_ids is not None else active_ids
     except Exception as e:
         print(f"[REAL LAB] Error loading lab_view catalog bundle: {e}. Cannot scan.")
         communicator._ensure_fixture_components()
@@ -113,13 +118,13 @@ def initialize_state(
     manipulables = [
         m
         for m in all_manipulables
-        if getattr(m, "tag_id", None) in scan_tag_ids
+        if getattr(m, "tag_id", None) in scan_tag_ids_effective
     ]
     skipped = len(all_manipulables) - len(manipulables)
     if skipped:
         print(
             f"[REAL LAB] Skipping scan for {skipped} registry tag(s) "
-            f"not in active_catalog.json"
+            f"outside scoped refresh"
         )
     if not manipulables:
         print(
@@ -138,6 +143,8 @@ def initialize_state(
     for item in catalog:
         tag_id = item.get("tag_id")
         if not tag_id:
+            continue
+        if scan_tag_ids is not None and tag_id not in scan_only:
             continue
 
         from lab_model.catalog.schema import catalog_is_fixed_instrument  # noqa: PLC0415
@@ -291,6 +298,7 @@ def initialize_state(
 def refresh_pose_from_camera(
     communicator: "RealLabCommunicator",
     preserve_component_ids: Optional[Iterable[str]] = None,
+    scan_tag_ids: Optional[Iterable[str]] = None,
 ) -> None:
     """User-triggered re-scan (UI "Refresh poses" button / SCAN_TABLE primitive).
 
@@ -303,7 +311,9 @@ def refresh_pose_from_camera(
         communicator.current_state["system_status"] = "BUSY"
     try:
         initialize_state(
-            communicator, preserve_component_ids=preserve_component_ids
+            communicator,
+            preserve_component_ids=preserve_component_ids,
+            scan_tag_ids=scan_tag_ids,
         )
     finally:
         with communicator._state_lock:

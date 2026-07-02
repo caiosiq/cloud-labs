@@ -8,8 +8,6 @@ import {
     STORAGE_RECT_Y_MIN,
 } from './config.js';
 import {
-    componentPresence,
-    drawPose,
     isBreadboardIntent,
     isStoredComponent,
     PRESENCE_BREADBOARD,
@@ -22,27 +20,6 @@ export function isStorageRegion(x, y) {
 
 export function isPlacedRegion(x, y) {
     return !isStorageRegion(x, y);
-}
-
-/**
- * @returns {string[]} human-readable warnings when committed pose disagrees with presence intent
- */
-export function collectLayoutWarnings(labState) {
-    const warnings = [];
-    if (!labState || !labState.components) return warnings;
-    for (const [id, comp] of Object.entries(labState.components)) {
-        const p = drawPose(comp);
-        if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') continue;
-        const { x, y } = p;
-        const pres = componentPresence(comp);
-        if (pres === PRESENCE_STORAGE && !isStorageRegion(x, y)) {
-            warnings.push(`${id}: storage intent but center (${x.toFixed(1)}, ${y.toFixed(1)}) is outside the configured storage rectangle.`);
-        }
-        if (pres === PRESENCE_BREADBOARD && isStorageRegion(x, y)) {
-            warnings.push(`${id}: breadboard intent but center (${x.toFixed(1)}, ${y.toFixed(1)}) lies in the inventory storage rectangle.`);
-        }
-    }
-    return warnings;
 }
 
 /**

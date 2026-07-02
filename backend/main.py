@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, ValidationError
 import json
 import os
 import re
+import math
+import uuid
 import asyncio
 import time
 from contextlib import asynccontextmanager
@@ -63,7 +65,7 @@ from lab_communicator.shared.lab_view_config import (
     line_id_pattern,
     load_layout_document,
     read_laser_lines_doc,
-    two_points_to_ab,
+    two_points_define_line,
     write_laser_lines_doc,
 )
 from lab_communicator.shared.communicator_factory import create_communicator
@@ -98,7 +100,7 @@ from lab_model.primitives import (
 
 
 RECIPES_DIR = get_lab_view_paths().recipes_dir
-STATES_DIR = get_lab_view_paths().states_dir
+CONTROL_DIR = get_lab_view_paths().control_dir
 
 # Initialize communicator from lab_manifest.json inside LAB_VIEW_PATH
 _manifest = get_lab_manifest()
@@ -185,11 +187,6 @@ class Recipe(BaseModel):
     description: Optional[str] = ""
     steps: List[RecipeStep]
 
-class StateName(BaseModel):
-    name: str
-    ui_state: Optional[Dict[str, Any]] = None
-
-
 class RuntimeModeBody(BaseModel):
     mode: str
 
@@ -199,9 +196,61 @@ class SessionReconcileApplyBody(BaseModel):
 
 
 class RefreshPoseBody(BaseModel):
-    """Optional tag ids whose full component rows are left unchanged after a scan."""
+    """Pose refresh selection: prefer ``apply_tag_ids``; legacy ``preserve_tag_ids``."""
 
     preserve_tag_ids: List[str] = Field(default_factory=list)
+    apply_tag_ids: List[str] = Field(default_factory=list)
+    tag_ids: List[str] = Field(default_factory=list)
+
+
+class ControlCreateRepoBody(BaseModel):
+    repo_id: str
+    display_name: Optional[str] = None
+
+
+class ControlCommitBody(BaseModel):
+    message: str = ""
+    branch: str = "main"
+    parent_id: Optional[str] = None
+
+
+class ControlBranchBody(BaseModel):
+    branch: str
+    parent_id: str
+
+
+class ControlCheckoutBody(BaseModel):
+    configuration_id: str
+    mode: str = "soft"
+    preview: bool = False
+    # When true, the frontend has already driven the reconcile primitives one at
+    # a time through /api/command (for step-by-step visibility). The endpoint
+    # then only *records* the result — projection + pointer + bench claim — and
+    # runs no motion of its own.
+    finalize: bool = False
+
+
+class ControlObservationsBody(BaseModel):
+    configuration_id: str
+    message: Optional[str] = None
+
+
+class ControlSetupBody(BaseModel):
+    name: str
+    configuration_id: Optional[str] = None
+    message: Optional[str] = None
+    include_observations: bool = True
+
+
+class ControlStashBody(BaseModel):
+    message: Optional[str] = None
+    preview: bool = False
+    # See ControlCheckoutBody.finalize. For stash, the frontend must also pass
+    # back the ``snapshot`` captured at preview time (the dirty bench, before the
+    # primitives drove it back to base) so the stash entry records the right
+    # state. Pop needs no snapshot — the server already holds the stash.
+    finalize: bool = False
+    snapshot: Optional[Dict[str, Any]] = None
 
 
 async def _run_reserved_background_task(
@@ -529,6 +578,101 @@ async def add_component(payload: Dict[str, Any], background_tasks: BackgroundTas
     background_tasks.add_task(lab.add_component_to_state, payload)
     mode = (payload.get("placement_mode") or "breadboard").lower()
     return {"status": "accepted", "message": f"Request submitted ({mode}): {payload.get('name')}"}
+
+
+class ComponentAddFromInventoryBody(BaseModel):
+    tag_id: str = Field(..., min_length=1)
+    placement_mode: str = Field(default="breadboard")
+
+
+@app.get("/api/catalog/active-tags")
+async def get_active_catalog_tags():
+    """Controlled tag ids (``active_catalog.json``) and full library tag ids."""
+    from lab_model.catalog.active_catalog_store import list_active_catalog_tags
+    from lab_model.catalog.bundle import library_by_tag
+
+    try:
+        return {
+            "tag_ids": list_active_catalog_tags(),
+            "library_tag_ids": sorted(library_by_tag().keys()),
+        }
+    except Exception as e:
+        logger.exception("GET /api/catalog/active-tags failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to read active catalog: {e}")
+
+
+@app.get("/api/catalog/library-rows")
+async def get_library_catalog_rows():
+    """All component_library rows (for sidebar display of off-catalog inventory)."""
+    from lab_model.catalog.bundle import library_by_tag
+
+    try:
+        return list(library_by_tag().values())
+    except Exception as e:
+        logger.exception("GET /api/catalog/library-rows failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to read component library: {e}")
+
+
+class ComponentTrackBody(BaseModel):
+    tag_id: str = Field(..., min_length=1)
+
+
+@app.post("/api/components/track")
+async def track_component(body: ComponentTrackBody):
+    """Add a part to the controlled set and materialize it on the mock bench when applicable."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    _assert_lab_idle_for_control()
+    try:
+        result = await lab.track_component({"tag_id": body.tag_id.strip()})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("POST /api/components/track failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if hasattr(lab, "_load_catalog"):
+        lab._load_catalog()
+    return result
+
+
+@app.post("/api/components/untrack")
+async def untrack_component(body: ComponentTrackBody):
+    """Remove a part from the controlled set; mock also drops it from runtime (library)."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    _assert_lab_idle_for_control()
+    try:
+        result = await lab.untrack_component(body.tag_id.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("POST /api/components/untrack failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return result
+
+
+@app.post("/api/components/add")
+async def add_component_from_inventory(body: ComponentAddFromInventoryBody):
+    """Place a catalog part on the bench from OFF_TABLE inventory or the library."""
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+    _assert_lab_idle_for_control()
+    payload = {
+        "tag_id": body.tag_id.strip(),
+        "placement_mode": (body.placement_mode or "breadboard").lower(),
+    }
+    try:
+        result = await lab.add_component_from_inventory(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("POST /api/components/add failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if hasattr(lab, "_load_catalog"):
+        lab._load_catalog()
+    return result
 
 @app.get("/api/components/{tag_id}/tunables")
 async def get_component_tunables(tag_id: str):
@@ -1134,22 +1278,95 @@ async def get_lab_state():
 
 def _schedule_pose_refresh(
     background_tasks: BackgroundTasks,
-    preserve_tag_ids: Optional[List[str]] = None,
+    payload: Optional[RefreshPoseBody] = None,
 ) -> Dict[str, Any]:
     if lab is None:
         raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
     fn = getattr(lab, "refresh_pose_from_camera", None)
     if callable(fn):
-        plist = list(preserve_tag_ids or [])
-        background_tasks.add_task(functools.partial(fn, preserve_tag_ids=plist))
+        body = payload or RefreshPoseBody()
+        kwargs = {
+            "preserve_tag_ids": list(body.preserve_tag_ids or []),
+            "apply_tag_ids": list(body.apply_tag_ids or []),
+            "tag_ids": list(body.tag_ids or []),
+        }
+        background_tasks.add_task(functools.partial(fn, **kwargs))
+        scoped = kwargs["tag_ids"] or kwargs["apply_tag_ids"]
+        scope_note = f" (scope: {', '.join(scoped)})" if scoped else ""
         return {
             "status": "accepted",
-            "message": "Pose refresh from camera started (updates measurables.pose)",
+            "message": f"Pose refresh from camera started{scope_note}",
+            "scan_tag_ids": kwargs["apply_tag_ids"] or None,
         }
     return {
         "status": "ok",
         "message": "Pose refresh not supported for this lab backend",
     }
+
+
+def _pose_refresh_offers_dict(scope_tag_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    from lab_communicator.shared.session_checkpoint import reconciliation_thresholds_from_manifest
+    from lab_model.state.pose_refresh_offers import build_pose_refresh_offers
+    from lab_model.state.pose_refresh_selection import normalize_tag_id_list
+
+    thresholds = (
+        lab.session_reconciliation_thresholds()
+        if lab is not None
+        else reconciliation_thresholds_from_manifest()
+    )
+    thresholds_dict = {"position_mm": thresholds.position_mm, "yaw_deg": thresholds.yaw_deg}
+    resp: Dict[str, Any] = {
+        "supported": False,
+        "skipped_reason": None,
+        "thresholds": thresholds_dict,
+        "offers": [],
+        "hardware_note": (
+            "Applying refresh runs a camera scan and updates measurables.pose "
+            "for checked components."
+        ),
+    }
+
+    if lab is None:
+        resp["skipped_reason"] = "lab_unavailable"
+        return resp
+
+    preview_fn = getattr(lab, "preview_refresh_pose_candidates", None)
+    if not callable(preview_fn):
+        resp["skipped_reason"] = "preview_not_supported"
+        return resp
+
+    cur = lab.get_lab_state()
+    if cur.get("system_status") != "IDLE":
+        resp["skipped_reason"] = f"busy:{cur.get('system_status')}"
+        return resp
+
+    scope = normalize_tag_id_list(scope_tag_ids) if scope_tag_ids else []
+    try:
+        proposed = preview_fn(tag_ids=scope if scope else None)
+    except TypeError:
+        proposed = preview_fn()
+    if not proposed:
+        resp["skipped_reason"] = "no_eligible_components"
+        return resp
+
+    components = cur.get("components") or {}
+    if scope:
+        scope_set = set(scope)
+        proposed = {k: v for k, v in proposed.items() if k in scope_set}
+    offers = build_pose_refresh_offers(components, proposed, thresholds)
+    resp["supported"] = True
+    resp["offers"] = offers
+    resp["eligible_count"] = len(offers)
+    return resp
+
+
+@app.get("/api/lab-state/refresh-pose/offers")
+async def refresh_lab_pose_offers(tag_ids: Optional[str] = Query(None)):
+    """Dry-run scan deltas vs current poses (mock: deterministic simulated scan)."""
+    scope = None
+    if tag_ids and tag_ids.strip():
+        scope = [t.strip() for t in tag_ids.split(",") if t.strip()]
+    return _pose_refresh_offers_dict(scope)
 
 
 @app.post("/api/lab-state/refresh-pose")
@@ -1159,10 +1376,8 @@ async def refresh_lab_pose_from_camera(
 ):
     """
     Re-localize component poses from the overhead / table camera (real: full scan; mock: simulated noise).
+  Supports scoped refresh via ``tag_ids`` / ``apply_tag_ids`` (preferred) or legacy ``preserve_tag_ids``.
     """
-    plist = []
-    if payload is not None:
-        plist = list(payload.preserve_tag_ids or [])
     cur = getattr(lab, "get_lab_state", lambda: {})
     try:
         st = cur()
@@ -1172,7 +1387,7 @@ async def refresh_lab_pose_from_camera(
         cs = st.get("system_status")
         if cs in ("BUSY", "OPTIMIZING"):
             raise HTTPException(status_code=409, detail=f"System is {cs}. Please wait.")
-    return _schedule_pose_refresh(background_tasks, plist)
+    return _schedule_pose_refresh(background_tasks, payload)
 
 
 @app.post("/api/lab-state/refresh")
@@ -1181,10 +1396,7 @@ async def refresh_lab_state_legacy(
     payload: Optional[RefreshPoseBody] = Body(None),
 ):
     """Deprecated: use ``POST /api/lab-state/refresh-pose`` (same behavior)."""
-    plist = []
-    if payload is not None:
-        plist = list(payload.preserve_tag_ids or [])
-    return _schedule_pose_refresh(background_tasks, plist)
+    return _schedule_pose_refresh(background_tasks, payload)
 
 
 @app.get("/api/session-reconciliation/offers")
@@ -1226,86 +1438,805 @@ async def api_session_checkpoint_save():
     return {"status": "ok"}
 
 
-@app.get("/api/states")
-async def list_saved_states():
-    if not os.path.exists(STATES_DIR):
-        return []
-    files = [f for f in os.listdir(STATES_DIR) if f.endswith(".json")]
-    # Return names without extension
-    return sorted([os.path.splitext(f)[0] for f in files])
+_control_managers: Dict[str, Any] = {}
 
-@app.post("/api/states/save")
-async def save_lab_state(payload: StateName):
+
+def _get_control_manager(repo_id: str):
+    from lab_model.state.control_manager import ControlManager
+
+    safe = (repo_id or "default").strip() or "default"
+    if safe not in _control_managers:
+        _control_managers[safe] = ControlManager(CONTROL_DIR, safe)
+    return _control_managers[safe]
+
+
+_CONTROL_DEBUG = os.environ.get("CONTROL_DEBUG", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "",
+)
+
+
+def _control_log(event: str, **fields: Any) -> None:
+    """Lightweight tracing for the version-control state machine.
+
+    Enabled by default; set CONTROL_DEBUG=0 to silence. Prints one compact line
+    per event so we can follow ownership / applied / dirty decisions live.
+    """
+    if not _CONTROL_DEBUG:
+        return
+    parts = " ".join(f"{k}={v!r}" for k, v in fields.items())
+    print(f"[control-debug] {event} {parts}", flush=True)
+
+
+def _repo_owns_bench(repo_id: str) -> bool:
+    """True when ``repo_id`` is the physical owner of the current global bench.
+
+    Switching repos never moves the bench, so only the owning repo gets
+    applied-based dirty detection; other repos diff against the empty state.
+    """
+    from lab_model.state.control_manager import read_bench_origin, repo_owns_bench
+
+    safe = (repo_id or "default").strip() or "default"
+    owns = repo_owns_bench(CONTROL_DIR, safe)
+    if _CONTROL_DEBUG:
+        origin = read_bench_origin(CONTROL_DIR)
+        _control_log(
+            "owns_bench",
+            repo=safe,
+            owns=owns,
+            origin_repo=(origin or {}).get("repo_id"),
+            origin_cfg=(origin or {}).get("configuration_id"),
+        )
+    return owns
+
+
+def _claim_bench(repo_id: str, configuration_id: Optional[str]) -> None:
+    """Record that ``repo_id`` physically realized the current bench."""
+    from lab_model.state.control_manager import write_bench_origin
+
+    safe = (repo_id or "default").strip() or "default"
+    _control_log("claim_bench", repo=safe, configuration_id=configuration_id)
+    write_bench_origin(CONTROL_DIR, safe, configuration_id)
+
+
+def _assert_lab_idle_for_control() -> None:
     if lab is None:
-        raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
-
-    if hasattr(lab, "get_lab_state"):
-        st = lab.get_lab_state() or {}
-        if st.get("system_status") in ("BUSY", "OPTIMIZING"):
-            raise HTTPException(status_code=409, detail=f"System is {st.get('system_status')}. Please wait.")
-
-    import re
-    name = payload.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="State name is required")
-    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", name)
-    if not safe:
-        raise HTTPException(status_code=400, detail="Invalid state name")
-
-    file_path = os.path.join(STATES_DIR, f"{safe}.json")
-    from lab_model.state.saved_workspace import build_workspace_state
-
-    state = build_workspace_state(
-        lab.get_lab_state(),
-        payload.ui_state,
-    )
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-    return {"status": "success", "name": safe, "path": file_path}
-
-@app.post("/api/states/load")
-async def load_lab_state(payload: StateName):
-    if lab is None:
-        raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
-    if runtime_manager is not None and runtime_manager.mode == "mujoco":
+        raise HTTPException(status_code=503, detail="Lab communicator not initialized")
+    status = (lab.get_lab_state() or {}).get("system_status")
+    if status in ("BUSY", "OPTIMIZING"):
         raise HTTPException(
             status_code=409,
-            detail="Loading snapshots is unavailable in MuJoCo v1",
+            detail=f"System is {status}. Please wait.",
         )
 
-    if hasattr(lab, "get_lab_state"):
-        st = lab.get_lab_state() or {}
-        if st.get("system_status") in ("BUSY", "OPTIMIZING"):
-            raise HTTPException(status_code=409, detail=f"System is {st.get('system_status')}. Please wait.")
 
-    import re
-    name = payload.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="State name is required")
-    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", name)
-    file_path = os.path.join(STATES_DIR, f"{safe}.json")
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail=f"State not found: {safe}")
+def _lab_runtime_manager():
+    manager = getattr(lab, "_lab_runtime_manager", None)
+    if manager is None:
+        raise HTTPException(
+            status_code=500,
+            detail="RuntimeManager not available on lab communicator",
+        )
+    return manager
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        document = json.load(f)
 
-    from lab_model.state.saved_workspace import unpack_workspace_state
+def _invalidate_control_manager_cache(repo_id: Optional[str] = None) -> None:
+    if repo_id is None:
+        _control_managers.clear()
+        return
+    safe = (repo_id or "default").strip() or "default"
+    _control_managers.pop(safe, None)
 
-    state, ui_state, has_ui_state = unpack_workspace_state(document)
 
-    if hasattr(lab, "set_lab_state"):
-        lab.set_lab_state(state)
+@app.get("/api/control/repos")
+async def control_list_repos():
+    from lab_model.state.control_manager import list_control_repos
 
-    # Return merged lab state (e.g. catalog parts not in the file are preserved on load).
-    out_state = lab.get_lab_state() if hasattr(lab, "get_lab_state") else state
+    return {"repos": list_control_repos(CONTROL_DIR)}
+
+
+@app.post("/api/control/backfill-lines")
+async def control_backfill_lines(payload: Dict[str, Any] = Body(default={})):
+    """One-time, idempotent migration: inject the currently-drawn alignment
+    overlays (guides + laser lines) into every commit across every repo that
+    predates line-versioning. Only fills documents missing the keys.
+
+    Guides come from the request body (the browser's localStorage import) when
+    provided, otherwise from the live runtime; laser lines come from the runtime
+    (seeded from the lab bundle).
+    """
+    from lab_model.state.control_manager import list_control_repos
+    from lab_model.state.projections import (
+        normalize_alignment_guides,
+        normalize_laser_lines_doc,
+    )
+
+    runtime = lab.get_lab_state() if lab is not None else {}
+    if isinstance(payload.get("alignment_guides"), list):
+        guides = normalize_alignment_guides(payload.get("alignment_guides"))
+    else:
+        guides = normalize_alignment_guides(runtime.get("alignment_guides"))
+    laser = normalize_laser_lines_doc(runtime.get("laser_lines"))
+
+    repos = list_control_repos(CONTROL_DIR)
+    updated = 0
+    for repo in repos:
+        mgr = _get_control_manager(repo["repo_id"])
+        updated += mgr.backfill_overlays(alignment_guides=guides, laser_lines=laser)
+    return {"repos": len(repos), "updated": updated, "guides": len(guides)}
+
+
+@app.post("/api/control/repos")
+async def control_create_repo(payload: ControlCreateRepoBody):
+    from lab_model.state.control_manager import create_control_repo, validate_repo_id
+
+    try:
+        validate_repo_id(payload.repo_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        repo = create_control_repo(
+            CONTROL_DIR,
+            payload.repo_id,
+            display_name=payload.display_name,
+        )
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=f"Repo already exists: {exc}") from exc
+    _invalidate_control_manager_cache(repo["repo_id"])
+    return {"status": "ok", "repo": repo}
+
+
+@app.get("/api/control/{repo_id}/status")
+async def control_status(repo_id: str):
+    runtime = lab.get_lab_state() if lab is not None else None
+    status = _get_control_manager(repo_id).status(
+        runtime, owns_bench=_repo_owns_bench(repo_id)
+    )
+    working = status.get("working") or {}
+    _control_log(
+        "status",
+        repo=repo_id,
+        applied=(status.get("applied") or {}).get("configuration_id"),
+        applied_branch=(status.get("applied") or {}).get("branch"),
+        heads=status.get("heads"),
+        on_head=working.get("on_head"),
+        detached=working.get("detached"),
+        dirty=working.get("dirty"),
+        unadopted=working.get("unadopted"),
+        owns_bench=working.get("owns_bench"),
+    )
+    return status
+
+
+@app.get("/api/control/{repo_id}/history")
+async def control_history(repo_id: str, branch: Optional[str] = Query(None)):
+    mgr = _get_control_manager(repo_id)
     return {
-        "status": "success",
-        "name": safe,
-        "state": out_state,
-        "ui_state": ui_state,
-        "has_ui_state": has_ui_state,
+        "repo_id": repo_id,
+        "branch": branch,
+        "head": mgr.get_head(branch or "main") if branch else mgr.status().get("heads"),
+        "nodes": mgr.list_history(branch),
     }
+
+
+@app.get("/api/control/{repo_id}/configurations/{commit_id}")
+async def control_get_configuration(repo_id: str, commit_id: str):
+    try:
+        return _get_control_manager(repo_id).get_configuration(commit_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/control/{repo_id}/diff")
+async def control_diff(
+    repo_id: str,
+    from_id: str = Query(..., alias="from"),
+    to_id: str = Query(..., alias="to"),
+):
+    try:
+        changes = _get_control_manager(repo_id).diff_configurations(from_id, to_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"from": from_id, "to": to_id, "changes": changes}
+
+
+@app.post("/api/control/{repo_id}/configurations")
+async def control_commit_configuration(repo_id: str, payload: ControlCommitBody):
+    _assert_lab_idle_for_control()
+    from lab_model.catalog.bundle import active_tag_ids, library_by_tag
+    from lab_model.catalog.catalog_hash import compute_active_catalog_hash
+
+    runtime = lab.get_lab_state()
+    mgr = _get_control_manager(repo_id)
+    working = mgr.working_state(runtime, owns_bench=_repo_owns_bench(repo_id))
+    if working.get("detached"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "detached_head",
+                "message": (
+                    "You are on an older commit (detached). Fork a new branch "
+                    "here before committing changes."
+                ),
+            },
+        )
+    if working.get("viewing"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "viewing_preview",
+                "message": "Return to the bench before committing.",
+            },
+        )
+    try:
+        catalog_hash = compute_active_catalog_hash()
+    except Exception:
+        catalog_hash = None
+    document = mgr.commit_from_runtime(
+        runtime,
+        message=payload.message,
+        branch=payload.branch or "main",
+        parent_id=payload.parent_id,
+        catalog_hash=catalog_hash,
+    )
+    # Committing the live bench means this repo now owns it at the new node.
+    _claim_bench(repo_id, str(document.get("id")) if document.get("id") else None)
+    return {"status": "ok", "commit": document, "catalog_hash": catalog_hash}
+
+
+@app.get("/api/control/{repo_id}/checkout-report")
+async def control_checkout_report(
+    repo_id: str,
+    configuration_id: str = Query(..., min_length=1),
+):
+    """Tag/catalog compatibility between a commit and the live runtime bench."""
+    from lab_model.catalog.bundle import active_tag_ids, library_by_tag
+    from lab_model.catalog.catalog_hash import compute_active_catalog_hash
+
+    mgr = _get_control_manager(repo_id)
+    try:
+        current_hash = compute_active_catalog_hash()
+        catalog_ids = active_tag_ids()
+        library_ids = list(library_by_tag().keys())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Catalog unavailable: {exc}") from exc
+
+    runtime = lab.get_lab_state() if lab is not None else {}
+    try:
+        report = mgr.checkout_compatibility_report(
+            configuration_id,
+            runtime,
+            current_catalog_hash=current_hash,
+            catalog_tag_ids=catalog_ids,
+            library_tag_ids=library_ids,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return report
+
+
+@app.post("/api/control/{repo_id}/branches")
+async def control_fork_branch(repo_id: str, payload: ControlBranchBody):
+    branch = (payload.branch or "").strip()
+    if not branch:
+        raise HTTPException(status_code=400, detail="branch is required")
+    try:
+        _get_control_manager(repo_id).fork_branch(
+            branch=branch,
+            parent_id=payload.parent_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Forking carries the live bench onto the new branch, so this repo owns it.
+    _claim_bench(repo_id, payload.parent_id)
+    return {
+        "status": "ok",
+        "branch": branch,
+        "head": payload.parent_id,
+    }
+
+
+@app.post("/api/control/{repo_id}/checkout")
+async def control_checkout(repo_id: str, payload: ControlCheckoutBody):
+    _assert_lab_idle_for_control()
+    mode = (payload.mode or "soft").strip().lower()
+    mgr = _get_control_manager(repo_id)
+    _control_log(
+        "checkout:request",
+        repo=repo_id,
+        mode=mode,
+        target=payload.configuration_id,
+        preview=getattr(payload, "preview", None),
+        applied=mgr.get_applied().get("configuration_id"),
+    )
+    try:
+        document = mgr.get_configuration(payload.configuration_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    configuration = document.get("configuration") or {}
+    branch = str(document.get("branch") or "main")
+
+    if mode == "adopt":
+        # "Set as node": declare this node as the current node WITHOUT moving the
+        # bench (git reset --soft). No reconcile plan, no projection — the
+        # physical bench is left exactly as-is and becomes uncommitted edits
+        # relative to the adopted node. Used to establish a base when you enter a
+        # repo and have no current node yet.
+        _control_log(
+            "checkout:adopt",
+            repo=repo_id,
+            target=payload.configuration_id,
+            branch=branch,
+        )
+        mgr.set_applied(payload.configuration_id, branch=branch)
+        mgr.set_viewing(None)
+        _claim_bench(repo_id, payload.configuration_id)
+        if hasattr(lab, "_persist_state"):
+            lab._persist_state()
+        return {
+            "status": "ok",
+            "mode": "adopt",
+            "configuration_id": payload.configuration_id,
+            "branch": branch,
+            "applied": mgr.get_applied(),
+            "working": mgr.working_state(
+                lab.get_lab_state(), owns_bench=_repo_owns_bench(repo_id)
+            ),
+        }
+
+    if mode == "hard" and payload.finalize:
+        # Step-by-step "Apply on bench": the frontend already ran every reconcile
+        # primitive through /api/command (so the operator saw each one), and the
+        # bench now physically matches the target. This records the outcome only:
+        # snap tunables to the node's nominal poses, move the applied pointer, and
+        # claim the bench. No reconcile plan, no motion.
+        _control_log(
+            "checkout:finalize",
+            repo=repo_id,
+            target=payload.configuration_id,
+            branch=branch,
+        )
+        runtime_mgr = _lab_runtime_manager()
+        runtime_mgr.apply_hard_checkout_projection(
+            configuration,
+            source=f"hard_checkout:{payload.configuration_id}",
+        )
+        mgr.set_applied(payload.configuration_id, branch=branch)
+        mgr.set_viewing(None)
+        _claim_bench(repo_id, payload.configuration_id)
+        if hasattr(lab, "_persist_state"):
+            lab._persist_state()
+        return {
+            "status": "ok",
+            "mode": "hard",
+            "finalized": True,
+            "configuration_id": payload.configuration_id,
+            "branch": branch,
+            "applied": mgr.get_applied(),
+            "steps_executed": 0,
+        }
+
+    runtime = lab.get_lab_state()
+
+    # Git-like guard applies ONLY to a hard checkout, the one mode that
+    # physically moves the bench: you cannot reconcile away from a dirty working
+    # table without committing or stashing first. Soft preview is read-only, and
+    # "adopt" (handled above) only repoints the HEAD — both leave the bench
+    # untouched, so neither is gated. (In particular, an unadopted repo reads as
+    # dirty-vs-empty, so gating preview here would block you from ever clicking a
+    # node to Set it.)
+    if mode == "hard":
+        owns_bench = _repo_owns_bench(repo_id)
+        applied_id = mgr.get_applied().get("configuration_id") if owns_bench else None
+        is_dirty = mgr.runtime_is_dirty(runtime, owns_bench=owns_bench)
+        _control_log(
+            "checkout:hard-guard",
+            repo=repo_id,
+            target=payload.configuration_id,
+            owns_bench=owns_bench,
+            applied=applied_id,
+            dirty=is_dirty,
+            blocked=(is_dirty and payload.configuration_id != applied_id),
+        )
+        if is_dirty and payload.configuration_id != applied_id:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "dirty_working_table",
+                    "message": (
+                        "You have uncommitted changes on the bench. Commit or stash "
+                        "them before checking out another configuration."
+                    ),
+                },
+            )
+
+    if mode in ("soft", "hard"):
+        from lab_model.catalog.bundle import active_tag_ids, library_by_tag
+        from lab_model.catalog.catalog_hash import compute_active_catalog_hash
+        try:
+            compat = mgr.checkout_compatibility_report(
+                payload.configuration_id,
+                runtime,
+                current_catalog_hash=compute_active_catalog_hash(),
+                catalog_tag_ids=active_tag_ids(),
+                library_tag_ids=list(library_by_tag().keys()),
+            )
+        except Exception:
+            compat = {"ready": True, "issues": []}
+        if not compat.get("ready") and compat.get("blocking_count", 0) > 0:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Bench is incompatible with configuration (blocking issues)",
+                    "compatibility": compat,
+                },
+            )
+
+    if mode == "soft":
+        # Read-only preview. The live bench is NEVER mutated: the frontend
+        # renders the returned configuration as an overlay. This is the core of
+        # the state-machine separation — preview can no longer contaminate the
+        # live runtime, so layout/dirty/compat (all computed against the real
+        # bench) cannot fire spurious warnings while you are only *viewing* a
+        # node. No `set_viewing`, no projection, no persist.
+        return {
+            "status": "ok",
+            "mode": "soft",
+            "configuration_id": payload.configuration_id,
+            "configuration": configuration,
+            "compatibility": compat,
+        }
+    if mode == "hard":
+        # The live runtime IS the physical bench (preview never mutates it), so
+        # always plan straight from the runtime. Correct across detached commits
+        # AND across repos (membership reconcile turns component add/remove into
+        # PLACE_FROM_STORAGE / STORE_COMPONENT).
+        from_id = mgr.get_applied().get("configuration_id")
+        plan = mgr.plan_checkout_from_runtime(runtime, payload.configuration_id)
+        if payload.preview:
+            return {
+                "status": "planned",
+                "mode": "hard",
+                "configuration_id": payload.configuration_id,
+                "from_id": from_id,
+                "branch": branch,
+                "plan": plan,
+                "steps": len(plan),
+                "compatibility": compat,
+            }
+
+        from lab_model.state.reconcile_executor import (
+            ReconcilePlanError,
+            execute_reconcile_plan,
+        )
+
+        runtime_mgr = _lab_runtime_manager()
+        try:
+            if plan:
+                await execute_reconcile_plan(
+                    lab,
+                    plan,
+                    source=f"checkout:{payload.configuration_id}",
+                )
+        except ReconcilePlanError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Hard checkout failed: {exc}",
+            ) from exc
+
+        runtime_mgr.apply_hard_checkout_projection(
+            configuration,
+            source=f"hard_checkout:{payload.configuration_id}",
+        )
+        mgr.set_applied(payload.configuration_id, branch=branch)
+        mgr.set_viewing(None)
+        # This repo now physically owns the bench at the checked-out node.
+        _claim_bench(repo_id, payload.configuration_id)
+        if hasattr(lab, "_persist_state"):
+            lab._persist_state()
+        return {
+            "status": "ok",
+            "mode": "hard",
+            "configuration_id": payload.configuration_id,
+            "from_id": from_id,
+            "branch": branch,
+            "plan": plan,
+            "steps_executed": len(plan),
+            "applied": mgr.get_applied(),
+            "compatibility": compat,
+        }
+    raise HTTPException(status_code=400, detail="mode must be soft, hard, or adopt")
+
+
+@app.post("/api/control/{repo_id}/stash")
+async def control_stash(repo_id: str, payload: ControlStashBody):
+    """Set uncommitted bench changes aside and reconcile back to the applied node.
+
+    Single-slot: refuses if a stash already exists. Physically moves the bench
+    to the clean applied configuration (a reconcile plan), then records the
+    snapshot so it can be popped later.
+    """
+    _assert_lab_idle_for_control()
+    mgr = _get_control_manager(repo_id)
+    runtime = lab.get_lab_state()
+    owns_bench = _repo_owns_bench(repo_id)
+    working = mgr.working_state(runtime, owns_bench=owns_bench)
+
+    if mgr.get_stash() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stash_exists",
+                "message": "A stash already exists. Pop or drop it first.",
+            },
+        )
+    applied = working.get("applied") or {}
+    applied_id = applied.get("configuration_id")
+
+    from lab_model.state.projections import EMPTY_CONFIGURATION, extract_configuration
+
+    # Stash base: the applied node when this repo owns the bench, otherwise the
+    # shared empty state (a foreign bench is uncommitted work on top of empty,
+    # so stashing clears the table back to empty — every part returns to
+    # storage — leaving a clean slate to check out this repo's nodes).
+    if applied_id:
+        try:
+            base_cfg = mgr.get_configuration(applied_id).get("configuration") or {}
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    else:
+        base_cfg = EMPTY_CONFIGURATION
+
+    if payload.finalize:
+        # Step-by-step stash: the frontend already drove the primitives back to
+        # base, so the runtime is clean now (dirty check would wrongly reject).
+        # The dirty snapshot was captured at preview time and passed back here.
+        snapshot = payload.snapshot or {}
+        if not snapshot:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "missing_snapshot",
+                    "message": "finalize requires the snapshot captured at preview time.",
+                },
+            )
+        runtime_mgr = _lab_runtime_manager()
+        runtime_mgr.apply_hard_checkout_projection(base_cfg, source="stash")
+        mgr.set_applied(applied_id, branch=applied.get("branch"))
+        mgr.save_stash(
+            snapshot,
+            base_configuration_id=applied_id,
+            base_branch=applied.get("branch"),
+            message=payload.message,
+        )
+        _claim_bench(repo_id, applied_id)
+        if hasattr(lab, "_persist_state"):
+            lab._persist_state()
+        return {
+            "status": "ok",
+            "finalized": True,
+            "stash": mgr.stash_summary(),
+            "steps_executed": 0,
+            "working": mgr.working_state(
+                lab.get_lab_state(), owns_bench=_repo_owns_bench(repo_id)
+            ),
+        }
+
+    if not working.get("dirty"):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "nothing_to_stash", "message": "No uncommitted changes to stash."},
+        )
+
+    snapshot = extract_configuration(runtime)
+    plan = mgr.plan_runtime_to_configuration(runtime, base_cfg)
+
+    if payload.preview:
+        return {
+            "status": "planned",
+            "plan": plan,
+            "steps": len(plan),
+            "base_configuration_id": applied_id,
+            "base_branch": applied.get("branch"),
+            "snapshot": snapshot,
+        }
+
+    from lab_model.state.reconcile_executor import (
+        ReconcilePlanError,
+        execute_reconcile_plan,
+    )
+
+    runtime_mgr = _lab_runtime_manager()
+    try:
+        if plan:
+            await execute_reconcile_plan(lab, plan, source="stash")
+    except ReconcilePlanError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=f"Stash failed: {exc}") from exc
+
+    runtime_mgr.apply_hard_checkout_projection(base_cfg, source="stash")
+    mgr.set_applied(applied_id, branch=applied.get("branch"))
+    stash = mgr.save_stash(
+        snapshot,
+        base_configuration_id=applied_id,
+        base_branch=applied.get("branch"),
+        message=payload.message,
+    )
+    # The bench is now clean at this repo's base, so this repo owns it.
+    _claim_bench(repo_id, applied_id)
+    if hasattr(lab, "_persist_state"):
+        lab._persist_state()
+    return {
+        "status": "ok",
+        "stash": mgr.stash_summary(),
+        "steps_executed": len(plan),
+        "working": mgr.working_state(
+            lab.get_lab_state(), owns_bench=_repo_owns_bench(repo_id)
+        ),
+    }
+
+
+@app.post("/api/control/{repo_id}/stash/pop")
+async def control_stash_pop(repo_id: str, payload: ControlStashBody = ControlStashBody()):
+    """Reconcile the bench to the stashed snapshot and restore it as uncommitted.
+
+    Pop is only allowed on a clean HEAD: the snapshot lands as uncommitted
+    changes, and uncommitted changes can only ever live on HEAD.
+    """
+    _assert_lab_idle_for_control()
+    mgr = _get_control_manager(repo_id)
+    runtime = lab.get_lab_state()
+    working = mgr.working_state(runtime, owns_bench=_repo_owns_bench(repo_id))
+
+    stash = mgr.get_stash()
+    if stash is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "no_stash", "message": "No stash to pop."},
+        )
+    snapshot = stash.get("configuration") or {}
+
+    if payload.finalize:
+        # Step-by-step pop: the frontend already drove the primitives to restore
+        # the stash snapshot on the bench (which is dirty-vs-applied by design —
+        # so the pre-pop dirty guard would wrongly reject). Record only: snap
+        # tunables to the snapshot and clear the stash slot. No motion.
+        runtime_mgr = _lab_runtime_manager()
+        runtime_mgr.apply_configuration_projection(snapshot, source="stash_pop")
+        mgr.clear_stash()
+        if hasattr(lab, "_persist_state"):
+            lab._persist_state()
+        return {
+            "status": "ok",
+            "finalized": True,
+            "steps_executed": 0,
+            "working": mgr.working_state(
+                lab.get_lab_state(), owns_bench=_repo_owns_bench(repo_id)
+            ),
+        }
+
+    if working.get("viewing"):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "viewing_preview", "message": "Return to the bench before popping the stash."},
+        )
+    if working.get("detached"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "detached_head",
+                "message": "Fork a branch before popping the stash (changes can only land on HEAD).",
+            },
+        )
+    if working.get("dirty"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "dirty_working_table",
+                "message": "Commit or drop your current changes before popping the stash.",
+            },
+        )
+
+    plan = mgr.plan_runtime_to_configuration(runtime, snapshot)
+
+    if payload.preview:
+        return {
+            "status": "planned",
+            "plan": plan,
+            "steps": len(plan),
+        }
+
+    from lab_model.state.reconcile_executor import (
+        ReconcilePlanError,
+        execute_reconcile_plan,
+    )
+
+    runtime_mgr = _lab_runtime_manager()
+    try:
+        if plan:
+            await execute_reconcile_plan(lab, plan, source="stash_pop")
+    except ReconcilePlanError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=f"Stash pop failed: {exc}") from exc
+
+    runtime_mgr.apply_configuration_projection(snapshot, source="stash_pop")
+    mgr.clear_stash()
+    if hasattr(lab, "_persist_state"):
+        lab._persist_state()
+    return {
+        "status": "ok",
+        "steps_executed": len(plan),
+        "working": mgr.working_state(
+            lab.get_lab_state(), owns_bench=_repo_owns_bench(repo_id)
+        ),
+    }
+
+
+@app.delete("/api/control/{repo_id}/stash")
+async def control_stash_drop(repo_id: str):
+    """Discard the stash without touching the bench (metadata only)."""
+    mgr = _get_control_manager(repo_id)
+    had_stash = mgr.get_stash() is not None
+    mgr.clear_stash()
+    return {"status": "ok", "dropped": had_stash}
+
+
+@app.post("/api/control/{repo_id}/observations")
+async def control_pin_observations(repo_id: str, payload: ControlObservationsBody):
+    _assert_lab_idle_for_control()
+    runtime = lab.get_lab_state()
+    try:
+        pin = _get_control_manager(repo_id).pin_observations(
+            runtime,
+            configuration_id=payload.configuration_id,
+            message=payload.message,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "ok", "observations": pin}
+
+
+@app.post("/api/control/{repo_id}/setups")
+async def control_save_setup(repo_id: str, payload: ControlSetupBody):
+    _assert_lab_idle_for_control()
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    mgr = _get_control_manager(repo_id)
+    runtime = lab.get_lab_state()
+    if payload.include_observations:
+        setup = mgr.build_setup_from_runtime(
+            runtime,
+            name=name,
+            configuration_id=payload.configuration_id,
+            message=payload.message,
+        )
+    else:
+        if payload.configuration_id:
+            setup = mgr.save_setup(
+                name=name,
+                configuration_id=payload.configuration_id,
+                message=payload.message,
+            )
+        else:
+            commit = mgr.commit_from_runtime(
+                runtime,
+                message=payload.message or f"setup {name}",
+            )
+            setup = mgr.save_setup(
+                name=name,
+                configuration_id=str(commit["id"]),
+                message=payload.message,
+            )
+    return {"status": "ok", "setup": setup}
+
 
 def _lab_component_wh(tag_id: str) -> Tuple[float, float]:
     """Catalog width/height in mm for layout analysis (mock vs real)."""
@@ -1368,33 +2299,58 @@ async def get_component_library():
         return json.load(f)
 
 
-@app.get("/api/laser-line")
-async def get_laser_line():
-    """Single-line legacy coefficients (x = a*y + b, mm) from lab_view laser_lines.json snap line."""
-    doc = read_laser_lines_doc()
-    return laser_line_coeffs_from_doc(doc, LAB_MODE)
+GUIDE_MIN_LENGTH_MM = 2.0
 
 
-@app.get("/api/laser-lines")
-async def get_laser_lines():
-    """All laser overlays defined in lab_view laser_lines.json."""
-    doc = read_laser_lines_doc()
-    out = dict(doc)
+def _runtime_laser_doc() -> Dict[str, Any]:
+    """Live laser overlay slice from the runtime.
+
+    Laser lines are now *versioned configuration* carried on the runtime
+    (seeded once from ``laser_lines.json`` by the communicator). Editing them
+    makes the bench dirty like any other configuration change, so reads/writes
+    flow through the runtime rather than the bundle file.
+    """
+    state = lab.get_lab_state() if lab is not None else {}
+    doc = state.get("laser_lines")
+    if not isinstance(doc, dict):
+        doc = {"snap_line_id": None, "lines": []}
+    return {
+        "version": int(doc.get("version") or 1),
+        "snap_line_id": doc.get("snap_line_id"),
+        "lines": doc.get("lines") or [],
+    }
+
+
+def _laser_lines_response() -> Dict[str, Any]:
+    out = _runtime_laser_doc()
     out["lab_mode"] = LAB_MODE
     out["schema_file"] = os.path.basename(get_lab_view_paths().laser_lines_json)
     return out
 
 
+@app.get("/api/laser-line")
+async def get_laser_line():
+    """Single-line legacy coefficients (x = a*y + b, mm) from the runtime snap line."""
+    return laser_line_coeffs_from_doc(_runtime_laser_doc(), LAB_MODE)
+
+
+@app.get("/api/laser-lines")
+async def get_laser_lines():
+    """All laser overlays carried on the live runtime (versioned configuration)."""
+    return _laser_lines_response()
+
+
 @app.patch("/api/laser-lines/{line_id}")
 async def patch_laser_line(line_id: str, payload: Dict[str, Any] = Body(...)):
-    """Update one line: ``enabled`` anytime; ``p1``/``p2`` only with ``confirm: true``."""
+    """Update one line: ``enabled`` anytime; ``p1``/``p2`` only with ``confirm: true``.
+
+    Mutates the runtime overlay (marks the bench dirty); ``laser_lines.json`` is
+    only the initial seed and is no longer written here.
+    """
     if not line_id_pattern().match(line_id or ""):
         raise HTTPException(status_code=400, detail="Invalid line id")
-    doc = read_laser_lines_doc()
-    lines = doc.get("lines")
-    if not isinstance(lines, list):
-        lines = []
-        doc["lines"] = lines
+    doc = _runtime_laser_doc()
+    lines = doc.get("lines") or []
     idx = next(
         (i for i, ln in enumerate(lines) if isinstance(ln, dict) and ln.get("id") == line_id),
         None,
@@ -1402,6 +2358,7 @@ async def patch_laser_line(line_id: str, payload: Dict[str, Any] = Body(...)):
     if idx is None:
         raise HTTPException(status_code=404, detail=f"Unknown laser line: {line_id}")
 
+    updates: Dict[str, Any] = {}
     wants_geo = any(k in payload for k in ("p1", "p2"))
     if wants_geo:
         if payload.get("confirm") is not True:
@@ -1418,35 +2375,178 @@ async def patch_laser_line(line_id: str, payload: Dict[str, Any] = Body(...)):
             p2f = {"x": float(p2["x"]), "y": float(p2["y"])}
         except (KeyError, TypeError, ValueError):
             raise HTTPException(status_code=400, detail="p1 and p2 require numeric x and y")
-        if two_points_to_ab(p1f, p2f) is None:
+        if not two_points_define_line(p1f, p2f):
             raise HTTPException(
                 status_code=422,
-                detail="Invalid geometry: coincident points or unsupported horizontal line.",
+                detail="Invalid geometry: p1 and p2 must be two distinct points.",
             )
-        lines[idx]["p1"] = p1f
-        lines[idx]["p2"] = p2f
+        updates["p1"] = p1f
+        updates["p2"] = p2f
 
     if "enabled" in payload:
         en = payload["enabled"]
         if not isinstance(en, bool):
             raise HTTPException(status_code=400, detail="enabled must be a boolean")
-        lines[idx]["enabled"] = en
+        updates["enabled"] = en
 
     if "name" in payload and isinstance(payload["name"], str) and payload["name"].strip():
-        lines[idx]["name"] = payload["name"].strip()[:120]
+        updates["name"] = payload["name"].strip()[:120]
 
     if "color" in payload and isinstance(payload["color"], str) and payload["color"].strip():
         col = payload["color"].strip()
         if len(col) > 32:
             raise HTTPException(status_code=400, detail="color string too long")
-        lines[idx]["color"] = col
+        updates["color"] = col
 
-    doc["version"] = max(1, int(doc.get("version") or 1))
-    write_laser_lines_doc(doc)
-    out = dict(read_laser_lines_doc())
-    out["lab_mode"] = LAB_MODE
-    out["schema_file"] = os.path.basename(get_lab_view_paths().laser_lines_json)
-    return out
+    from lab_model.state.runtime_manager import MutationKind
+
+    def _mut(state: Dict[str, Any]) -> None:
+        ll = state.setdefault("laser_lines", {"snap_line_id": None, "lines": []})
+        for ln in ll.setdefault("lines", []):
+            if isinstance(ln, dict) and ln.get("id") == line_id:
+                ln.update(updates)
+                break
+
+    _lab_runtime_manager().mutate(
+        _mut, kind=MutationKind.RECOVERY_PATCH, source=f"laser_patch:{line_id}"
+    )
+    if hasattr(lab, "_persist_state"):
+        lab._persist_state()
+    return _laser_lines_response()
+
+
+# ---- Alignment guides (versioned pencil overlays) --------------------------
+
+
+def _parse_guide_points(payload: Dict[str, Any]) -> Tuple[Dict[str, float], Dict[str, float]]:
+    p1 = payload.get("p1")
+    p2 = payload.get("p2")
+    if not isinstance(p1, dict) or not isinstance(p2, dict):
+        raise HTTPException(status_code=400, detail="p1 and p2 must be objects with numeric x, y")
+    try:
+        p1f = {"x": float(p1["x"]), "y": float(p1["y"])}
+        p2f = {"x": float(p2["x"]), "y": float(p2["y"])}
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="p1 and p2 require numeric x and y")
+    if math.hypot(p2f["x"] - p1f["x"], p2f["y"] - p1f["y"]) < GUIDE_MIN_LENGTH_MM:
+        raise HTTPException(status_code=422, detail="Guide is too short to register.")
+    return p1f, p2f
+
+
+def _runtime_guides() -> List[Dict[str, Any]]:
+    state = lab.get_lab_state() if lab is not None else {}
+    guides = state.get("alignment_guides")
+    return guides if isinstance(guides, list) else []
+
+
+def _mutate_guides(fn, *, source: str) -> None:
+    from lab_model.state.runtime_manager import MutationKind
+
+    def _mut(state: Dict[str, Any]) -> None:
+        guides = state.get("alignment_guides")
+        if not isinstance(guides, list):
+            guides = []
+            state["alignment_guides"] = guides
+        fn(guides)
+
+    _lab_runtime_manager().mutate(_mut, kind=MutationKind.RECOVERY_PATCH, source=source)
+    if hasattr(lab, "_persist_state"):
+        lab._persist_state()
+
+
+@app.get("/api/guides")
+async def get_guides():
+    return {"guides": _runtime_guides()}
+
+
+@app.post("/api/guides")
+async def add_guide(payload: Dict[str, Any] = Body(...)):
+    p1f, p2f = _parse_guide_points(payload)
+    guide = {"id": f"g_{uuid.uuid4().hex[:12]}", "p1": p1f, "p2": p2f}
+    _mutate_guides(lambda g: g.append(guide), source="guide_add")
+    return {"guide": guide, "guides": _runtime_guides()}
+
+
+@app.patch("/api/guides/{guide_id}")
+async def move_guide(guide_id: str, payload: Dict[str, Any] = Body(...)):
+    p1f, p2f = _parse_guide_points(payload)
+    found = any(
+        isinstance(g, dict) and str(g.get("id")) == guide_id for g in _runtime_guides()
+    )
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Unknown guide: {guide_id}")
+
+    def _apply(guides: List[Dict[str, Any]]) -> None:
+        for g in guides:
+            if isinstance(g, dict) and str(g.get("id")) == guide_id:
+                g["p1"] = p1f
+                g["p2"] = p2f
+                break
+
+    _mutate_guides(_apply, source=f"guide_move:{guide_id}")
+    return {"guides": _runtime_guides()}
+
+
+@app.delete("/api/guides/{guide_id}")
+async def delete_guide(guide_id: str):
+    found = any(
+        isinstance(g, dict) and str(g.get("id")) == guide_id for g in _runtime_guides()
+    )
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Unknown guide: {guide_id}")
+
+    def _apply(guides: List[Dict[str, Any]]) -> None:
+        guides[:] = [
+            g for g in guides if not (isinstance(g, dict) and str(g.get("id")) == guide_id)
+        ]
+
+    _mutate_guides(_apply, source=f"guide_delete:{guide_id}")
+    return {"guides": _runtime_guides()}
+
+
+@app.put("/api/guides")
+async def replace_guides(payload: Dict[str, Any] = Body(...)):
+    """Replace the full guide set (clear-all, or one-time localStorage import)."""
+    from lab_model.state.projections import normalize_alignment_guides
+
+    incoming = normalize_alignment_guides(payload.get("guides"))
+
+    def _apply(guides: List[Dict[str, Any]]) -> None:
+        guides[:] = incoming
+
+    _mutate_guides(_apply, source="guide_replace")
+    return {"guides": _runtime_guides()}
+
+
+@app.put("/api/overlays")
+async def replace_overlays(payload: Dict[str, Any] = Body(...)):
+    """Replace alignment guides and laser lines on the live bench (no motion).
+
+    Used as the first visible step when applying a versioned configuration so
+    lines match the target node before component reconcile primitives run.
+    """
+    from lab_model.state.projections import (
+        normalize_alignment_guides,
+        normalize_laser_lines_doc,
+    )
+    from lab_model.state.runtime_manager import MutationKind
+
+    guides = normalize_alignment_guides(payload.get("alignment_guides"))
+    laser = normalize_laser_lines_doc(payload.get("laser_lines") or {})
+
+    def _mut(state: Dict[str, Any]) -> None:
+        state["alignment_guides"] = guides
+        state["laser_lines"] = laser
+
+    _lab_runtime_manager().mutate(
+        _mut, kind=MutationKind.PROJECTION_APPLY, source="overlay_apply"
+    )
+    if hasattr(lab, "_persist_state"):
+        lab._persist_state()
+    return {
+        "alignment_guides": guides,
+        "laser_lines": laser,
+    }
 
 
 def _enforce_holding_rules(cmd, state: Dict[str, Any]) -> None:

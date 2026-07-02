@@ -93,12 +93,41 @@ def active_catalog_v1_document(paths: Optional[LabViewPaths] = None) -> Optional
     return filter_v1_catalog_to_active_tags(data, active)
 
 
-def merged_catalog_rows(paths: Optional[LabViewPaths] = None) -> List[Dict[str, Any]]:
+def _merged_tag_id_list(
+    by_tag: Dict[str, Dict[str, Any]],
+    active_path: str,
+    *,
+    runtime_tag_ids: Optional[Iterable[str]] = None,
+) -> List[str]:
+    """Union of active-catalog tags plus runtime tags that exist in the library."""
+    tag_ids = list(active_tag_ids(active_path))
+    seen = set(tag_ids)
+    if runtime_tag_ids:
+        for raw in runtime_tag_ids:
+            tid = str(raw).strip() if raw is not None else ""
+            if not tid or tid in seen:
+                continue
+            if tid not in by_tag:
+                continue
+            tag_ids.append(tid)
+            seen.add(tid)
+    return tag_ids
+
+
+def merged_catalog_rows(
+    paths: Optional[LabViewPaths] = None,
+    *,
+    runtime_tag_ids: Optional[Iterable[str]] = None,
+) -> List[Dict[str, Any]]:
     lp = paths or get_lab_view_paths_optional()
     if lp is None:
         raise RuntimeError("lab_view not bootstrapped")
     by_tag = library_by_tag(lp.component_library_json)
-    tag_ids = active_tag_ids(lp.active_catalog_json)
+    tag_ids = _merged_tag_id_list(
+        by_tag,
+        lp.active_catalog_json,
+        runtime_tag_ids=runtime_tag_ids,
+    )
     rows: List[Dict[str, Any]] = []
     for tid in tag_ids:
         row = by_tag.get(tid)
@@ -112,7 +141,9 @@ def merged_catalog_rows(paths: Optional[LabViewPaths] = None) -> List[Dict[str, 
 
 def merged_catalog_maps(
     paths: Optional[LabViewPaths] = None,
+    *,
+    runtime_tag_ids: Optional[Iterable[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    rows = merged_catalog_rows(paths)
+    rows = merged_catalog_rows(paths, runtime_tag_ids=runtime_tag_ids)
     catalog_map = {r["tag_id"]: r for r in rows if isinstance(r.get("tag_id"), str)}
     return rows, catalog_map

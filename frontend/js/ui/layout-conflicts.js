@@ -1,9 +1,9 @@
 /**
  * Layout-conflict UI: warning banner + one-issue-at-a-time blocking modal.
  *
- * Sources of issues:
- *   - `store.layoutIssues` (server-detected, from /api/layout-conflicts) — authoritative.
- *   - `collectLayoutWarnings(labState)` — client-side hints that supplement the banner.
+ * Source of issues:
+ *   - `store.layoutIssues` (server-detected, from /api/layout-conflicts) — the
+ *     single authoritative source. The client no longer recomputes layout rules.
  *
  * Issue kinds (server):
  *   - PLACED_IN_Q3: a "placed" tag has nominal pose inside the storage rectangle.
@@ -15,7 +15,7 @@
  */
 import { store } from '../state/store.js';
 import { log } from './log.js';
-import { collectLayoutWarnings, isStorageRegion } from '../storage-region.js';
+import { isStorageRegion } from '../storage-region.js';
 import { drawPose } from '../component-model.js';
 
 let _executeSendCommand = async () => {};
@@ -32,11 +32,9 @@ export function initLayoutConflicts(deps) {
 export function updateLayoutWarningBanner() {
     const el = document.getElementById('layout-warnings');
     if (!el || !store.labState) return;
-    const local = collectLayoutWarnings(store.labState);
-    const server = (store.layoutIssues || []).map((i) => i.message);
     const seen = new Set();
     const lines = [];
-    for (const s of [...server, ...local]) {
+    for (const s of (store.layoutIssues || []).map((i) => i.message)) {
         if (!seen.has(s)) {
             seen.add(s);
             lines.push(s);

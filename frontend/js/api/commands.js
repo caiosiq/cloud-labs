@@ -16,6 +16,7 @@
  * `initCommands` so this module stays independent of the canvas/UI module graph.
  */
 import { store } from '../state/store.js';
+import { runtimeEditableOrMessage } from '../control/control-state.js';
 import { log } from '../ui/log.js';
 import { showConfirmationModal } from '../ui/modals.js';
 import { drawPose, isBreadboardIntent } from '../component-model.js';
@@ -34,6 +35,12 @@ export function initCommands(deps) {
 }
 
 export async function sendCommand(command) {
+    const blocked = runtimeEditableOrMessage();
+    if (blocked) {
+        log(blocked, 'warn');
+        return { ok: false, error: blocked };
+    }
+
     // MOVE_COMPONENT goes through a user confirmation modal — except while recording a recipe,
     // where every command is captured verbatim so the recipe stays deterministic.
     if (command.action === 'MOVE_COMPONENT' && !store.isRecording) {
@@ -85,6 +92,12 @@ export async function sendCommand(command) {
 }
 
 export async function executeSendCommand(command) {
+    const blocked = runtimeEditableOrMessage();
+    if (blocked) {
+        log(blocked, 'warn');
+        return { ok: false, error: blocked };
+    }
+
     try {
         log(`Sending command: ${command.action}`, 'info');
 

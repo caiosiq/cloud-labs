@@ -54,11 +54,14 @@ def _log_primitive(
     *,
     macro_parent: str | None = None,
 ) -> None:
+    # One consistent line for EVERY command the communicator receives — mock or
+    # real, interactive drag or a reconcile step from checkout/stash. Gives the
+    # server log a clear, uniform "received & executing" trace per primitive.
     _LOG.info(
-        "lab_primitive primitive_id=%s target_id=%s macro_parent=%s",
+        "lab command received: %s target=%s%s",
         primitive_id,
-        target_id or "",
-        macro_parent or "",
+        target_id or "-",
+        f" macro={macro_parent}" if macro_parent else "",
     )
 
 ValidatedCommand = Union[

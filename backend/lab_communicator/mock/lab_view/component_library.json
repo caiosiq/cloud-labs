@@ -83,10 +83,17 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 175,
       "properties": {
+        "placeable_on_table": true,
         "resolution": "1920x1080",
-        "fov": 60
+        "fov": 60,
+        "hardware_binding": {
+          "backend": "recorder_tcp",
+          "recorder_cam_id": 1,
+          "recorder_port": 9999
+        },
+        "vision_device_index": 1
       },
       "capabilities": {
         "statecontrol": {
@@ -177,10 +184,17 @@
         "width": 62,
         "height": 62
       },
-      "height_mm": 60,
+      "height_mm": 210,
       "properties": {
+        "placeable_on_table": true,
         "resolution": "1920x1080",
-        "fov": 60
+        "fov": 60,
+        "hardware_binding": {
+          "backend": "recorder_tcp",
+          "recorder_cam_id": 2,
+          "recorder_port": 10000
+        },
+        "vision_device_index": 2
       },
       "capabilities": {
         "statecontrol": {

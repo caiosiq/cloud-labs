@@ -1,6 +1,5 @@
 import json
 import os
-import random
 import asyncio
 from datetime import datetime
 from io import BytesIO
@@ -24,6 +23,7 @@ from lab_model.domain.holding import (
 from lab_communicator.base import LabCommunicator
 from lab_model.catalog.bundle import merged_catalog_maps
 from lab_communicator.shared.lab_view_config import get_lab_view_paths
+from lab_model.state.runtime_manager import MutationKind
 from lab_model.state.snapshot import LabPose
 
 # Constants
@@ -61,16 +61,21 @@ class MockLabCommunicator(LabCommunicator):
         paths = get_lab_view_paths()
         self.state_file = paths.lab_state_json
         print(f"[MOCK LAB] Using state file: {self.state_file}")
-        rows, cmap = merged_catalog_maps()
-        self.catalog = rows
-        self.catalog_map = cmap
+        self.catalog = []
+        self.catalog_map = {}
         self._ensure_state()
         # Initial in-memory load from disk. Subsequent mutations go
         # through ``_persist_state`` (migrated primitives) or
         # ``_write_state`` (still-file-backed primitives, both of
         # which keep the in-memory copy in sync).
         from lab_communicator.mock.persistence import read_state
-        self.current_state = read_state(self.state_file)
+
+        self._lab_runtime.replace_state(
+            read_state(self.state_file),
+            kind=MutationKind.BOOT_HYDRATE,
+            source="mock_persistence_load",
+        )
+        self._load_catalog()
         self._ensure_fixture_components()
 
         # Dev flag: simulate boot-time gripper-closed reconciliation (see new_primitives.md #6.3).
@@ -148,7 +153,8 @@ class MockLabCommunicator(LabCommunicator):
 
     def _load_catalog(self):
         """Reload library + active tags from ``lab_view`` (list + ``catalog_map``)."""
-        rows, cmap = merged_catalog_maps()
+        runtime_ids = list((self.current_state.get("components") or {}).keys())
+        rows, cmap = merged_catalog_maps(runtime_tag_ids=runtime_ids)
         self.catalog = rows
         self.catalog_map = cmap
 
@@ -203,8 +209,11 @@ class MockLabCommunicator(LabCommunicator):
         """
         from lab_communicator.mock.persistence import write_state
         write_state(self.state_file, state)
-        with self._state_lock:
-            self.current_state = state
+        self._lab_runtime.replace_state(
+            state,
+            kind=MutationKind.BOOT_HYDRATE,
+            source="mock_write_state",
+        )
 
     def _persist_state(self) -> None:
         """Write ``self.current_state`` to the on-disk JSON file.
@@ -235,10 +244,21 @@ class MockLabCommunicator(LabCommunicator):
         return {"closed": False, "confidence": 1.0, "source": "mock"}
 
     def refresh_pose_from_camera(
-        self, preserve_tag_ids: Optional[List[str]] = None
+        self,
+        preserve_tag_ids: Optional[List[str]] = None,
+        apply_tag_ids: Optional[List[str]] = None,
+        tag_ids: Optional[List[str]] = None,
     ) -> None:
-        """Simulate camera re-localisation; ``preserve_tag_ids`` keep prior rows verbatim."""
+        """Simulate camera re-localisation; scoped via ``tag_ids`` / ``apply_tag_ids``."""
+        from lab_communicator.shared.mock_scan_preview import (
+            apply_mock_scan_to_component,
+            build_mock_scan_proposed_poses,
+        )
         from lab_model.state.pose_refresh_merge import merge_scan_into_components
+        from lab_model.state.pose_refresh_selection import (
+            filter_proposed_poses,
+            resolve_pose_refresh_plan,
+        )
 
         state = self._read_state()
         comps = state.get("components") or {}
@@ -246,32 +266,35 @@ class MockLabCommunicator(LabCommunicator):
             return
 
         baseline = json.loads(json.dumps(comps))
+        plan = resolve_pose_refresh_plan(
+            baseline,
+            tag_ids=tag_ids,
+            apply_tag_ids=apply_tag_ids,
+            preserve_tag_ids=preserve_tag_ids,
+        )
+        if not plan.scan_tag_ids:
+            print("[MOCK LAB] refresh_pose_from_camera: no tags selected for scan")
+            return
+
+        proposed_poses = build_mock_scan_proposed_poses(
+            baseline,
+            tag_ids=plan.scan_tag_ids,
+        )
+        proposed_poses = filter_proposed_poses(proposed_poses, plan.scan_tag_ids)
 
         state["system_status"] = SYSTEM_STATUS_BUSY
         self._write_state(state)
 
         candidate: Dict[str, Any] = {}
         for tag_id, comp in baseline.items():
-            if not isinstance(comp, dict):
+            if tag_id not in proposed_poses or not isinstance(comp, dict):
                 continue
-            tun = comp.get("tunables") or {}
-            pres = tun.get("presence")
-            if pres not in (PRESENCE_BREADBOARD, PRESENCE_STORAGE):
-                continue
-            refreshed = json.loads(json.dumps(comp))
-            np = refreshed.get("tunables", {}).get("nominal_pose") or {}
-            meas = refreshed.setdefault("measurables", default_measurables())
-            pose = meas.setdefault("pose", {})
-            nx = float(np.get("x", pose.get("x", 0.0)))
-            ny = float(np.get("y", pose.get("y", 0.0)))
-            nr = float(np.get("rotation", pose.get("rotation", 0.0)))
-            pose["x"] = nx + random.uniform(-0.8, 0.8)
-            pose["y"] = ny + random.uniform(-0.8, 0.8)
-            pose["rotation"] = nr + random.uniform(-0.35, 0.35)
-            candidate[tag_id] = refreshed
+            candidate[tag_id] = apply_mock_scan_to_component(comp, proposed_poses[tag_id])
 
         merged_components = merge_scan_into_components(
-            baseline, candidate, preserve_tag_ids
+            baseline,
+            candidate,
+            plan.preserve_tag_ids,
         )
 
         state = self._read_state()
@@ -281,8 +304,25 @@ class MockLabCommunicator(LabCommunicator):
         self._write_state(state)
         print(
             "[MOCK LAB] refresh_pose_from_camera: updated measurables.pose "
-            "(simulated camera)"
+            f"for {plan.scan_tag_ids} (simulated camera)"
         )
+
+    def preview_refresh_pose_candidates(
+        self,
+        tag_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Dict[str, float]]:
+        """Dry-run scan poses (deterministic; matches :meth:`refresh_pose_from_camera`)."""
+        from lab_communicator.shared.mock_scan_preview import build_mock_scan_proposed_poses
+        from lab_model.state.pose_refresh_selection import filter_proposed_poses
+
+        state = self._read_state()
+        comps = state.get("components") or {}
+        if not isinstance(comps, dict):
+            return {}
+        proposed = build_mock_scan_proposed_poses(comps, tag_ids=tag_ids)
+        if tag_ids:
+            proposed = filter_proposed_poses(proposed, tag_ids)
+        return proposed
 
     def refresh_state(self):
         """Deprecated name; use :meth:`refresh_pose_from_camera`."""
@@ -349,6 +389,160 @@ class MockLabCommunicator(LabCommunicator):
         return await primitive_add_component_to_state(
             self, component_data, existing_components
         )
+
+    async def _primitive_reactivate_off_table_component(
+        self,
+        tag_id: str,
+        existing_entry: Dict[str, Any],
+        component_data: Dict[str, Any],
+        existing_components: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        from lab_communicator.mock.primitives import primitive_reactivate_off_table_component
+        return await primitive_reactivate_off_table_component(
+            self, tag_id, existing_entry, component_data, existing_components
+        )
+
+    async def track_component(self, component_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Enable control and materialize the part on the mock bench (table or chrome bar)."""
+        from lab_model.catalog.active_catalog_store import (
+            ensure_tag_in_active_catalog,
+            remove_tag_from_active_catalog,
+        )
+        from lab_model.catalog.bundle import library_by_tag
+        from lab_model.catalog.schema import catalog_is_fixed_instrument
+        from lab_model.domain.component import is_off_table, presence_of
+        from lab_model.state.fixture_seed import build_fixture_component_entry
+        from lab_model.state.runtime_manager import MutationKind
+
+        tag_id = (component_data or {}).get("tag_id")
+        if not tag_id:
+            raise ValueError("tag_id is required")
+
+        by_tag = library_by_tag()
+        lib_row = by_tag.get(tag_id)
+        if lib_row is None:
+            raise ValueError(f"Unknown tag_id: {tag_id}")
+
+        catalog_updated = ensure_tag_in_active_catalog(tag_id)
+        if catalog_updated:
+            self._load_catalog()
+
+        comp_type = (component_data or {}).get("type") or lib_row.get("type", "OPTICAL_MIRROR")
+        fixed = catalog_is_fixed_instrument(lib_row)
+
+        with self._state_lock:
+            existing = dict(self.current_state.get("components") or {})
+
+        new_entry: Optional[Dict[str, Any]] = None
+        action = "catalog_only"
+
+        if tag_id not in existing:
+            if fixed:
+                new_entry = build_fixture_component_entry(lib_row)
+                action = "created_fixture"
+            else:
+                payload = {
+                    "tag_id": tag_id,
+                    "type": comp_type,
+                    "placement_mode": "breadboard",
+                }
+                new_entry = await self._primitive_add_component_to_state(payload, existing)
+                action = "placed_on_table" if new_entry else "failed"
+        elif fixed:
+            action = "catalog_only"
+        elif is_off_table(existing[tag_id]):
+            payload = {
+                "tag_id": tag_id,
+                "type": comp_type,
+                "placement_mode": "breadboard",
+            }
+            new_entry = await self._primitive_reactivate_off_table_component(
+                tag_id,
+                existing[tag_id],
+                payload,
+                existing,
+            )
+            action = "reactivated_on_table" if new_entry else "failed"
+        else:
+            action = "catalog_only"
+
+        if action == "failed":
+            if catalog_updated:
+                remove_tag_from_active_catalog(tag_id)
+                self._load_catalog()
+            raise RuntimeError(f"No valid table placement for {tag_id}")
+
+        if new_entry is not None:
+
+            def _apply(state: Dict[str, Any]) -> None:
+                state.setdefault("components", {})[tag_id] = new_entry
+
+            self._lab_runtime.mutate(
+                _apply,
+                kind=MutationKind.ADMINISTRATIVE_LOAD,
+                source=f"track_component:{tag_id}",
+            )
+            self._persist_state()
+
+        if new_entry is not None:
+            presence = presence_of(new_entry)
+        elif tag_id in existing:
+            presence = presence_of(existing[tag_id])
+        else:
+            presence = "off_table"
+
+        return {
+            "status": "ok",
+            "tag_id": tag_id,
+            "tracked": True,
+            "presence": presence,
+            "catalog_updated": catalog_updated,
+            "action": action,
+        }
+
+    async def untrack_component(self, tag_id: str) -> Dict[str, Any]:
+        """Remove from active catalog and drop the runtime row (returns part to library)."""
+        from lab_model.catalog.active_catalog_store import remove_tag_from_active_catalog
+        from lab_model.domain.holding import SYSTEM_STATUS_IDLE, empty_holding, get_holding
+        from lab_model.state.runtime_manager import MutationKind
+
+        tid = (tag_id or "").strip()
+        if not tid:
+            raise ValueError("tag_id is required")
+
+        catalog_updated = remove_tag_from_active_catalog(tid)
+        if catalog_updated:
+            self._load_catalog()
+
+        removed = False
+
+        def _apply(state: Dict[str, Any]) -> None:
+            nonlocal removed
+            comps = state.get("components")
+            if isinstance(comps, dict) and tid in comps:
+                del comps[tid]
+                removed = True
+            holding = get_holding(state)
+            if holding.get("tag_id") == tid:
+                state["holding"] = empty_holding()
+                if state.get("system_status") == "HOLDING":
+                    state["system_status"] = SYSTEM_STATUS_IDLE
+
+        self._lab_runtime.mutate(
+            _apply,
+            kind=MutationKind.ADMINISTRATIVE_LOAD,
+            source=f"untrack_component:{tid}",
+        )
+        if removed:
+            self._persist_state()
+
+        return {
+            "status": "ok",
+            "tag_id": tid,
+            "tracked": False,
+            "catalog_updated": catalog_updated,
+            "removed_from_runtime": removed,
+        }
 
     async def _primitive_pick_component(
         self, target_id: str, commanded: LabPose, params: Dict[str, Any]

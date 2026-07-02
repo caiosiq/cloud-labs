@@ -28,16 +28,43 @@ export function initApiFetchers(cbs = {}) {
     if (cbs.onRecipesLoaded) _onRecipesLoaded = cbs.onRecipesLoaded;
 }
 
+function mergeCatalogRows(rows) {
+    if (!Array.isArray(rows)) return;
+    rows.forEach((item) => {
+        if (item && item.tag_id) {
+            store.catalogMap[item.tag_id] = item;
+        }
+    });
+}
+
 export async function fetchCatalogMap() {
     try {
-        const response = await fetch('/api/catalog');
-        if (response.ok) {
-            const catalog = await response.json();
-            store.catalogMap = {};
-            catalog.forEach((item) => {
-                store.catalogMap[item.tag_id] = item;
-            });
+        const [catalogRes, activeRes, libraryRes] = await Promise.all([
+            fetch('/api/catalog'),
+            fetch('/api/catalog/active-tags'),
+            fetch('/api/catalog/library-rows'),
+        ]);
+        store.catalogMap = {};
+        if (libraryRes.ok) {
+            mergeCatalogRows(await libraryRes.json());
+        }
+        if (catalogRes.ok) {
+            mergeCatalogRows(await catalogRes.json());
+        }
+        if (libraryRes.ok || catalogRes.ok) {
             console.log('Catalog Loaded:', store.catalogMap);
+        }
+        if (activeRes.ok) {
+            const active = await activeRes.json();
+            store.activeCatalogTags = Array.isArray(active.tag_ids) ? active.tag_ids : [];
+            store.libraryTagIds = Array.isArray(active.library_tag_ids)
+                ? active.library_tag_ids
+                : [];
+        } else {
+            store.activeCatalogTags = [];
+            store.libraryTagIds = [];
+        }
+        if (libraryRes.ok || catalogRes.ok) {
             _onCatalogLoaded();
         }
     } catch (e) {

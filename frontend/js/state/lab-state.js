@@ -40,11 +40,14 @@ import {
     updateLayoutWarningBanner,
 } from '../ui/layout-conflicts.js';
 import { syncMotorActionStatuses } from '../ui/motor-action-ui.js';
+import { syncGuidesFromLabState } from '../canvas/guides.js';
+import { syncLaserLinesFromLabState } from '../ui/laser-lines-panel.js';
 let _deps = {
     placementUiLabel: () => 'PLACED',
     updateContextPanel: () => {},
     updateMotorAngleLabels: () => {},
     updateUI: () => {},
+    refreshControlWorkingState: async () => {},
 };
 
 let _pollTimerId = null;
@@ -89,6 +92,38 @@ function resetOptimizationFeedPreview() {
     }
 }
 
+/** Drop canvas/UI state for tags no longer present in runtime (e.g. after untrack). */
+function pruneOrphanRuntimeUiState() {
+    const runtimeTags = new Set(Object.keys(store.labState?.components || {}));
+
+    for (const tagId of Object.keys(store.ghostState)) {
+        if (!runtimeTags.has(tagId)) delete store.ghostState[tagId];
+    }
+    for (const tagId of store.pendingCommands) {
+        if (!runtimeTags.has(tagId)) {
+            store.pendingCommands.delete(tagId);
+            store.pendingActions.delete(tagId);
+        }
+    }
+    for (const tagId of Object.keys(store.teleopLivePose)) {
+        if (!runtimeTags.has(tagId)) delete store.teleopLivePose[tagId];
+    }
+    for (const tagId of Object.keys(store.teleopTarget)) {
+        if (!runtimeTags.has(tagId)) delete store.teleopTarget[tagId];
+    }
+    for (const tagId of Object.keys(store.teleopTargetAwaitingLive)) {
+        if (!runtimeTags.has(tagId)) delete store.teleopTargetAwaitingLive[tagId];
+    }
+    if (store.draggingComponent && !runtimeTags.has(store.draggingComponent)) {
+        store.draggingComponent = null;
+        store.isDragging = false;
+    }
+    if (store.dragFromStorageTag && !runtimeTags.has(store.dragFromStorageTag)) {
+        store.dragFromStorageTag = null;
+        store.dragFromStorageStartPose = null;
+    }
+}
+
 /**
  * @param {{
  *   placementUiLabel: (comp: any) => string,
@@ -126,6 +161,10 @@ export async function fetchLabState() {
 
         store.labState = await response.json();
         syncTeleopLivePosePolls();
+        // Versioned alignment overlays travel with lab-state — mirror them into
+        // the canvas mirrors so commit / checkout / stash changes show up.
+        syncGuidesFromLabState();
+        syncLaserLinesFromLabState();
         console.log(`[${new Date().toLocaleTimeString()}] Received Lab State successfully.`);
 
         const runtimeError = store.labState.last_runtime_error;
@@ -161,15 +200,21 @@ export async function fetchLabState() {
         }
 
         // Recovery: a previously displayed connection-error modal becomes stale once we successfully
-        // fetched state again — remove it so the operator isn't blocked.
+        // fetched state again — remove it so the operator isn't blocked. Dismissible operation
+        // errors (e.g. "Apply on bench failed") are NOT connection problems, so we leave them up
+        // until the user reads and dismisses them.
         const existingError = document.getElementById('error-modal');
-        if (existingError) existingError.remove();
+        if (existingError && existingError.dataset.errorKind !== 'dismissible') {
+            existingError.remove();
+        }
 
         // Ghost state reconciliation. The ghost is what the canvas draws; we sync it from the
         // backend's nominal/measured pose when:
         //   1. Force Sync was requested (Refresh button).
         //   2. The system status transitioned BUSY/OPTIMIZING → IDLE (command finished).
         //   3. Initial load (handled by `!store.ghostState[name]` check).
+        pruneOrphanRuntimeUiState();
+
         if (store.labState.components) {
             const justFinishedCommand = (store.previousSystemStatus !== 'IDLE' && store.labState.system_status === 'IDLE');
             const shouldSync = store.forceGhostSync || justFinishedCommand || newRuntimeFailure;
@@ -232,7 +277,13 @@ export async function fetchLabState() {
                 }
             });
 
-            if (shouldSync) store.forceGhostSync = false;
+            if (shouldSync) {
+                store.forceGhostSync = false;
+                // A command just settled (or a forced sync) — refresh the
+                // git-like working flags so the Stash button / HEAD pill reflect
+                // freshly-made (or cleared) uncommitted edits.
+                void _deps.refreshControlWorkingState();
+            }
         }
 
         // Rebuild EVERY open panel when its component's placement label OR the
@@ -284,7 +335,9 @@ export async function fetchLabState() {
         const stableStatus =
             store.labState.system_status === 'IDLE' ||
             store.labState.system_status === 'HOLDING';
-        if (stableStatus) {
+        const reconcileActive =
+            store.control.reconcileProgress && store.control.reconcileProgress.active;
+        if (stableStatus && !reconcileActive) {
             store.pendingCommands.clear();
             store.pendingActions.clear();
         }
@@ -386,7 +439,7 @@ export async function fetchLabState() {
             statusBadge.innerHTML = `<span class="status-dot error"></span> OFFLINE`;
         }
 
-        showErrorModal('Connection Failed', error.message);
+        showErrorModal('Connection Failed', error.message, { kind: 'connection' });
 
         // Inventory: replace the spinner with a retry block so the user has a path forward.
         const componentList = document.getElementById('component-list');

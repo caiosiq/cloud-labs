@@ -432,13 +432,34 @@ class RealLabCommunicator(LabCommunicator):
         initialize_state(self)
 
     def refresh_pose_from_camera(
-        self, preserve_tag_ids: Optional[List[str]] = None
+        self,
+        preserve_tag_ids: Optional[List[str]] = None,
+        apply_tag_ids: Optional[List[str]] = None,
+        tag_ids: Optional[List[str]] = None,
     ) -> None:
-        """Re-scan the table; optional ``preserve_tag_ids`` freeze whole component rows."""
-
+        """Re-scan the table; supports scoped refresh via ``tag_ids`` / ``apply_tag_ids``."""
         from lab_communicator.real.scan import refresh_pose_from_camera as rpc
+        from lab_model.state.pose_refresh_selection import resolve_pose_refresh_plan
 
-        rpc(self, preserve_component_ids=preserve_tag_ids)
+        components = (self.get_lab_state() or {}).get("components") or {}
+        plan = resolve_pose_refresh_plan(
+            components,
+            tag_ids=tag_ids,
+            apply_tag_ids=apply_tag_ids,
+            preserve_tag_ids=preserve_tag_ids,
+        )
+        rpc(
+            self,
+            preserve_component_ids=plan.preserve_tag_ids,
+            scan_tag_ids=plan.scan_tag_ids,
+        )
+
+    def preview_refresh_pose_candidates(
+        self,
+        tag_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Dict[str, float]]:
+        """Dry-run scan poses for scoped refresh offers (real: not yet implemented)."""
+        return {}
 
     def refresh_state(self):
         """Deprecated name; use :meth:`refresh_pose_from_camera`."""
@@ -770,6 +791,18 @@ class RealLabCommunicator(LabCommunicator):
         from lab_communicator.real.primitives import primitive_add_component_to_state
         return await primitive_add_component_to_state(
             self, component_data, existing_components
+        )
+
+    async def _primitive_reactivate_off_table_component(
+        self,
+        tag_id: str,
+        existing_entry: Dict[str, Any],
+        component_data: Dict[str, Any],
+        existing_components: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        from lab_communicator.real.primitives import primitive_reactivate_off_table_component
+        return await primitive_reactivate_off_table_component(
+            self, tag_id, existing_entry, component_data, existing_components
         )
 
     def get_video_feed_status(self):

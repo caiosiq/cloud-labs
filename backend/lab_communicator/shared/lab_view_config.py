@@ -33,6 +33,7 @@ class LabViewPaths:
     session_checkpoint_json: str
     recipes_dir: str
     states_dir: str
+    control_dir: str
     camera_captures_dir: str
     table_cam_preview_json: str
     lab_manifest_json: str
@@ -363,6 +364,7 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
         session_checkpoint_json=os.path.join(root, "session_last_lab_state.json"),
         recipes_dir=os.path.join(root, "recipes"),
         states_dir=os.path.join(root, "states"),
+        control_dir=os.path.join(root, "control"),
         camera_captures_dir=os.path.join(root, "camera_captures"),
         table_cam_preview_json=os.path.join(root, "table_cam_preview.json"),
         lab_manifest_json=os.path.join(root, "lab_manifest.json"),
@@ -392,6 +394,7 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
 
     os.makedirs(paths.recipes_dir, exist_ok=True)
     os.makedirs(paths.states_dir, exist_ok=True)
+    os.makedirs(paths.control_dir, exist_ok=True)
     os.makedirs(paths.camera_captures_dir, exist_ok=True)
 
     if not os.path.isfile(paths.stored_intent_json):
@@ -570,10 +573,33 @@ def write_laser_lines_doc(doc: Dict[str, Any]) -> None:
     atomic_write_json(get_lab_view_paths().laser_lines_json, doc)
 
 
+def two_points_define_line(p1: Dict[str, Any], p2: Dict[str, Any]) -> bool:
+    """True if p1, p2 are two distinct points (any orientation: vertical, horizontal, sloped).
+
+    Geometry is stored as the two endpoints (p1, p2) in ``laser_lines.json`` and the
+    frontend handles all orientations directly. The only invalid case is coincident
+    points, which do not define a line.
+    """
+    try:
+        x1 = float(p1["x"])
+        y1 = float(p1["y"])
+        x2 = float(p2["x"])
+        y2 = float(p2["y"])
+    except (TypeError, KeyError, ValueError):
+        return False
+    return abs(x2 - x1) >= 1e-9 or abs(y2 - y1) >= 1e-9
+
+
 def two_points_to_ab(
     p1: Dict[str, Any], p2: Dict[str, Any]
 ) -> Optional[Tuple[float, float]]:
-    """Return (a, b) for x = a*y + b in lab mm, or vertical (0, x0). None if degenerate."""
+    """Return (a, b) for x = a*y + b in lab mm, or vertical (0, x0). None if degenerate.
+
+    Legacy single-line snap form (GET /api/laser-line). This representation cannot
+    express a horizontal line (constant y); callers fall back to ``loaded: false``.
+    Line geometry itself is validated by :func:`two_points_define_line`, which accepts
+    horizontal lines.
+    """
     try:
         x1 = float(p1["x"])
         y1 = float(p1["y"])

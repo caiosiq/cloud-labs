@@ -254,11 +254,11 @@
         "type": "OPTICAL_CAMERA",
         "statecontrol": {
           "tunables": {
-            "presence": "off_table",
+            "presence": "breadboard",
             "nominal_pose": {
-              "x": 0.0,
-              "y": 0.0,
-              "rotation": 0.0
+              "x": 389.0526304984779,
+              "y": -194.14395457104297,
+              "rotation": 267.9005016229432
             },
             "nominal_motor_positions": {},
             "storage": {
@@ -271,7 +271,11 @@
             "exposure_time_ms": 200.0
           },
           "measurables": {
-            "pose": null,
+            "pose": {
+              "x": 389.0526304984779,
+              "y": -194.14395457104297,
+              "rotation": 267.9005016229432
+            },
             "last_optimization_score": null,
             "last_optimized_pose": null,
             "camera_image": null
@@ -310,11 +314,11 @@
         "type": "OPTICAL_CAMERA",
         "statecontrol": {
           "tunables": {
-            "presence": "off_table",
+            "presence": "breadboard",
             "nominal_pose": {
-              "x": 0.0,
-              "y": 0.0,
-              "rotation": 0.0
+              "x": 157.1,
+              "y": 189.3,
+              "rotation": -90.0
             },
             "nominal_motor_positions": {},
             "storage": {
@@ -327,7 +331,11 @@
             "exposure_time_ms": 200.0
           },
           "measurables": {
-            "pose": null,
+            "pose": {
+              "x": 157.1,
+              "y": 189.3,
+              "rotation": -90.0
+            },
             "last_optimization_score": null,
             "last_optimized_pose": null,
             "camera_image": null

@@ -31,7 +31,12 @@ import {
 } from '../config.js';
 import { mmToPx } from './coordinates.js';
 import { store } from '../state/store.js';
-import { drawPose, isHeldTag, shouldRenderOnCanvas } from '../component-model.js';
+import {
+    drawPose,
+    isHeldTag,
+    isStoredComponent,
+    shouldRenderOnCanvas,
+} from '../component-model.js';
 import { isTeleopReady } from '../component-state.js';
 import { clipTwoPointLineToLabBounds } from '../geometry/lines.js';
 import { drawAlignmentGuides, drawAlignmentIntersectionMarkers } from './guides.js';
@@ -171,9 +176,9 @@ function drawStorageZone() {
     }
 }
 
-function drawLaserPath() {
+function drawLaserPath(docOverride) {
     const ctx = _ctx;
-    const doc = store.laserLinesDoc;
+    const doc = docOverride || store.laserLinesDoc;
     if (!doc || !Array.isArray(doc.lines)) return;
     doc.lines.forEach((line) => {
         if (!line || line.enabled === false || !line.p1 || !line.p2) return;
@@ -541,11 +546,59 @@ function drawOptimizationGraph() {
     ctx.stroke();
 }
 
+/**
+ * Render a VIEWED node's configuration (read-only preview / "replace" mode).
+ *
+ * The previewed config (membership model) lists only the node's breadboard
+ * parts at their nominal poses; we draw those, plus the live bench's stored
+ * parts (storage isn't versioned, so they're physically the same regardless of
+ * which node you view). The live bench is never modified by this.
+ *
+ * @param {{ components?: Record<string, any> }} preview
+ */
+function drawPreviewConfiguration(preview) {
+    const comps = (preview && preview.components) || {};
+    Object.entries(comps).forEach(([name, c]) => {
+        const tun = (c && c.statecontrol && c.statecontrol.tunables) || {};
+        const pose = tun.nominal_pose;
+        if (!pose || typeof pose.x !== 'number' || typeof pose.y !== 'number') return;
+        if (!shouldRenderOnCanvas(name, c)) return;
+        drawComponent(name, pose, c.type, 'SOLID');
+    });
+
+    // Live stored parts stay visible in the storage zone during preview.
+    const live = store.labState && store.labState.components;
+    if (live) {
+        Object.entries(live).forEach(([name, comp]) => {
+            if (comps[name]) return;
+            if (isStoredComponent(comp) && shouldRenderOnCanvas(name, comp)) {
+                drawComponent(name, drawPose(comp), comp.type, 'SOLID');
+            }
+        });
+    }
+}
+
 export function render() {
     if (!_ctx) return;
     const ctx = _ctx;
     clearCanvas();
     drawStorageZone();
+
+    // Read-only node preview: render the VIEWED node's configuration as an
+    // overlay instead of the live bench. The live bench (store.labState) is
+    // never mutated by preview, so this is a pure projection — and live overlays
+    // (ghost edits, TeleOp) are intentionally skipped while viewing. The lines
+    // (laser + alignment guides) are versioned too, so draw the node's own lines
+    // rather than whatever is currently on the bench.
+    const preview = store.control?.previewConfig || null;
+    if (preview) {
+        drawLaserPath(preview.laser_lines);
+        drawAlignmentGuides(preview.alignment_guides || []);
+        if (!store.labState) return;
+        drawPreviewConfiguration(preview);
+        return;
+    }
+
     drawLaserPath();
     drawAlignmentGuides();
     drawAlignmentIntersectionMarkers();
@@ -598,8 +651,9 @@ export function render() {
     // 2. Ghost components (non-TeleOp intent editing).
     Object.entries(store.ghostState).forEach(([name, pose]) => {
         const comp = store.labState.components[name];
-        if (comp && isTeleopReady(comp)) return;
-        const type = comp?.type || 'UNKNOWN';
+        if (!comp || !shouldRenderOnCanvas(name, comp)) return;
+        if (isTeleopReady(comp)) return;
+        const type = comp.type || 'UNKNOWN';
         const isPending = store.pendingCommands.has(name);
         // Steady-state HOLDING: system reports HOLDING and this tag is the one in the gripper,
         // with no primitive currently in flight. We draw a distinct "HOLDING" ghost (solid

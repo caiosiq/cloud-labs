@@ -6,11 +6,15 @@ This repository is a **digital twin** for an autonomous optics lab: a browser-ba
 
 The UI separates **what you intend** (ghost / nominal poses on the canvas) from **what the lab reports** (solid geometry from polled state), including recipe replay and **golden** snapshots for drift checks.
 
-**Design reference:** **`backend/lab_model/ARCHITECTURE.md`** (Universal Component map), **`backend/lab_model/README.md`** (StateControl + Telemetry), **`docs/primitive_ui_contract.md`** (read-only panels vs primitives). Lab backends and **`LAB_VIEW_PATH`**: **`backend/lab_communicator/README.md`**.
+**Design reference:** **`backend/lab_model/ARCHITECTURE.md`** (Universal Component map), **`backend/lab_model/README.md`** (StateControl + Telemetry), **`docs/primitive_ui_contract.md`** (read-only panels vs primitives), **`docs/CONTROL_RUNTIME_AND_VERSIONING.md`** (RuntimeManager, ControlManager, configuration VC — planned). Lab backends and **`LAB_VIEW_PATH`**: **`backend/lab_communicator/README.md`**.
 
 ---
 
 ## Why two worlds? `lab_automation`, experiment manager, and this repository
+
+> **Naming:** **`ControlManager`** (cloud-labs, planned) = configuration version history.  
+> **`OpticalExperiment`** / *experiment manager* (`lab_automation`) = robot, cameras, and hardware procedures.  
+> See [`docs/CONTROL_RUNTIME_AND_VERSIONING.md`](docs/CONTROL_RUNTIME_AND_VERSIONING.md).
 
 If you have spent time in both places, it can feel as though you are **writing the same functions twice**: on one side, the **`lab_automation`** tree gives you an **experiment manager** built from modular optical components; on the other, **`LabCommunicator`** in this repo exposes **move**, **optimize**, and **motor** actions that ultimately call into that same stack. That overlap is real—and **deliberate**.
 
@@ -38,9 +42,9 @@ In **real** mode, **`RealLabCommunicator`** maps **lab-frame** intent (what the 
 - **Dark, lab-style UI** (Inter typography, Material Icons): main table in the center, **left** sidebar for placed components and selection, **right** sidebar for live/overhead-style video, table-camera capture, recipes, and activity log.
 - **2D breadboard canvas** (HTML5 Canvas): metric coordinates (~±500 mm by default), grid, robot-base **danger zone**, and **laser overlays** from **`laser_lines.json`** inside **`LAB_VIEW_PATH`** (`GET /api/laser-line`, `GET /api/laser-lines`). Geometry is aligned with the backend via **`GET /api/lab-layout`** before **`app-main.js`** loads.
 - **Solid vs ghost**: placed components draw twice—opaque **physical** pose and semi-transparent **intent** pose with a dashed “drift” segment when they differ.
-- **Interaction**: select a part; **move**, **optimize**, **motors**, **TeleOp**, **live feed**, and **record** live in a **floating component panel** (top-right of the table). The panel has **read-only STATE CONTROL + TELEMETRY** sections and a **PRIMITIVES** section for all writes (see **`docs/primitive_ui_contract.md`**). The **left sidebar** lists components plus **Refresh Pose** and **Save / Load state**. Drag on canvas with optional **snap toward the laser line**; wheel to rotate while dragging. **Motor jog** appears for catalog entries that declare motor primitives.
+- **Interaction**: select a part; **move**, **optimize**, **motors**, **TeleOp**, **live feed**, and **record** live in a **floating component panel** (top-right of the table). The panel has **read-only STATE CONTROL + TELEMETRY** sections and a **PRIMITIVES** section for all writes (see **`docs/primitive_ui_contract.md`**). The **left sidebar** lists components plus **Refresh Pose** and **Configuration** (save commits, branch graph). Drag on canvas with optional **snap toward the laser line**; wheel to rotate while dragging. **Motor jog** appears for catalog entries that declare motor primitives.
 - **Recipes**: record MOVE/OPTIMIZE steps; files live under **`{LAB_VIEW_PATH}/recipes/`** (see **`LAB_VIEW_PATH`** in `.env`). Successful runs can emit a **`{recipe_id}_golden.json`** reference beside the recipe JSON.
-- **Saved layouts**: **Save / Load lab state** writes JSON under **`{LAB_VIEW_PATH}/states/`** (same bundle as layout and catalog — distinct per deployment).
+- **Configuration version control**: **Save configuration** commits tunable intent to **`{LAB_VIEW_PATH}/control/`** (see **`docs/CONTROL_RUNTIME_AND_VERSIONING.md`**).
 - **Command Console** (bottom of the main page): typed shorthand for moves, optimize, and related actions; backed by ES modules (`command-parse.js`, `command-api.js`, `command-complete.js`, …) and wired through **`window.__commandConsoleDeps`** (see **Frontend code layout** below).
 - **Debug page** at `/debug` for deeper inspection (ghost derivation, golden listing, etc.).
 
@@ -315,7 +319,7 @@ The `backend-simple/` folder holds small lab-related Python snippets with **rela
 | POST | `/api/session-reconciliation/apply` | Apply checkpoint tunables/measurables for given tag ids |
 | POST | `/api/session-reconciliation/save` | Write checkpoint now |
 | GET/POST | `/api/recipes`, `/api/recipes/{id}/play`, `/api/recipes/{id}/golden`, `/api/recipes/{id}/compare` | Recipe CRUD, play, golden, drift report |
-| GET/POST | `/api/states`, `/api/states/save`, `/api/states/load` | List / save / load snapshots under **`{LAB_VIEW_PATH}/states/`** |
+| GET/POST | `/api/control/{repo_id}/…` | Configuration commits, branch graph, soft/hard checkout |
 | GET | `/api/debug/ghost-state`, `/api/debug/golden-states` | Debug aggregates |
 
 ---
@@ -408,7 +412,7 @@ Set `LAB_MODE=REAL` and a valid `LAB_AUTOMATION_PATH` so `from lab_automation...
 2. **Place and align** — Drag on the canvas or use the **floating component controls**; confirm moves; run **Optimize** with strategy parameters. For **Cobyla**, run **`RECORD_MEASURABLES`** on the gripper camera tag first so the optimizer reads the latest **`measurables.camera_image`** as its reference.
 3. **Record a recipe** — Toggle record, perform actions, save; play back from the sidebar.
 4. **Drift / golden** — After a good run, a golden file may exist; use **Debug** or `GET /api/recipes/{id}/compare` to compare poses to the current lab state.
-5. **Snapshots** — Use **Save / Load state** to persist JSON under **`{LAB_VIEW_PATH}/states/`**.
+5. **Configuration** — Use **Save configuration** in the sidebar to commit tunable layout; travel the branch graph to soft-view or hard-apply older commits.
 
 ---
 

@@ -63,6 +63,47 @@ class TestHardwareBinding(unittest.TestCase):
         self.assertTrue(catalog_is_placeable_on_table(row21))
         self.assertFalse(catalog_is_fixed_instrument(row21))
 
+    def test_mock_gripper_cameras_placeable_on_table(self) -> None:
+        lib = (
+            Path(__file__).resolve().parents[1]
+            / "lab_communicator"
+            / "mock"
+            / "lab_view"
+            / "component_library.json"
+        )
+        with open(lib, encoding="utf-8") as f:
+            data = json.load(f)
+        for tag_id in ("tag_21", "tag_22"):
+            row = (data.get("components") or {}).get(tag_id)
+            self.assertIsInstance(row, dict)
+            assert isinstance(row, dict)
+            self.assertTrue(catalog_is_placeable_on_table(row))
+            self.assertFalse(catalog_is_fixed_instrument(row))
+            self.assertEqual(resolve_telemetry_stream_backend(row), "table_cam")
+
+    def test_enrich_runtime_entry_from_catalog(self) -> None:
+        from lab_model.domain.component import new_component_entry
+        from lab_model.state.fixture_seed import enrich_runtime_entry_from_catalog
+
+        row = _load_real_catalog_row("tag_22")
+        entry = new_component_entry(
+            "tag_22",
+            "OPTICAL_CAMERA",
+            presence="breadboard",
+            nominal_pose={"x": 1.0, "y": 2.0, "rotation": 0.0},
+            meas_pose={"x": 1.0, "y": 2.0, "rotation": 0.0},
+        )
+        enrich_runtime_entry_from_catalog(entry, row)
+        self.assertEqual(entry["statecontrol"]["tunables"]["exposure_time_ms"], 200.0)
+        self.assertEqual(
+            entry["telemetry"]["live_feed"]["stream"]["backend"],
+            "table_cam",
+        )
+        self.assertEqual(
+            entry["telemetry"]["live_feed"]["stream"]["resource_id"],
+            "cam_gripper_1",
+        )
+
     def test_fixture_entry_v1_shape(self) -> None:
         row = _load_real_catalog_row("tag_99")
         entry = build_fixture_component_entry(row)

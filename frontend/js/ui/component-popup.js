@@ -204,21 +204,25 @@ function _renderBody(tagId, comp, catalogRow, deps) {
     const wrap = document.createElement('div');
     wrap.style.marginTop = '12px';
 
-    wrap.appendChild(
-        renderReadOnlyPanel(tagId, comp, catalogRow, {
-            sendCommand,
-            fetchLabState,
-            updateMotorAngleLabels,
-            refreshPanel: deps.updateContextPanel
-                ? (tid) => deps.updateContextPanel(tid || tagId)
-                : undefined,
-            resetPanelSnapshot: () => {
-                store.contextPanelSnapshots.delete(tagId);
-            },
-            render: deps.render,
-            log,
-        }),
-    );
+    const isStored = comp ? isStoredComponent(comp) : false;
+
+    if (!isStored) {
+        wrap.appendChild(
+            renderReadOnlyPanel(tagId, comp, catalogRow, {
+                sendCommand,
+                fetchLabState,
+                updateMotorAngleLabels,
+                refreshPanel: deps.updateContextPanel
+                    ? (tid) => deps.updateContextPanel(tid || tagId)
+                    : undefined,
+                resetPanelSnapshot: () => {
+                    store.contextPanelSnapshots.delete(tagId);
+                },
+                render: deps.render,
+                log,
+            }),
+        );
+    }
 
     const caps = catalogRow.capabilities;
     if (caps && Array.isArray(caps.primitives) && caps.primitives.length) {
@@ -233,7 +237,7 @@ function _renderBody(tagId, comp, catalogRow, deps) {
         title.style.letterSpacing = '0.05em';
         title.style.paddingBottom = '4px';
         title.style.borderBottom = '1px solid #2a2e36';
-        title.textContent = 'PRIMITIVES';
+        title.textContent = isStored ? 'STORAGE' : 'PRIMITIVES';
         primBlock.appendChild(title);
 
         const ctx = {

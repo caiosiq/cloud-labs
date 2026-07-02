@@ -123,12 +123,12 @@ export function shouldRenderOnCanvas(tagId, comp) {
     return isOnTableComponent(comp) && catalogDeclaresTablePose(tagId);
 }
 
-/** Chrome-bar tags currently in lab state. */
+/** Chrome-bar tags currently in lab state and under operator control. */
 export function listChromeComponentTags(labState) {
     if (!labState || !labState.components) return [];
     return Object.keys(labState.components).filter((tagId) => {
         const comp = labState.components[tagId];
-        return comp && isChromeComponent(tagId);
+        return comp && isChromeComponent(tagId) && isComponentControlled(tagId);
     });
 }
 
@@ -138,6 +138,28 @@ export function isBreadboardIntent(c) {
 
 export function isOffTableComponent(c) {
     return componentPresence(c) === PRESENCE_OFF_TABLE;
+}
+
+/** Part is in the operator-controlled session (runtime + active catalog). */
+export function isComponentControlled(tagId, { libraryOnly = false } = {}) {
+    if (!tagId || libraryOnly) return false;
+    const tags = store.activeCatalogTags;
+    if (!Array.isArray(tags)) return false;
+    return tags.includes(tagId);
+}
+
+/** @deprecated use isComponentControlled */
+export function isTrackedTag(tagId) {
+    return isComponentControlled(tagId);
+}
+
+/** Physical mount / placement hint (not the same as tracked vs controlled). */
+export function physicalMountLabel(tagId, comp) {
+    if (isChromeComponent(tagId)) return 'Fixed mount';
+    if (!comp) return 'In library';
+    if (isStoredComponent(comp)) return 'In storage';
+    if (isOnTableComponent(comp)) return 'On table';
+    return 'Off bench';
 }
 
 /** Optimization outcome: strategy mode + numeric score (no legacy is_optimized). */

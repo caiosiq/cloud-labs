@@ -7,7 +7,7 @@ cloud-labs / `lab_automation` architecture.**
 |---|---|
 | **Status** | v1 draft design doc · **Phases 0–9 + Universal Component shape implemented** (see [`backend/lab_model/ARCHITECTURE.md`](backend/lab_model/ARCHITECTURE.md)) |
 | **Audience** | Cloud-labs maintainers, `lab_automation` maintainers, UROP advisor review |
-| **Companion docs** | [`capability_contract.md`](capability_contract.md) (focused technical spec), [`backend/lab_model/README.md`](backend/lab_model/README.md) (tunables/measurables today), [`backend/lab_model/primitives/README.md`](backend/lab_model/primitives/README.md), [`Run_CloudLab_Scripts.md`](Run_CloudLab_Scripts.md), [`import_json.md`](import_json.md) |
+| **Companion docs** | [`capability_contract.md`](capability_contract.md) (focused technical spec), [`backend/lab_model/README.md`](backend/lab_model/README.md) (tunables/measurables today), [`backend/lab_model/primitives/README.md`](backend/lab_model/primitives/README.md), [`CONTROL_RUNTIME_AND_VERSIONING.md`](CONTROL_RUNTIME_AND_VERSIONING.md) (RuntimeManager, ControlManager, configuration VC — **planned**), [`Run_CloudLab_Scripts.md`](Run_CloudLab_Scripts.md), [`import_json.md`](import_json.md) |
 | **Scope** | Frontend (`optics-digital-twin/frontend/`), backend communicator (`optics-digital-twin/backend/`), and the separately-versioned `lab_automation` repository |
 
 ---
@@ -22,6 +22,7 @@ cloud-labs / `lab_automation` architecture.**
 - [Part VI — Phased implementation plan](#part-vi--phased-implementation-plan)
 - [Part VII — Open questions](#part-vii--open-questions)
 - [Part VIII — Glossary & references](#part-viii--glossary--references)
+- [Part IX — Runtime & control (planned)](#part-ix--runtime--control-planned)
 
 ---
 
@@ -1297,9 +1298,10 @@ The HTTP setter routes were removed in 9a; the optimizer-side wiring
 ndarray) was completed in Phase 9d.
 
 **Q4. Recipe / golden state migration.** Recipes today snapshot
-measurables; under the new model golden files should snapshot
-tunables (since measurables are transient receipts). Need a migration
-script for `lab_view/recipes/*.json`. Decide before Phase 3 or 7.
+measurables; under the new model golden files should become **Setups**
+(configuration for replay + observations for drift). Migration tracked in
+[`CONTROL_RUNTIME_AND_VERSIONING.md`](CONTROL_RUNTIME_AND_VERSIONING.md) Phase 8.
+See also §28 below.
 
 **Q5. `OPTIMIZE` strategy declaration in the catalog.** Should the
 catalog declare which strategies a component supports
@@ -1349,6 +1351,12 @@ otherwise". Revisit if breaking changes ever ship mid-version.
 | **Ghost (DRAG)** | Frontend state buffer for "user is dragging a component but hasn't committed yet". Existing behavior. |
 | **Ghost (TELEOP)** | Frontend state buffer driven by incoming telemetry during TELEOP. New behavior; same data shape as DRAG ghost, distinguished by a `source` field. |
 | **Lab view bundle** | Per-bench directory containing `lab_manifest.json`, catalog, layout, recipes, saved states. See [`backend/lab_communicator/README.md`](backend/lab_communicator/README.md). |
+| **Runtime** | Live lab JSON (working tree): tunables + measurables + telemetry + process fields. Polled by UI; not versioned directly. |
+| **Configuration** | Ensemble of all **tunables** (+ holding intent). Version-controllable; stored as commits by **ControlManager**. |
+| **Observations** | Ensemble of all **measurables**. Document-level name; JSON field stays `measurables`. Pinned, not branched. |
+| **Setup** | **Configuration + observations** at a point in history (tagged checkpoint). |
+| **RuntimeManager** | `lab_model` single-writer for runtime mutations (wired via shared `base.py`; communicators not rewritten). |
+| **ControlManager** | `lab_model` configuration version history (branch graph, diff, checkout). **Not** `lab_automation`'s `OpticalExperiment`. |
 
 ## 26. References
 
@@ -1362,12 +1370,78 @@ otherwise". Revisit if breaking changes ever ship mid-version.
   orchestration layer.
 - [`import_json.md`](import_json.md) — declarative JSON sequences
   (LLM-generated lab plans).
+- [`CONTROL_RUNTIME_AND_VERSIONING.md`](CONTROL_RUNTIME_AND_VERSIONING.md) —
+  canonical spec for RuntimeManager, ControlManager, configuration VC,
+  and phased actionables (mock → real + MuJoCo).
 - `lab_automation/CLOUDLAB_CONTRACT.md` (in the `lab_automation` repo) —
   hardware-side mirror of the Capability Contract. Must be kept in sync
   with this document.
 
-## 27. Change log
+---
+
+# Part IX — Runtime & control (planned)
+
+**Status:** proposal only — see [`CONTROL_RUNTIME_AND_VERSIONING.md`](CONTROL_RUNTIME_AND_VERSIONING.md) for the full spec and actionables.
+
+The Universal Component model (Part II) split **tunables**, **measurables**, and **telemetry**. The next structural step is to name **aggregates** and **centralize ownership** of the live JSON:
+
+| Aggregate | UC pillar | Manager |
+|-----------|-----------|---------|
+| **Runtime** | All of the above + `system_status`, `holding` process | **RuntimeManager** |
+| **Configuration** | Tunables (+ holding intent) | **ControlManager** (commits) |
+| **Observations** | Measurables | **ControlManager** (pins) |
+| **Setup** | Configuration + observations | **ControlManager** (tags) |
+
+## 28. Why two managers
+
+**Problem today:** `current_state` is mutated from primitives, `set_lab_state`, session reconciliation, and boot scans — while the UI contract says “writes via primitives only.” There is no single gate.
+
+**RuntimeManager** (shared **`lab_communicator/base.py`** wiring):
+
+- Sole typed write path to runtime (`PrimitiveCommit`, `AdministrativeLoad`, `ProjectionApply`, …).
+- Existing `commits.py` helpers stay; they are invoked *inside* the manager.
+- **Mock / real / MuJoCo subclasses are not rewritten** — they inherit wired `base.py`.
+
+**ControlManager** (`lab_model` + `main.py` API):
+
+- Persists configuration DAG, observation pins, setups under `{LAB_VIEW_PATH}/control/`.
+- Checkouts **project into** RuntimeManager (soft UI travel, hard reconcile via primitives).
+- **Communicator-agnostic** — no imports from mock/real/MuJoCo.
+
+> **Do not call ControlManager “ExperimentManager”.** In this repo, *experiment manager* means **`OpticalExperiment`** in `lab_automation` (robot, cameras, low-level procedures).
+
+## 29. Relationship to primitives and canvas
+
+Unchanged UC rules:
+
+- Canvas **ghost** ← tunables (configuration intent).
+- Canvas **solid** ← measurables (observations) when present.
+- **Golden Rule:** null measurables on motion; re-fill via `RECORD_MEASURABLES`.
+- Primitives remain the **only** normal path to bench-affecting intent; ControlManager adds **Save configuration** (manual commit) and **checkout** (projection + optional reconcile).
+
+**Optimize / irreversible actions:** version history stores **resulting configuration** (final poses, setpoints). Reconcile between commits emits ordinary `MOVE_*` / `SET_*` primitives — not a replay of the optimizer trace.
+
+## 30. UC Phase 10+ roadmap hook
+
+Phases 0–9 + UC shape are **implemented** (see [`backend/lab_model/ARCHITECTURE.md`](../backend/lab_model/ARCHITECTURE.md)). Configuration version control is **Phase 10+**:
+
+| UC phase | Deliverable | Detail doc |
+|----------|-------------|------------|
+| **10** | RuntimeManager in `base.py` | CRVC Phase 1–2 |
+| **11** | ControlManager store + API | CRVC Phase 3 |
+| **12** | UI branch graph + soft checkout | CRVC Phase 4 |
+| **13** | Observations pins + setups | CRVC Phase 5 |
+| **14** | Hard checkout + reconcile | CRVC Phase 6 |
+| **15** | Real + MuJoCo parity | CRVC Phase 7 |
+| **16** | Legacy migration (states/, golden) | CRVC Phase 8 |
+
+*(CRVC = [`CONTROL_RUNTIME_AND_VERSIONING.md`](CONTROL_RUNTIME_AND_VERSIONING.md).)*
+
+---
+
+## 31. Change log
 
 | Date       | Author | Change |
 |------------|--------|--------|
 | 2026-05-21 | initial | First draft, Phase 0 artifact. Architecture locked; implementation phases enumerated; open questions captured. |
+| 2026-06-24 | — | Part IX: RuntimeManager, ControlManager, Configuration/Observations/Setup naming; pointer to CONTROL_RUNTIME_AND_VERSIONING.md. |

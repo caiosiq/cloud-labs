@@ -1,16 +1,33 @@
 /**
  * Chrome bar above the optical table canvas: fixed bench components
  * (tunables but no TablePose — table-top camera, future laser sources).
+ *
+ * Rebuilds are snapshot-gated (not every lab-state poll) and deferred while
+ * the pointer is over the bench header so clicks on camera / laser controls
+ * are not torn down mid-interaction.
  */
 import { store } from '../state/store.js';
 import {
     getCatalogRow,
-    isChromeComponent,
     listChromeComponentTags,
 } from '../component-model.js';
 import { getComponentIcon } from './icons.js';
 
 let _onSelect = () => {};
+let _lastSnapshot = '';
+let _benchHeaderPointerInside = false;
+let _pendingRebuild = false;
+let _interactionInit = false;
+const _pointerLeaveHandlers = [];
+
+/** Register a callback to run when the pointer leaves the bench header strip. */
+export function onBenchHeaderPointerLeave(handler) {
+    if (typeof handler === 'function') _pointerLeaveHandlers.push(handler);
+}
+
+export function isBenchHeaderHovered() {
+    return _benchHeaderPointerInside;
+}
 
 /**
  * @param {{ onSelect: (tagId: string, opts?: { add?: boolean }) => void }} deps
@@ -22,7 +39,54 @@ export function initBenchChromeBar(deps) {
     if (deps && typeof deps.onSelect === 'function') _onSelect = deps.onSelect;
 }
 
-export function refreshBenchChromeBar() {
+/** Defer chrome-bar DOM rebuilds while the operator uses the bench header strip. */
+export function initBenchChromeBarInteraction() {
+    if (_interactionInit) return;
+    const header = document.getElementById('bench-header');
+    if (!header) return;
+    _interactionInit = true;
+    header.addEventListener('pointerenter', () => {
+        _benchHeaderPointerInside = true;
+    });
+    header.addEventListener('pointerleave', () => {
+        _benchHeaderPointerInside = false;
+        if (_pendingRebuild) {
+            _pendingRebuild = false;
+            rebuildBenchChromeBar();
+        }
+        _pointerLeaveHandlers.forEach((handler) => {
+            try {
+                handler();
+            } catch (e) {
+                console.warn('[bench-chrome-bar] pointer-leave handler failed', e);
+            }
+        });
+    });
+}
+
+function computeBenchChromeSnapshot() {
+    const tags = listChromeComponentTags(store.labState);
+    const parts = [tags.join(',')];
+    tags.forEach((tagId) => {
+        const comp = store.labState?.components?.[tagId];
+        const row = getCatalogRow(tagId);
+        const displayName = (row && row.name) || tagId;
+        parts.push(`${tagId}=${displayName}:${comp?.type || ''}:${getComponentIcon(comp?.type)}`);
+    });
+    return parts.join('|');
+}
+
+/** Update active styling without recreating buttons. */
+function syncBenchChromeHighlights() {
+    const bar = document.getElementById('bench-chrome-bar');
+    if (!bar) return;
+    bar.querySelectorAll('.bench-chrome-bar__btn[data-tag-id]').forEach((btn) => {
+        const active = btn.dataset.tagId === store.focusedPanel;
+        btn.classList.toggle('bench-chrome-bar__btn--active', active);
+    });
+}
+
+function rebuildBenchChromeBar() {
     const bar = document.getElementById('bench-chrome-bar');
     if (!bar) return;
 
@@ -30,6 +94,7 @@ export function refreshBenchChromeBar() {
     bar.innerHTML = '';
     if (!tags.length) {
         bar.hidden = true;
+        _lastSnapshot = computeBenchChromeSnapshot();
         return;
     }
     bar.hidden = false;
@@ -48,9 +113,7 @@ export function refreshBenchChromeBar() {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'bench-chrome-bar__btn';
-        // Multi-panel: any open chrome panel gets the active highlight; the
-        // focused one stays distinguishable via the panel's own border (the
-        // chrome bar only carries one styling slot today, so we use focus).
+        btn.dataset.tagId = tagId;
         if (tagId === store.focusedPanel) btn.classList.add('bench-chrome-bar__btn--active');
         btn.title = `${displayName} (${tagId}) — fixed bench component`;
         btn.innerHTML = `
@@ -63,4 +126,30 @@ export function refreshBenchChromeBar() {
         });
         bar.appendChild(btn);
     });
+    _lastSnapshot = computeBenchChromeSnapshot();
+}
+
+/**
+ * Refresh the bench chrome bar when its snapshot changes. Skips full rebuilds
+ * during hover over the bench header (same pattern as the component sidebar).
+ * @param {{ force?: boolean }} [opts]
+ */
+export function maybeRefreshBenchChromeBar({ force = false } = {}) {
+    const snapshot = computeBenchChromeSnapshot();
+    if (!force && snapshot === _lastSnapshot) {
+        syncBenchChromeHighlights();
+        return;
+    }
+    if (!force && _benchHeaderPointerInside) {
+        _pendingRebuild = true;
+        syncBenchChromeHighlights();
+        return;
+    }
+    _pendingRebuild = false;
+    rebuildBenchChromeBar();
+}
+
+/** @deprecated Prefer {@link maybeRefreshBenchChromeBar}. Kept for callers that force a rebuild. */
+export function refreshBenchChromeBar() {
+    maybeRefreshBenchChromeBar({ force: true });
 }

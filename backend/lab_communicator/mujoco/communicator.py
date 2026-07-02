@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Iterable, Mapping, Optional
 from lab_communicator.base import LabCommunicator
 from lab_communicator.mujoco.client import MuJoCoProcessClient
 from lab_communicator.mujoco.scene import SceneSpec, build_scene_spec
+from lab_model.state.runtime_manager import MutationKind
 from lab_model.state.snapshot import LabPose
 
 
@@ -65,7 +66,11 @@ class MujocoLabCommunicator(LabCommunicator):
         self.catalog_map = {
             str(row["tag_id"]): row for row in rows if row.get("tag_id")
         }
-        self.current_state = copy.deepcopy(dict(state))
+        self._lab_runtime.replace_state(
+            copy.deepcopy(dict(state)),
+            kind=MutationKind.BOOT_HYDRATE,
+            source="mujoco_init",
+        )
         self._last_runtime_error: Optional[Dict[str, Any]] = None
         self.scene: SceneSpec = build_scene_spec(
             layout,

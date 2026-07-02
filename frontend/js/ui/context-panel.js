@@ -44,6 +44,7 @@ import {
 } from '../component-model.js';
 import { componentDataSnapshot } from '../component-state.js';
 import { renderComponentPanel } from './component-popup.js';
+import { syncComponentSidebarHighlights } from './updateUI.js';
 import { hideSelectedPartTab, showSelectedPartTab } from './workspace-tabs.js';
 
 let _render = () => {};
@@ -372,6 +373,7 @@ function _applyFocusStyling() {
         const tag = el.dataset.tagId;
         el.classList.toggle('component-panel--focused', tag != null && tag === focused);
     });
+    syncComponentSidebarHighlights();
 }
 
 /**
