@@ -34,6 +34,7 @@ import { isTeleopReady, componentDataSnapshot } from '../component-state.js';
 import { syncTeleopLivePosePolls } from '../teleop-session.js';
 import { showErrorModal } from '../ui/modals.js';
 import { maybeTriggerSessionReconciliation } from '../ui/session-reconciliation.js';
+import { updateOptimizationModeUi } from '../ui/optimization-mode.js';
 import { fetchLayoutConflicts } from '../api/fetchers.js';
 import {
     updateLayoutConflictModal,
@@ -42,6 +43,10 @@ import {
 import { syncMotorActionStatuses } from '../ui/motor-action-ui.js';
 import { syncGuidesFromLabState } from '../canvas/guides.js';
 import { syncLaserLinesFromLabState } from '../ui/laser-lines-panel.js';
+const OPTIMIZING_POLL_MS = 100;
+let _pollTimerId = null;
+let _pollIntervalMs = POLLING_INTERVAL;
+
 let _deps = {
     placementUiLabel: () => 'PLACED',
     updateContextPanel: () => {},
@@ -49,8 +54,6 @@ let _deps = {
     updateUI: () => {},
     refreshControlWorkingState: async () => {},
 };
-
-let _pollTimerId = null;
 
 /**
  * Resolve which component tag is currently being optimized.
@@ -136,10 +139,19 @@ export function initLabState(deps) {
     _deps = { ..._deps, ...deps };
 }
 
+function syncLabStatePollingInterval() {
+    const want =
+        store.labState?.system_status === 'OPTIMIZING' ? OPTIMIZING_POLL_MS : POLLING_INTERVAL;
+    if (_pollIntervalMs === want && _pollTimerId != null) return;
+    _pollIntervalMs = want;
+    if (_pollTimerId != null) clearInterval(_pollTimerId);
+    _pollTimerId = setInterval(fetchLabState, want);
+}
+
 /** Start the background poll. Returns the timer id. Idempotent. */
 export function startLabStatePolling() {
     if (_pollTimerId != null) return _pollTimerId;
-    _pollTimerId = setInterval(fetchLabState, POLLING_INTERVAL);
+    syncLabStatePollingInterval();
     return _pollTimerId;
 }
 
@@ -355,6 +367,13 @@ export async function fetchLabState() {
             if (store.isOptimizing) {
                 store.isOptimizing = false;
                 log('Optimization sequence complete.', 'info');
+                const last = store.labState?.last_ensemble_optimization;
+                if (last?.best_loss != null) {
+                    log(
+                        `Ensemble finished · best loss ${Number(last.best_loss).toFixed(4)} · ${last.evals ?? 0} evals`,
+                        'info',
+                    );
+                }
 
                 const optOverlay = document.getElementById('optimization-overlay');
                 if (optOverlay) optOverlay.style.display = 'none';
@@ -369,10 +388,19 @@ export async function fetchLabState() {
             const optStepText = document.getElementById('optimization-step-text');
             if (optOverlay && optStepText) {
                 optOverlay.style.display = 'flex';
-                const runBit = store.labState.optimization_run_dir
-                    ? ` · ${store.labState.optimization_run_dir}`
-                    : '';
-                optStepText.innerText = `OPTIMIZING (Step ${store.labState.optimization_step || 0})${runBit}`;
+                const sess = store.labState.optimization_session;
+                if (sess && sess.mode === 'ensemble') {
+                    const loss =
+                        sess.best_loss != null && Number.isFinite(Number(sess.best_loss))
+                            ? Number(sess.best_loss).toFixed(3)
+                            : '—';
+                    optStepText.innerText = `ENSEMBLE · eval ${sess.eval ?? store.labState.optimization_step ?? 0} · loss ${loss}`;
+                } else {
+                    const runBit = store.labState.optimization_run_dir
+                        ? ` · ${store.labState.optimization_run_dir}`
+                        : '';
+                    optStepText.innerText = `OPTIMIZING (Step ${store.labState.optimization_step || 0})${runBit}`;
+                }
             }
 
             const feedPreview = document.getElementById('optimization-feed-preview');
@@ -410,9 +438,14 @@ export async function fetchLabState() {
                 }
             }
 
-            // Mock-only: synthetic beam-intensity values so the optimization plot has something
-            // to draw before the real lab metric exists.
-            if (store.labState.lab_mode === 'MOCK' && Math.random() > 0.5) {
+            const ens = store.labState.optimization_session;
+
+            // Mock-only legacy plot: synthetic beam-intensity when not ensemble.
+            if (
+                store.labState.lab_mode === 'MOCK' &&
+                !(ens && ens.mode === 'ensemble') &&
+                Math.random() > 0.5
+            ) {
                 store.optimizationData.push({
                     step: store.optimizationData.length,
                     value: Math.min(1.0, 0.2 + store.optimizationData.length * 0.05 + Math.random() * 0.1),
@@ -431,6 +464,8 @@ export async function fetchLabState() {
             })
             .catch(() => {});
 
+        syncLabStatePollingInterval();
+        updateOptimizationModeUi();
         _deps.updateUI();
     } catch (error) {
         console.error('Failed to fetch lab state:', error);

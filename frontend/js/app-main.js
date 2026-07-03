@@ -44,6 +44,7 @@ import { fetchLabState, initLabState, startLabStatePolling } from './state/lab-s
 import { initBenchChromeBar, initBenchChromeBarInteraction } from './ui/bench-chrome-bar.js';
 import { initRuntimeMode } from './ui/runtime-mode.js';
 import { initWorkspaceTabs } from './ui/workspace-tabs.js';
+import { initOptimizationMode } from './ui/optimization-mode.js';
 import { initUpdateUI, initComponentSidebarInteraction, updateUI } from './ui/updateUI.js';
 import {
     initContextPanel,
@@ -115,6 +116,7 @@ void initRuntimeMode({
     showErrorModal,
 });
 initWorkspaceTabs();
+initOptimizationMode({ sendCommand, log });
 
 // Guides are now versioned server state: they arrive via lab-state polling
 // (synced into store.guideLines) rather than localStorage.

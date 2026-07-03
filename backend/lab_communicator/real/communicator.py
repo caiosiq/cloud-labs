@@ -768,6 +768,47 @@ class RealLabCommunicator(LabCommunicator):
             progress_callback=progress_callback,
         )
 
+    async def _primitive_run_ensemble_optimization(
+        self,
+        *,
+        spec: Any,
+        x0: Dict[str, Any],
+        session_id: str,
+        progress_callback: Callable[..., None],
+    ) -> Optional[Dict[str, Any]]:
+        from lab_communicator.real.ensemble import run_real_ensemble_session
+        from lab_model.optimization.spec import OptimizeEnsembleParameters
+
+        spec_obj = (
+            spec
+            if isinstance(spec, OptimizeEnsembleParameters)
+            else OptimizeEnsembleParameters.model_validate(spec)
+        )
+        x0_map = {str(k): float(v) for k, v in (x0 or {}).items()}
+
+        def _run() -> Any:
+            # Do not hold the state lock for the whole session — progress_callback
+            # and bridge writes release the lock between evals for live lab-state polls.
+            result = run_real_ensemble_session(
+                self,
+                spec_obj,
+                x0_map,
+                session_id=session_id,
+                progress_callback=progress_callback,
+            )
+            with self._state_lock:
+                self._persist_state()
+            return result
+
+        result = await asyncio.to_thread(_run)
+        return {
+            "session_id": result.session_id,
+            "best_loss": result.best_loss,
+            "final_values": result.final_values,
+            "evals": result.evals,
+            "trace": result.trace[-200:],
+        }
+
     def _primitive_finalize_optimization_run(self) -> None:
         from lab_communicator.real.primitives import primitive_finalize_optimization_run
         primitive_finalize_optimization_run(self)

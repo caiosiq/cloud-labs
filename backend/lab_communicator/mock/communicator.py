@@ -1,6 +1,7 @@
 import json
 import os
 import asyncio
+import time
 from datetime import datetime
 from io import BytesIO
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -379,6 +380,52 @@ class MockLabCommunicator(LabCommunicator):
             params=params,
             progress_callback=progress_callback,
         )
+
+    async def _primitive_run_ensemble_optimization(
+        self,
+        *,
+        spec: Any,
+        x0: Dict[str, Any],
+        session_id: str,
+        progress_callback: Callable[..., None],
+    ) -> Optional[Dict[str, Any]]:
+        from lab_communicator.mock.ensemble import run_mock_ensemble_session
+        from lab_model.optimization.spec import OptimizeEnsembleParameters
+
+        spec_obj = (
+            spec
+            if isinstance(spec, OptimizeEnsembleParameters)
+            else OptimizeEnsembleParameters.model_validate(spec)
+        )
+        x0_map = {str(k): float(v) for k, v in (x0 or {}).items()}
+
+        def _run() -> Any:
+            def _ui_progress(*args: Any, **kwargs: Any) -> None:
+                progress_callback(*args, **kwargs)
+                time.sleep(0.025)
+
+            # Do not hold the state lock for the whole session — progress_callback
+            # updates in-memory state between evals so GET /api/lab-state can poll live.
+            result = run_mock_ensemble_session(
+                self.current_state,
+                spec_obj,
+                x0_map,
+                session_id=session_id,
+                progress_callback=_ui_progress,
+                state_lock=self._state_lock,
+            )
+            with self._state_lock:
+                self._persist_state()
+            return result
+
+        result = await asyncio.to_thread(_run)
+        return {
+            "session_id": result.session_id,
+            "best_loss": result.best_loss,
+            "final_values": result.final_values,
+            "evals": result.evals,
+            "trace": result.trace[-200:],
+        }
 
     async def _primitive_add_component_to_state(
         self,

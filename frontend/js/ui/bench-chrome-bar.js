@@ -12,6 +12,11 @@ import {
     listChromeComponentTags,
 } from '../component-model.js';
 import { getComponentIcon } from './icons.js';
+import {
+    getOptimizationHighlightForTag,
+    optimizationHighlightColor,
+    isOptimizationPlanningActive,
+} from '../state/optimization-builder.js';
 
 let _onSelect = () => {};
 let _lastSnapshot = '';
@@ -77,12 +82,30 @@ function computeBenchChromeSnapshot() {
 }
 
 /** Update active styling without recreating buttons. */
-function syncBenchChromeHighlights() {
+export function syncBenchChromeHighlights() {
     const bar = document.getElementById('bench-chrome-bar');
     if (!bar) return;
     bar.querySelectorAll('.bench-chrome-bar__btn[data-tag-id]').forEach((btn) => {
-        const active = btn.dataset.tagId === store.focusedPanel;
+        const tagId = btn.dataset.tagId;
+        const active = tagId === store.focusedPanel;
         btn.classList.toggle('bench-chrome-bar__btn--active', active);
+        btn.classList.remove(
+            'opt-plan-scope',
+            'opt-plan-objective',
+            'opt-plan-variable',
+            'opt-plan-both',
+        );
+        btn.style.borderColor = '';
+        btn.style.boxShadow = '';
+        if (isOptimizationPlanningActive()) {
+            const role = getOptimizationHighlightForTag(tagId);
+            if (role) {
+                btn.classList.add(`opt-plan-${role}`);
+                const color = optimizationHighlightColor(role);
+                btn.style.borderColor = color;
+                btn.style.boxShadow = `0 0 8px ${color}66`;
+            }
+        }
     });
 }
 

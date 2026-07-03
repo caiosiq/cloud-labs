@@ -21,6 +21,7 @@ import { mmToPx, pxToMm } from './coordinates.js';
 import { isConfigViewMode } from '../ui/config-view-mode.js';
 import { isDetached } from '../control/control-state.js';
 import { runtimeEditableOrMessage } from '../control/control-state.js';
+import { isOptimizationPlanningActive } from '../ui/optimization-mode.js';
 import { store } from '../state/store.js';
 import { log } from '../ui/log.js';
 import {
@@ -304,6 +305,10 @@ function onMouseDown(canvas, e) {
         if (!alreadyFocused) {
             openPanel(hit.name);
             log(`Selected ${hit.name}`, 'info');
+            return;
+        }
+        if (isOptimizationPlanningActive()) {
+            return;
         }
         {
             if (labBusy) return;
@@ -468,6 +473,7 @@ function onMouseMove(canvas, e) {
 
 function onWheel(e) {
     if (isConfigViewMode()) return;
+    if (isOptimizationPlanningActive()) return;
     const tag = resolveWheelTag();
     if (!tag || !store.labState?.components?.[tag]) return;
 

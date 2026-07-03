@@ -6,7 +6,7 @@ This repository is a **digital twin** for an autonomous optics lab: a browser-ba
 
 The UI separates **what you intend** (ghost / nominal poses on the canvas) from **what the lab reports** (solid geometry from polled state), including recipe replay and **golden** snapshots for drift checks.
 
-**Design reference:** **`backend/lab_model/ARCHITECTURE.md`** (Universal Component map), **`backend/lab_model/README.md`** (StateControl + Telemetry), **`docs/primitive_ui_contract.md`** (read-only panels vs primitives), **`docs/CONTROL_RUNTIME_AND_VERSIONING.md`** (RuntimeManager, ControlManager, configuration VC — planned). Lab backends and **`LAB_VIEW_PATH`**: **`backend/lab_communicator/README.md`**.
+**Design reference:** **`backend/lab_model/ARCHITECTURE.md`** (Universal Component map), **`backend/lab_model/README.md`** (StateControl + Telemetry), **`docs/primitive_ui_contract.md`** (read-only panels vs primitives), **`docs/CONTROL_RUNTIME_AND_VERSIONING.md`** (RuntimeManager, ControlManager, configuration VC), **`docs/ENSEMBLE_OPTIMIZATION.md`** (generalized multi-variable optimization — design & roadmap). Lab backends and **`LAB_VIEW_PATH`**: **`backend/lab_communicator/README.md`**.
 
 ---
 
@@ -223,7 +223,21 @@ Copy/paste guidance and the call-site logic live in **`backend/lab_communicator/
 
 ### Mock-only: “beam intensity” plot
 
-The canvas plot labeled **Optimization Metric (Beam Intensity)** is **synthetic** and is shown only when **`lab_mode === "MOCK"`**. Real mode relies on the optimization MJPEG feed and table camera, not that metric.
+The canvas plot labeled **Optimization Metric (Beam Intensity)** is **synthetic** and is shown only when **`lab_mode === "MOCK"`** and the run is **not** an ensemble session. Ensemble runs plot **best loss** in the right sidebar **Alignment session** chart instead. Real mode relies on the optimization MJPEG feed and table camera, not the canvas intensity plot.
+
+---
+
+## Ensemble optimization (mock)
+
+Generalized multi-variable alignment uses **`parameters.mode: "ensemble"`** with explicit **variables**, **objective**, and **solver** blocks (see **[`docs/ENSEMBLE_OPTIMIZATION.md`](docs/ENSEMBLE_OPTIMIZATION.md)**).
+
+| Entry point | What to do |
+|-------------|------------|
+| **UI** | Right sidebar → **Optimization** → **Alignment session (ensemble)** → select mirrors → **Run ensemble alignment** |
+| **HTTP** | `POST /api/command` with body from [`schemas/ensemble_optimization_examples/two_mirror_mock.json`](schemas/ensemble_optimization_examples/two_mirror_mock.json) |
+| **Legacy** | Per-component panel **OPTIMIZE** still uses `strategy: NEWTON` \| `COBYLA` (`mode` defaults to `legacy_strategy`) |
+
+Mock runs a **synthetic coupled landscape** (centroid + power) and **block COBYLA** in normalized motor space. Pre-flight validates every variable path **before** `OPTIMIZING` (invalid path → HTTP **400**). On success, motor setpoints and **`ENSEMBLE`** optimization metadata are written; **Save configuration** commits the layout to VC.
 
 ---
 
@@ -409,7 +423,7 @@ Set `LAB_MODE=REAL` and a valid `LAB_AUTOMATION_PATH` so `from lab_automation...
 ## Typical workflow
 
 1. **Add parts** — Open the catalog, **Request** items; in mock this updates state quickly; in real lab this ties to your automation policy.
-2. **Place and align** — Drag on the canvas or use the **floating component controls**; confirm moves; run **Optimize** with strategy parameters. For **Cobyla**, run **`RECORD_MEASURABLES`** on the gripper camera tag first so the optimizer reads the latest **`measurables.camera_image`** as its reference.
+2. **Place and align** — Drag on the canvas or use the **floating component controls**; confirm moves. For **legacy Cobyla**, run **`RECORD_MEASURABLES`** on the camera tag first. For **multi-mirror mock alignment**, use the **Optimization** tab → **Alignment session (ensemble)** or `POST /api/command` with [`schemas/ensemble_optimization_examples/two_mirror_mock.json`](schemas/ensemble_optimization_examples/two_mirror_mock.json).
 3. **Record a recipe** — Toggle record, perform actions, save; play back from the sidebar.
 4. **Drift / golden** — After a good run, a golden file may exist; use **Debug** or `GET /api/recipes/{id}/compare` to compare poses to the current lab state.
 5. **Configuration** — Use **Save configuration** in the sidebar to commit tunable layout; travel the branch graph to soft-view or hard-apply older commits.

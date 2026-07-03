@@ -1211,6 +1211,29 @@ class LabCommunicator:
         """
         raise NotImplementedError
 
+    async def _primitive_run_ensemble_optimization(
+        self,
+        *,
+        spec: Any,
+        x0: Dict[str, Any],
+        session_id: str,
+        progress_callback: "Callable[..., None]",
+    ) -> Optional[Dict[str, Any]]:
+        """Hardware step for ensemble ``OPTIMIZE`` (Phase 1 default: not implemented).
+
+        Expected return shape::
+
+            {
+                "session_id": str,
+                "best_loss": float,
+                "final_values": {variable_id: physical_value, ...},
+            }
+
+        Mock/real backends override to call
+        ``lab_model.optimization.run_ensemble_optimization``.
+        """
+        raise NotImplementedError
+
     def _primitive_finalize_optimization_run(self) -> None:
         """Backend-side teardown for one optimization run; default no-op.
 

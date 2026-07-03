@@ -66,6 +66,10 @@ export const store = {
     isOptimizing: false,
     isOptimizingFeedActive: false,
     optimizationData: [],
+    /** Ensemble session loss trace: `{ step, loss }[]` from `optimization_session.best_loss`. */
+    ensembleLossTrace: [],
+    /** Staged optimization mode builder (UI); see `optimization-mode.js`. */
+    optimizationBuilder: null,
     isRecording: false,
     currentRecipeSteps: [],
     /**

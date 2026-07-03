@@ -78,6 +78,7 @@ class MotorIdParameters(BaseModel):
 class OptimizeParameters(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    mode: Literal["legacy_strategy", "ensemble"] = "legacy_strategy"
     strategy: str = "NEWTON"
 
 

@@ -17,6 +17,13 @@ async def run_optimize_component(
     strategy_name: str,
     params: Dict[str, Any],
 ) -> None:
+    params = params or {}
+    if params.get("mode") == "ensemble":
+        from .optimize_ensemble import run_optimize_ensemble
+
+        await run_optimize_ensemble(host, target_id, params)
+        return
+
     print(
         f"{host.log_prefix} Optimize {target_id} with {strategy_name} "
         f"(params keys={sorted((params or {}).keys())})"

@@ -75,7 +75,7 @@ class InAirHost(StateHost, Protocol):
 
 
 class OptimizeHost(StateHost, Protocol):
-    """Bridge surface for OPTIMIZE."""
+    """Bridge surface for OPTIMIZE (legacy strategy and ensemble)."""
 
     def _catalog_meta_for_tag(self, tag_id: str) -> Optional[Dict[str, Any]]: ...
     def _set_status(self, status: str, *, persist: bool = True) -> None: ...
@@ -90,6 +90,15 @@ class OptimizeHost(StateHost, Protocol):
         target_id: str,
         strategy_name: str,
         params: Dict[str, Any],
+        progress_callback: Any,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    async def _primitive_run_ensemble_optimization(
+        self,
+        *,
+        spec: Any,
+        x0: Dict[str, float],
+        session_id: str,
         progress_callback: Any,
     ) -> Optional[Dict[str, Any]]: ...
 

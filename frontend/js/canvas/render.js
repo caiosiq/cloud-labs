@@ -42,6 +42,10 @@ import { clipTwoPointLineToLabBounds } from '../geometry/lines.js';
 import { drawAlignmentGuides, drawAlignmentIntersectionMarkers } from './guides.js';
 import { getComponentSize } from './interaction.js';
 import { placementUiLabel } from '../ui/context-panel.js';
+import {
+    getOptimizationHighlightForTag,
+    optimizationHighlightColor,
+} from '../state/optimization-builder.js';
 
 let _ctx = null;
 
@@ -248,6 +252,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     const h = size.height * LAB_SCALE;
     const halfW = w / 2;
     const halfH = h / 2;
+    const optRole = getOptimizationHighlightForTag(name);
 
     ctx.save();
     ctx.translate(x, y);
@@ -283,6 +288,21 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.beginPath();
         ctx.arc(0, 0, haloR, 0, Math.PI * 2);
         ctx.stroke();
+    }
+
+    if (optRole) {
+        const optColor = optimizationHighlightColor(optRole);
+        const rOpt = Math.sqrt(halfW * halfW + halfH * halfH) + (optRole === 'scope' ? 6 : 10);
+        ctx.strokeStyle = optColor;
+        ctx.lineWidth = optRole === 'scope' ? 2 : 3;
+        ctx.setLineDash(optRole === 'scope' ? [5, 4] : []);
+        ctx.shadowColor = optColor;
+        ctx.shadowBlur = optRole === 'scope' ? 6 : 14;
+        ctx.beginPath();
+        ctx.arc(0, 0, rOpt, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.shadowBlur = 0;
     }
 
     if (store.dragFromStorageTag === name) {
@@ -504,6 +524,13 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.fillStyle = '#10b981';
         ctx.font = 'bold 10px Inter, sans-serif';
         ctx.fillText('OPTIMIZING...', 0, halfH + 15);
+    } else if (optRole && optRole !== 'scope') {
+        const optColor = optimizationHighlightColor(optRole);
+        ctx.fillStyle = optColor;
+        ctx.font = 'bold 9px Inter, sans-serif';
+        const label =
+            optRole === 'both' ? 'OBJ · VAR' : optRole === 'objective' ? 'OBJECTIVE' : 'VARIABLE';
+        ctx.fillText(label, 0, halfH + 15);
     }
 
     ctx.restore();

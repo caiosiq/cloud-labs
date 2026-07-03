@@ -180,7 +180,12 @@ async def _invoke_atomic(
     elif isinstance(cmd, OptimizeBody):
         _log_primitive("OPTIMIZE", cmd.target_id, macro_parent=macro_parent)
         opt = cmd.parameters
-        await lab.optimize_component(cmd.target_id, opt.strategy, opt.model_dump())
+        params = opt.model_dump()
+        if params.get("mode") == "ensemble":
+            strategy = params.get("session_label") or "ensemble"
+        else:
+            strategy = opt.strategy
+        await lab.optimize_component(cmd.target_id, strategy, params)
     elif isinstance(cmd, StoreComponentBody):
         _log_primitive("STORE_COMPONENT", cmd.target_id, macro_parent=macro_parent)
         await lab.store_component(cmd.target_id)
@@ -336,7 +341,16 @@ def schedule_validated_command(
         }
 
     if isinstance(cmd, OptimizeBody):
-        strat = cmd.parameters.strategy
+        opt = cmd.parameters
+        params = opt.model_dump()
+        if params.get("mode") == "ensemble":
+            label = params.get("session_label") or "ensemble"
+            background_tasks.add_task(execute_validated_command, lab, cmd)
+            return {
+                "status": "accepted",
+                "message": f"Ensemble optimization ({label}) started for {cmd.target_id}",
+            }
+        strat = opt.strategy
         background_tasks.add_task(execute_validated_command, lab, cmd)
         return {
             "status": "accepted",

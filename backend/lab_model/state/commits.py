@@ -339,6 +339,38 @@ def commit_affirm_placed(state: Dict[str, Any], target_id: str) -> None:
     set_presence_and_storage(entry, PRESENCE_BREADBOARD, in_storage=False, slot=None)
 
 
+def commit_optimization_ensemble_complete(
+    state: Dict[str, Any],
+    *,
+    spec: Any,
+    session_id: str,
+    final_values: Dict[str, float],
+    best_loss: float,
+) -> None:
+    """After ensemble OPTIMIZE: apply final tunables and per-tag optimization metadata."""
+    from lab_model.optimization.paths import VariablePathResolver
+    from lab_model.optimization.spec import OptimizeEnsembleParameters
+
+    if not isinstance(spec, OptimizeEnsembleParameters):
+        spec = OptimizeEnsembleParameters.model_validate(spec)
+
+    resolver = VariablePathResolver.resolve(state, spec.variables, writable=True)
+    for var in spec.variables:
+        if var.id in final_values:
+            resolver.set(var.id, float(final_values[var.id]))
+
+    touched_tags = sorted({v.tag_id for v in spec.variables})
+    loss = float(best_loss)
+    for tag_id in touched_tags:
+        commit_optimization_complete(
+            state,
+            tag_id,
+            strategy_name="ENSEMBLE",
+            score=loss,
+        )
+    _ = session_id  # reserved for configuration metadata.session_id (Phase 3)
+
+
 def commit_optimization_complete(
     state: Dict[str, Any],
     target_id: str,
@@ -868,6 +900,7 @@ __all__ = [
     "commit_affirm_placed",
     "commit_observed_camera_image",
     "commit_observed_measurables",
+    "commit_optimization_ensemble_complete",
     "commit_optimization_complete",
     "null_measurables_for_targets",
     "commit_teleop_start",

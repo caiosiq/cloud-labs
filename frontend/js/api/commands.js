@@ -21,6 +21,7 @@ import { log } from '../ui/log.js';
 import { showConfirmationModal } from '../ui/modals.js';
 import { drawPose, isBreadboardIntent } from '../component-model.js';
 import { updateRecipeEditorList } from '../ui/recipes.js';
+import { fetchLabState } from '../state/lab-state.js';
 
 let _render = () => {};
 let _updateContextPanel = () => {};
@@ -98,6 +99,25 @@ export async function executeSendCommand(command) {
         return { ok: false, error: blocked };
     }
 
+    /** @param {unknown} detail */
+    function formatApiDetail(detail) {
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+            return detail.map((d) => d.msg || JSON.stringify(d)).join('; ');
+        }
+        if (detail && typeof detail === 'object') {
+            const msg = detail.message;
+            if (msg && Array.isArray(detail.errors) && detail.errors.length) {
+                const errs = detail.errors
+                    .map((e) => e.reason || e.msg || JSON.stringify(e))
+                    .join('; ');
+                return `${msg}: ${errs}`;
+            }
+            return msg || JSON.stringify(detail);
+        }
+        return 'Request failed';
+    }
+
     try {
         log(`Sending command: ${command.action}`, 'info');
 
@@ -130,7 +150,7 @@ export async function executeSendCommand(command) {
             // 409 = system busy / state machine rejected the command. Surface the detail
             // verbatim to the log so the operator knows *why*.
             const body = await response.json().catch(() => ({}));
-            const detail = (body && body.detail) ? String(body.detail) : 'System BUSY or command not allowed in current state.';
+            const detail = formatApiDetail(body?.detail) || 'System BUSY or command not allowed in current state.';
             log(`Command rejected (409): ${detail}`, 'warn');
             if (command.target_id) {
                 store.pendingCommands.delete(command.target_id);
@@ -142,7 +162,7 @@ export async function executeSendCommand(command) {
         const result = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-            const detail = result.detail || `HTTP ${response.status}`;
+            const detail = formatApiDetail(result.detail) || `HTTP ${response.status}`;
             log(`Command rejected: ${detail}`, 'error');
             if (command.target_id) {
                 store.pendingCommands.delete(command.target_id);
@@ -156,6 +176,19 @@ export async function executeSendCommand(command) {
         if (command.action === 'OPTIMIZE') {
             store.isOptimizing = true;
             store.optimizationData = [];
+            if (command.parameters?.mode === 'ensemble') {
+                store.ensembleLossTrace = [];
+                const b = store.optimizationBuilder;
+                if (b) {
+                    b.runCompleted = false;
+                    b.viewingLastRun = false;
+                    b.lastSeenResultAt = null;
+                    b.awaitingRunResults = true;
+                    b.maxEvalsForRun =
+                        command.parameters?.solver?.max_total_evals ?? b.maxEvals ?? 200;
+                }
+                void fetchLabState();
+            }
         }
 
         return { ok: true, message: result.message || 'Accepted' };

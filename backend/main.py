@@ -86,7 +86,7 @@ from lab_model.primitives import (
     ScanRotateInPlaceBody,
     StartTeleopBody,
     StartLiveFeedBody,
-    EndLiveFeedBody,
+    OptimizeBody,
     TeleopGotoBody,
     TeleopGotoParameters,
     TeleopJogBody,
@@ -98,6 +98,9 @@ from lab_model.primitives import (
     validation_error_detail,
 )
 
+
+from lab_model.optimization.errors import EnsemblePreflightError
+from lab_model.optimization.preflight import preflight_ensemble
 
 RECIPES_DIR = get_lab_view_paths().recipes_dir
 CONTROL_DIR = get_lab_view_paths().control_dir
@@ -2589,6 +2592,21 @@ async def replace_overlays(payload: Dict[str, Any] = Body(...)):
     }
 
 
+def _enforce_ensemble_preflight(lab_comm, cmd) -> None:
+    """Resolve all ensemble variable paths before accepting OPTIMIZING work."""
+    if not isinstance(cmd, OptimizeBody):
+        return
+    params = cmd.parameters.model_dump()
+    if params.get("mode") != "ensemble":
+        return
+    with lab_comm._state_lock:
+        state = lab_comm.current_state
+    try:
+        preflight_ensemble(state, params)
+    except EnsemblePreflightError as exc:
+        raise HTTPException(status_code=400, detail=exc.as_dict()) from exc
+
+
 def _enforce_holding_rules(cmd, state: Dict[str, Any]) -> None:
     """
     Reject commands that would be unsafe given the current HOLDING state.
@@ -2700,6 +2718,7 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
         raise HTTPException(status_code=400, detail=validation_error_detail(e))
 
     _enforce_holding_rules(cmd, state)
+    _enforce_ensemble_preflight(lab, cmd)
     if runtime_manager is not None and not runtime_manager.supports_primitive(cmd.action):
         raise HTTPException(
             status_code=409,

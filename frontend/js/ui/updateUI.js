@@ -22,6 +22,11 @@ import { maybeRefreshBenchChromeBar } from './bench-chrome-bar.js';
 import { getComponentIcon } from './icons.js';
 import { updateLayoutWarningBanner } from './layout-conflicts.js';
 import { createTrackToggleButton, listLibraryOnlyTags } from './inventory-add.js';
+import {
+    getOptimizationHighlightForTag,
+    optimizationHighlightColor,
+    isOptimizationPlanningActive,
+} from '../state/optimization-builder.js';
 
 let _deps = {
     placementUiLabel: () => 'PLACED',
@@ -124,10 +129,28 @@ export function syncComponentSidebarHighlights() {
     if (!list) return;
     list.querySelectorAll('.component-card[data-tag-id]').forEach((card) => {
         const tagId = card.dataset.tagId;
-        if (store.openPanels.includes(tagId)) {
+        card.classList.remove(
+            'opt-plan-scope',
+            'opt-plan-objective',
+            'opt-plan-variable',
+            'opt-plan-both',
+        );
+        if (isOptimizationPlanningActive()) {
+            const role = getOptimizationHighlightForTag(tagId);
+            if (role) {
+                card.classList.add(`opt-plan-${role}`);
+                card.style.borderColor = optimizationHighlightColor(role);
+                card.style.boxShadow = `0 0 10px ${optimizationHighlightColor(role)}55`;
+            } else {
+                card.style.borderColor = '';
+                card.style.boxShadow = '';
+            }
+        } else if (store.openPanels.includes(tagId)) {
             card.style.borderColor = 'rgba(59, 130, 246, 0.45)';
+            card.style.boxShadow = '';
         } else {
             card.style.borderColor = '';
+            card.style.boxShadow = '';
         }
         if (tagId === store.focusedPanel) {
             card.style.borderColor = '#3b82f6';

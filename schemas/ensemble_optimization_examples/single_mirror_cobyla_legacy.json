@@ -1,0 +1,59 @@
+{
+  "action": "OPTIMIZE",
+  "target_id": "tag_20",
+  "parameters": {
+    "mode": "ensemble",
+    "session_label": "legacy COBYLA equivalent",
+    "variables": [
+      {
+        "id": "v_tag_20_m1",
+        "tag_id": "tag_20",
+        "path": "tunables.nominal_motor_positions.1",
+        "kind": "continuous",
+        "physical_type": "continuous",
+        "unit": "deg",
+        "bounds": { "min": -3.0, "max": 3.0 },
+        "delta": true
+      },
+      {
+        "id": "v_tag_20_m3",
+        "tag_id": "tag_20",
+        "path": "tunables.nominal_motor_positions.3",
+        "kind": "continuous",
+        "physical_type": "continuous",
+        "unit": "deg",
+        "bounds": { "min": -3.0, "max": 3.0 },
+        "delta": true
+      }
+    ],
+    "objective": {
+      "type": "weighted_sum",
+      "minimize": true,
+      "terms": [
+        {
+          "id": "legacy_score",
+          "weight": 1.0,
+          "source": {
+            "tag_id": "tag_20",
+            "kind": "measurable_scalar",
+            "path": "measurables.last_optimization_score"
+          },
+          "metric": "one_minus_normalized"
+        }
+      ]
+    },
+    "solver": {
+      "type": "block_cobyla",
+      "max_total_evals": 80,
+      "keep_best": true,
+      "blocks": [
+        {
+          "id": "block_tag_20",
+          "variable_ids": ["v_tag_20_m1", "v_tag_20_m3"],
+          "max_evals": 30,
+          "passes": 2
+        }
+      ]
+    }
+  }
+}

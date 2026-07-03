@@ -16,14 +16,14 @@
  * telemetry, and primitives all live inside this template.
  */
 import { store } from '../state/store.js';
-import { measPose } from '../component-model.js';
+import { measPose, isChromeComponent, isStoredComponent } from '../component-model.js';
 import { sendCommand } from '../api/commands.js';
 import { fetchLabState } from '../state/lab-state.js';
 import { log } from './log.js';
 import { updateMotorAngleLabels, placementUiLabel } from './context-panel.js';
 import { renderReadOnlyPanel } from './component-viewer.js';
 import { renderPrimitiveRegions } from '../primitives/index.js';
-import { isChromeComponent, isStoredComponent } from '../component-model.js';
+import { renderOptimizationVariablePicker, isOptimizationVariableStage } from './optimization-mode.js';
 
 const PRIMITIVE_DEV_HINTS =
     typeof window !== 'undefined' &&
@@ -222,6 +222,13 @@ function _renderBody(tagId, comp, catalogRow, deps) {
                 log,
             }),
         );
+    }
+
+    if (isOptimizationVariableStage()) {
+        const optSlot = document.createElement('div');
+        optSlot.className = 'component-popup__optimization-vars';
+        renderOptimizationVariablePicker(optSlot, tagId, comp);
+        wrap.appendChild(optSlot);
     }
 
     const caps = catalogRow.capabilities;

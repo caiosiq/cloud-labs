@@ -9,6 +9,7 @@
 **Related docs:**
 
 - [`universal_component_architecture.md`](./universal_component_architecture.md) — UC model, glossary extension, Phase 10+ roadmap hook
+- [`ENSEMBLE_OPTIMIZATION.md`](./ENSEMBLE_OPTIMIZATION.md) — generalized multi-variable `OPTIMIZE` (variables / objectives / solvers), normalization, touch-and-go, implementation roadmap
 - [`../backend/lab_model/ARCHITECTURE.md`](../backend/lab_model/ARCHITECTURE.md) — current platform map (managers = planned)
 - [`../backend/lab_model/README.md`](../backend/lab_model/README.md) — tunables, measurables, telemetry today
 - [`primitive_ui_contract.md`](./primitive_ui_contract.md) — read-only panels vs primitives
@@ -149,7 +150,7 @@ This makes the UI contract **enforceable**: bench-affecting intent changes are *
 Version branches live in **configuration space**.
 
 - `MOVE_*`, `SET_*`, storage primitives → reconcile as themselves.
-- **`OPTIMIZE`** → reconcile uses **final `nominal_pose` only**, not optimizer trace. Intermediate steps are never versioned.
+- **`OPTIMIZE`** → reconcile uses **final `nominal_pose` / motor setpoints only**, not optimizer trace. Intermediate steps are never versioned. Multi-variable **ensemble** sessions are specified in [`ENSEMBLE_OPTIMIZATION.md`](./ENSEMBLE_OPTIMIZATION.md).
 - **`RECORD_MEASURABLES`** → observations pin, not configuration commit (unless user saves **setup**).
 
 **Optimization metadata (non-reconcile):** configuration commits may carry a sibling `metadata.optimization` block per tag (`placement_mode`, `last_optimization_score`, optional `last_optimized_pose`). This annotates *how* a pose was reached and powers UI golden highlights; it does **not** participate in `configuration_diff()` or `plan_reconcile()`. Legacy `tunables.placement` is stripped from the versioned configuration slice and excluded from diffs. One-time backfill: `POST /api/control/backfill-optimization-metadata`.
