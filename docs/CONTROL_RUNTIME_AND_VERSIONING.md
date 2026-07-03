@@ -149,8 +149,10 @@ This makes the UI contract **enforceable**: bench-affecting intent changes are *
 Version branches live in **configuration space**.
 
 - `MOVE_*`, `SET_*`, storage primitives → reconcile as themselves.
-- **`OPTIMIZE`** → commit **resulting tunables** only; reconcile uses target poses, not optimizer trace.
+- **`OPTIMIZE`** → reconcile uses **final `nominal_pose` only**, not optimizer trace. Intermediate steps are never versioned.
 - **`RECORD_MEASURABLES`** → observations pin, not configuration commit (unless user saves **setup**).
+
+**Optimization metadata (non-reconcile):** configuration commits may carry a sibling `metadata.optimization` block per tag (`placement_mode`, `last_optimization_score`, optional `last_optimized_pose`). This annotates *how* a pose was reached and powers UI golden highlights; it does **not** participate in `configuration_diff()` or `plan_reconcile()`. Legacy `tunables.placement` is stripped from the versioned configuration slice and excluded from diffs. One-time backfill: `POST /api/control/backfill-optimization-metadata`.
 
 ### 3.5. Checkout modes
 
@@ -464,7 +466,7 @@ Phase 8 (migration)
 
 | ID | Question | Lean |
 |----|----------|------|
-| Q1 | `placement.mode` in diff? | Yes |
+| Q1 | `placement.mode` in diff? | **No** — stored in `metadata.optimization`; excluded from reconcile diff |
 | Q2 | Control repo id | `default` first |
 | Q3 | Soft checkout server vs client | Client overlay first; optional `runtime.view_configuration_id` later |
 | Q4 | Reconcile path | Direct diff to target |
@@ -491,7 +493,8 @@ Phase 8 (migration)
 | Concept | Contains | Versioned? | Checkout? |
 |---------|----------|------------|-------------|
 | **Runtime** | Live JSON (all pillars + process) | No | — |
-| **Configuration** | Tunables (+ holding intent) | Yes (DAG) | Soft / hard |
+| **Configuration** | Tunables (+ holding intent); reconcile slice omits `placement` | Yes (DAG) | Soft / hard |
+| **Configuration metadata** | Optimization outcomes (`metadata.optimization`) | Yes (on commit doc) | Soft preview + hard apply (display) |
 | **Observations** | Measurables | Pins | Compare / re-record |
 | **Setup** | Config + obs | Tags | View / export |
 

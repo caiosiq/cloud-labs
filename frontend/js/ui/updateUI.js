@@ -13,6 +13,8 @@ import {
     isHeldTag,
     isOnTableComponent,
     isOptimizedPlacement,
+    formatOptimizationLabel,
+    getOptimizationDisplayInfo,
     isStoredComponent,
     physicalMountLabel,
 } from '../component-model.js';
@@ -76,7 +78,11 @@ function sidebarCardContentKey(tagId, comp, { libraryOnlyCard = false } = {}) {
     const parts = [
         controlled ? '1' : '0',
         isHeldTag(tagId, store.labState) ? '1' : '0',
-        comp && isOptimizedPlacement(comp) ? '1' : '0',
+        comp && isOptimizedPlacement(comp, tagId) ? '1' : '0',
+        (() => {
+            const info = getOptimizationDisplayInfo(comp, tagId);
+            return info ? formatOptimizationLabel(info) : '';
+        })(),
         comp && isStoredComponent(comp) ? '1' : '0',
         comp && isOnTableComponent(comp) ? '1' : '0',
         comp ? _deps.placementUiLabel(comp) : '',
@@ -178,8 +184,9 @@ function rebuildComponentSidebar() {
         let statusDot;
         if (isHeldTag(name, store.labState)) {
             statusDot = `<div class="status-dot holding" title="Held by gripper"></div>`;
-        } else if (isOptimizedPlacement(comp)) {
-            statusDot = `<div class="status-dot optimized" title="Optimized (${_deps.placementUiLabel(comp)})"></div>`;
+        } else if (isOptimizedPlacement(comp, name)) {
+            const optLabel = formatOptimizationLabel(getOptimizationDisplayInfo(comp, name));
+            statusDot = `<div class="status-dot optimized" title="Optimized (${optLabel})"></div>`;
         } else if (isStoredComponent(comp)) {
             statusDot = `<div class="status-dot stored" title="Stored (Q3)"></div>`;
         } else if (libraryOnlyCard) {
@@ -204,11 +211,17 @@ function rebuildComponentSidebar() {
                 '<span class="material-icons-round" style="font-size: 12px; color: #f59e0b; margin-right: 4px;" title="Motorized">settings_input_component</span>';
         }
 
+        let optBadge = '';
+        const optInfo = getOptimizationDisplayInfo(comp, name);
+        if (optInfo) {
+            optBadge = `<span class="inv-badge inv-badge--optimized" title="Optimization score">${formatOptimizationLabel(optInfo)}</span>`;
+        }
+
         card.innerHTML = `
             <div class="comp-icon material-icons-round">${icon}</div>
             <div class="comp-info">
                 <span class="comp-name" style="${unknownTag ? 'color: #f59e0b;' : ''}">${displayName}</span>
-                <span class="comp-meta">${controlBadge}${mountBadge}${motorBadge}${displayType.replace('OPTICAL_', '')} • ${name}</span>
+                <span class="comp-meta">${controlBadge}${mountBadge}${optBadge}${motorBadge}${displayType.replace('OPTICAL_', '')} • ${name}</span>
             </div>
             ${statusDot}
         `;

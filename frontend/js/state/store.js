@@ -132,6 +132,8 @@ export const store = {
         // being VIEWED (soft checkout). The live bench (store.labState) is never
         // mutated by preview; the canvas renders this overlay instead while set.
         previewConfig: null,
+        /** Non-reconcile metadata for the viewed commit (optimization scores, etc.). */
+        previewMetadata: null,
         nodes: [],
         graphNodes: [],
         loading: false,

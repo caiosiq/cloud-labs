@@ -1,3 +1,4 @@
+import { getPreviewOptimizationEntry, isConfigViewMode } from './control/control-state.js';
 import { store } from './state/store.js';
 import { getStatecontrol, normalizeCapabilities, tunableValue } from './component-state.js';
 
@@ -192,14 +193,53 @@ export const NON_OPTIMIZATION_PLACEMENT_MODES = new Set([
  * run, i.e. it has a finite ``last_optimization_score`` AND ``placement.mode``
  * is a strategy name (not MANUAL / STORAGE / HOVER / PICK).
  *
- * This intentionally excludes parts that were optimized earlier but then
- * manually re-moved or picked up — "optimized" should describe the *pose
- * the component is currently sitting at*, not its whole history.
+ * While viewing a configuration commit, uses that node's stored metadata
+ * instead of live-bench measurables.
  * @param {object | undefined} c
+ * @param {string | undefined} tagId
  */
-export function isOptimizedPlacement(c) {
-    if (!hasOptimizationOutcome(c)) return false;
-    return !NON_OPTIMIZATION_PLACEMENT_MODES.has(placementMode(c));
+export function isOptimizedPlacement(c, tagId) {
+    return getOptimizationDisplayInfo(c, tagId) != null;
+}
+
+/**
+ * Strategy + score for sidebar labels (live bench or viewed commit metadata).
+ * @param {object | undefined} c
+ * @param {string | undefined} tagId
+ * @returns {{ mode: string, score: number } | null}
+ */
+export function getOptimizationDisplayInfo(c, tagId) {
+    const id = tagId || (c && c.id);
+    if (isConfigViewMode() && id) {
+        const preview = getPreviewOptimizationEntry(id);
+        if (preview) {
+            const score = preview.last_optimization_score;
+            const mode = String(preview.placement_mode || 'MANUAL').toUpperCase();
+            if (
+                score != null
+                && Number.isFinite(Number(score))
+                && !NON_OPTIMIZATION_PLACEMENT_MODES.has(mode)
+            ) {
+                return { mode, score: Number(score) };
+            }
+        }
+        return null;
+    }
+    if (!hasOptimizationOutcome(c)) return null;
+    const mode = placementMode(c);
+    if (NON_OPTIMIZATION_PLACEMENT_MODES.has(mode)) return null;
+    const m = getStatecontrol(c).measurables;
+    return { mode, score: Number(m.last_optimization_score) };
+}
+
+/** Human-readable optimization label, e.g. ``NEWTON · 0.990``. */
+export function formatOptimizationLabel(info) {
+    if (!info) return '';
+    const score = Number(info.score);
+    if (Number.isFinite(score)) {
+        return `${info.mode} · ${score.toFixed(3)}`;
+    }
+    return info.mode;
 }
 
 // --- HOLDING-state helpers (see new_primitives.md) ---------------------------

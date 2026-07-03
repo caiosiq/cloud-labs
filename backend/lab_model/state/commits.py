@@ -378,12 +378,22 @@ def commit_optimization_complete(
         }
         meas["pose"] = pose
         meas["last_optimized_pose"] = dict(pose)
+        tun["nominal_pose"] = dict(pose)
     else:
         cur = meas.get("pose") or {}
         if cur:
             meas["last_optimized_pose"] = {
                 k: cur[k] for k in ("x", "y", "rotation") if k in cur
             }
+            if isinstance(cur, dict):
+                try:
+                    tun["nominal_pose"] = {
+                        "x": float(cur.get("x", 0.0)),
+                        "y": float(cur.get("y", 0.0)),
+                        "rotation": float(cur.get("rotation", 0.0)),
+                    }
+                except (TypeError, ValueError):
+                    pass
 
 
 def null_measurables_for_targets(

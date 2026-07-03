@@ -1,0 +1,239 @@
+{
+  "id": "8e8fd8c27c7247d684de828f9dfafad0",
+  "repo_id": "laser-cavity",
+  "base_configuration_id": "931163e5aa51410c9d16e9b9e936193a",
+  "base_branch": "interference",
+  "configuration": {
+    "holding": {
+      "tag_id": null,
+      "nominal_pose": null
+    },
+    "components": {
+      "tag_20": {
+        "id": "tag_20",
+        "type": "OPTICAL_MIRROR",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": -168.90482003348217,
+              "y": 222,
+              "rotation": 33
+            },
+            "nominal_motor_positions": {
+              "1": 0,
+              "3": 0
+            },
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            }
+          }
+        }
+      },
+      "tag_19": {
+        "id": "tag_19",
+        "type": "OPTICAL_CRYSTAL",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": -116.78571428571428,
+              "y": 200,
+              "rotation": 0
+            },
+            "nominal_motor_positions": {},
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            }
+          }
+        }
+      },
+      "tag_22": {
+        "id": "tag_22",
+        "type": "OPTICAL_CAMERA",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": -241.90482003348217,
+              "y": 54.64285714285717,
+              "rotation": 0
+            },
+            "nominal_motor_positions": {},
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            },
+            "exposure_time_ms": 200
+          }
+        }
+      },
+      "tag_21": {
+        "id": "tag_21",
+        "type": "OPTICAL_CAMERA",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": 256.66660853794644,
+              "y": -150,
+              "rotation": 0
+            },
+            "nominal_motor_positions": {},
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            },
+            "exposure_time_ms": 200
+          }
+        }
+      },
+      "tag_10": {
+        "id": "tag_10",
+        "type": "OPTICAL_BEAMSPLITTER",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": 256.66660853794644,
+              "y": 200,
+              "rotation": 180
+            },
+            "nominal_motor_positions": {},
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            }
+          }
+        }
+      },
+      "tag_11": {
+        "id": "tag_11",
+        "type": "OPTICAL_LENS",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": -366.0538678841965,
+              "y": 200,
+              "rotation": 0
+            },
+            "nominal_motor_positions": {
+              "1": 15,
+              "3": 0
+            },
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            }
+          }
+        }
+      },
+      "tag_18": {
+        "id": "tag_18",
+        "type": "OPTICAL_MIRROR",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": 103.49882542451815,
+              "y": 200,
+              "rotation": 220
+            },
+            "nominal_motor_positions": {
+              "1": 0,
+              "3": 0
+            },
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            }
+          }
+        }
+      }
+    },
+    "alignment_guides": [
+      {
+        "id": "g_0576663fea70",
+        "p1": {
+          "x": 129.5237513950893,
+          "y": -27.361101422991073
+        },
+        "p2": {
+          "x": 483.8094656808036,
+          "y": -27.361101422991073
+        }
+      },
+      {
+        "id": "g_2a167ca6ec44",
+        "p1": {
+          "x": 453.8094656808036,
+          "y": 278.35318429129467
+        },
+        "p2": {
+          "x": 453.8094656808036,
+          "y": -228.78967285156253
+        }
+      },
+      {
+        "id": "g_607cc43a9b1a",
+        "p1": {
+          "x": 256.66660853794644,
+          "y": 345.49604143415183
+        },
+        "p2": {
+          "x": 256.66660853794644,
+          "y": -193.0753871372768
+        }
+      },
+      {
+        "id": "g_83fa666c00f3",
+        "p1": {
+          "x": -241.90482003348217,
+          "y": 432.63889857700894
+        },
+        "p2": {
+          "x": -241.90482003348217,
+          "y": -60.21824428013393
+        }
+      }
+    ],
+    "laser_lines": {
+      "snap_line_id": "demo_beam",
+      "lines": [
+        {
+          "id": "demo_beam",
+          "name": "Mock table beam",
+          "color": "#ff3b3b",
+          "enabled": true,
+          "p1": {
+            "x": 0,
+            "y": -450
+          },
+          "p2": {
+            "x": 0,
+            "y": 450
+          }
+        },
+        {
+          "id": "demo_secondary",
+          "name": "Mock secondary (angled)",
+          "color": "#ff8c42",
+          "enabled": true,
+          "p1": {
+            "x": -200,
+            "y": 200
+          },
+          "p2": {
+            "x": 200,
+            "y": 200
+          }
+        }
+      ]
+    }
+  },
+  "message": "stash 2026-07-03 12:34:53",
+  "created_at": "2026-07-03T12:35:01.317149+00:00"
+}

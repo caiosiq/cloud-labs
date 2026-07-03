@@ -6,6 +6,7 @@ import math
 from typing import Any, Dict, List, Mapping, Optional
 
 from lab_model.primitives.ids import PrimitiveId
+from lab_model.state.projections import NON_RECONCILE_TUNABLE_KEYS
 
 
 def _path(*parts: str) -> str:
@@ -67,6 +68,8 @@ def configuration_diff(
             tun_to = {}
 
         for key in sorted(set(tun_from.keys()) | set(tun_to.keys())):
+            if key in NON_RECONCILE_TUNABLE_KEYS:
+                continue
             add(tag_id, _path("tunables", key), tun_from.get(key), tun_to.get(key))
 
     # Versioned alignment overlays. Only diff a key when BOTH configs declare

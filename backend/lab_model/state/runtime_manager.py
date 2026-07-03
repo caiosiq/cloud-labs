@@ -9,11 +9,12 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Deque, Dict, List, Optional
+from typing import Any, Callable, Deque, Dict, List, Mapping, Optional
 
 from lab_model.domain.holding import SYSTEM_STATUS_IDLE, empty_holding
 
 from .projections import (
+    apply_configuration_metadata,
     apply_configuration_to_components,
     clear_observations_in_runtime,
     extract_configuration,
@@ -128,9 +129,11 @@ class RuntimeManager:
         configuration: Dict[str, Any],
         *,
         source: str = "soft_checkout",
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
         def _apply(state: Dict[str, Any]) -> None:
             apply_configuration_to_components(state, configuration)
+            apply_configuration_metadata(state, metadata)
 
         self.mutate(_apply, kind=MutationKind.PROJECTION_APPLY, source=source)
 
@@ -139,12 +142,14 @@ class RuntimeManager:
         configuration: Dict[str, Any],
         *,
         source: str = "hard_checkout",
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
         """Apply target configuration tunables and clear observations (hard checkout)."""
 
         def _apply(state: Dict[str, Any]) -> None:
             apply_configuration_to_components(state, configuration)
             clear_observations_in_runtime(state)
+            apply_configuration_metadata(state, metadata)
 
         self.mutate(_apply, kind=MutationKind.PROJECTION_APPLY, source=source)
 

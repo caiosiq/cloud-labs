@@ -181,6 +181,35 @@ export function normalizeControlViewState() {
     }
 }
 
+/** Clear read-only preview overlay (configuration + metadata). */
+export function clearPreviewOverlay() {
+    store.control.previewConfig = null;
+    store.control.previewMetadata = null;
+}
+
+/**
+ * Set read-only preview overlay from a soft checkout response.
+ * @param {object|null} configuration
+ * @param {object|null|undefined} metadata
+ */
+export function setPreviewOverlay(configuration, metadata) {
+    store.control.previewConfig = configuration || null;
+    store.control.previewMetadata = metadata || null;
+}
+
+/**
+ * Optimization metadata for a tag from the viewed commit (if any).
+ * @param {string} tagId
+ * @returns {object|null}
+ */
+export function getPreviewOptimizationEntry(tagId) {
+    const meta = store.control.previewMetadata;
+    if (!tagId || !meta || typeof meta !== 'object') return null;
+    const opt = meta.optimization;
+    if (!opt || typeof opt !== 'object') return null;
+    return opt[tagId] || null;
+}
+
 /**
  * After soft checkout, set viewing id unless it matches applied (live bench).
  * @param {string|null} commitId

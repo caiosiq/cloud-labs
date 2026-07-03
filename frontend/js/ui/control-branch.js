@@ -6,6 +6,8 @@ import {
     getAppliedCommitId,
     isDirty,
     setViewingCommit,
+    setPreviewOverlay,
+    clearPreviewOverlay,
 } from '../control/control-state.js';
 import { store } from '../state/store.js';
 import { showConfirmationModal, showErrorModal } from './modals.js';
@@ -60,12 +62,12 @@ async function executeBranchSwitch(branchSelect, newBranch, previousBranch, head
 
         if (headId) {
             const res = await softCheckoutConfiguration(headId);
-            store.control.previewConfig = (res && res.configuration) || null;
+            setPreviewOverlay(res && res.configuration, res && res.metadata);
             store.control.selectedCommitId = headId;
             setViewingCommit(headId);
             await deps.onSwitch(newBranch, headId);
         } else {
-            store.control.previewConfig = null;
+            clearPreviewOverlay();
             store.control.viewingCommitId = null;
             store.control.selectedCommitId = null;
             await deps.onSwitch(newBranch, null);

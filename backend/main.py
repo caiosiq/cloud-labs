@@ -251,6 +251,7 @@ class ControlStashBody(BaseModel):
     # state. Pop needs no snapshot — the server already holds the stash.
     finalize: bool = False
     snapshot: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 async def _run_reserved_background_task(
@@ -1568,6 +1569,24 @@ async def control_backfill_lines(payload: Dict[str, Any] = Body(default={})):
     return {"repos": len(repos), "updated": updated, "guides": len(guides)}
 
 
+@app.post("/api/control/backfill-optimization-metadata")
+async def control_backfill_optimization_metadata():
+    """One-time, idempotent migration: infer optimization metadata on legacy commits.
+
+    Reads legacy ``tunables.placement.mode`` and linked observation pins, writes
+    ``metadata.optimization`` on each configuration document, and strips
+    ``placement`` from stored configuration tunables.
+    """
+    from lab_model.state.control_manager import list_control_repos
+
+    repos = list_control_repos(CONTROL_DIR)
+    updated = 0
+    for repo in repos:
+        mgr = _get_control_manager(repo["repo_id"])
+        updated += mgr.backfill_optimization_metadata()
+    return {"repos": len(repos), "updated": updated}
+
+
 @app.post("/api/control/repos")
 async def control_create_repo(payload: ControlCreateRepoBody):
     from lab_model.state.control_manager import create_control_repo, validate_repo_id
@@ -1757,6 +1776,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     configuration = document.get("configuration") or {}
+    metadata = document.get("metadata") or {}
     branch = str(document.get("branch") or "main")
 
     if mode == "adopt":
@@ -1803,6 +1823,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody):
         runtime_mgr.apply_hard_checkout_projection(
             configuration,
             source=f"hard_checkout:{payload.configuration_id}",
+            metadata=metadata if isinstance(metadata, dict) else None,
         )
         mgr.set_applied(payload.configuration_id, branch=branch)
         mgr.set_viewing(None)
@@ -1887,6 +1908,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody):
             "mode": "soft",
             "configuration_id": payload.configuration_id,
             "configuration": configuration,
+            "metadata": metadata if isinstance(metadata, dict) else {},
             "compatibility": compat,
         }
     if mode == "hard":
@@ -1932,6 +1954,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody):
         runtime_mgr.apply_hard_checkout_projection(
             configuration,
             source=f"hard_checkout:{payload.configuration_id}",
+            metadata=metadata if isinstance(metadata, dict) else None,
         )
         mgr.set_applied(payload.configuration_id, branch=branch)
         mgr.set_viewing(None)
@@ -1978,7 +2001,11 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
     applied = working.get("applied") or {}
     applied_id = applied.get("configuration_id")
 
-    from lab_model.state.projections import EMPTY_CONFIGURATION, extract_configuration
+    from lab_model.state.projections import (
+        EMPTY_CONFIGURATION,
+        extract_configuration,
+        extract_configuration_metadata,
+    )
 
     # Stash base: the applied node when this repo owns the bench, otherwise the
     # shared empty state (a foreign bench is uncommitted work on top of empty,
@@ -2013,6 +2040,7 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
             base_configuration_id=applied_id,
             base_branch=applied.get("branch"),
             message=payload.message,
+            metadata=payload.metadata if isinstance(payload.metadata, dict) else None,
         )
         _claim_bench(repo_id, applied_id)
         if hasattr(lab, "_persist_state"):
@@ -2034,6 +2062,7 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
         )
 
     snapshot = extract_configuration(runtime)
+    snapshot_metadata = extract_configuration_metadata(runtime)
     plan = mgr.plan_runtime_to_configuration(runtime, base_cfg)
 
     if payload.preview:
@@ -2044,6 +2073,7 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
             "base_configuration_id": applied_id,
             "base_branch": applied.get("branch"),
             "snapshot": snapshot,
+            "metadata": snapshot_metadata,
         }
 
     from lab_model.state.reconcile_executor import (
@@ -2067,6 +2097,7 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
         base_configuration_id=applied_id,
         base_branch=applied.get("branch"),
         message=payload.message,
+        metadata=snapshot_metadata or None,
     )
     # The bench is now clean at this repo's base, so this repo owns it.
     _claim_bench(repo_id, applied_id)
@@ -2101,6 +2132,7 @@ async def control_stash_pop(repo_id: str, payload: ControlStashBody = ControlSta
             detail={"code": "no_stash", "message": "No stash to pop."},
         )
     snapshot = stash.get("configuration") or {}
+    stash_metadata = stash.get("metadata") or {}
 
     if payload.finalize:
         # Step-by-step pop: the frontend already drove the primitives to restore
@@ -2108,7 +2140,11 @@ async def control_stash_pop(repo_id: str, payload: ControlStashBody = ControlSta
         # so the pre-pop dirty guard would wrongly reject). Record only: snap
         # tunables to the snapshot and clear the stash slot. No motion.
         runtime_mgr = _lab_runtime_manager()
-        runtime_mgr.apply_configuration_projection(snapshot, source="stash_pop")
+        runtime_mgr.apply_configuration_projection(
+            snapshot,
+            source="stash_pop",
+            metadata=stash_metadata if isinstance(stash_metadata, dict) else None,
+        )
         mgr.clear_stash()
         if hasattr(lab, "_persist_state"):
             lab._persist_state()
@@ -2166,7 +2202,11 @@ async def control_stash_pop(repo_id: str, payload: ControlStashBody = ControlSta
     except Exception as exc:
         raise HTTPException(status_code=409, detail=f"Stash pop failed: {exc}") from exc
 
-    runtime_mgr.apply_configuration_projection(snapshot, source="stash_pop")
+    runtime_mgr.apply_configuration_projection(
+        snapshot,
+        source="stash_pop",
+        metadata=stash_metadata if isinstance(stash_metadata, dict) else None,
+    )
     mgr.clear_stash()
     if hasattr(lab, "_persist_state"):
         lab._persist_state()

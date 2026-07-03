@@ -68,6 +68,8 @@ import {
     normalizeControlViewState,
     runtimeEditableOrMessage,
     setAppliedPointer,
+    setPreviewOverlay,
+    clearPreviewOverlay,
     setViewingCommit,
     syncControlStatus,
 } from '../control/control-state.js';
@@ -360,7 +362,7 @@ function enterRepo(repoId) {
     // Leave the branch unresolved so refreshControlPanel follows the branch the
     // bench is actually applied to (not a hardcoded 'main').
     store.control.branch = null;
-    store.control.previewConfig = null;
+    clearPreviewOverlay();
     store.control.viewingCommitId = null;
     store.control.selectedCommitId = null;
     store.control.liveHeadId = null;
@@ -378,7 +380,7 @@ function enterRepo(repoId) {
 /** Leave version control: hide the panel. Bench and ownership are untouched. */
 function stopVersionControl() {
     store.control.repoId = null;
-    store.control.previewConfig = null;
+    clearPreviewOverlay();
     store.control.viewingCommitId = null;
     store.control.selectedCommitId = null;
     store.control.working = null;
@@ -731,8 +733,11 @@ async function viewConfiguration(commitId, node) {
         // live bench is NOT touched, so no fetchLabState / ghost resync. Viewing
         // the applied node shows the live bench directly (no overlay).
         const appliedNow = getAppliedCommitId();
-        store.control.previewConfig =
-            commitId === appliedNow ? null : (res && res.configuration) || null;
+        if (commitId === appliedNow) {
+            clearPreviewOverlay();
+        } else {
+            setPreviewOverlay(res && res.configuration, res && res.metadata);
+        }
 
         setViewingCommit(commitId);
 
@@ -938,7 +943,7 @@ function onSetAsNode(commitId) {
 async function executeSetAsNode(commitId) {
     try {
         const res = await adoptConfiguration(commitId);
-        store.control.previewConfig = null;
+        clearPreviewOverlay();
         store.control.viewingCommitId = null;
         store.control.selectedCommitId = commitId;
         if (res?.applied) setAppliedPointer(res.applied);
@@ -1052,7 +1057,7 @@ async function executeHardCheckout(commitId, plan, targetConfig) {
 
         const result = await finalizeHardCheckout(commitId);
 
-        store.control.previewConfig = null;
+        clearPreviewOverlay();
 
         store.control.viewingCommitId = null;
 
@@ -1128,7 +1133,7 @@ async function returnToLiveHead() {
 
     if (!applied) {
 
-        store.control.previewConfig = null;
+        clearPreviewOverlay();
 
         store.control.viewingCommitId = null;
 
@@ -1153,7 +1158,7 @@ async function returnToLiveHead() {
         // Returning to the bench is now purely clearing the read-only preview
         // overlay — the live bench was never modified, so there is nothing to
         // re-apply.
-        store.control.previewConfig = null;
+        clearPreviewOverlay();
 
         store.control.viewingCommitId = null;
 
@@ -1215,7 +1220,7 @@ async function onSaveConfiguration() {
 
         });
 
-        store.control.previewConfig = null;
+        clearPreviewOverlay();
 
         store.control.viewingCommitId = null;
 
@@ -1278,7 +1283,7 @@ async function onForkBranch() {
         // Fork lands the bench on the new branch HEAD carrying any uncommitted
         // changes — refresh the runtime/panel rather than entering view mode.
 
-        store.control.previewConfig = null;
+        clearPreviewOverlay();
 
         store.control.viewingCommitId = null;
 
@@ -1342,7 +1347,7 @@ async function onStashChanges() {
 
             confirmMsg,
 
-            () => { void executeStash(message, plan, snapshot); },
+            () => { void executeStash(message, plan, snapshot, preview.metadata || null); },
 
             () => { hidePlanPreview(); },
 
@@ -1362,7 +1367,7 @@ async function onStashChanges() {
 
 
 
-async function executeStash(message, plan, snapshot) {
+async function executeStash(message, plan, snapshot, metadata) {
 
     const steps = Array.isArray(plan) ? plan : [];
 
@@ -1372,7 +1377,7 @@ async function executeStash(message, plan, snapshot) {
         // record the stash from the snapshot captured before we moved anything.
         await runReconcilePlan(steps, { title: 'Stash' });
 
-        await finalizeStash(message, snapshot);
+        await finalizeStash(message, snapshot, metadata);
 
         store.forceGhostSync = true;
 

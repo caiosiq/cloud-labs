@@ -21,7 +21,10 @@ from lab_model.state.projections import (
     EMPTY_CONFIGURATION,
     build_setup,
     extract_configuration,
+    extract_configuration_metadata,
     extract_observations,
+    infer_configuration_metadata_from_document,
+    strip_non_reconcile_tunables_from_configuration,
     table_configuration,
 )
 from lab_model.state.reconcile import plan_reconcile
@@ -323,6 +326,89 @@ class ControlManager:
                     updated += 1
         return updated
 
+    def _latest_observations_by_configuration_id(self) -> Dict[str, Dict[str, Any]]:
+        """Map configuration id → observations payload from the newest pin per commit."""
+        index: Dict[str, Dict[str, Any]] = {}
+        if not os.path.isdir(self.observations_dir):
+            return index
+        pins: List[Dict[str, Any]] = []
+        for name in os.listdir(self.observations_dir):
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(self.observations_dir, name)
+            try:
+                with open(path, "r", encoding="utf-8-sig") as handle:
+                    doc = json.load(handle)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(doc, dict):
+                pins.append(doc)
+        pins.sort(key=lambda item: str(item.get("created_at") or ""))
+        for pin in pins:
+            cid = pin.get("configuration_id")
+            if isinstance(cid, str) and cid:
+                obs = pin.get("observations")
+                index[cid] = obs if isinstance(obs, dict) else {}
+        return index
+
+    def _backfill_optimization_on_document(
+        self,
+        doc: Dict[str, Any],
+        *,
+        observations: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Idempotently add optimization metadata and strip legacy placement tunables."""
+        cfg = doc.get("configuration")
+        if not isinstance(cfg, dict):
+            return False
+        changed = False
+        inferred = infer_configuration_metadata_from_document(
+            doc,
+            observations=observations,
+        )
+        if inferred:
+            meta = doc.get("metadata")
+            if not isinstance(meta, dict):
+                meta = {}
+                doc["metadata"] = meta
+            opt = meta.get("optimization")
+            if not isinstance(opt, dict):
+                opt = {}
+                meta["optimization"] = opt
+            for tag_id, entry in (inferred.get("optimization") or {}).items():
+                if tag_id not in opt:
+                    opt[tag_id] = copy.deepcopy(entry)
+                    changed = True
+        if strip_non_reconcile_tunables_from_configuration(cfg):
+            changed = True
+        return changed
+
+    def backfill_optimization_metadata(self) -> int:
+        """One-time migration: infer ``metadata.optimization`` on legacy commits.
+
+        Uses legacy ``tunables.placement.mode`` plus observation pins linked to
+        each configuration id. Also strips ``placement`` from stored tunables.
+        Idempotent — safe to run repeatedly.
+        """
+        obs_by_config = self._latest_observations_by_configuration_id()
+        updated = 0
+        for cid in self.list_configuration_ids():
+            try:
+                doc = self.get_configuration(cid)
+            except (FileNotFoundError, ValueError):
+                continue
+            if self._backfill_optimization_on_document(
+                doc,
+                observations=obs_by_config.get(cid),
+            ):
+                self.save_configuration_document(doc)
+                updated += 1
+        stash = self.get_stash()
+        if isinstance(stash, dict) and self._backfill_optimization_on_document(stash):
+            _atomic_write_json(self.stash_path, stash)
+            updated += 1
+        return updated
+
     def commit_configuration(
         self,
         configuration: Mapping[str, Any],
@@ -332,10 +418,12 @@ class ControlManager:
         parent_id: Optional[str] = None,
         author: Optional[str] = None,
         catalog_hash: Optional[str] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         if parent_id is None:
             parent_id = self.get_head(branch)
         commit_id = uuid.uuid4().hex
+        meta_copy = copy.deepcopy(dict(metadata)) if metadata else None
         document = configuration_document(
             commit_id=commit_id,
             repo_id=self.repo_id,
@@ -343,6 +431,7 @@ class ControlManager:
             parent_id=parent_id,
             message=message.strip() or "configuration commit",
             configuration=copy.deepcopy(dict(configuration)),
+            metadata=meta_copy,
             catalog_hash=catalog_hash,
             created_at=_utc_now(),
             author=author,
@@ -364,6 +453,7 @@ class ControlManager:
         catalog_hash: Optional[str] = None,
     ) -> Dict[str, Any]:
         configuration = extract_configuration(runtime)
+        metadata = extract_configuration_metadata(runtime)
         return self.commit_configuration(
             configuration,
             message=message,
@@ -371,6 +461,7 @@ class ControlManager:
             parent_id=parent_id,
             author=author,
             catalog_hash=catalog_hash,
+            metadata=metadata or None,
         )
 
     def fork_branch(self, *, branch: str, parent_id: str) -> None:
@@ -633,6 +724,7 @@ class ControlManager:
         base_configuration_id: Optional[str],
         base_branch: Optional[str],
         message: Optional[str] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         document = {
             "id": uuid.uuid4().hex,
@@ -643,6 +735,8 @@ class ControlManager:
             "message": (message or "").strip() or None,
             "created_at": _utc_now(),
         }
+        if metadata:
+            document["metadata"] = copy.deepcopy(dict(metadata))
         _atomic_write_json(self.stash_path, document)
         return document
 

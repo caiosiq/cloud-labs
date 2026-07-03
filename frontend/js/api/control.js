@@ -183,11 +183,16 @@ export async function popStash({ preview = false } = {}) {
  * preview time (before the primitives ran), so the saved stash reflects the
  * changes that were set aside — not the now-clean bench.
  */
-export async function finalizeStash(message, snapshot) {
+export async function finalizeStash(message, snapshot, metadata) {
     const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/stash`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: message ?? null, finalize: true, snapshot }),
+        body: JSON.stringify({
+            message: message ?? null,
+            finalize: true,
+            snapshot,
+            metadata: metadata ?? null,
+        }),
     });
     return parseJson(res);
 }

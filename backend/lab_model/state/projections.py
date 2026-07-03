@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from typing import Any, Dict, Mapping, Optional
 
 from lab_model.domain.component import (
@@ -32,6 +33,231 @@ EMPTY_CONFIGURATION: Dict[str, Any] = {
     "holding": {"tag_id": None, "nominal_pose": None},
     "components": {},
 }
+
+# Tunable keys that annotate how a pose was reached but do not affect reconcile.
+NON_RECONCILE_TUNABLE_KEYS = frozenset({"placement"})
+
+# Placement modes that are not optimization-sourced (mirrors frontend component-model).
+NON_OPTIMIZATION_PLACEMENT_MODES = frozenset({"MANUAL", "STORAGE", "HOVER", "PICK"})
+
+
+def _tunables_for_configuration_slice(tunables: Mapping[str, Any]) -> Dict[str, Any]:
+    """Copy tunables for versioned configuration, omitting non-reconcile keys."""
+    out = copy.deepcopy(dict(tunables))
+    for key in NON_RECONCILE_TUNABLE_KEYS:
+        out.pop(key, None)
+    return out
+
+
+def _optimization_entry_from_component(entry: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """Build one tag's optimization metadata, or None if not optimization-sourced."""
+    tun = get_tunables(entry)
+    meas = get_measurables(entry)
+    score = meas.get("last_optimization_score")
+    if score is None:
+        return None
+    try:
+        score_f = float(score)
+        if not math.isfinite(score_f):
+            return None
+    except (TypeError, ValueError):
+        return None
+    pl = tun.get("placement") or {}
+    mode = str(pl.get("mode") or "MANUAL").upper()
+    if mode in NON_OPTIMIZATION_PLACEMENT_MODES:
+        return None
+    out: Dict[str, Any] = {
+        "placement_mode": mode,
+        "last_optimization_score": score_f,
+    }
+    lop = meas.get("last_optimized_pose")
+    if isinstance(lop, dict):
+        try:
+            out["last_optimized_pose"] = {
+                "x": float(lop.get("x", 0.0)),
+                "y": float(lop.get("y", 0.0)),
+                "rotation": float(lop.get("rotation", 0.0)),
+            }
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def extract_configuration_metadata(runtime: Mapping[str, Any]) -> Dict[str, Any]:
+    """Non-reconcile annotations stored on configuration commits (optimization outcomes)."""
+    components_in = runtime.get("components") or {}
+    if not isinstance(components_in, dict):
+        return {}
+    optimization: Dict[str, Any] = {}
+    for tag_id, entry in components_in.items():
+        if not isinstance(tag_id, str) or not isinstance(entry, dict):
+            continue
+        if is_stored(entry) or is_off_table(entry):
+            continue
+        meta_entry = _optimization_entry_from_component(entry)
+        if meta_entry is not None:
+            optimization[tag_id] = meta_entry
+    if not optimization:
+        return {}
+    return {"optimization": optimization}
+
+
+def _optimization_entry_from_legacy_sources(
+    cfg_entry: Mapping[str, Any],
+    obs_entry: Mapping[str, Any] | None = None,
+) -> Optional[Dict[str, Any]]:
+    """Infer optimization metadata from a legacy configuration component + optional obs pin."""
+    tun = ((cfg_entry.get("statecontrol") or {}).get("tunables") or {})
+    if not isinstance(tun, dict):
+        tun = {}
+    pl = tun.get("placement") or {}
+    mode = str(pl.get("mode") or "MANUAL").upper()
+    if mode in NON_OPTIMIZATION_PLACEMENT_MODES:
+        return None
+
+    score = None
+    lop = None
+    if isinstance(obs_entry, dict):
+        meas = ((obs_entry.get("statecontrol") or {}).get("measurables") or {})
+        if isinstance(meas, dict):
+            score = meas.get("last_optimization_score")
+            lop = meas.get("last_optimized_pose")
+
+    if score is None:
+        return None
+    try:
+        score_f = float(score)
+        if not math.isfinite(score_f):
+            return None
+    except (TypeError, ValueError):
+        return None
+
+    out: Dict[str, Any] = {
+        "placement_mode": mode,
+        "last_optimization_score": score_f,
+    }
+    if isinstance(lop, dict):
+        try:
+            out["last_optimized_pose"] = {
+                "x": float(lop.get("x", 0.0)),
+                "y": float(lop.get("y", 0.0)),
+                "rotation": float(lop.get("rotation", 0.0)),
+            }
+        except (TypeError, ValueError):
+            pass
+    else:
+        np = tun.get("nominal_pose")
+        if isinstance(np, dict):
+            try:
+                out["last_optimized_pose"] = {
+                    "x": float(np.get("x", 0.0)),
+                    "y": float(np.get("y", 0.0)),
+                    "rotation": float(np.get("rotation", 0.0)),
+                }
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
+def infer_configuration_metadata_from_document(
+    document: Mapping[str, Any],
+    *,
+    observations: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Build optimization metadata for a stored commit (legacy backfill helper)."""
+    configuration = document.get("configuration") or {}
+    if not isinstance(configuration, dict):
+        return {}
+    existing = document.get("metadata") or {}
+    existing_opt = (
+        existing.get("optimization") if isinstance(existing, dict) else None
+    ) or {}
+    obs_components = (observations or {}).get("components") or {}
+    if not isinstance(obs_components, dict):
+        obs_components = {}
+
+    cfg_components = table_configuration(configuration).get("components") or {}
+    if not isinstance(cfg_components, dict):
+        cfg_components = {}
+
+    optimization: Dict[str, Any] = dict(existing_opt) if isinstance(existing_opt, dict) else {}
+    for tag_id, cfg_entry in cfg_components.items():
+        if not isinstance(tag_id, str) or not isinstance(cfg_entry, dict):
+            continue
+        if tag_id in optimization:
+            continue
+        obs_entry = obs_components.get(tag_id)
+        obs_map = obs_entry if isinstance(obs_entry, dict) else None
+        entry = _optimization_entry_from_legacy_sources(cfg_entry, obs_map)
+        if entry is not None:
+            optimization[tag_id] = entry
+
+    if not optimization:
+        return {}
+    return {"optimization": optimization}
+
+
+def strip_non_reconcile_tunables_from_configuration(configuration: Dict[str, Any]) -> bool:
+    """Remove ``placement`` from stored configuration tunables (legacy normalize). Returns True if changed."""
+    changed = False
+    comps = configuration.get("components")
+    if not isinstance(comps, dict):
+        return False
+    for entry in comps.values():
+        if not isinstance(entry, dict):
+            continue
+        sc = entry.get("statecontrol")
+        if not isinstance(sc, dict):
+            continue
+        tun = sc.get("tunables")
+        if not isinstance(tun, dict):
+            continue
+        if "placement" in tun:
+            del tun["placement"]
+            changed = True
+    return changed
+
+
+def apply_configuration_metadata(
+    runtime: Dict[str, Any],
+    metadata: Mapping[str, Any] | None,
+) -> None:
+    """Restore optimization annotations onto runtime after checkout (display only)."""
+    if not metadata:
+        return
+    optimization = metadata.get("optimization")
+    if not isinstance(optimization, dict):
+        return
+    components = runtime.get("components") or {}
+    if not isinstance(components, dict):
+        return
+    for tag_id, meta_entry in optimization.items():
+        if not isinstance(tag_id, str) or not isinstance(meta_entry, dict):
+            continue
+        entry = components.get(tag_id)
+        if not isinstance(entry, dict):
+            continue
+        mode = meta_entry.get("placement_mode")
+        if isinstance(mode, str) and mode.strip():
+            from lab_model.domain.component import tunables_bucket
+
+            tunables_bucket(entry)["placement"] = {"mode": mode.strip().upper()}
+        score = meta_entry.get("last_optimization_score")
+        if score is not None:
+            try:
+                measurables_bucket(entry)["last_optimization_score"] = float(score)
+            except (TypeError, ValueError):
+                pass
+        lop = meta_entry.get("last_optimized_pose")
+        if isinstance(lop, dict):
+            try:
+                measurables_bucket(entry)["last_optimized_pose"] = {
+                    "x": float(lop.get("x", 0.0)),
+                    "y": float(lop.get("y", 0.0)),
+                    "rotation": float(lop.get("rotation", 0.0)),
+                }
+            except (TypeError, ValueError):
+                pass
 
 
 def _config_entry_on_table(entry: Mapping[str, Any]) -> bool:
@@ -100,7 +326,7 @@ def extract_configuration(runtime: Mapping[str, Any]) -> Dict[str, Any]:
             "id": entry.get("id", tag_id),
             "type": entry.get("type"),
             "statecontrol": {
-                "tunables": copy.deepcopy(get_tunables(entry)),
+                "tunables": _tunables_for_configuration_slice(get_tunables(entry)),
             },
         }
     out: Dict[str, Any] = {

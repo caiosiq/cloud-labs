@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "saved_at": "2026-07-02T18:31:19.799492+00:00",
+  "saved_at": "2026-07-03T15:19:56.716227+00:00",
   "lab_mode": "MOCK",
   "lab_state": {
     "system_status": "IDLE",
-    "last_updated": "2026-07-02T15:31:11.085612",
+    "last_updated": "2026-07-03T09:35:20.062854",
     "components": {
       "tag_9": {
         "id": "tag_9",
@@ -322,9 +322,9 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 256.66660853794644,
-              "y": -150.0,
-              "rotation": 0.0
+              "x": 454.24285714285725,
+              "y": 200.0,
+              "rotation": -90.0
             },
             "nominal_motor_positions": {},
             "storage": {
@@ -500,19 +500,22 @@
         "type": "OPTICAL_BEAMSPLITTER",
         "statecontrol": {
           "tunables": {
-            "presence": "breadboard",
+            "presence": "storage",
             "nominal_pose": {
-              "x": 256.66660853794644,
-              "y": 200.0,
-              "rotation": 180.0
+              "x": -112.5,
+              "y": -332.5,
+              "rotation": 0.0
             },
             "nominal_motor_positions": {},
             "storage": {
-              "in_storage": false,
-              "slot": null
+              "in_storage": true,
+              "slot": {
+                "i": 2,
+                "j": 0
+              }
             },
             "placement": {
-              "mode": "MANUAL"
+              "mode": "STORAGE"
             }
           },
           "measurables": {
@@ -696,39 +699,6 @@
     "optimization_run_dir": null,
     "optimization_target_id": null,
     "alignment_guides": [
-      {
-        "id": "g_0576663fea70",
-        "p1": {
-          "x": 129.5237513950893,
-          "y": -27.361101422991073
-        },
-        "p2": {
-          "x": 483.8094656808036,
-          "y": -27.361101422991073
-        }
-      },
-      {
-        "id": "g_2a167ca6ec44",
-        "p1": {
-          "x": 453.8094656808036,
-          "y": 278.35318429129467
-        },
-        "p2": {
-          "x": 453.8094656808036,
-          "y": -228.78967285156253
-        }
-      },
-      {
-        "id": "g_607cc43a9b1a",
-        "p1": {
-          "x": 256.66660853794644,
-          "y": 345.49604143415183
-        },
-        "p2": {
-          "x": 256.66660853794644,
-          "y": -193.0753871372768
-        }
-      },
       {
         "id": "g_83fa666c00f3",
         "p1": {

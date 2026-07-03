@@ -9,6 +9,7 @@ import {
 import {
     isConfigViewMode,
     setAppliedPointer,
+    clearPreviewOverlay,
 } from '../control/control-state.js';
 import { store } from '../state/store.js';
 import { showConfirmationModal, showErrorModal } from './modals.js';
@@ -74,7 +75,7 @@ async function executeRepoSwitch(repoSelect, newRepoId, previousRepoId, deps) {
         store.control.repoId = newRepoId;
         // Unresolved: refreshControlPanel adopts the applied branch of the target.
         store.control.branch = null;
-        store.control.previewConfig = null;
+        clearPreviewOverlay();
         store.control.viewingCommitId = null;
         store.control.selectedCommitId = null;
         store.control.liveHeadId = null;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 import tempfile
@@ -13,7 +14,11 @@ from lab_communicator.shared.lab_view_config import bootstrap_lab_view
 from lab_model.primitives.ids import PrimitiveId
 from lab_model.state.control_manager import ControlManager
 from lab_model.state.diff import configuration_diff
-from lab_model.state.projections import extract_configuration, extract_observations
+from lab_model.state.projections import (
+    extract_configuration,
+    extract_configuration_metadata,
+    extract_observations,
+)
 from lab_model.state.reconcile import plan_reconcile
 from lab_model.state.reconcile_executor import validate_reconcile_plan
 from lab_model.state.runtime_manager import MutationKind, RuntimeManager
@@ -463,6 +468,190 @@ class ControlRuntimeTests(unittest.TestCase):
         pose = updated["components"][tag]["statecontrol"]["tunables"]["nominal_pose"]
         self.assertAlmostEqual(pose["x"], base_x + 73.0)
         self.assertEqual(pose["y"], 222.0)
+
+    def test_extract_configuration_strips_placement_and_metadata_roundtrip(self) -> None:
+        runtime = json.loads(json.dumps(self.fixture_runtime))
+        tag = next(
+            t
+            for t, c in runtime["components"].items()
+            if (c.get("statecontrol", {}).get("tunables", {}) or {}).get("presence")
+            == "breadboard"
+        )
+        sc = runtime["components"][tag]["statecontrol"]
+        sc["tunables"]["placement"] = {"mode": "NEWTON"}
+        sc["measurables"]["last_optimization_score"] = 0.87
+        sc["measurables"]["last_optimized_pose"] = {
+            "x": 1.0,
+            "y": 2.0,
+            "rotation": 3.0,
+        }
+
+        configuration = extract_configuration(runtime)
+        tun = configuration["components"][tag]["statecontrol"]["tunables"]
+        self.assertNotIn("placement", tun)
+
+        metadata = extract_configuration_metadata(runtime)
+        self.assertEqual(
+            metadata["optimization"][tag]["placement_mode"],
+            "NEWTON",
+        )
+        self.assertAlmostEqual(
+            metadata["optimization"][tag]["last_optimization_score"],
+            0.87,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = ControlManager(tmp, "test")
+            commit = mgr.commit_from_runtime(runtime, message="optimized", branch="main")
+            loaded = mgr.get_configuration(commit["id"])
+            self.assertIn("metadata", loaded)
+            self.assertEqual(
+                loaded["metadata"]["optimization"][tag]["placement_mode"],
+                "NEWTON",
+            )
+
+    def test_placement_mode_does_not_trigger_configuration_diff(self) -> None:
+        current = extract_configuration(self.fixture_runtime)
+        target = json.loads(json.dumps(current))
+        tag = next(iter(target["components"].keys()))
+        tun = target["components"][tag]["statecontrol"]["tunables"]
+        tun["placement"] = {"mode": "NEWTON"}
+
+        changes = configuration_diff(current, target)
+        self.assertFalse(
+            any(item.get("path") == "tunables.placement" for item in changes),
+            changes,
+        )
+        plan = plan_reconcile(current, target)
+        self.assertEqual(plan, [])
+
+    def test_hard_checkout_restores_optimization_metadata(self) -> None:
+        runtime = json.loads(json.dumps(self.fixture_runtime))
+        tag = next(
+            t
+            for t, c in runtime["components"].items()
+            if (c.get("statecontrol", {}).get("tunables", {}) or {}).get("presence")
+            == "breadboard"
+        )
+        sc = runtime["components"][tag]["statecontrol"]
+        sc["tunables"]["placement"] = {"mode": "COBYLA"}
+        sc["measurables"]["last_optimization_score"] = 0.75
+
+        configuration = extract_configuration(runtime)
+        metadata = extract_configuration_metadata(runtime)
+        runtime_mgr = RuntimeManager(runtime)
+        runtime_mgr.apply_hard_checkout_projection(
+            configuration,
+            source="test",
+            metadata=metadata,
+        )
+        obs = runtime_mgr.extract_observations()
+        meas = obs["components"][tag]["statecontrol"]["measurables"]
+        self.assertAlmostEqual(meas["last_optimization_score"], 0.75)
+        updated = runtime_mgr.extract_configuration()
+        tun = updated["components"][tag]["statecontrol"]["tunables"]
+        self.assertNotIn("placement", tun)
+
+    def test_commit_optimization_complete_syncs_nominal_pose(self) -> None:
+        from lab_model.state.commits import commit_optimization_complete
+
+        runtime = json.loads(json.dumps(self.fixture_runtime))
+        tag = next(
+            t
+            for t, c in runtime["components"].items()
+            if (c.get("statecontrol", {}).get("tunables", {}) or {}).get("presence")
+            == "breadboard"
+        )
+        commit_optimization_complete(
+            runtime,
+            tag,
+            strategy_name="NEWTON",
+            score=0.91,
+            final_pose={"x": 10.0, "y": 20.0, "rotation": 5.0},
+        )
+        sc = runtime["components"][tag]["statecontrol"]
+        self.assertEqual(
+            sc["tunables"]["nominal_pose"],
+            {"x": 10.0, "y": 20.0, "rotation": 5.0},
+        )
+        self.assertAlmostEqual(
+            sc["measurables"]["last_optimization_score"],
+            0.91,
+        )
+
+    def test_backfill_optimization_metadata_from_legacy_commit(self) -> None:
+        from lab_model.state.control_documents import configuration_document
+        from lab_model.state.projections import infer_configuration_metadata_from_document
+
+        legacy_cfg = {
+            "holding": {"tag_id": None, "nominal_pose": None},
+            "components": {
+                "tag_a": {
+                    "statecontrol": {
+                        "tunables": {
+                            "presence": "breadboard",
+                            "nominal_pose": {"x": 1.0, "y": 2.0, "rotation": 0.0},
+                            "placement": {"mode": "NEWTON"},
+                        }
+                    }
+                }
+            },
+        }
+        observations = {
+            "components": {
+                "tag_a": {
+                    "statecontrol": {
+                        "measurables": {
+                            "last_optimization_score": 0.88,
+                            "last_optimized_pose": {"x": 1.0, "y": 2.0, "rotation": 0.0},
+                        }
+                    }
+                }
+            }
+        }
+        doc = configuration_document(
+            commit_id="abc",
+            repo_id="test",
+            branch="main",
+            parent_id=None,
+            message="legacy",
+            configuration=copy.deepcopy(legacy_cfg),
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+        inferred = infer_configuration_metadata_from_document(
+            doc,
+            observations=observations,
+        )
+        self.assertAlmostEqual(
+            inferred["optimization"]["tag_a"]["last_optimization_score"],
+            0.88,
+        )
+        self.assertEqual(inferred["optimization"]["tag_a"]["placement_mode"], "NEWTON")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = ControlManager(tmp, "test")
+            mgr.save_configuration_document(doc)
+            obs_dir = mgr.observations_dir
+            os.makedirs(obs_dir, exist_ok=True)
+            pin_path = os.path.join(obs_dir, "pin1.json")
+            with open(pin_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "configuration_id": "abc",
+                        "created_at": "2026-01-02T00:00:00+00:00",
+                        "observations": observations,
+                    },
+                    handle,
+                )
+            updated = mgr.backfill_optimization_metadata()
+            self.assertEqual(updated, 1)
+            loaded = mgr.get_configuration("abc")
+            self.assertIn("metadata", loaded)
+            self.assertNotIn(
+                "placement",
+                loaded["configuration"]["components"]["tag_a"]["statecontrol"]["tunables"],
+            )
+            self.assertEqual(mgr.backfill_optimization_metadata(), 0)
 
 
 if __name__ == "__main__":

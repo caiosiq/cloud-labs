@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, Final
 
 KIND_CONFIGURATION: Final[str] = "cloud_labs_configuration"
@@ -20,6 +21,7 @@ def configuration_document(
     parent_id: str | None,
     message: str,
     configuration: Dict[str, Any],
+    metadata: Dict[str, Any] | None = None,
     catalog_hash: str | None = None,
     created_at: str,
     author: str | None = None,
@@ -35,6 +37,8 @@ def configuration_document(
         "created_at": created_at,
         "configuration": configuration,
     }
+    if metadata:
+        doc["metadata"] = copy.deepcopy(metadata)
     if catalog_hash is not None:
         doc["catalog_hash"] = catalog_hash
     if author is not None:
