@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kernels": [
+    {
+      "id": "demo.image_mean_score",
+      "label": "Demo image mean score",
+      "artifact": "demo_image_mean_score.pt",
+      "runtime": "torchscript",
+      "backend": "any",
+      "phase": "production",
+      "output_kind": "scalar",
+      "hooks": ["evaluate", "capture", "tensor"],
+      "inputs": [
+        {
+          "name": "image",
+          "from": "measurables.camera_image",
+          "layout": "bgr_hwc_uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "score",
+          "role": "scalar"
+        }
+      ],
+      "description": "Fixture scalar for CI/mock and Wiki demos. Converts the camera frame to float RGB in [0,1] (NCHW) and returns the mean intensity of all pixels. Bright images score near 1.0; dark images near 0.0. Not a physical beam metric — use curated feature kernels or a session kernel for centroid/radius work."
+    },
+    {
+      "id": "demo.roi_mean_score",
+      "label": "Demo center ROI mean",
+      "artifact": "demo_roi_mean_score.pt",
+      "runtime": "torchscript",
+      "backend": "any",
+      "phase": "production",
+      "output_kind": "scalar",
+      "hooks": ["evaluate", "capture", "tensor"],
+      "inputs": [
+        {
+          "name": "image",
+          "from": "measurables.camera_image",
+          "layout": "bgr_hwc_uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "score",
+          "role": "scalar"
+        }
+      ],
+      "description": "Mean intensity over the center half of the frame (crop H/4..3H/4, W/4..3W/4) after RGB float normalization. Useful when you care about the middle of the camera FOV rather than the full sensor."
+    },
+    {
+      "id": "demo.peak_intensity",
+      "label": "Demo peak intensity",
+      "artifact": "demo_peak_intensity.pt",
+      "runtime": "torchscript",
+      "backend": "any",
+      "phase": "production",
+      "output_kind": "scalar",
+      "hooks": ["evaluate", "capture", "tensor"],
+      "inputs": [
+        {
+          "name": "image",
+          "from": "measurables.camera_image",
+          "layout": "bgr_hwc_uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "score",
+          "role": "scalar"
+        }
+      ],
+      "description": "Maximum channel intensity in the normalized RGB frame (max over C,H,W). Tracks the brightest pixel — a crude peak-power proxy for mock demos."
+    }
+  ]
+}

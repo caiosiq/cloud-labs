@@ -11,6 +11,8 @@ from lab_communicator.real.ensemble import (
     RealEnsembleBackend,
     RealEnsembleHardwareBridge,
     _read_scalar_from_state,
+)
+from lab_model.optimization.metrics.image_features import (
     compute_beam_centroid_px,
     compute_beam_power_scalar,
 )
@@ -52,9 +54,12 @@ class TestReadScalarFromState(unittest.TestCase):
         state = {
             "components": {
                 "tag_20": {
-                    "measurables": {
-                        "last_optimization_score": {"scalar": 0.42},
-                    }
+                    "statecontrol": {
+                        "measurables": {
+                            "last_optimization_score": {"scalar": 0.42},
+                        }
+                    },
+                    "telemetry": {"teleop": {"active": False}, "live_feed": {}},
                 }
             }
         }
@@ -74,7 +79,13 @@ class TestRealEnsembleMeasurements(unittest.TestCase):
         png_bytes = self._spot_png_bytes()
         comm = MagicMock()
         comm.current_state = {"components": {}}
-        comm.catalog_map = {"tag_20": {"type": "OPTICAL_CAMERA", "cam_id": 1}}
+        comm.catalog_map = {
+            "tag_20": {"type": "OPTICAL_MIRROR", "motor_controller": "mirror_ctrl", "motor_ids": [1]},
+            "tag_22": {
+                "type": "OPTICAL_CAMERA",
+                "hardware_binding": {"backend": "recorder_tcp", "recorder_cam_id": 1},
+            },
+        }
         comm.return_tunables_for_tag.return_value = {}
         comm.capture_table_cam.return_value = png_bytes
         comm._table_cam_connected = {1: True}
@@ -104,6 +115,8 @@ class TestRealEnsembleMeasurements(unittest.TestCase):
                             "source": {
                                 "tag_id": "tag_20",
                                 "kind": "derived_centroid",
+                                "from": "measurables.camera_image",
+                                "target_px": {"x": 512.0, "y": 384.0},
                             },
                             "metric": "rms_distance_px",
                         }
@@ -120,6 +133,7 @@ class TestRealEnsembleMeasurements(unittest.TestCase):
         self.assertIn("centroid_rms_px", meas)
         self.assertAlmostEqual(meas["centroid_rms_px"]["centroid_x"], 70.0, delta=4.0)
         self.assertAlmostEqual(meas["centroid_rms_px"]["centroid_y"], 40.0, delta=4.0)
+        comm.capture_table_cam.assert_called_with(1, exposure=0.2)
 
     @staticmethod
     def _spot_png_bytes() -> bytes:

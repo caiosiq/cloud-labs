@@ -43,6 +43,8 @@ import {
 import { syncMotorActionStatuses } from '../ui/motor-action-ui.js';
 import { syncGuidesFromLabState } from '../canvas/guides.js';
 import { syncLaserLinesFromLabState } from '../ui/laser-lines-panel.js';
+import { refreshSessionLeaseBanner } from '../control/control-state.js';
+import { withBackendQuery, ensureBackendSelected } from './backend-selection.js';
 const OPTIMIZING_POLL_MS = 100;
 let _pollTimerId = null;
 let _pollIntervalMs = POLLING_INTERVAL;
@@ -157,8 +159,9 @@ export function startLabStatePolling() {
 
 export async function fetchLabState() {
     try {
+        await ensureBackendSelected();
         console.log(`[${new Date().toLocaleTimeString()}] Requesting Lab State...`);
-        const response = await fetch('/api/lab-state');
+        const response = await fetch(withBackendQuery('/api/lab-state'));
         if (!response.ok) {
             // Surface the backend's error detail when available — it usually carries a
             // human-readable reason (e.g. "controller in safe mode").
@@ -172,6 +175,7 @@ export async function fetchLabState() {
         }
 
         store.labState = await response.json();
+        refreshSessionLeaseBanner();
         syncTeleopLivePosePolls();
         // Versioned alignment overlays travel with lab-state — mirror them into
         // the canvas mirrors so commit / checkout / stash changes show up.
@@ -349,9 +353,13 @@ export async function fetchLabState() {
             store.labState.system_status === 'HOLDING';
         const reconcileActive =
             store.control.reconcileProgress && store.control.reconcileProgress.active;
-        if (stableStatus && !reconcileActive) {
+        const jobMonitorActive = store.operationsMonitorActive;
+        if (stableStatus && !reconcileActive && !jobMonitorActive) {
             store.pendingCommands.clear();
             store.pendingActions.clear();
+        }
+        if (jobMonitorActive && typeof store.operationsOnLabStatePoll === 'function') {
+            store.operationsOnLabStatePoll();
         }
         syncMotorActionStatuses();
         // Per-tag snapshots are now written by ``updateContextPanel(tag)`` at

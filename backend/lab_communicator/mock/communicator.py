@@ -388,6 +388,7 @@ class MockLabCommunicator(LabCommunicator):
         x0: Dict[str, Any],
         session_id: str,
         progress_callback: Callable[..., None],
+        should_abort: Optional[Callable[[], bool]] = None,
     ) -> Optional[Dict[str, Any]]:
         from lab_communicator.mock.ensemble import run_mock_ensemble_session
         from lab_model.optimization.spec import OptimizeEnsembleParameters
@@ -413,6 +414,8 @@ class MockLabCommunicator(LabCommunicator):
                 session_id=session_id,
                 progress_callback=_ui_progress,
                 state_lock=self._state_lock,
+                should_abort=should_abort
+                or getattr(self, "_job_abort_check", None),
             )
             with self._state_lock:
                 self._persist_state()

@@ -1,4 +1,5 @@
 import { store } from '../state/store.js';
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
 
 let _deps = {
     fetchCatalogMap: async () => {},
@@ -51,7 +52,9 @@ function renderRuntimeMode(info) {
 }
 
 async function fetchRuntimeMode() {
-    const response = await fetch('/api/runtime-mode');
+    const response = await fetch(withBackendQuery('/api/runtime-mode'), {
+        headers: backendHeaders(),
+    });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
         throw new Error(detailFromResponse(data, `HTTP ${response.status}`));
@@ -64,9 +67,9 @@ export async function switchRuntimeMode(mode) {
     const select = document.getElementById('runtime-mode-select');
     if (select) select.disabled = true;
     try {
-        const response = await fetch('/api/runtime-mode', {
+        const response = await fetch(withBackendQuery('/api/runtime-mode'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ mode }),
         });
         const data = await response.json().catch(() => ({}));

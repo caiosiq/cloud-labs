@@ -251,10 +251,16 @@ class VariablePathResolver:
         return {b.variable.id: b.get_value() for b in self._bindings}
 
 
+def component_entry(state: Mapping[str, Any], tag_id: str) -> Optional[Dict[str, Any]]:
+    """Return one component dict from live runtime state, or None."""
+    return _component_entry(state, tag_id)
+
+
 __all__ = [
     "ALLOWED_VARIABLE_PATHS",
     "ParsedVariablePath",
     "VariableBinding",
     "VariablePathResolver",
+    "component_entry",
     "parse_variable_path",
 ]

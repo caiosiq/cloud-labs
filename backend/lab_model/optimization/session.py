@@ -26,6 +26,7 @@ def run_ensemble_optimization(
     backend: EnsembleEvaluationBackend,
     session_id: str = "",
     progress_callback: Optional[Callable[..., None]] = None,
+    should_abort: Optional[Callable[[], bool]] = None,
 ) -> EnsembleOptimizationResult:
     """
     Inner macro loop: sequential block COBYLA on normalized subspaces.
@@ -41,9 +42,17 @@ def run_ensemble_optimization(
     evals = 0
     trace: list[Dict[str, Any]] = []
 
+    class _OptimizationAborted(Exception):
+        pass
+
+    def _check_abort() -> None:
+        if should_abort is not None and should_abort():
+            raise _OptimizationAborted("cancelled")
+
     def _objective_for_block(block_id: str, router: Any) -> Callable[[Mapping[str, float]], float]:
         def _fn(physical: Mapping[str, float]) -> float:
             nonlocal evals, best_loss, best
+            _check_abort()
             backend.apply_through_router(router, physical, block_id=block_id)
             loss, terms = backend.evaluate_loss(
                 physical,
@@ -72,33 +81,38 @@ def run_ensemble_optimization(
 
         return _fn
 
-    for block in spec.solver.blocks:
-        block_vars = [variables_by_id[vid] for vid in block.variable_ids]
-        invasive = any(v.physical_type == "invasive_discrete" for v in block_vars)
-        router = backend.router_for_block(block, block.variable_ids)
-        if invasive:
-            router.enter_invasive_block(block.variable_ids)
-        else:
-            router.enter_continuous_block(block.variable_ids)
+    try:
+        for block in spec.solver.blocks:
+            _check_abort()
+            block_vars = [variables_by_id[vid] for vid in block.variable_ids]
+            invasive = any(v.physical_type == "invasive_discrete" for v in block_vars)
+            router = backend.router_for_block(block, block.variable_ids)
+            if invasive:
+                router.enter_invasive_block(block.variable_ids)
+            else:
+                router.enter_continuous_block(block.variable_ids)
 
-        obj_fn = _objective_for_block(block.id, router)
-        remaining = max(1, spec.solver.max_total_evals - evals)
-
-        for _pass in range(block.passes):
-            if evals >= spec.solver.max_total_evals:
-                break
-            per_block = min(block.max_evals, remaining)
-            current = run_block_cobyla(
-                block,
-                block.variable_ids,
-                space,
-                current,
-                obj_fn,
-                max_evals=per_block,
-            )
+            obj_fn = _objective_for_block(block.id, router)
             remaining = max(1, spec.solver.max_total_evals - evals)
 
-        router.exit_block(block.id)
+            for _pass in range(block.passes):
+                _check_abort()
+                if evals >= spec.solver.max_total_evals:
+                    break
+                per_block = min(block.max_evals, remaining)
+                current = run_block_cobyla(
+                    block,
+                    block.variable_ids,
+                    space,
+                    current,
+                    obj_fn,
+                    max_evals=per_block,
+                )
+                remaining = max(1, spec.solver.max_total_evals - evals)
+
+            router.exit_block(block.id)
+    except _OptimizationAborted:
+        pass
 
     sid = session_id or "ensemble"
     return EnsembleOptimizationResult(

@@ -12,6 +12,7 @@
  * Strategies are currently hard-coded client-side (no /api/strategies yet).
  */
 import { store } from '../state/store.js';
+import { withBackendQuery } from '../state/backend-selection.js';
 
 let _onCatalogLoaded = () => {};
 let _onRecipesLoaded = () => {};
@@ -40,9 +41,9 @@ function mergeCatalogRows(rows) {
 export async function fetchCatalogMap() {
     try {
         const [catalogRes, activeRes, libraryRes] = await Promise.all([
-            fetch('/api/catalog'),
-            fetch('/api/catalog/active-tags'),
-            fetch('/api/catalog/library-rows'),
+            fetch(withBackendQuery('/api/catalog')),
+            fetch(withBackendQuery('/api/catalog/active-tags')),
+            fetch(withBackendQuery('/api/catalog/library-rows')),
         ]);
         store.catalogMap = {};
         if (libraryRes.ok) {
@@ -110,7 +111,7 @@ export async function fetchStrategies() {
 
 export async function fetchStorageGridSpec() {
     try {
-        const response = await fetch('/api/storage-grid');
+        const response = await fetch(withBackendQuery('/api/storage-grid'));
         if (response.ok) {
             store.storageGridSpec = await response.json();
         }
@@ -121,7 +122,7 @@ export async function fetchStorageGridSpec() {
 
 export async function fetchLayoutConflicts() {
     try {
-        const response = await fetch('/api/layout-conflicts');
+        const response = await fetch(withBackendQuery('/api/layout-conflicts'));
         if (!response.ok) {
             store.layoutIssues = [];
             return;
@@ -136,7 +137,7 @@ export async function fetchLayoutConflicts() {
 
 export async function fetchRecipes() {
     try {
-        const response = await fetch('/api/recipes');
+        const response = await fetch(withBackendQuery('/api/recipes'));
         if (response.ok) {
             store.availableRecipes = await response.json();
             _onRecipesLoaded();

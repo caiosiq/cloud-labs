@@ -1,6 +1,10 @@
 /** Mutable application state (single source for lab UI). */
 export const store = {
     labState: null,
+    /** User-selected backend_id (see backend-selection.js). */
+    selectedBackendId: null,
+    /** Cached rows from GET /api/backends. */
+    backends: [],
     runtimeMode: null,
     /**
      * Ghost (canvas-truth) pose per tag: ``{x, y, rotation}``.
@@ -12,6 +16,14 @@ export const store = {
     dragComponentStartLab: null,
     isDragging: false,
     dragOffset: { x: 0, y: 0 },
+    /**
+     * When true, lab-state polling must not clear ``pendingCommands`` between
+     * job steps (operations dashboard tracks running jobs on the twin canvas).
+     */
+    operationsMonitorActive: false,
+    operationsTrackedJobId: null,
+    /** @type {(() => void) | null} */
+    operationsOnLabStatePoll: null,
     pendingCommands: new Set(),
     /**
      * Last action (e.g. ``HOVER``, ``MOVE_COMPONENT``) that was sent for a
@@ -132,6 +144,19 @@ export const store = {
         liveHeadId: null,
         viewingCommitId: null,
         selectedCommitId: null,
+        /**
+         * How the current viewing target was chosen.
+         * null / local = graph node; catalog = Start from catalog pin.
+         * @type {null|{
+         *   source: 'local'|'catalog',
+         *   pin_id?: string,
+         *   display_name?: string,
+         *   repo_id?: string,
+         *   branch?: string,
+         *   configuration_id?: string,
+         * }}
+         */
+        snapshotSource: null,
         // Read-only preview overlay: the configuration of the node currently
         // being VIEWED (soft checkout). The live bench (store.labState) is never
         // mutated by preview; the canvas renders this overlay instead while set.

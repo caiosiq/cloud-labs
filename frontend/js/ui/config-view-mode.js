@@ -84,6 +84,8 @@ export function initConfigViewMode(handlers = {}) {
 
         commitId: document.getElementById('config-view-commit-id'),
 
+        sourceLabel: document.getElementById('config-view-source'),
+
         applyingId: document.getElementById('config-view-applying-id'),
 
         reconcileProgress: document.getElementById('config-view-reconcile-progress'),
@@ -276,6 +278,28 @@ export function syncConfigViewMode() {
 
             : '—';
 
+    }
+
+    if (_els.sourceLabel && !applying) {
+        const src = store.control.snapshotSource;
+        if (src?.source === 'catalog') {
+            const name = src.display_name || src.pin_id || 'pin';
+            _els.sourceLabel.hidden = false;
+            _els.sourceLabel.classList.remove('is-local');
+            _els.sourceLabel.textContent = `Catalog · ${name}`;
+            _els.sourceLabel.title =
+                'Frozen catalog pin — does not follow local branch heads';
+        } else if (store.control.viewingCommitId) {
+            const repo = store.control.repoId || 'repo';
+            const branch = store.control.branch || 'main';
+            _els.sourceLabel.hidden = false;
+            _els.sourceLabel.classList.add('is-local');
+            _els.sourceLabel.textContent = `Local · ${repo} @ ${branch}`;
+            _els.sourceLabel.title = 'Local control-repo commit (live VC graph)';
+        } else {
+            _els.sourceLabel.hidden = true;
+            _els.sourceLabel.textContent = '';
+        }
     }
 
 

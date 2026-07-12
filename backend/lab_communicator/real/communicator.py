@@ -775,6 +775,7 @@ class RealLabCommunicator(LabCommunicator):
         x0: Dict[str, Any],
         session_id: str,
         progress_callback: Callable[..., None],
+        should_abort: Optional[Callable[[], bool]] = None,
     ) -> Optional[Dict[str, Any]]:
         from lab_communicator.real.ensemble import run_real_ensemble_session
         from lab_model.optimization.spec import OptimizeEnsembleParameters
@@ -795,6 +796,8 @@ class RealLabCommunicator(LabCommunicator):
                 x0_map,
                 session_id=session_id,
                 progress_callback=progress_callback,
+                should_abort=should_abort
+                or getattr(self, "_job_abort_check", None),
             )
             with self._state_lock:
                 self._persist_state()

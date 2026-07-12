@@ -6,13 +6,15 @@ This repository is a **digital twin** for an autonomous optics lab: a browser-ba
 
 The UI separates **what you intend** (ghost / nominal poses on the canvas) from **what the lab reports** (solid geometry from polled state), including recipe replay and **golden** snapshots for drift checks.
 
-**Design reference:** **`backend/lab_model/ARCHITECTURE.md`** (Universal Component map), **`backend/lab_model/README.md`** (StateControl + Telemetry), **`docs/primitive_ui_contract.md`** (read-only panels vs primitives), **`docs/CONTROL_RUNTIME_AND_VERSIONING.md`** (RuntimeManager, ControlManager, configuration VC), **`docs/ENSEMBLE_OPTIMIZATION.md`** (generalized multi-variable optimization — design & roadmap). Lab backends and **`LAB_VIEW_PATH`**: **`backend/lab_communicator/README.md`**.
+**Design reference:** **`backend/lab_model/ARCHITECTURE.md`** (Universal Component map), **`backend/lab_model/README.md`** (StateControl + Telemetry), **`docs/primitive_ui_contract.md`** (read-only panels vs primitives), **`docs/CONTROL_RUNTIME_AND_VERSIONING.md`** (RuntimeManager, ControlManager, configuration VC), **`docs/ENSEMBLE_OPTIMIZATION.md`** (generalized multi-variable optimization), **`docs/SESSION_KERNELS.md`** (author TorchScript packages), **`docs/LAB_SURFACES_VC_AND_INITIALIZATION.md`** (Landing `/`, Twin `/twin`, Catalog `/catalog`, Operations `/operations`). Lab backends and **`LAB_VIEW_PATH`**: **`backend/lab_communicator/README.md`**.
+
+**SDK examples:** [`scripts/example_torchscript_cobyla_mirror.py`](scripts/example_torchscript_cobyla_mirror.py) (catalog-kernel COBYLA), [`scripts/example_session_kernel_author.py`](scripts/example_session_kernel_author.py) (session kernels + feature `run_optimize`).
 
 ---
 
 ## Why two worlds? `lab_automation`, experiment manager, and this repository
 
-> **Naming:** **`ControlManager`** (cloud-labs, planned) = configuration version history.  
+> **Naming:** **`ControlManager`** (cloud-labs) = configuration version history.  
 > **`OpticalExperiment`** / *experiment manager* (`lab_automation`) = robot, cameras, and hardware procedures.  
 > See [`docs/CONTROL_RUNTIME_AND_VERSIONING.md`](docs/CONTROL_RUNTIME_AND_VERSIONING.md).
 

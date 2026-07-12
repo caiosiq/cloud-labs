@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "type": "weighted_sum",
+  "minimize": true,
+  "terms": [
+    {
+      "id": "centroid_rms_px",
+      "weight": 1.0,
+      "tag_id": "tag_20",
+      "field": "camera_image",
+      "metric": "rms_distance_px",
+      "target_px": { "x": 512.0, "y": 384.0 }
+    },
+    {
+      "id": "optimization_score",
+      "weight": 0.35,
+      "tag_id": "tag_20",
+      "field": "last_optimization_score",
+      "metric": "one_minus_normalized"
+    }
+  ]
+}

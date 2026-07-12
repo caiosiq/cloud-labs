@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>Optical Digital Twin | Lab Interface</title>
+    <title>Cloud Labs | Twin UI</title>
     <!-- Google Fonts for Modern Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -50,16 +50,61 @@
             background-color: var(--bg-dark);
             color: var(--text-primary);
             display: flex;
+            flex-direction: column;
             height: 100vh;
             overflow: hidden;
             font-size: 14px;
+        }
+
+        .app-top-nav {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-panel);
+            z-index: 40;
+        }
+
+        .app-top-nav__brand {
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 16px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .app-top-nav__brand:hover {
+            color: var(--primary-accent);
+        }
+
+        .app-top-nav nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            margin-left: 16px;
+            font-size: 13px;
+        }
+
+        .app-top-nav nav a:hover,
+        .app-top-nav nav a.active {
+            color: var(--primary-accent);
+        }
+
+        .app-shell {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
         }
 
         /* --- Sidebar (Left) --- */
         #sidebar {
             width: 260px;
             min-width: 240px;
-            height: 100vh;
+            height: auto;
+            align-self: stretch;
             min-height: 0;
             background-color: var(--bg-panel);
             border-right: 1px solid var(--border-color);
@@ -67,13 +112,14 @@
             flex-direction: column;
             z-index: 10;
             box-shadow: 4px 0 24px rgba(0,0,0,0.2);
-            position: relative; /* Ensure it stays in flow */
+            position: relative;
         }
 
         /* --- Sidebar (Right) --- */
         #sidebar-right {
             width: 320px;
-            height: 100vh;
+            height: auto;
+            align-self: stretch;
             min-height: 0;
             background-color: var(--bg-panel);
             border-left: 1px solid var(--border-color);
@@ -261,6 +307,41 @@
 
         .runtime-mode-status--physical {
             background: #f59e0b;
+        }
+
+        .backend-session-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            min-width: 0;
+            margin-top: 2px;
+        }
+
+        .backend-session-id {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .backend-switch-btn {
+            flex: 0 0 auto;
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 10px;
+            cursor: pointer;
+        }
+
+        .backend-switch-btn:hover {
+            color: var(--text-main);
+            border-color: #64748b;
         }
 
         .control-panel {
@@ -768,6 +849,39 @@
         .control-graph-panel .control-fork-btn:hover:not(:disabled) {
             background: rgba(139, 92, 246, 0.30);
             color: #ede9fe;
+        }
+
+        .control-graph-panel .control-publish-btn {
+            border-color: rgba(16, 185, 129, 0.35);
+            color: #6ee7b7;
+        }
+
+        .control-graph-panel .control-publish-btn:hover:not(:disabled) {
+            background: rgba(16, 185, 129, 0.18);
+            color: #10b981;
+        }
+
+        .control-graph-panel .control-catalog-pin-btn {
+            border-color: rgba(59, 130, 246, 0.4);
+            color: #93c5fd;
+        }
+
+        .control-graph-panel .control-catalog-pin-btn:hover:not(:disabled) {
+            background: rgba(59, 130, 246, 0.18);
+            color: #bfdbfe;
+        }
+
+        .config-view-badge__source {
+            display: block;
+            font-size: 10px;
+            font-weight: 600;
+            color: #93c5fd;
+            margin-bottom: 4px;
+            line-height: 1.3;
+        }
+
+        .config-view-badge__source.is-local {
+            color: #a7f3d0;
         }
 
         /* Detached: forking is the escape hatch — make it solid. */
@@ -1687,15 +1801,22 @@
     </style>
 </head>
 <body>
-
+    <header class="app-top-nav">
+        <a class="app-top-nav__brand" href="/">Cloud Labs</a>
+        <nav>
+            <a href="/twin" class="active">Twin UI</a>
+            <a href="/operations">Operations</a>
+            <a href="/catalog">Catalog</a>
+            <a href="/wiki">Wiki</a>
+            <a href="/debug" target="_blank">Debugger</a>
+        </nav>
+    </header>
+    <div class="app-shell">
     <div id="sidebar">
         <div class="logo-area">
             <div class="logo-title-row">
                 <span class="material-icons-round logo-icon">science</span>
-                <div class="logo-text">AI Optics Twin</div>
-                <a href="/debug" target="_blank" title="Open Debugger" class="logo-debug-link">
-                    <span class="material-icons-round" style="font-size: 16px;">bug_report</span>
-                </a>
+                <div class="logo-text">Twin control</div>
             </div>
             <div class="runtime-mode-control">
                 <span id="runtime-mode-status" class="runtime-mode-status" title="Loading runtime mode"></span>
@@ -1703,9 +1824,15 @@
                     <option>Loading...</option>
                 </select>
             </div>
+            <div class="backend-session-bar" id="backend-session-bar" title="Lab backend chosen at login">
+                <span class="backend-session-id" id="backend-session-label">—</span>
+                <button type="button" class="backend-switch-btn" id="backend-switch-btn" title="Leave this lab and choose another backend">Switch</button>
+            </div>
         </div>
 
         <div id="layout-warnings" style="display: none; margin: 0 16px 10px; padding: 8px 10px; font-size: 11px; color: #fcd34d; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; line-height: 1.35;"></div>
+
+        <div id="session-lease-banner" style="display: none; margin: 0 16px 10px; padding: 8px 10px; font-size: 11px; color: #93c5fd; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 6px; line-height: 1.35;"></div>
 
         <div class="section-header">
             <span>Lab components</span>
@@ -1760,6 +1887,14 @@
                 <button id="control-save-config-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-commit-btn" title="Commit layout">
                     <span class="material-icons-round" aria-hidden="true">save</span>
                     <span class="sr-only">Commit</span>
+                </button>
+                <button id="control-publish-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-publish-btn" title="Request publish to remote catalog">
+                    <span class="material-icons-round" aria-hidden="true">publish</span>
+                    <span class="sr-only">Publish</span>
+                </button>
+                <button id="control-catalog-pin-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-catalog-pin-btn" title="Start from catalog pin (frozen snapshot)">
+                    <span class="material-icons-round" aria-hidden="true">push_pin</span>
+                    <span class="sr-only">Catalog pin</span>
                 </button>
                 <span id="control-head-label" class="control-graph-head-pill" title="Branch HEAD">
                     <span class="control-graph-head-pill__tag">HEAD</span>
@@ -1825,6 +1960,7 @@
                 <aside id="config-view-badge" class="config-view-badge" hidden aria-live="polite">
                     <div id="config-view-viewing" class="config-view-badge__viewing">
                         <span class="config-view-badge__label">Viewing</span>
+                        <span id="config-view-source" class="config-view-badge__source" hidden></span>
                         <code id="config-view-commit-id" class="config-view-badge__id">—</code>
                         <div class="config-view-badge__actions">
                             <button id="config-view-apply-btn" type="button" class="config-view-badge__btn config-view-badge__btn--primary">Apply on bench</button>
@@ -2595,6 +2731,49 @@
             }
             .opt-stat-val--success { color: #34d399; }
 
+            /* —— Run job options (VC reconcile / commit) —— */
+            .opt-job-options {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                margin-bottom: 12px;
+                padding: 10px;
+                border-radius: 8px;
+                border: 1px solid #27272a;
+                background: rgba(15, 17, 21, 0.6);
+            }
+            .opt-job-option {
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                font-size: 11px;
+                color: #cbd5e1;
+                line-height: 1.35;
+                cursor: pointer;
+            }
+            .opt-job-option input[type="checkbox"] {
+                margin-top: 2px;
+                flex-shrink: 0;
+            }
+            .opt-job-option input:disabled + span,
+            .opt-job-option:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+            .opt-job-commit-msg { padding-left: 22px; }
+            .opt-job-commit-input {
+                width: 100%;
+                box-sizing: border-box;
+                padding: 6px 8px;
+                border-radius: 6px;
+                border: 1px solid #3f3f46;
+                background: #18181b;
+                color: #e2e8f0;
+                font-size: 11px;
+            }
+            .opt-commit-id {
+                font-size: 10px;
+                color: #93c5fd;
+            }
+            .opt-hint--warn { color: #fca5a5; }
+
             /* —— Footer nav —— */
             .opt-nav-row {
                 display: flex;
@@ -2770,6 +2949,7 @@
         </div>
         </div>
     </div>
+    </div><!-- /.app-shell -->
 
     <style>
         /* Unified Panel Styles */

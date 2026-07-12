@@ -18,6 +18,47 @@ _LINE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _lab_paths_singleton: Optional["LabViewPaths"] = None
 _lab_manifest_singleton: Optional["LabViewManifest"] = None
 _project_root_cached: Optional[str] = None
+_backend_registry_ref: Any = None
+
+
+def set_backend_registry(registry: Any) -> None:
+    """Wire the live BackendRegistry so path lookups can resolve by request backend_id."""
+    global _backend_registry_ref
+    _backend_registry_ref = registry
+
+
+def _paths_from_request_backend() -> Optional["LabViewPaths"]:
+    if _backend_registry_ref is None:
+        return None
+    try:
+        from lab_model.backends.dispatch import get_request_backend_id
+
+        bid = get_request_backend_id()
+        if not bid:
+            return None
+        rt = _backend_registry_ref.get_runtime(bid, init=False)
+        if rt.paths.root_dir:
+            return rt.paths
+    except Exception:
+        return None
+    return None
+
+
+def _manifest_from_request_backend() -> Optional["LabViewManifest"]:
+    if _backend_registry_ref is None:
+        return None
+    try:
+        from lab_model.backends.dispatch import get_request_backend_id
+
+        bid = get_request_backend_id()
+        if not bid:
+            return None
+        rt = _backend_registry_ref.get_runtime(bid, init=False)
+        if rt.paths.root_dir:
+            return rt.manifest
+    except Exception:
+        return None
+    return None
 
 
 @dataclass(frozen=True)
@@ -133,19 +174,40 @@ _DEFAULT_TABLE_CAM_PREVIEW = TableCamPreviewConfig()
 
 
 def get_lab_view_paths() -> LabViewPaths:
-    if _lab_paths_singleton is None:
-        raise RuntimeError("lab_view bootstrap did not run; call bootstrap_lab_view() from main.")
-    return _lab_paths_singleton
+    from lab_model.backends.context import get_context_paths
+
+    ctx_paths = get_context_paths()
+    if ctx_paths is not None:
+        return ctx_paths
+    if _lab_paths_singleton is not None:
+        return _lab_paths_singleton
+    # Request-scoped fallback when middleware set backend_id but paths
+    # contextvars did not propagate (BaseHTTPMiddleware quirk).
+    resolved = _paths_from_request_backend()
+    if resolved is not None:
+        return resolved
+    raise RuntimeError("lab_view bootstrap did not run; call bootstrap_lab_view() from main.")
 
 
 def get_lab_view_paths_optional() -> Optional[LabViewPaths]:
-    return _lab_paths_singleton
+    try:
+        return get_lab_view_paths()
+    except RuntimeError:
+        return None
 
 
 def get_lab_manifest() -> LabViewManifest:
-    if _lab_manifest_singleton is None:
-        raise RuntimeError("lab_view bootstrap did not run; call bootstrap_lab_view() from main.")
-    return _lab_manifest_singleton
+    from lab_model.backends.context import get_context_manifest
+
+    ctx_manifest = get_context_manifest()
+    if ctx_manifest is not None:
+        return ctx_manifest
+    if _lab_manifest_singleton is not None:
+        return _lab_manifest_singleton
+    resolved = _manifest_from_request_backend()
+    if resolved is not None:
+        return resolved
+    raise RuntimeError("lab_view bootstrap did not run; call bootstrap_lab_view() from main.")
 
 
 def get_lab_automation_path() -> Optional[str]:
@@ -332,9 +394,11 @@ def _apply_manifest_to_process_env(manifest: LabViewManifest) -> None:
 
 
 def bootstrap_lab_view(project_root: str) -> LabViewPaths:
-    """Load ``LAB_VIEW_PATH``, configure storage geometry, register paths.
+    """Load ``LAB_VIEW_PATH`` (legacy single-backend) or first registry entry.
 
-    No legacy fallbacks: missing required files abort startup loudly.
+    Prefer :func:`load_lab_view_bundle` via :class:`BackendRegistry` for
+    multi-backend servers. When ``LAB_VIEW_PATH`` is unset, this is a no-op
+    that returns paths for the first enabled backend in ``schemas/backends.json``.
     """
     global _lab_paths_singleton, _lab_manifest_singleton, _project_root_cached
 
@@ -342,15 +406,53 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
 
     raw = (os.getenv("LAB_VIEW_PATH") or "").strip()
     if not raw:
-        raise SystemExit(
-            "[CONFIG] LAB_VIEW_PATH is required in .env — absolute or project-relative path "
-            'to your lab bundle directory (must contain lab_manifest.json, layout.json, '
-            "laser_lines.json, component_library.json, active_catalog.json)."
-        )
+        try:
+            from lab_model.backends.registry import BackendRegistry
 
-    root = _resolve_project_relative(project_root, raw)
+            reg = BackendRegistry.from_project(project_root)
+            first = reg.first_available()
+            if first is None:
+                raise SystemExit(
+                    "[CONFIG] No LAB_VIEW_PATH and no available backends in registry. "
+                    "Configure schemas/backends.json or set CLOUDLABS_BACKENDS_CONFIG."
+                )
+            paths, manifest = first.paths, first.manifest
+            _lab_paths_singleton = paths
+            _lab_manifest_singleton = manifest
+            _apply_manifest_to_process_env(manifest)
+            return paths
+        except SystemExit:
+            raise
+        except Exception as exc:
+            raise SystemExit(
+                "[CONFIG] LAB_VIEW_PATH unset and backend registry bootstrap failed: "
+                f"{exc}"
+            ) from exc
+
+    paths, manifest = load_lab_view_bundle(project_root, raw)
+    _lab_paths_singleton = paths
+    _lab_manifest_singleton = manifest
+    _apply_manifest_to_process_env(manifest)
+    print(
+        f"[CONFIG] lab_manifest: communicator={manifest.communicator!r} "
+        f"lab_mode={manifest.lab_mode}"
+        + (
+            f" lab_automation_path={manifest.lab_automation_path}"
+            if manifest.lab_automation_path
+            else ""
+        ),
+        flush=True,
+    )
+    from lab_model import measurables as _measurables  # noqa: F401
+    from lab_model import tunables as _tunables  # noqa: F401
+    return paths
+
+
+def load_lab_view_bundle(project_root: str, lab_view_path: str) -> tuple[LabViewPaths, LabViewManifest]:
+    """Load one lab view bundle without requiring ``LAB_VIEW_PATH`` in the environment."""
+    root = _resolve_project_relative(project_root, lab_view_path)
     if not os.path.isdir(root):
-        raise SystemExit(f"[CONFIG] LAB_VIEW_PATH does not exist or is not a directory: {root}")
+        raise FileNotFoundError(f"lab_view bundle does not exist: {root}")
 
     paths = LabViewPaths(
         root_dir=root,
@@ -379,14 +481,14 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
     )
     missing = [p for p in mandatory if not os.path.isfile(p)]
     if missing:
-        raise SystemExit(
-            "[CONFIG] lab_view bundle incomplete; missing:\n  " + "\n  ".join(missing)
+        raise FileNotFoundError(
+            "lab_view bundle incomplete; missing: " + ", ".join(missing)
         )
 
     with open(paths.layout_json, "r", encoding="utf-8") as f:
         layout_document = json.load(f)
     if not isinstance(layout_document, dict):
-        raise SystemExit(f"[CONFIG] layout.json must contain a JSON object: {paths.layout_json}")
+        raise ValueError(f"layout.json must contain a JSON object: {paths.layout_json}")
 
     from lab_model.domain.storage_region import configure_from_layout_document
 
@@ -420,34 +522,15 @@ def bootstrap_lab_view(project_root: str) -> LabViewPaths:
         )
 
     manifest = _load_lab_manifest(paths, project_root)
-    _lab_manifest_singleton = manifest
-    _apply_manifest_to_process_env(manifest)
-    print(
-        f"[CONFIG] lab_manifest: communicator={manifest.communicator!r} "
-        f"lab_mode={manifest.lab_mode}"
-        + (
-            f" lab_automation_path={manifest.lab_automation_path}"
-            if manifest.lab_automation_path
-            else ""
-        ),
-        flush=True,
-    )
 
-    _lab_paths_singleton = paths
-
-    from lab_model import measurables as _measurables  # noqa: F401
-    from lab_model import tunables as _tunables  # noqa: F401
     from lab_model.catalog.schema import load_component_library_rows
     from lab_model.platform import validate_communicator_backend, validate_platform_integrity
 
-    try:
-        rows = load_component_library_rows(paths.component_library_json)
-        validate_platform_integrity(rows)
-        validate_communicator_backend(manifest.communicator)
-    except Exception as exc:
-        raise SystemExit(f"[CONFIG] platform integrity check failed: {exc}") from exc
+    rows = load_component_library_rows(paths.component_library_json)
+    validate_platform_integrity(rows)
+    validate_communicator_backend(manifest.communicator)
 
-    return paths
+    return paths, manifest
 
 
 def load_table_cam_preview_config(

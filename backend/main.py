@@ -58,21 +58,17 @@ else:
     print(f"[CONFIG] No .env at {_env_path}")
 
 from lab_communicator.shared.lab_view_config import (
-    bootstrap_lab_view,
     get_lab_manifest,
     get_lab_view_paths,
     laser_line_coeffs_from_doc,
     line_id_pattern,
     load_layout_document,
     read_laser_lines_doc,
+    set_backend_registry,
     two_points_define_line,
     write_laser_lines_doc,
 )
-from lab_communicator.shared.communicator_factory import create_communicator
 from lab_model import motor_rotation_store as motor_rot
-
-bootstrap_lab_view(_project_root)
-motor_rot.configure(get_lab_view_paths().motor_rotations_json)
 
 from lab_model.primitives import (
     ConfirmHoldingTagBody,
@@ -100,56 +96,209 @@ from lab_model.primitives import (
 
 
 from lab_model.optimization.errors import EnsemblePreflightError
-from lab_model.optimization.preflight import preflight_ensemble
+from lab_model.optimization.preflight import preflight_ensemble, preflight_objective_sources
+from lab_model.optimization.compiler import compile_objective_payload
+from lab_model.optimization.spec import ObjectiveSpec
+from lab_model.optimization.metrics import METRIC_REGISTRY
+from lab_model.optimization.metrics import weighted_sum as _weighted_sum_metrics  # noqa: F401 — register
+from lab_model.optimization.kernels import list_kernels
+from lab_model.jobs.lease_manager import (
+    LeaseConflictError,
+    LeaseExpiredError,
+    LeaseNotFoundError,
+    SessionLeaseManager,
+    active_backend_id,
+    lease_record_to_api_dict,
+)
+from lab_model.backends.job_hub import JobManagerHub
+from lab_model.backends.registry import BackendRegistry, BackendRuntime
+from lab_model.backends.dispatch import (
+    RequestLab,
+    RequestRuntimeManager,
+    active_backend_id_for_request,
+    catalog_pins_for_request,
+    control_dir_for_request,
+    get_request_backend_id,
+    recipes_dir_for_request,
+    reset_request_backend_id,
+    set_request_backend_id,
+)
+from lab_model.jobs.job_manager import JobNotFoundError, parse_snapshot_ref, validate_submit_spec
+from lab_model.jobs.initialization_policy import normalize_initialization_policy
+from lab_model.jobs.runner import run_job, schedule_job_runner
+from lab_model.backends.server import BackendSession, require_backend, resolve_backend_id
 
-RECIPES_DIR = get_lab_view_paths().recipes_dir
-CONTROL_DIR = get_lab_view_paths().control_dir
+backend_registry = BackendRegistry.from_project(_project_root)
+set_backend_registry(backend_registry)
+job_hub = JobManagerHub()
+session_lease_manager = SessionLeaseManager()
+lab = RequestLab(backend_registry)
+runtime_manager = RequestRuntimeManager(backend_registry)
 
-# Initialize communicator from lab_manifest.json inside LAB_VIEW_PATH
-_manifest = get_lab_manifest()
-LAB_MODE = _manifest.lab_mode
-COMMUNICATOR_ID = _manifest.communicator
-print(f"LAB_MODE: {LAB_MODE} (communicator={COMMUNICATOR_ID!r})")
 
-lab = None
-runtime_manager = None
-try:
-    lab = create_communicator(COMMUNICATOR_ID)
-    if COMMUNICATOR_ID == "mock":
-        from lab_communicator.runtime_mode import RuntimeLabProxy
+def _active_backend_id() -> str:
+    bid = get_request_backend_id()
+    if bid:
+        return bid
+    # Pre-request contexts (startup logs): first available id for display only.
+    ids = backend_registry.known_backend_ids()
+    return ids[0] if ids else "unknown"
 
-        runtime_manager = RuntimeLabProxy(lab)
-        lab = runtime_manager
-    print(f">>> STARTING WITH {COMMUNICATOR_ID.upper()} COMMUNICATOR <<<")
-except ImportError as e:
-    print(f"CRITICAL ERROR: Failed to import communicator {COMMUNICATOR_ID!r}: {e}")
-    if COMMUNICATOR_ID != "mock":
-        print("Falling back to mock communicator...")
-        try:
-            lab = create_communicator("mock")
-            LAB_MODE = "MOCK"
-        except Exception as e2:
-            print(f"CRITICAL ERROR: Mock fallback failed: {e2}")
-except Exception as e:
-    print(f"CRITICAL ERROR: Failed to initialize communicator {COMMUNICATOR_ID!r}: {e}")
-    if COMMUNICATOR_ID != "mock":
-        print("Falling back to mock communicator...")
-        try:
-            lab = create_communicator("mock")
-            LAB_MODE = "MOCK"
-        except Exception as e2:
-            print(f"CRITICAL ERROR: Mock fallback failed: {e2}")
+
+def _runtime_for_active(*, init: bool = False) -> BackendRuntime:
+    return require_backend(backend_registry, _active_backend_id(), init=init)
+
+
+def _lab_mode_for_active() -> str:
+    return _runtime_for_active().lab_mode
+
+
+def _CONTROL_DIR() -> str:
+    return control_dir_for_request(backend_registry)
+
+
+def _RECIPES_DIR() -> str:
+    return recipes_dir_for_request(backend_registry)
+
+
+def _catalog_pins_store():
+    return catalog_pins_for_request(backend_registry)
+
+def _kick_job_runner_for(backend_id: str) -> None:
+    """Start the next queued job for one backend on the running event loop."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    mgr = job_hub.for_backend(backend_id)
+
+    async def _run_one(job_id: str) -> None:
+        rt = require_backend(backend_registry, backend_id, init=True)
+        with BackendSession(rt):
+            await run_job(
+                job_id,
+                lab=rt.lab,
+                runtime_manager=rt.runtime_manager,
+                lease_manager=session_lease_manager,
+                job_manager=mgr,
+                backend_id=backend_id,
+                control_dir=rt.control_dir(),
+                pins_lookup=rt.catalog_pins_store,
+                repo_owns_bench=lambda repo_id: _repo_owns_bench_for(rt, repo_id),
+            )
+
+    schedule_job_runner(
+        job_manager=mgr,
+        loop=loop,
+        run_fn=_run_one,
+    )
+
+
+def _kick_job_runner() -> None:
+    """Kick runners for every backend that has queued work."""
+    for bid in backend_registry.known_backend_ids():
+        mgr = job_hub.for_backend(bid)
+        if mgr.runner_should_start():
+            _kick_job_runner_for(bid)
+
+
+def _command_lease_required() -> bool:
+    return _command_lease_required_for(_active_backend_id())
+
+
+def _mock_auto_approve_publish() -> bool:
+    return _mock_auto_approve_publish_for(_active_backend_id())
+
+
+def _command_lease_required_for(backend_id: str) -> bool:
+    if backend_id.startswith("mock."):
+        strict = (os.environ.get("CLOUDLABS_STRICT_LEASE") or "").strip().lower()
+        return strict in ("1", "true", "yes")
+    return True
+
+
+def _mock_auto_approve_publish_for(backend_id: str) -> bool:
+    return backend_id.startswith("mock.")
+
+
+def _session_lease_runtime_field(backend_id: str) -> Optional[Dict[str, Any]]:
+    record = session_lease_manager.active_lease(backend_id)
+    if record is None:
+        return None
+    return lease_record_to_api_dict(record)
+
+
+def _repo_owns_bench_for(runtime: BackendRuntime, repo_id: str) -> bool:
+    from lab_model.state.control_manager import read_bench_origin, repo_owns_bench
+
+    safe = (repo_id or "default").strip() or "default"
+    return repo_owns_bench(runtime.control_dir(), safe)
+
+
+print(
+    f"[CONFIG] Backend registry: {len(backend_registry.known_backend_ids())} backend(s): "
+    + ", ".join(backend_registry.known_backend_ids())
+)
+
+
+def _extract_lease_id(payload: Dict[str, Any], request: Request) -> Optional[str]:
+    header = (request.headers.get("X-CloudLabs-Lease") or "").strip()
+    if header:
+        return header
+    body_val = payload.get("lease_id")
+    if isinstance(body_val, str) and body_val.strip():
+        return body_val.strip()
+    return None
+
+
+def _checkout_skip_dirty_guard(
+    payload: "ControlCheckoutBody",
+    request: Request,
+) -> bool:
+    """Plan-only preview and force_reconcile under a valid lease bypass dirty guard."""
+    if payload.preview:
+        return True
+    policy = normalize_initialization_policy(payload.initialization_policy)
+    if policy != "force_reconcile":
+        return False
+    lease_id = _extract_lease_id({}, request)
+    if not lease_id:
+        return False
+    try:
+        session_lease_manager.validate_command_lease(
+            backend_id=_active_backend_id(),
+            lease_id=lease_id,
+            require_when_locked=True,
+        )
+        return True
+    except (LeaseConflictError, LeaseNotFoundError, LeaseExpiredError):
+        return False
+
+
+def _lease_conflict_response(exc: LeaseConflictError) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": "backend_locked",
+            "holder": exc.holder,
+            "backend_id": exc.backend_id,
+        },
+    )
+
 
 
 def _persist_session_checkpoint_on_shutdown() -> None:
-    try:
-        if lab is None:
-            return
-        saver = getattr(lab, "save_session_checkpoint_if_enabled", None)
-        if callable(saver):
-            saver()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Shutdown session checkpoint save failed: %s", e)
+    for bid in backend_registry.known_backend_ids():
+        try:
+            rt = require_backend(backend_registry, bid, init=True)
+            if rt.lab is None:
+                continue
+            with BackendSession(rt):
+                saver = getattr(rt.lab, "save_session_checkpoint_if_enabled", None)
+                if callable(saver):
+                    saver()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Shutdown session checkpoint save failed for %s: %s", bid, e)
 
 
 @asynccontextmanager
@@ -159,22 +308,74 @@ async def _app_lifespan(_: FastAPI):
     # Phase 8 teardown: stop the TELEOP stale-lease sweeper thread (if it
     # ever started) before persisting the session checkpoint, so the
     # checkpoint reflects a quiesced state instead of one mid-sweep.
-    try:
-        if lab is not None:
-            shutdown = getattr(lab, "shutdown_lab_processes", None)
-            if callable(shutdown):
-                shutdown()
-    except Exception:
-        pass
-    try:
-        if lab is not None:
-            lab.stop_teleop_sweeper()
-    except Exception:
-        pass
+    for bid in backend_registry.known_backend_ids():
+        try:
+            rt = require_backend(backend_registry, bid, init=False)
+            if rt.lab is None:
+                continue
+            with BackendSession(rt):
+                shutdown = getattr(rt.lab, "shutdown_lab_processes", None)
+                if callable(shutdown):
+                    shutdown()
+                rt.lab.stop_teleop_sweeper()
+        except Exception:
+            pass
     _persist_session_checkpoint_on_shutdown()
 
 
 app = FastAPI(lifespan=_app_lifespan)
+
+
+@app.middleware("http")
+async def _backend_selection_middleware(request: Request, call_next):
+    """Bind backend_id + lab-view paths for /api/* routes (except backends listing)."""
+    from lab_model.backends.context import bind_backend_context, reset_backend_context
+
+    path = request.url.path
+    skip = (
+        path in ("/api/backends",)
+        or path.startswith("/api/jobs/submit")
+        or path.startswith("/api/jobs/lease/")
+        or not path.startswith("/api/")
+    )
+    token = None
+    paths_token = None
+    if not skip:
+        backend_id = (request.query_params.get("backend_id") or "").strip()
+        if not backend_id:
+            backend_id = (request.headers.get("X-CloudLabs-Backend") or "").strip()
+        if not backend_id:
+            for spec in backend_registry.list_specs():
+                rt = backend_registry.get_runtime(spec.backend_id, init=False)
+                if rt.availability == "ready":
+                    backend_id = rt.backend_id
+                    break
+        if not backend_id:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "detail": (
+                        "backend_id is required (query ?backend_id=, header X-CloudLabs-Backend). "
+                        "List options with GET /api/backends."
+                    )
+                },
+            )
+        try:
+            rt = require_backend(backend_registry, backend_id, init=False)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        token = set_request_backend_id(backend_id)
+        # Paths must be bound here — get_lab_view_paths() / load_layout_document()
+        # read contextvars, not the registry singleton.
+        if rt.paths.root_dir:
+            paths_token = bind_backend_context(rt.paths, rt.manifest)
+    try:
+        return await call_next(request)
+    finally:
+        if paths_token is not None:
+            reset_backend_context(paths_token)
+        if token is not None:
+            reset_request_backend_id(token)
 
 # --- Models ---
 class RecipeStep(BaseModel):
@@ -226,6 +427,7 @@ class ControlCheckoutBody(BaseModel):
     configuration_id: str
     mode: str = "soft"
     preview: bool = False
+    initialization_policy: Optional[str] = None
     # When true, the frontend has already driven the reconcile primitives one at
     # a time through /api/command (for step-by-step visibility). The endpoint
     # then only *records* the result — projection + pointer + bench claim — and
@@ -426,7 +628,7 @@ async def execute_recipe(recipe: Recipe, target_lab: Any = None):
         "metrics": {"completion_status": "SUCCESS"}
     }
     
-    golden_path = os.path.join(RECIPES_DIR, f"{recipe.id}_golden.json")
+    golden_path = os.path.join(_RECIPES_DIR(), f"{recipe.id}_golden.json")
     with open(golden_path, "w") as f:
         json.dump(golden_state, f, indent=2)
         
@@ -449,7 +651,7 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
         path = request.scope.get("path", "")
-        if path == "/" or path == "/debug" or path.startswith("/static"):
+        if path == "/" or path == "/twin" or path == "/debug" or path.startswith("/static"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
@@ -468,15 +670,33 @@ def _read_index_html(path: str) -> str:
     return html
 
 
+def _html_no_cache(path: str, *, bust_index: bool = False) -> Response:
+    if bust_index:
+        html = _read_index_html(path)
+    else:
+        with open(path, "r", encoding="utf-8") as f:
+            html = f.read()
+    return Response(
+        content=html,
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 @app.get("/")
-async def read_index():
-    path = os.path.join(frontend_path, "index.html")
-    html = _read_index_html(path)
-    return Response(content=html, media_type="text/html", headers={
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "Expires": "0",
-    })
+async def read_home():
+    """Cloud Labs landing — not the Twin control room."""
+    return _html_no_cache(os.path.join(frontend_path, "home.html"))
+
+
+@app.get("/twin")
+async def read_twin():
+    """Twin UI control room (direct control + local VC)."""
+    return _html_no_cache(os.path.join(frontend_path, "index.html"), bust_index=True)
 
 @app.get("/api/platform/registries")
 async def get_platform_registries():
@@ -503,8 +723,8 @@ async def get_component_catalog():
 
 def _locked_runtime_mode_info() -> Dict[str, Any]:
     physical_armed = (
-        COMMUNICATOR_ID == "real"
-        and lab is not None
+        _runtime_for_active().communicator == "real"
+        and bool(lab)
         and type(lab).__name__ == "RealLabCommunicator"
     )
     active_mode = "physical" if physical_armed else "mock"
@@ -715,6 +935,73 @@ async def post_component_record_measurables(tag_id: str):
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=validation_error_detail(e))
     return {"status": "ok", "measurables": meas}
+
+
+@app.get("/api/components/{tag_id}/measurables/{field}/tensor")
+async def get_measurable_tensor(
+    tag_id: str,
+    field: str,
+    *,
+    record: bool = False,
+    resolve: bool = False,
+):
+    """Return a ``MeasurableTensor`` envelope for one measurable field (Phase D).
+
+    Query ``record=true`` to capture fresh measurables first (same as
+    ``RECORD_MEASURABLES``). Query ``resolve=true`` to materialize lazy image
+    payloads server-side (numpy array serialized in JSON).
+    """
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
+
+    safe_field = (field or "").strip()
+    if safe_field.startswith("measurables."):
+        safe_field = safe_field.split(".", 1)[1]
+    if not safe_field:
+        raise HTTPException(status_code=400, detail="field is required")
+
+    if record:
+        state = lab.get_lab_state()
+        current_status = state.get("system_status")
+        if current_status in ("BUSY", "OPTIMIZING"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"System is {current_status}. Please wait.",
+            )
+        await lab.record_measurables_for_tag(tag_id)
+
+    from lab_model.domain.component import get_measurables  # noqa: PLC0415
+    from lab_model.measurables.materialize import materialize_measurable
+    from lab_model.measurables.resolve_data import resolve_tensor_with_state_path
+
+    state = lab.get_lab_state()
+    entry = (state.get("components") or {}).get(tag_id)
+    if not isinstance(entry, dict):
+        raise HTTPException(status_code=404, detail=f"Unknown tag {tag_id}")
+    meas = get_measurables(entry)
+    if safe_field not in meas or meas[safe_field] is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Measurable {safe_field!r} not set on {tag_id}; "
+            "POST .../measurables/record or use ?record=true",
+        )
+
+    raw = meas[safe_field]
+    fetch_url = f"/api/components/{tag_id}/camera-image"
+    tensor = materialize_measurable(
+        tag_id,
+        safe_field,
+        raw,
+        backend_id=_active_backend_id(),
+        fetch_url=fetch_url if safe_field == "camera_image" else None,
+    )
+
+    if resolve and safe_field == "camera_image" and isinstance(raw, dict):
+        path = raw.get("path")
+        if isinstance(path, str) and path:
+            tensor = resolve_tensor_with_state_path(tensor, filesystem_path=path)
+
+    return {"status": "ok", "tensor": tensor.to_api_dict(include_data=True)}
 
 
 # ---------------------------------------------------------------------------
@@ -969,7 +1256,7 @@ async def get_component_optimization_stream(tag_id: str, fps: int = 5):
         "Expires": "0",
         "X-Accel-Buffering": "no",
     }
-    if LAB_MODE == "REAL" and hasattr(lab, "get_optimization_stream"):
+    if _lab_mode_for_active() == "REAL" and hasattr(lab, "get_optimization_stream"):
         return StreamingResponse(
             lab.get_optimization_stream(fps=fps),
             media_type="multipart/x-mixed-replace; boundary=frame",
@@ -1256,26 +1543,24 @@ async def get_component_camera_image(tag_id: str):
 
 @app.get("/api/lab-state")
 async def get_lab_state():
-    # Polled every ~500ms from the UI — use debug to avoid flooding the console (see LOG_LEVEL).
-    logger.debug("GET /api/lab-state")
-    if lab is None:
-        logger.error("GET /api/lab-state: lab communicator not initialized")
-        raise HTTPException(status_code=500, detail="Lab Communicator failed to initialize. Check server logs.")
+    logger.debug("GET /api/lab-state backend=%s", _active_backend_id())
     try:
         state = lab.get_lab_state()
         logger.debug("GET /api/lab-state: ok")
         if isinstance(state, dict):
-            active_runtime = (
-                runtime_manager.mode.upper()
-                if runtime_manager is not None
-                else LAB_MODE
-            )
+            bid = _active_backend_id()
+            active_runtime = runtime_manager.mode.upper()
             state = {
                 **state,
                 "lab_mode": active_runtime,
                 "runtime_mode": active_runtime.lower(),
+                "session_lease": _session_lease_runtime_field(bid),
+                "active_backend_id": bid,
+                "active_job_id": job_hub.active_job_id(bid),
             }
         return JSONResponse(content=state)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("GET /api/lab-state failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read Lab State: {str(e)}")
@@ -1450,7 +1735,7 @@ def _get_control_manager(repo_id: str):
 
     safe = (repo_id or "default").strip() or "default"
     if safe not in _control_managers:
-        _control_managers[safe] = ControlManager(CONTROL_DIR, safe)
+        _control_managers[safe] = ControlManager(_CONTROL_DIR(), safe)
     return _control_managers[safe]
 
 
@@ -1483,9 +1768,9 @@ def _repo_owns_bench(repo_id: str) -> bool:
     from lab_model.state.control_manager import read_bench_origin, repo_owns_bench
 
     safe = (repo_id or "default").strip() or "default"
-    owns = repo_owns_bench(CONTROL_DIR, safe)
+    owns = repo_owns_bench(_CONTROL_DIR(), safe)
     if _CONTROL_DEBUG:
-        origin = read_bench_origin(CONTROL_DIR)
+        origin = read_bench_origin(_CONTROL_DIR())
         _control_log(
             "owns_bench",
             repo=safe,
@@ -1502,7 +1787,7 @@ def _claim_bench(repo_id: str, configuration_id: Optional[str]) -> None:
 
     safe = (repo_id or "default").strip() or "default"
     _control_log("claim_bench", repo=safe, configuration_id=configuration_id)
-    write_bench_origin(CONTROL_DIR, safe, configuration_id)
+    write_bench_origin(_CONTROL_DIR(), safe, configuration_id)
 
 
 def _assert_lab_idle_for_control() -> None:
@@ -1538,7 +1823,7 @@ def _invalidate_control_manager_cache(repo_id: Optional[str] = None) -> None:
 async def control_list_repos():
     from lab_model.state.control_manager import list_control_repos
 
-    return {"repos": list_control_repos(CONTROL_DIR)}
+    return {"repos": list_control_repos(_CONTROL_DIR())}
 
 
 @app.post("/api/control/backfill-lines")
@@ -1564,7 +1849,7 @@ async def control_backfill_lines(payload: Dict[str, Any] = Body(default={})):
         guides = normalize_alignment_guides(runtime.get("alignment_guides"))
     laser = normalize_laser_lines_doc(runtime.get("laser_lines"))
 
-    repos = list_control_repos(CONTROL_DIR)
+    repos = list_control_repos(_CONTROL_DIR())
     updated = 0
     for repo in repos:
         mgr = _get_control_manager(repo["repo_id"])
@@ -1582,7 +1867,7 @@ async def control_backfill_optimization_metadata():
     """
     from lab_model.state.control_manager import list_control_repos
 
-    repos = list_control_repos(CONTROL_DIR)
+    repos = list_control_repos(_CONTROL_DIR())
     updated = 0
     for repo in repos:
         mgr = _get_control_manager(repo["repo_id"])
@@ -1600,7 +1885,7 @@ async def control_create_repo(payload: ControlCreateRepoBody):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         repo = create_control_repo(
-            CONTROL_DIR,
+            _CONTROL_DIR(),
             payload.repo_id,
             display_name=payload.display_name,
         )
@@ -1761,7 +2046,7 @@ async def control_fork_branch(repo_id: str, payload: ControlBranchBody):
 
 
 @app.post("/api/control/{repo_id}/checkout")
-async def control_checkout(repo_id: str, payload: ControlCheckoutBody):
+async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: Request):
     _assert_lab_idle_for_control()
     mode = (payload.mode or "soft").strip().lower()
     mgr = _get_control_manager(repo_id)
@@ -1856,6 +2141,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody):
         owns_bench = _repo_owns_bench(repo_id)
         applied_id = mgr.get_applied().get("configuration_id") if owns_bench else None
         is_dirty = mgr.runtime_is_dirty(runtime, owns_bench=owns_bench)
+        skip_dirty = _checkout_skip_dirty_guard(payload, request)
         _control_log(
             "checkout:hard-guard",
             repo=repo_id,
@@ -1863,9 +2149,11 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody):
             owns_bench=owns_bench,
             applied=applied_id,
             dirty=is_dirty,
-            blocked=(is_dirty and payload.configuration_id != applied_id),
+            skip_dirty=skip_dirty,
+            init_policy=normalize_initialization_policy(payload.initialization_policy),
+            blocked=(is_dirty and payload.configuration_id != applied_id and not skip_dirty),
         )
-        if is_dirty and payload.configuration_id != applied_id:
+        if is_dirty and payload.configuration_id != applied_id and not skip_dirty:
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -2322,16 +2610,19 @@ async def get_lab_layout():
     """Breadboard/table bounds + storage grid overlay (single source matching ``layout.json``)."""
     from lab_model.domain.storage_region import storage_grid_spec
 
-    doc = load_layout_document()
-    enriched = dict(doc)
-    paths = get_lab_view_paths()
-    manifest = get_lab_manifest()
-    enriched["lab_view_root"] = paths.root_dir
-    enriched["storage_grid"] = storage_grid_spec()
-    enriched["lab_manifest"] = manifest.as_dict()
-    enriched["lab_mode"] = manifest.lab_mode
-    enriched["communicator"] = manifest.communicator
-    return enriched
+    rt = require_backend(backend_registry, _active_backend_id(), init=False)
+    with BackendSession(rt):
+        doc = load_layout_document()
+        enriched = dict(doc)
+        paths = rt.paths
+        manifest = rt.manifest
+        enriched["lab_view_root"] = paths.root_dir
+        enriched["storage_grid"] = storage_grid_spec()
+        enriched["lab_manifest"] = manifest.as_dict()
+        enriched["lab_mode"] = manifest.lab_mode
+        enriched["communicator"] = manifest.communicator
+        enriched["backend_id"] = rt.backend_id
+        return enriched
 
 
 @app.get("/api/component-library")
@@ -2366,15 +2657,15 @@ def _runtime_laser_doc() -> Dict[str, Any]:
 
 def _laser_lines_response() -> Dict[str, Any]:
     out = _runtime_laser_doc()
-    out["lab_mode"] = LAB_MODE
-    out["schema_file"] = os.path.basename(get_lab_view_paths().laser_lines_json)
+    out["lab_mode"] = _lab_mode_for_active()
+    out["schema_file"] = os.path.basename(_runtime_for_active().paths.laser_lines_json)
     return out
 
 
 @app.get("/api/laser-line")
 async def get_laser_line():
     """Single-line legacy coefficients (x = a*y + b, mm) from the runtime snap line."""
-    return laser_line_coeffs_from_doc(_runtime_laser_doc(), LAB_MODE)
+    return laser_line_coeffs_from_doc(_runtime_laser_doc(), _lab_mode_for_active())
 
 
 @app.get("/api/laser-lines")
@@ -2601,8 +2892,15 @@ def _enforce_ensemble_preflight(lab_comm, cmd) -> None:
         return
     with lab_comm._state_lock:
         state = lab_comm.current_state
+    is_real = not _active_backend_id().startswith("mock.")
+    catalog_map = getattr(lab_comm, "catalog_map", None)
     try:
-        preflight_ensemble(state, params)
+        preflight_ensemble(
+            state,
+            params,
+            catalog_map=catalog_map,
+            strict_real_objectives=is_real,
+        )
     except EnsemblePreflightError as exc:
         raise HTTPException(status_code=400, detail=exc.as_dict()) from exc
 
@@ -2701,12 +2999,646 @@ def _enforce_holding_rules(cmd, state: Dict[str, Any]) -> None:
         )
 
 
+@app.get("/api/backends")
+async def list_backends():
+    """Catalog of registered backends with lease/queue status (no backend_id required)."""
+    rows = []
+    for spec in backend_registry.list_specs():
+        rt = backend_registry.get_runtime(spec.backend_id, init=False)
+        row = backend_registry.to_api_row(
+            rt,
+            lease_manager=session_lease_manager,
+            job_hub=job_hub,
+        )
+        active_job = row.get("active_job_id")
+        if active_job:
+            found = job_hub.find_job(active_job)
+            if found:
+                _, mgr = found
+                try:
+                    row["active_job"] = mgr.get(active_job).to_api_dict()
+                except JobNotFoundError:
+                    row["active_job"] = None
+        rows.append(row)
+    return {"backends": rows, "schema_version": 1}
+
+
+@app.get("/api/optimization/metrics")
+async def list_optimization_metrics():
+    """Registered ensemble objective metric ids (Phase E)."""
+    return {"metrics": sorted(METRIC_REGISTRY.keys())}
+
+
+@app.get("/api/kernels")
+async def list_edge_kernels(request: Request, backend: Optional[str] = Query(None)):
+    """Registered edge kernels for closed-loop jobs (catalog + optional session)."""
+    backend_id = _active_backend_id()
+    lease_id = _extract_lease_id({}, request)
+    if lease_id:
+        from lab_model.optimization.kernels import session_store
+
+        session_store.activate_lease_roots(backend_id, lease_id)
+    try:
+        from lab_communicator.shared.lab_view_config import get_lab_view_paths_optional
+
+        paths = get_lab_view_paths_optional()
+        lv = str(paths.root_dir) if paths is not None else None
+    except Exception:
+        lv = None
+    rows = list_kernels(backend=backend, lab_view_path=lv)
+    return {
+        "kernels": [k.to_api_dict() for k in rows],
+        "backend_id": backend_id,
+    }
+
+
+@app.post("/api/kernels/session")
+async def register_session_kernel(request: Request, body: Dict[str, Any] = Body(...)):
+    """Register a TorchScript package under the active lease (session-scoped)."""
+    import base64
+
+    from lab_model.optimization.kernels import session_store
+
+    backend_id = str(body.get("backend_id") or _active_backend_id()).strip()
+    lease_id = _extract_lease_id(body, request)
+    if not lease_id:
+        raise HTTPException(status_code=400, detail="X-CloudLabs-Lease required")
+    try:
+        session_lease_manager.validate_command_lease(
+            backend_id=backend_id,
+            lease_id=lease_id,
+            require_when_locked=True,
+        )
+    except (LeaseConflictError, LeaseNotFoundError, LeaseExpiredError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    b64 = body.get("artifact_b64") or body.get("artifact_base64")
+    if not b64:
+        raise HTTPException(status_code=400, detail="artifact_b64 is required")
+    try:
+        artifact = base64.b64decode(str(b64), validate=False)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"invalid artifact_b64: {exc}") from exc
+
+    feature_names = body.get("feature_names")
+    if feature_names is not None and not isinstance(feature_names, list):
+        raise HTTPException(status_code=400, detail="feature_names must be a list")
+
+    try:
+        entry = session_store.register_package(
+            backend_id=backend_id,
+            lease_id=lease_id,
+            name=name,
+            artifact_bytes=artifact,
+            label=str(body.get("label") or name),
+            description=str(body.get("description") or ""),
+            output_kind=str(body.get("output_kind") or "scalar"),
+            feature_names=feature_names,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"kernel": entry, "backend_id": backend_id, "lease_id": lease_id}
+
+
+@app.get("/api/kernels/session")
+async def list_session_kernels(request: Request, backend_id: Optional[str] = Query(None)):
+    """List session packages for the active lease."""
+    from lab_model.optimization.kernels import session_store
+
+    bid = str(backend_id or _active_backend_id()).strip()
+    lease_id = _extract_lease_id({}, request)
+    if not lease_id:
+        raise HTTPException(status_code=400, detail="X-CloudLabs-Lease required")
+    rows = session_store.list_lease_packages(bid, lease_id)
+    return {"kernels": rows, "backend_id": bid, "lease_id": lease_id}
+
+
+@app.delete("/api/kernels/session/{kernel_id}")
+async def delete_session_kernel(
+    kernel_id: str,
+    request: Request,
+    backend_id: Optional[str] = Query(None),
+):
+    """Delete one session package from the active lease."""
+    from lab_model.optimization.kernels import session_store
+
+    bid = str(backend_id or _active_backend_id()).strip()
+    lease_id = _extract_lease_id({}, request)
+    if not lease_id:
+        raise HTTPException(status_code=400, detail="X-CloudLabs-Lease required")
+    ok = session_store.delete_package(bid, lease_id, kernel_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"session kernel {kernel_id!r} not found")
+    return {"status": "deleted", "kernel_id": kernel_id}
+
+
+@app.get("/api/kernels/session/{kernel_id}/artifact")
+async def download_session_kernel_artifact(
+    kernel_id: str,
+    request: Request,
+    backend_id: Optional[str] = Query(None),
+):
+    """Download session kernel ``.pt`` bytes (base64) for local authoring-time eval."""
+    import base64
+
+    from lab_model.optimization.kernels import session_store
+
+    bid = str(backend_id or _active_backend_id()).strip()
+    lease_id = _extract_lease_id({}, request)
+    if not lease_id:
+        raise HTTPException(status_code=400, detail="X-CloudLabs-Lease required")
+    try:
+        data = session_store.read_artifact_bytes(bid, lease_id, kernel_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    rows = {
+        r["id"]: r for r in session_store.list_lease_packages(bid, lease_id)
+    }
+    meta = rows.get(kernel_id) or {}
+    return {
+        "kernel_id": kernel_id,
+        "artifact_b64": base64.b64encode(data).decode("ascii"),
+        "digest": meta.get("digest"),
+        "output_kind": meta.get("output_kind") or "scalar",
+        "feature_names": meta.get("feature_names") or [],
+    }
+
+
+@app.post("/api/kernels/eval")
+async def eval_kernel_on_edge(request: Request, body: Dict[str, Any] = Body(...)):
+    """Capture a measurable and run a TorchScript kernel on the edge (lease required)."""
+    from lab_model.optimization.kernels import session_store
+    from lab_model.optimization.kernels.torchscript_runtime import (
+        bgr_uint8_to_nchw_float,
+        run_torchscript_output,
+    )
+
+    backend_id = str(body.get("backend_id") or _active_backend_id()).strip()
+    lease_id = _extract_lease_id(body, request)
+    if not lease_id:
+        raise HTTPException(status_code=400, detail="X-CloudLabs-Lease required")
+    try:
+        session_lease_manager.validate_command_lease(
+            backend_id=backend_id,
+            lease_id=lease_id,
+            require_when_locked=True,
+        )
+    except (LeaseConflictError, LeaseNotFoundError, LeaseExpiredError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    kernel_id = str(body.get("kernel_id") or "").strip()
+    tag_id = str(body.get("tag_id") or "").strip()
+    if not kernel_id or not tag_id:
+        raise HTTPException(status_code=400, detail="kernel_id and tag_id required")
+
+    session_store.activate_lease_roots(backend_id, lease_id)
+    rt = require_backend(backend_registry, backend_id, init=True)
+    if rt.lab is None:
+        raise HTTPException(status_code=503, detail="lab not initialized")
+
+    try:
+        import numpy as np
+
+        with BackendSession(rt):
+            lab = rt.lab
+            bgr = None
+            reader = getattr(lab, "read_camera_bgr", None)
+            if callable(reader):
+                bgr = reader(tag_id)
+            if bgr is None:
+                # Mock-friendly synthetic frame when no camera hook exists
+                bgr = np.full((64, 64, 3), 128, dtype=np.uint8)
+            kind, value = run_torchscript_output(kernel_id, bgr)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if kind == "features":
+        return {"kind": "features", "features": list(value), "kernel_id": kernel_id}
+    return {"kind": "scalar", "scalar": float(value), "kernel_id": kernel_id}
+
+
+@app.post("/api/optimization/compile")
+async def optimization_compile(body: Dict[str, Any] = Body(...)):
+    """
+    Compile declarative objective graph → runtime ``ObjectiveSpec`` JSON.
+
+    Optional ``preflight: true`` validates compiled sources against live bench state.
+    Optional ``parameters`` merges compiled objective into an ensemble payload and
+    runs full ensemble preflight when ``preflight`` is set.
+    """
+    objective_in = body.get("graph") or body.get("objective")
+    if objective_in is None and isinstance(body.get("parameters"), dict):
+        params_obj = body["parameters"]
+        objective_in = params_obj.get("objective")
+    if objective_in is None:
+        raise HTTPException(
+            status_code=400,
+            detail="graph, objective, or parameters.objective required",
+        )
+
+    try:
+        compiled = compile_objective_payload(objective_in)
+    except EnsemblePreflightError as exc:
+        raise HTTPException(status_code=400, detail=exc.as_dict()) from exc
+
+    result: Dict[str, Any] = {"ok": True, "objective": compiled}
+    do_preflight = bool(body.get("preflight", False))
+
+    if do_preflight:
+        if lab is None:
+            result["preflight"] = {
+                "ok": False,
+                "message": "lab not initialized",
+            }
+            result["ok"] = False
+        else:
+            with lab._state_lock:
+                state = lab.current_state
+            is_real = not _active_backend_id().startswith("mock.")
+            catalog_map = getattr(lab, "catalog_map", None)
+            try:
+                if isinstance(body.get("parameters"), dict):
+                    params = dict(body["parameters"])
+                    params["objective"] = compiled
+                    spec, _, x0 = preflight_ensemble(
+                        state,
+                        params,
+                        catalog_map=catalog_map,
+                        strict_real_objectives=is_real,
+                    )
+                    result["parameters"] = spec.model_dump()
+                    result["x0"] = x0
+                    result["preflight"] = {"ok": True}
+                else:
+                    preflight_objective_sources(
+                        state,
+                        ObjectiveSpec.model_validate(compiled),
+                        catalog_map=catalog_map,
+                        strict_real_objectives=is_real,
+                    )
+                    result["preflight"] = {"ok": True}
+            except EnsemblePreflightError as exc:
+                result["preflight"] = exc.as_dict()
+                result["ok"] = False
+
+    return result
+
+
+@app.get("/api/jobs")
+async def list_jobs(
+    limit: int = Query(50, ge=1, le=200),
+    status: Optional[str] = Query(None),
+    backend_id: Optional[str] = Query(None),
+):
+    """List recent jobs (newest first), optionally filtered by backend."""
+    allowed = {"queued", "running", "succeeded", "failed", "cancelled"}
+    if status is not None and status not in allowed:
+        raise HTTPException(status_code=400, detail=f"invalid status filter: {status!r}")
+    if backend_id:
+        mgr = job_hub.for_backend(backend_id.strip())
+        records = mgr.list_jobs(limit=limit, status=status)  # type: ignore[arg-type]
+        active = mgr.active_job_id()
+    else:
+        records = job_hub.list_all_jobs(limit=limit, status=status)
+        active = None
+    return {
+        "jobs": [r.to_api_dict() for r in records],
+        "active_job_id": active,
+        "backend_id": backend_id,
+    }
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job(job_id: str):
+    """Job status + progress telemetry."""
+    found = job_hub.find_job(job_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"job {job_id!r} not found")
+    _, mgr = found
+    return mgr.get(job_id).to_api_dict()
+
+
+@app.post("/api/jobs/submit")
+async def submit_job(request: Request, body: Dict[str, Any] = Body(...)):
+    """Submit a job (closed-loop OPTIMIZE or compiled DAG steps)."""
+    mode = str(body.get("mode") or "").strip().lower()
+    backend_id = str(body.get("backend_id") or "").strip()
+    holder = str(body.get("holder") or "").strip()
+
+    if not backend_id:
+        raise HTTPException(status_code=400, detail="backend_id is required in job submit body")
+    require_backend(backend_registry, backend_id, init=False)
+
+    if mode not in {"closed_loop", "compiled_dag"}:
+        raise HTTPException(
+            status_code=400,
+            detail="mode must be closed_loop or compiled_dag (imperative uses SDK lease directly)",
+        )
+
+    lease_id = _extract_lease_id(body, request)
+    known_session: set = set()
+    inline_packages = body.get("kernel_packages")
+    if isinstance(inline_packages, list):
+        for row in inline_packages:
+            if isinstance(row, dict):
+                kid = str(row.get("kernel_id") or row.get("id") or "").strip()
+                if kid.startswith("session."):
+                    known_session.add(kid)
+    if lease_id:
+        from lab_model.optimization.kernels import session_store
+
+        session_store.activate_lease_roots(backend_id, lease_id)
+        for row in session_store.list_lease_packages(backend_id, lease_id):
+            known_session.add(str(row["id"]))
+
+    try:
+        spec = validate_submit_spec(
+            mode,
+            body,
+            known_session_ids=known_session or None,
+        )  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    snapshot_ref = parse_snapshot_ref(body.get("snapshot"))
+    mgr = job_hub.for_backend(backend_id)
+    record = mgr.submit(
+        backend_id=backend_id,
+        mode=mode,  # type: ignore[arg-type]
+        holder=holder or f"api:{uuid.uuid4().hex[:8]}",
+        spec=spec,
+        snapshot_ref=snapshot_ref,
+    )
+
+    # Stage session packages into job scratch.
+    # Prefer inline kernel_packages (client exported before releasing lease) so
+    # the job runner can acquire the backend without racing the imperative lease.
+    inline_packages = body.get("kernel_packages")
+    session_ids = list(spec.get("session_kernel_ids") or [])
+    if not session_ids:
+        session_ids = [
+            k for k in (spec.get("kernels") or []) if str(k).startswith("session.")
+        ]
+    if inline_packages or session_ids:
+        from lab_model.optimization.kernels import session_store
+
+        try:
+            if isinstance(inline_packages, list) and inline_packages:
+                audit = session_store.stage_packages_from_payload(
+                    backend_id=backend_id,
+                    job_id=record.job_id,
+                    packages=inline_packages,
+                )
+            else:
+                if not lease_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "session kernels require kernel_packages in the submit body "
+                            "or X-CloudLabs-Lease so packages can be staged"
+                        ),
+                    )
+                audit = session_store.stage_packages_for_job(
+                    backend_id=backend_id,
+                    lease_id=lease_id,
+                    job_id=record.job_id,
+                    kernel_ids=session_ids,
+                )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        record.spec["kernel_packages"] = audit
+        mgr.update_progress(record.job_id, {"kernel_audit": audit})
+
+    logger.info(
+        "job submitted id=%s backend=%s mode=%s holder=%s",
+        record.job_id,
+        backend_id,
+        mode,
+        record.holder,
+    )
+    _kick_job_runner_for(backend_id)
+    return record.to_api_dict()
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """Cancel a queued or running job (best-effort for running)."""
+    found = job_hub.find_job(job_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"job {job_id!r} not found")
+    backend_id, mgr = found
+    record = mgr.request_cancel(job_id)
+    _kick_job_runner_for(backend_id)
+    return record.to_api_dict()
+
+
+@app.get("/api/catalog/pins")
+async def list_catalog_pins():
+    """Remote approved configuration pins (read-only catalog store)."""
+    return {
+        "pins": _catalog_pins_store().list_pins(),
+        "backend_id": _active_backend_id(),
+    }
+
+
+@app.get("/api/catalog/publish-requests")
+async def list_publish_requests(status: Optional[str] = Query(None)):
+    """List publish requests (pending by default when status=pending)."""
+    filter_status = status if status is not None else None
+    rows = _catalog_pins_store().list_publish_requests(status=filter_status)
+    return {"requests": rows}
+
+
+@app.post("/api/catalog/publish-requests")
+async def submit_publish_request(body: Dict[str, Any] = Body(...)):
+    """Request promotion of a local commit to the remote catalog."""
+    repo_id = str(body.get("repo_id") or "").strip()
+    configuration_id = str(
+        body.get("configuration_id") or body.get("commit") or ""
+    ).strip()
+    branch = str(body.get("branch") or "main").strip() or "main"
+    message = str(body.get("message") or "").strip()
+    requested_by = str(body.get("requested_by") or body.get("holder") or "api").strip()
+    pin_id = body.get("pin_id") or body.get("proposed_pin_id")
+    backend_id = str(body.get("backend_id") or _active_backend_id()).strip()
+
+    try:
+        record = _catalog_pins_store().submit_publish_request(
+            repo_id=repo_id,
+            configuration_id=configuration_id,
+            branch=branch,
+            message=message,
+            requested_by=requested_by,
+            pin_id=str(pin_id).strip() if pin_id else None,
+            backend_id=backend_id,
+            auto_approve=_mock_auto_approve_publish(),
+            approved_by="mock:auto" if _mock_auto_approve_publish() else "owner",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return record
+
+
+@app.post("/api/catalog/publish-requests/{request_id}/approve")
+async def approve_publish_request(request_id: str, body: Dict[str, Any] = Body(default={})):
+    """Owner approves a pending publish request (promotes to CatalogPin)."""
+    approved_by = str(body.get("approved_by") or "owner").strip() or "owner"
+    pin_id = body.get("pin_id")
+    try:
+        record = _catalog_pins_store().approve_publish_request(
+            request_id,
+            approved_by=approved_by,
+            pin_id=str(pin_id).strip() if pin_id else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return record
+
+
+@app.post("/api/catalog/publish-requests/{request_id}/reject")
+async def reject_publish_request(request_id: str, body: Dict[str, Any] = Body(default={})):
+    """Owner rejects a pending publish request."""
+    rejected_by = str(body.get("rejected_by") or "owner").strip() or "owner"
+    reason = str(body.get("reason") or body.get("message") or "").strip()
+    try:
+        record = _catalog_pins_store().reject_publish_request(
+            request_id,
+            rejected_by=rejected_by,
+            reason=reason,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return record
+
+
+@app.post("/api/jobs/lease/acquire")
+async def acquire_session_lease(body: Dict[str, Any] = Body(...)):
+    """Acquire an exclusive session lease on a backend (Phase B SDK)."""
+    backend_id = str(body.get("backend_id") or "").strip()
+    holder = str(body.get("holder") or "").strip()
+    mode = str(body.get("mode") or "imperative").strip().lower()
+    snapshot_ref = body.get("snapshot_ref")
+    ttl_seconds = body.get("ttl_seconds")
+
+    if not backend_id:
+        raise HTTPException(status_code=400, detail="backend_id is required")
+    if not holder:
+        raise HTTPException(status_code=400, detail="holder is required")
+    if mode not in {"imperative", "compiled_dag", "closed_loop"}:
+        raise HTTPException(status_code=400, detail=f"unsupported mode: {mode!r}")
+
+    require_backend(backend_registry, backend_id, init=False)
+
+    try:
+        record = session_lease_manager.acquire(
+            backend_id=backend_id,
+            holder=holder,
+            mode=mode,  # type: ignore[arg-type]
+            snapshot_ref=str(snapshot_ref) if snapshot_ref else None,
+            ttl_seconds=int(ttl_seconds) if ttl_seconds is not None else None,
+        )
+    except LeaseConflictError as exc:
+        return _lease_conflict_response(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    logger.info(
+        "session lease acquired backend=%s holder=%s lease_id=%s",
+        backend_id,
+        holder,
+        record.lease_id,
+    )
+    return lease_record_to_api_dict(record)
+
+
+@app.post("/api/jobs/lease/release")
+async def release_session_lease(body: Dict[str, Any] = Body(...)):
+    """Release a session lease (idempotent)."""
+    lease_id = str(body.get("lease_id") or "").strip()
+    if not lease_id:
+        raise HTTPException(status_code=400, detail="lease_id is required")
+
+    released = session_lease_manager.release(lease_id)
+    if released is None:
+        raise HTTPException(status_code=404, detail=f"lease {lease_id!r} not found")
+
+    try:
+        from lab_model.optimization.kernels import session_store
+
+        session_store.delete_lease_scratch(released.backend_id, released.lease_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("session kernel scratch cleanup failed: %s", exc)
+
+    logger.info(
+        "session lease released backend=%s holder=%s lease_id=%s",
+        released.backend_id,
+        released.holder,
+        released.lease_id,
+    )
+    return {"status": "released", "lease": lease_record_to_api_dict(released)}
+
+
+@app.post("/api/jobs/lease/heartbeat")
+async def heartbeat_session_lease(body: Dict[str, Any] = Body(...)):
+    """Extend a session lease TTL."""
+    lease_id = str(body.get("lease_id") or "").strip()
+    if not lease_id:
+        raise HTTPException(status_code=400, detail="lease_id is required")
+    extend_seconds = body.get("extend_seconds")
+
+    try:
+        record = session_lease_manager.heartbeat(
+            lease_id,
+            extend_seconds=int(extend_seconds) if extend_seconds is not None else None,
+        )
+    except LeaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LeaseExpiredError as exc:
+        raise HTTPException(status_code=410, detail=str(exc)) from exc
+
+    return lease_record_to_api_dict(record)
+
+
 @app.post("/api/command")
-async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundTasks):
+async def receive_command(
+    payload: Dict[str, Any],
+    background_tasks: BackgroundTasks,
+    request: Request,
+):
     print(f"Received Command: {payload}")
 
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab Communicator not initialized")
+
+    lease_id = _extract_lease_id(payload, request)
+    try:
+        session_lease_manager.validate_command_lease(
+            backend_id=_active_backend_id(),
+            lease_id=lease_id,
+            require_when_locked=_command_lease_required(),
+        )
+    except LeaseConflictError as exc:
+        return _lease_conflict_response(exc)
+    except LeaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LeaseExpiredError as exc:
+        raise HTTPException(status_code=410, detail=str(exc)) from exc
+
     state = lab.get_lab_state()
     current_status = state.get("system_status")
     if current_status == "BUSY" or current_status == "OPTIMIZING":
@@ -2819,13 +3751,13 @@ async def receive_command(payload: Dict[str, Any], background_tasks: BackgroundT
 @app.get("/api/recipes")
 async def list_recipes():
     recipes = []
-    if os.path.exists(RECIPES_DIR):
-        for f in os.listdir(RECIPES_DIR):
+    if os.path.exists(_RECIPES_DIR()):
+        for f in os.listdir(_RECIPES_DIR()):
             if f.endswith(".json") and not f.endswith("_golden.json"):
-                with open(os.path.join(RECIPES_DIR, f), "r") as file:
+                with open(os.path.join(_RECIPES_DIR(), f), "r") as file:
                     try:
                         data = json.load(file)
-                        golden_path = os.path.join(RECIPES_DIR, f.replace(".json", "_golden.json"))
+                        golden_path = os.path.join(_RECIPES_DIR(), f.replace(".json", "_golden.json"))
                         data["has_golden"] = os.path.exists(golden_path)
                         recipes.append(data)
                     except:
@@ -2834,7 +3766,7 @@ async def list_recipes():
 
 @app.post("/api/recipes")
 async def save_recipe(recipe: Recipe):
-    file_path = os.path.join(RECIPES_DIR, f"{recipe.id}.json")
+    file_path = os.path.join(_RECIPES_DIR(), f"{recipe.id}.json")
     with open(file_path, "w") as f:
         f.write(recipe.model_dump_json(indent=2))
     return {"status": "success", "message": f"Recipe {recipe.id} saved"}
@@ -2846,7 +3778,7 @@ async def play_recipe(recipe_id: str, background_tasks: BackgroundTasks):
             status_code=409,
             detail="Recipes are unavailable in MuJoCo v1",
         )
-    file_path = os.path.join(RECIPES_DIR, f"{recipe_id}.json")
+    file_path = os.path.join(_RECIPES_DIR(), f"{recipe_id}.json")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Recipe not found")
     
@@ -2877,7 +3809,7 @@ async def play_recipe(recipe_id: str, background_tasks: BackgroundTasks):
 
 @app.get("/api/recipes/{recipe_id}/golden")
 async def get_golden_state(recipe_id: str):
-    file_path = os.path.join(RECIPES_DIR, f"{recipe_id}_golden.json")
+    file_path = os.path.join(_RECIPES_DIR(), f"{recipe_id}_golden.json")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Golden state not found")
     
@@ -2887,7 +3819,7 @@ async def get_golden_state(recipe_id: str):
 @app.get("/api/recipes/{recipe_id}/compare")
 async def compare_golden_state(recipe_id: str):
     # 1. Load Golden State
-    golden_path = os.path.join(RECIPES_DIR, f"{recipe_id}_golden.json")
+    golden_path = os.path.join(_RECIPES_DIR(), f"{recipe_id}_golden.json")
     if not os.path.exists(golden_path):
         raise HTTPException(status_code=404, detail="Golden state not found")
     
@@ -3022,16 +3954,53 @@ async def get_ghost_state():
 async def list_golden_states():
     """Returns a map of recipe_id -> golden_state content"""
     golden_states = {}
-    if os.path.exists(RECIPES_DIR):
-        for f in os.listdir(RECIPES_DIR):
+    if os.path.exists(_RECIPES_DIR()):
+        for f in os.listdir(_RECIPES_DIR()):
             if f.endswith("_golden.json"):
                 recipe_id = f.replace("_golden.json", "")
-                with open(os.path.join(RECIPES_DIR, f), "r") as file:
+                with open(os.path.join(_RECIPES_DIR(), f), "r") as file:
                     try:
                         golden_states[recipe_id] = json.load(file)
                     except:
                         pass
     return golden_states
+
+@app.get("/catalog")
+async def read_catalog():
+    path = os.path.join(frontend_path, "catalog.html")
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    return Response(content=html, media_type="text/html", headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
+
+
+@app.get("/wiki")
+async def read_wiki():
+    """Live capability wiki — tunables / measurables / parameters with SDK handles."""
+    path = os.path.join(frontend_path, "wiki.html")
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    return Response(content=html, media_type="text/html", headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
+
+
+@app.get("/operations")
+async def read_operations():
+    path = os.path.join(frontend_path, "operations.html")
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    return Response(content=html, media_type="text/html", headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
+
 
 @app.get("/debug")
 async def read_debug():

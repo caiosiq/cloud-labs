@@ -36,6 +36,8 @@ import {
 
 } from '../api/control.js';
 
+import { submitPublishRequest, fetchCatalogPins } from '../api/catalog.js';
+
 import { runReconcilePlan } from '../control/reconcile-runner.js';
 
 import {
@@ -190,6 +192,10 @@ export function initControlPanel(deps = {}) {
 
         saveBtn: document.getElementById('control-save-config-btn'),
 
+        publishBtn: document.getElementById('control-publish-btn'),
+
+        catalogPinBtn: document.getElementById('control-catalog-pin-btn'),
+
         forkBtn: document.getElementById('control-fork-btn'),
 
         planPreview: document.getElementById('control-plan-preview'),
@@ -227,6 +233,10 @@ export function initControlPanel(deps = {}) {
 
 
     _els.saveBtn?.addEventListener('click', () => void onSaveConfiguration());
+
+    _els.publishBtn?.addEventListener('click', () => void onPublishToCatalog());
+
+    _els.catalogPinBtn?.addEventListener('click', () => void onStartFromCatalogPin());
 
     _els.forkBtn?.addEventListener('click', () => void onForkBranch());
 
@@ -365,6 +375,7 @@ function enterRepo(repoId) {
     clearPreviewOverlay();
     store.control.viewingCommitId = null;
     store.control.selectedCommitId = null;
+    store.control.snapshotSource = null;
     store.control.liveHeadId = null;
     store.control.working = null;
     setVcActive(true);
@@ -383,6 +394,7 @@ function stopVersionControl() {
     clearPreviewOverlay();
     store.control.viewingCommitId = null;
     store.control.selectedCommitId = null;
+    store.control.snapshotSource = null;
     store.control.working = null;
     setVcActive(false);
     _deps.render?.();
@@ -688,6 +700,12 @@ function selectCommitNode(commitId, node) {
     }
 
     store.control.selectedCommitId = commitId;
+    store.control.snapshotSource = {
+        source: 'local',
+        repo_id: store.control.repoId || undefined,
+        branch: store.control.branch || 'main',
+        configuration_id: commitId,
+    };
 
     void viewConfiguration(commitId, node);
 
@@ -920,6 +938,20 @@ function updateStashUi() {
             : 'Fork branch';
     }
 
+    const publishCommitId = getAppliedCommitId() || store.control.selectedCommitId;
+    if (_els.publishBtn) {
+        const canPublish = Boolean(publishCommitId) && !viewing;
+        _els.publishBtn.disabled = !canPublish;
+        _els.publishBtn.title = canPublish
+            ? `Request publish of ${shortCommitId(publishCommitId)} to remote catalog`
+            : 'Select or apply a commit before publishing';
+    }
+    if (_els.catalogPinBtn) {
+        _els.catalogPinBtn.disabled = false;
+        _els.catalogPinBtn.title =
+            'Preview a frozen catalog pin (separate from local branch heads)';
+    }
+
     const graphPanel = document.getElementById('control-graph-panel');
     graphPanel?.classList.toggle('is-dirty', dirty);
     graphPanel?.classList.toggle('is-detached', detached);
@@ -1137,6 +1169,8 @@ async function returnToLiveHead() {
 
         store.control.viewingCommitId = null;
 
+        store.control.snapshotSource = null;
+
         _deps.render();
 
         renderCommitGraph();
@@ -1163,6 +1197,8 @@ async function returnToLiveHead() {
         store.control.viewingCommitId = null;
 
         store.control.selectedCommitId = applied;
+
+        store.control.snapshotSource = null;
 
         _deps.render();
 
@@ -1238,6 +1274,197 @@ async function onSaveConfiguration() {
 
     }
 
+}
+
+
+
+async function onStartFromCatalogPin() {
+    if (isDirty()) {
+        promptResolveDirty('opening a catalog pin');
+        return;
+    }
+
+    let pins = [];
+    try {
+        const payload = await fetchCatalogPins();
+        pins = Array.isArray(payload.pins) ? payload.pins : [];
+    } catch (e) {
+        showErrorModal('Catalog pins', `Could not load pins: ${e.message || e}`);
+        return;
+    }
+
+    if (!pins.length) {
+        showErrorModal(
+            'Catalog pins',
+            'No approved catalog pins on this backend. Publish from Twin UI or seed pins in the catalog store.',
+            { kind: 'dismissible' },
+        );
+        return;
+    }
+
+    const existing = document.getElementById('catalog-pin-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'catalog-pin-modal';
+    overlay.style.cssText =
+        'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:2990;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+
+    const card = document.createElement('div');
+    card.style.cssText =
+        'background:#181b21;border:1px solid rgba(59,130,246,0.35);border-radius:10px;padding:22px;max-width:480px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,0.65);';
+
+    let html =
+        '<h3 style="margin:0 0 6px 0;color:#e2e8f0;font-size:16px;">Start from catalog pin</h3>' +
+        '<p style="margin:0 0 14px 0;color:#94a3b8;font-size:12px;line-height:1.45;">' +
+        'Frozen approved snapshots — not live local branches. Selecting a pin opens a ' +
+        'read-only preview of that commit (same as viewing a graph node).</p>' +
+        '<div style="display:flex;flex-direction:column;gap:8px;">';
+
+    for (const pin of pins) {
+        const id = escapeHtml(pin.pin_id);
+        const name = escapeHtml(pin.display_name || pin.pin_id);
+        const origin = escapeHtml(`${pin.repo_id}@${pin.branch || 'main'}`);
+        const commit = escapeHtml(shortCommitId(pin.configuration_id));
+        html +=
+            `<button type="button" class="btn btn-secondary catalog-pin-pick" data-pin="${id}" ` +
+            `style="width:100%;justify-content:flex-start;text-align:left;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;">` +
+            `<span><span style="color:#93c5fd;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;margin-right:6px;">Catalog pin</span>${name}</span>` +
+            `<span style="opacity:0.65;font-size:11px;font-family:ui-monospace,monospace;">${id} · ${origin} · ${commit}</span>` +
+            `</button>`;
+    }
+    html +=
+        '</div><div style="margin-top:14px;display:flex;justify-content:flex-end;">' +
+        '<button type="button" id="catalog-pin-cancel" class="btn btn-secondary" style="width:auto;padding:8px 16px;">Cancel</button>' +
+        '</div>';
+
+    card.innerHTML = html;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    document.getElementById('catalog-pin-cancel')?.addEventListener('click', () => {
+        overlay.remove();
+    });
+    overlay.addEventListener('click', (ev) => {
+        if (ev.target === overlay) overlay.remove();
+    });
+
+    card.querySelectorAll('button.catalog-pin-pick').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const pin = pins.find((p) => p.pin_id === btn.dataset.pin);
+            overlay.remove();
+            if (pin) void applyCatalogPinPreview(pin);
+        });
+    });
+}
+
+async function applyCatalogPinPreview(pin) {
+    const repoId = String(pin.repo_id || '').trim();
+    const configurationId = String(pin.configuration_id || pin.commit || '').trim();
+    const pinId = String(pin.pin_id || '').trim();
+    if (!repoId || !configurationId || !pinId) {
+        showErrorModal('Catalog pin', 'Pin is incomplete (missing repo or commit).');
+        return;
+    }
+
+    try {
+        if (!store.control.repoId) {
+            setVcActive(true);
+        }
+        if (store.control.repoId !== repoId) {
+            store.control.repoId = repoId;
+            store.control.branch = pin.branch || 'main';
+            store.control.liveHeadId = null;
+            store.control.working = null;
+            setVcActive(true);
+            await refreshControlPanel();
+        } else if (pin.branch) {
+            store.control.branch = pin.branch;
+        }
+
+        store.control.snapshotSource = {
+            source: 'catalog',
+            pin_id: pinId,
+            display_name: pin.display_name || pinId,
+            repo_id: repoId,
+            branch: pin.branch || 'main',
+            configuration_id: configurationId,
+        };
+        store.control.selectedCommitId = configurationId;
+
+        await viewConfiguration(configurationId, {
+            message: pin.display_name || pinId,
+        });
+        log(
+            `Catalog pin <code>${escapeHtml(pinId)}</code> — frozen commit ` +
+                `${shortCommitId(configurationId)} (does not follow local branch heads)`,
+            'info',
+        );
+    } catch (e) {
+        console.error('[control-panel] catalog pin preview failed', e);
+        store.control.snapshotSource = null;
+        showErrorModal('Catalog pin', e.message || String(e));
+    }
+}
+
+async function onPublishToCatalog() {
+    const blocked = runtimeEditableOrMessage();
+    if (blocked) {
+        showErrorModal('Publish', blocked);
+        return;
+    }
+
+    const configurationId =
+        getAppliedCommitId() || store.control.selectedCommitId || store.control.liveHeadId;
+    if (!configurationId) {
+        showErrorModal(
+            'Publish to catalog',
+            'No committed configuration to publish. Commit your layout first.',
+            { kind: 'dismissible' },
+        );
+        return;
+    }
+
+    const repo = store.control.repoId;
+    const branch = store.control.branch || 'main';
+    const defaultMsg = `catalog pin ${shortCommitId(configurationId)}`;
+    const message = prompt('Catalog display name / message:', defaultMsg);
+    if (message == null) return;
+
+    const pinIdRaw = prompt(
+        'Optional catalog pin id (leave blank for auto-generated id):',
+        `${repo}-${shortCommitId(configurationId)}`,
+    );
+    if (pinIdRaw == null) return;
+
+    try {
+        const backendId = store.labState?.active_backend_id;
+        const result = await submitPublishRequest({
+            repoId: repo,
+            configurationId,
+            branch,
+            message: message.trim() || defaultMsg,
+            pinId: pinIdRaw.trim() || undefined,
+            requestedBy: 'ui:twin',
+            backendId,
+        });
+
+        if (result.status === 'approved') {
+            const pin = result.catalog_pin_id || '—';
+            log(
+                `Published to catalog as pin <code>${pin}</code> — see <a href="/catalog" target="_blank">Catalog</a>`,
+                'info',
+            );
+        } else {
+            log(
+                `Publish request <code>${result.request_id}</code> submitted (pending owner approval).`,
+                'info',
+            );
+        }
+    } catch (e) {
+        console.error('[control-panel] publish failed', e);
+        showErrorModal('Publish failed', e.message || String(e));
+    }
 }
 
 

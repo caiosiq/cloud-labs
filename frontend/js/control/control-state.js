@@ -164,6 +164,12 @@ export function isRuntimeEditable() {
 
 /** User-facing block reason, or null if edits are allowed. */
 export function runtimeEditableOrMessage() {
+    const lease = store.labState?.session_lease;
+    const backendId = String(store.labState?.active_backend_id || '');
+    const isMock = backendId.startsWith('mock.');
+    if (lease?.holder && !isMock) {
+        return `Bench leased by ${lease.holder}. Wait for the job to finish or release the lease from Operations.`;
+    }
     if (isConfigViewMode()) {
         return 'You are viewing a configuration preview. Return to bench or apply on bench before editing.';
     }
@@ -171,6 +177,32 @@ export function runtimeEditableOrMessage() {
         return 'You are on an older commit (detached). Fork a new branch here before making changes.';
     }
     return null;
+}
+
+/** Update the Twin UI lease banner from lab-state polling. */
+export function refreshSessionLeaseBanner() {
+    const el = document.getElementById('session-lease-banner');
+    if (!el) return;
+    const lease = store.labState?.session_lease;
+    if (!lease?.holder) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    const backendId = String(store.labState?.active_backend_id || '');
+    const isMock = backendId.startsWith('mock.');
+    el.style.display = 'block';
+    if (isMock) {
+        el.style.color = '#cbd5e1';
+        el.style.borderColor = 'rgba(148, 163, 184, 0.35)';
+        el.style.background = 'rgba(148, 163, 184, 0.1)';
+        el.innerHTML = `Session lease: <strong>${lease.holder}</strong> (mock — controls stay available unless CLOUDLABS_STRICT_LEASE=1). <a href="/operations" target="_blank" style="color:inherit">Operations</a>`;
+        return;
+    }
+    el.style.color = '#93c5fd';
+    el.style.borderColor = 'rgba(59, 130, 246, 0.35)';
+    el.style.background = 'rgba(59, 130, 246, 0.12)';
+    el.innerHTML = `Bench leased by <strong>${lease.holder}</strong> — direct control disabled. <a href="/operations" target="_blank" style="color:inherit">View on Operations</a>`;
 }
 
 /** Clear stale preview pointers when on an uncommitted working table. */

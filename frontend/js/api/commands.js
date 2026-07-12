@@ -1,5 +1,8 @@
 /**
- * Command dispatch — the **only** code path that POSTs to `/api/command`.
+ * Command dispatch — primary path for interactive primitives via ``POST /api/command``.
+ *
+ * **Exception:** staged optimization mode (ensemble) submits via ``POST /api/jobs/submit``
+ * so runs hold a session lease and appear on ``/operations`` — see ``api/jobs.js``.
  *
  * Two-stage flow:
  *   1. `sendCommand` — applies user-facing safeguards (e.g. MOVE_COMPONENT confirm modal). If the
@@ -18,6 +21,7 @@
 import { store } from '../state/store.js';
 import { runtimeEditableOrMessage } from '../control/control-state.js';
 import { log } from '../ui/log.js';
+import { backendHeaders } from '../state/backend-selection.js';
 import { showConfirmationModal } from '../ui/modals.js';
 import { drawPose, isBreadboardIntent } from '../component-model.js';
 import { updateRecipeEditorList } from '../ui/recipes.js';
@@ -142,7 +146,7 @@ export async function executeSendCommand(command) {
 
         const response = await fetch('/api/command', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(command),
         });
 

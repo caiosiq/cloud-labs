@@ -1218,6 +1218,7 @@ class LabCommunicator:
         x0: Dict[str, Any],
         session_id: str,
         progress_callback: "Callable[..., None]",
+        should_abort: Optional["Callable[[], bool]"] = None,
     ) -> Optional[Dict[str, Any]]:
         """Hardware step for ensemble ``OPTIMIZE`` (Phase 1 default: not implemented).
 

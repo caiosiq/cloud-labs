@@ -4,8 +4,14 @@ This document discusses a **Python-facing layer** for **long-running lab workflo
 
 **Document order (project roadmap):**  
 1. **`coding_on_the_ui.md`** — browser Command Console (HTTP-only, no communicator changes).  
-2. **`Run_CloudLab_Scripts.md`** (this file) — Python orchestration & communicator API.  
-3. **`import_json.md`** — declarative JSON sequences (LLM lab plans, batch runner).
+2. **`PROGRAMMABLE_LAB_VISION.md`** — Phase A vision: OPU analogy, layers, component pillars.  
+3. **`EXECUTION_MODES.md`** — Phase A: imperative / compiled / closed-loop + **exclusive session lease**.  
+4. **`LAB_SURFACES_VC_AND_INITIALIZATION.md`** — Twin / Operations / Catalog, local vs remote VC, **`force_reconcile`** init policy.  
+5. **`Run_CloudLab_Scripts.md`** (this file) — Python orchestration & communicator API.  
+6. **`SESSION_KERNELS.md`** — author-defined TorchScript packages for closed-loop.  
+7. **`import_json.md`** — declarative JSON sequences (LLM lab plans, batch runner).
+
+**Status (2026-07-11):** Phase B SDK ships on mock — `connect` / `prepare` / `run_cobyla` / `run_optimize` / session kernels. See §11.
 
 ---
 
@@ -95,7 +101,7 @@ Batch **declarative** runs (JSON list of steps) can be executed by a **thin runn
 
 ## 9. Open questions
 
-- **Single owner of the robot:** Should long scripts **stop the FastAPI server** from accepting conflicting UI commands, or is shared access with last-writer-wins acceptable?
+- **Single owner of the robot:** Resolved by [`EXECUTION_MODES.md`](./EXECUTION_MODES.md) §4 (**exclusive session lease**). Implemented on mock (`connect` acquires lease).
 - **Process model:** dedicated **script runner** subprocess vs in-server **admin endpoint** that runs a job—security and ops tradeoffs.
 - **Async:** align with `asyncio` if the communicator stays async-friendly for callers.
 
@@ -116,29 +122,78 @@ Batch **declarative** runs (JSON list of steps) can be executed by a **thin runn
 
 ### Phase 1 — Spike & transport choice
 
-- [ ] Document decision: in-process communicator access vs HTTP client (or both behind one façade).
-- [ ] Spike script: one move (or noop-safe call) via chosen transport; print lab state before/after.
+- [x] Document decision: in-process communicator access vs HTTP client (or both behind one façade). **HTTP client chosen for Phase B** (`lab_model.optimization.sdk`).
+- [x] Spike script: one move (or noop-safe call) via chosen transport; print lab state before/after. **`scripts/smoke_sdk.py`**
 - [ ] Spike: same action via alternate transport for comparison (optional second spike).
 
 ### Phase 2 — Minimal Python API
 
-- [ ] Package or module layout (import path, `__init__.py`, naming per repo convention).
-- [ ] `move_component` / `optimize` / `refresh_state` / `get_state` aligned with `LabCommunicator` + `/api/command` semantics.
-- [ ] `wait_until_idle()` (or equivalent) polling `system_status` until `IDLE` (define timeouts and errors).
+- [x] Package or module layout (import path, `__init__.py`, naming per repo convention). **`lab_model/optimization/sdk/`**
+- [x] `move_component` / `optimize` / `refresh_state` / `get_state` aligned with `LabCommunicator` + `/api/command` semantics. **`move_component`, `capture_measurable`, `get_lab_state`, `optimize` / `run_cobyla` / `run_optimize`**
+- [x] `wait_until_idle()` (or equivalent) polling `system_status` until `IDLE` (define timeouts and errors).
 
 ### Phase 3 — Long-run ergonomics
 
-- [ ] Example: loop with **measure** step between commands (log path, timestamp).
-- [ ] Example: wait for optimization step / image folder if needed by your workflow.
-- [ ] Clear errors: robot failures, **409** busy, disconnect.
+- [x] Example: loop with **measure** step between commands (log path, timestamp). **`scripts/smoke_sdk.py`**
+- [x] Example: wait for optimization step / image folder if needed by your workflow. **`wait_for_primitive_settled` for reconcile steps**
+- [x] Clear errors: robot failures, **409** busy, disconnect. **Typed SDK exceptions**
 
 ### Phase 4 — Hardening & docs
 
-- [ ] Typing and docstrings for public functions.
-- [ ] README section or standalone doc: install, env vars, running next to FastAPI vs standalone HTTP.
-- [ ] Decide and document concurrency policy (shared robot with UI vs exclusive mode).
+- [x] Typing and docstrings for public functions.
+- [x] README section or standalone doc: install, env vars, running next to FastAPI vs standalone HTTP. **See §11 below**
+- [x] Decide and document concurrency policy (shared robot with UI vs exclusive mode). **`EXECUTION_MODES.md` §4 + lease enforcement**
 
 ### Phase 5 — Optional advanced
 
 - [ ] `asyncio` integration if callers need async.
 - [ ] Dedicated “runner” process or job API if security/ops requires it.
+
+---
+
+## 11. Running the SDK (Phase B.1)
+
+**Prerequisites:** FastAPI server running (`python backend/main.py`). Server prints `ACTIVE_BACKEND_ID` (e.g. `mock.default`).
+
+**Smoke test (move + capture):**
+
+```powershell
+cd backend
+python ..\scripts\smoke_sdk.py
+```
+
+**With hardware reconcile** (monitored step-by-step, same primitive path as the UI reconcile runner):
+
+```powershell
+python ..\scripts\smoke_sdk.py --reconcile laser-cavity main
+```
+
+**Notebook / script:**
+
+```python
+from lab_model.optimization.sdk import connect, resolve_backend_id
+
+with connect(resolve_backend_id(), verbose=True) as lab:
+    lab.prepare(catalog_pin="laser-cavity-main", reconcile=True)
+    lab.set_tunable("tag_20", "tunables.nominal_pose.x", 10.0)
+    lab.wait_until_idle()
+    tensor = lab.measurable("tag_22", "camera_image").resolve(record=True)
+    # Closed-loop: lab.run_cobyla(...) or lab.run_optimize(objective=...)
+```
+
+**Authoring examples:**
+
+| Script | Role |
+|--------|------|
+| [`scripts/example_torchscript_cobyla_mirror.py`](../scripts/example_torchscript_cobyla_mirror.py) | Minimal catalog-kernel COBYLA |
+| [`scripts/example_session_kernel_author.py`](../scripts/example_session_kernel_author.py) | Author-defined session kernels + feature `run_optimize` |
+| [`docs/SESSION_KERNELS.md`](./SESSION_KERNELS.md) | Session package policy + API |
+
+| Env var | Purpose |
+|---------|---------|
+| `CLOUDLABS_BENCH_ID` | Suffix for `active_backend_id` (default `default` → `mock.default`) |
+| `LAB_VIEW_PATH` | Lab deployment bundle (control repos, catalog) |
+
+**Lease heartbeat:** enabled by default (60 s). Long notebooks stay locked without expiring at 10 min. Pass `heartbeat_s=0` to disable.
+
+**Import path:** run from `backend/` or set `PYTHONPATH` to `backend` so `lab_model` resolves.

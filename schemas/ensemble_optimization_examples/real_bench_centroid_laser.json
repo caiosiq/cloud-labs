@@ -1,0 +1,78 @@
+{
+  "action": "OPTIMIZE",
+  "target_id": "tag_20",
+  "parameters": {
+    "mode": "ensemble",
+    "session_label": "real bench — mirror motors + camera centroid + laser readback",
+    "variables": [
+      {
+        "id": "v_m20_m1",
+        "tag_id": "tag_20",
+        "path": "tunables.nominal_motor_positions.1",
+        "physical_type": "continuous",
+        "unit": "deg",
+        "bounds": { "min": -3.0, "max": 3.0 },
+        "delta": true
+      },
+      {
+        "id": "v_m20_m3",
+        "tag_id": "tag_20",
+        "path": "tunables.nominal_motor_positions.3",
+        "physical_type": "continuous",
+        "unit": "deg",
+        "bounds": { "min": -3.0, "max": 3.0 },
+        "delta": true
+      }
+    ],
+    "objective": {
+      "type": "weighted_sum",
+      "minimize": true,
+      "terms": [
+        {
+          "id": "centroid_rms_px",
+          "weight": 1.0,
+          "source": {
+            "tag_id": "tag_20",
+            "kind": "derived_centroid",
+            "from": "measurables.camera_image",
+            "target_px": { "x": 512.0, "y": 384.0 }
+          },
+          "metric": "rms_distance_px"
+        },
+        {
+          "id": "laser_power",
+          "weight": 0.25,
+          "source": {
+            "tag_id": "tag_50",
+            "kind": "measurable_scalar",
+            "path": "measurables.output_power_readback_mw",
+            "normalize": { "min": 0.0, "max": 100.0 }
+          },
+          "metric": "one_minus_normalized"
+        }
+      ]
+    },
+    "solver": {
+      "type": "block_cobyla",
+      "max_total_evals": 80,
+      "keep_best": true,
+      "settle_ms": 200,
+      "blocks": [
+        {
+          "id": "block_mirrors",
+          "variable_ids": ["v_m20_m1", "v_m20_m3"],
+          "max_evals": 40,
+          "trust_region_u": 0.25,
+          "rhobeg_u": 0.08,
+          "rhoend_u": 0.002,
+          "passes": 2
+        }
+      ]
+    },
+    "kernels": [
+      "ensemble.eval.image_features",
+      "measurable.materialize.camera",
+      "stabilization.settle"
+    ]
+  }
+}

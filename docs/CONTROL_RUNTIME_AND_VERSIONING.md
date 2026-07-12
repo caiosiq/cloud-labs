@@ -8,6 +8,7 @@
 
 **Related docs:**
 
+- [`LAB_SURFACES_VC_AND_INITIALIZATION.md`](./LAB_SURFACES_VC_AND_INITIALIZATION.md) — local VC (this doc) vs remote catalog pins; Twin UI vs Operations
 - [`universal_component_architecture.md`](./universal_component_architecture.md) — UC model, glossary extension, Phase 10+ roadmap hook
 - [`ENSEMBLE_OPTIMIZATION.md`](./ENSEMBLE_OPTIMIZATION.md) — generalized multi-variable `OPTIMIZE` (variables / objectives / solvers), normalization, touch-and-go, implementation roadmap
 - [`../backend/lab_model/ARCHITECTURE.md`](../backend/lab_model/ARCHITECTURE.md) — current platform map (managers = planned)

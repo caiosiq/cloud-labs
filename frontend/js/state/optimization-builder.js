@@ -22,6 +22,20 @@ export function createOptimizationBuilder() {
         awaitingRunResults: false,
         /** User explicitly opened persisted results (not auto-loaded on enter) */
         viewingLastRun: false,
+        /** @type {string|null} Active Job Manager id for the current run */
+        activeJobId: null,
+        /** Reconcile bench to applied commit snapshot before job steps (default on). */
+        reconcileBeforeRun: true,
+        /** Request post-job commit via Job Manager on_success hook. */
+        commitAfterRun: false,
+        /** Optional message for post-job commit; auto-generated when empty. */
+        commitMessage: '',
+        /** Captured from job.result after run completes. */
+        lastPostCommit: null,
+        lastPostCommitError: null,
+        postCommitFetched: false,
+        /** Latest job.progress from polling (init / post_commit phases). */
+        lastJobProgress: null,
         /** @type {string} Filter text for variables stage list */
         variableSearchQuery: '',
     };
@@ -278,6 +292,34 @@ export function buildSolverPayload(builder) {
             rhoend_u: b.rhoend_u,
             passes: b.passes,
         })),
+    };
+}
+
+/** Authoring-time objective graph for Phase E compiler (field-based terms). */
+export function buildAuthoringObjectiveGraph(builder) {
+    return {
+        version: 1,
+        type: 'weighted_sum',
+        minimize: true,
+        terms: builder.objectiveTerms.map((t) => {
+            const term = {
+                id: t.id,
+                tag_id: t.tag_id,
+                field: t.field,
+                weight: t.weight,
+                metric: t.metric,
+            };
+            if (t.field === 'camera_image' && t.centroidTarget) {
+                term.target_px = { ...t.centroidTarget };
+            }
+            if (t.field === 'output_power_readback_mw') {
+                term.normalize = {
+                    min: Number(t.normalizeMin ?? 0),
+                    max: Number(t.normalizeMax ?? 1),
+                };
+            }
+            return term;
+        }),
     };
 }
 

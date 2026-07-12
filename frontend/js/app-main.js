@@ -42,6 +42,7 @@ import {
 import { endTeleopBeacon } from './api/teleop.js';
 import { fetchLabState, initLabState, startLabStatePolling } from './state/lab-state.js';
 import { initBenchChromeBar, initBenchChromeBarInteraction } from './ui/bench-chrome-bar.js';
+import { initBackendPicker } from './ui/backend-picker.js';
 import { initRuntimeMode } from './ui/runtime-mode.js';
 import { initWorkspaceTabs } from './ui/workspace-tabs.js';
 import { initOptimizationMode } from './ui/optimization-mode.js';
@@ -170,6 +171,7 @@ initBenchChromeBar({
     },
 });
 initBenchChromeBarInteraction();
+initBackendPicker();
 initUpdateUI({
     placementUiLabel,
     updateContextPanel: (tagId) => updateContextPanel(tagId),

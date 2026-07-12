@@ -113,12 +113,14 @@ async def run_optimize_ensemble(
         host._persist_state()
 
     result: Optional[Dict[str, Any]] = None
+    should_abort = getattr(host, "_job_abort_check", None)
     try:
         result = await host._primitive_run_ensemble_optimization(
             spec=spec,
             x0=x0,
             session_id=session_id,
             progress_callback=progress_callback,
+            should_abort=should_abort,
         )
     except NotImplementedError as exc:
         print(f"{host.log_prefix} Ensemble optimization stub: {exc}")

@@ -100,6 +100,7 @@ class OptimizeHost(StateHost, Protocol):
         x0: Dict[str, float],
         session_id: str,
         progress_callback: Any,
+        should_abort: Any = None,
     ) -> Optional[Dict[str, Any]]: ...
 
     def _primitive_finalize_optimization_run(self) -> None: ...

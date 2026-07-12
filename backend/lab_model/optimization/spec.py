@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class BoundsSpec(BaseModel):
@@ -65,6 +65,15 @@ class ObjectiveSourceSpec(BaseModel):
     from_: Optional[str] = Field(default=None, alias="from")
     target_px: Optional[Dict[str, float]] = None
     normalize: Optional[BoundsSpec] = None
+    #: Approved TorchScript kernel id (``kind == \"torchscript_scalar\"`` / features).
+    kernel_id: Optional[str] = None
+    #: Target scalar ``M0`` for ``squared_error`` metric (baked into the job).
+    target_scalar: Optional[float] = None
+    #: Feature channel index (int) or pair (list) for vector kernels.
+    feature_index: Optional[Any] = None
+    feature_names: Optional[List[str]] = None
+    target: Optional[Any] = None
+    use_abs: Optional[bool] = None
 
 
 class ObjectiveTermSpec(BaseModel):
@@ -150,6 +159,15 @@ class OptimizeEnsembleParameters(BaseModel):
     solver: SolverSpec
     capture: Optional[CaptureSpec] = None
     telemetry: Optional[TelemetrySpec] = None
+    #: Edge kernel ids (same catalog as job ``kernels[]``); threaded into eval.
+    kernels: List[str] = Field(default_factory=list)
+
+    @field_validator("kernels", mode="before")
+    @classmethod
+    def _validate_kernels(cls, value: Any) -> List[str]:
+        from lab_model.optimization.kernels import validate_kernel_ids
+
+        return validate_kernel_ids(value)
 
     @model_validator(mode="after")
     def _solver_references_known_variables(self) -> "OptimizeEnsembleParameters":

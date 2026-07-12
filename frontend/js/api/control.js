@@ -68,6 +68,37 @@ export async function fetchAllControlNodes() {
     return fetchControlHistory(null);
 }
 
+/** Explicit-repo status (Catalog browse — does not rely on store.control.repoId). */
+export async function fetchControlStatusFor(explicitRepoId) {
+    const rid = String(explicitRepoId || '').trim();
+    if (!rid) throw new Error('repo id required');
+    const res = await fetch(`/api/control/${encodeURIComponent(rid)}/status`);
+    return parseJson(res);
+}
+
+/** Explicit-repo history. Pass ``branch=null`` for all branches. */
+export async function fetchControlHistoryFor(explicitRepoId, branch = undefined) {
+    const rid = String(explicitRepoId || '').trim();
+    if (!rid) throw new Error('repo id required');
+    let url = `/api/control/${encodeURIComponent(rid)}/history`;
+    if (branch != null && branch !== '') {
+        url += `?branch=${encodeURIComponent(branch)}`;
+    }
+    const res = await fetch(url);
+    return parseJson(res);
+}
+
+/** Full commit document (configuration + metadata) — read-only, no bench mutation. */
+export async function fetchConfigurationDocument(explicitRepoId, configurationId) {
+    const rid = String(explicitRepoId || '').trim();
+    const cid = String(configurationId || '').trim();
+    if (!rid || !cid) throw new Error('repo id and configuration id required');
+    const res = await fetch(
+        `/api/control/${encodeURIComponent(rid)}/configurations/${encodeURIComponent(cid)}`,
+    );
+    return parseJson(res);
+}
+
 export async function commitConfiguration({ message, branch, parentId } = {}) {
     const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/configurations`, {
         method: 'POST',
@@ -102,8 +133,9 @@ export async function softCheckoutConfiguration(configurationId) {
     return parseJson(res);
 }
 
-export async function previewHardCheckout(configurationId) {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/checkout`, {
+export async function previewHardCheckout(configurationId, explicitRepoId = undefined) {
+    const rid = explicitRepoId || repoId();
+    const res = await fetch(`/api/control/${encodeURIComponent(rid)}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

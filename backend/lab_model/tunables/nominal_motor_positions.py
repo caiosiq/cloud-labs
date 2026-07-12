@@ -45,7 +45,7 @@ async def apply(
     if abs(delta) < 1e-9:
         print(
             f"{bridge.log_prefix} Motor {motor_id} on {tag_id}: "
-            f"setpoint {angle:g}° (intent only, already at θ)."
+            f"setpoint {angle:g} deg (intent only, already at angle)."
         )
         return
     await bridge.move_motor(tag_id, motor_id, delta)

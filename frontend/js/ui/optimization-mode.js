@@ -6,7 +6,13 @@
  */
 import { store } from '../state/store.js';
 import { isBreadboardIntent, getCatalogRow } from '../component-model.js';
-import { runtimeEditableOrMessage } from '../control/control-state.js';
+import {
+    runtimeEditableOrMessage,
+    getAppliedCommitId,
+    getAppliedBranch,
+    isDetached,
+    isConfigViewMode,
+} from '../control/control-state.js';
 import {
     createOptimizationBuilder,
     OPTIMIZATION_STAGES,
@@ -18,9 +24,12 @@ import {
     syncSolverBlocksFromVariables,
     buildObjectiveTermsPayload,
     buildSolverPayload,
+    buildAuthoringObjectiveGraph,
     isOptimizationPlanningActive,
 } from '../state/optimization-builder.js';
 import { executeSendCommand } from '../api/commands.js';
+import { fetchJob, submitClosedLoopJob } from '../api/jobs.js';
+import { compileObjective } from '../api/optimization.js';
 import { fetchLabState } from '../state/lab-state.js';
 import { render } from '../canvas/render.js';
 import { syncComponentSidebarHighlights } from './updateUI.js';
@@ -30,12 +39,14 @@ export { isOptimizationPlanningActive };
 
 let _sendCommand = async (cmd) => executeSendCommand(cmd);
 let _log = () => {};
+let _lastJobOutcomePollMs = 0;
 
 function syncOptimizationRuntimeChrome() {
     const optimizing = store.labState?.system_status === 'OPTIMIZING';
     const b = builder();
+    const awaiting = !!(b.active && b.awaitingRunResults);
     const showResultsChrome = !!(b.active && (b.runCompleted || b.viewingLastRun));
-    document.body.classList.toggle('is-optimizing', !!optimizing);
+    document.body.classList.toggle('is-optimizing', !!(optimizing || awaiting));
     document.body.classList.toggle('opt-results-ready', showResultsChrome);
     document.body.classList.toggle(
         'is-ensemble-optimize',
@@ -411,6 +422,155 @@ export function buildPayloadFromBuilder(b) {
     };
 }
 
+function buildJobSubmitOptions(b) {
+    const opts = {
+        holder: 'ui:optimization-mode',
+        initializationPolicy: 'force_reconcile',
+    };
+    const repo = store.control?.repoId;
+    const commit = getAppliedCommitId();
+    const branch = store.control?.branch || getAppliedBranch() || 'main';
+
+    if (b.reconcileBeforeRun && repo && commit) {
+        opts.snapshot = { repo_id: repo, branch, commit };
+    }
+
+    if (b.commitAfterRun && repo && !isDetached() && !isConfigViewMode()) {
+        const msg =
+            (b.commitMessage || '').trim() ||
+            `after optimization · ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+        opts.onSuccess = {
+            commit_configuration: { repo_id: repo, branch, message: msg },
+        };
+    }
+
+    return opts;
+}
+
+function capturePostCommitFromJobResult(b, job) {
+    if (!job || typeof job !== 'object') return;
+    b.lastJobProgress = job.progress || null;
+    if (job.result?.post_commit) {
+        b.lastPostCommit = job.result.post_commit;
+    }
+    if (job.result?.post_commit_error) {
+        b.lastPostCommitError = job.result.post_commit_error;
+    }
+    if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') {
+        b.postCommitFetched = true;
+    }
+}
+
+/** Apply client run state after a closed-loop job is accepted. */
+function markEnsembleRunStarted(command, jobId) {
+    const b = builder();
+    store.isOptimizing = true;
+    store.ensembleLossTrace = [];
+    b.runCompleted = false;
+    b.viewingLastRun = false;
+    b.lastSeenResultAt = null;
+    b.awaitingRunResults = true;
+    b.activeJobId = jobId;
+    b.lastPostCommit = null;
+    b.lastPostCommitError = null;
+    b.postCommitFetched = false;
+    b.lastJobProgress = null;
+    b.maxEvalsForRun = command.parameters?.solver?.max_total_evals ?? b.maxEvals ?? 200;
+
+    if (command.target_id) {
+        store.pendingCommands.add(command.target_id);
+        store.pendingActions.set(command.target_id, 'OPTIMIZE');
+    }
+}
+
+async function submitEnsembleOptimizationJob(command) {
+    const b = builder();
+    const graph = buildAuthoringObjectiveGraph(b);
+    const compileResult = await compileObjective({
+        graph,
+        parameters: command.parameters,
+        preflight: true,
+    });
+    if (!compileResult.ok) {
+        const err =
+            compileResult.error ||
+            compileResult.preflight?.message ||
+            'Objective compile/preflight failed';
+        return { ok: false, error: err, detail: compileResult.detail || compileResult.preflight };
+    }
+    if (compileResult.objective) {
+        command.parameters.objective = compileResult.objective;
+    }
+
+    const result = await submitClosedLoopJob(command, buildJobSubmitOptions(b));
+    if (!result.ok) {
+        if (command.target_id) {
+            store.pendingCommands.delete(command.target_id);
+            store.pendingActions.delete(command.target_id);
+        }
+        return result;
+    }
+    const jobId = result.job?.job_id;
+    if (!jobId) {
+        return { ok: false, error: 'Job submit succeeded but no job_id returned' };
+    }
+    markEnsembleRunStarted(command, jobId);
+    _log(`Optimization job submitted (${jobId.slice(0, 14)}…)`, 'info');
+    void fetchLabState();
+    return { ok: true, jobId, message: `Job ${jobId} queued` };
+}
+
+async function pollOptimizationJobOutcome(root) {
+    const b = builder();
+    const jobId = b.activeJobId || store.labState?.active_job_id;
+    if (!b.awaitingRunResults || !jobId) return;
+
+    const st = store.labState?.system_status;
+    const completed = !!store.labState?.last_ensemble_optimization?.completed_at;
+    if (st === 'OPTIMIZING') return;
+    if (completed && b.postCommitFetched) return;
+
+    const now = Date.now();
+    if (now - _lastJobOutcomePollMs < 2000) return;
+    _lastJobOutcomePollMs = now;
+
+    try {
+        const job = await fetchJob(jobId);
+        capturePostCommitFromJobResult(b, job);
+        if (job.status === 'failed' || job.status === 'cancelled') {
+            b.awaitingRunResults = false;
+            b.activeJobId = null;
+            store.isOptimizing = false;
+            if (b.variables[0]?.tag_id) {
+                store.pendingCommands.delete(b.variables[0].tag_id);
+                store.pendingActions.delete(b.variables[0].tag_id);
+            }
+            const msg = job.error || `Job ${job.status}`;
+            _log(`Optimization job ${job.status}: ${msg}`, 'error');
+            if (job.result?.post_commit_error) {
+                _log(`Post-job commit failed: ${job.result.post_commit_error}`, 'warn');
+            }
+            updateRunStatus(root);
+            refreshOptimizationVisuals();
+        } else if (job.status === 'queued' || job.status === 'running') {
+            updateRunStatus(root);
+        } else if (job.status === 'succeeded' && completed) {
+            if (job.result?.post_commit) {
+                const cid = job.result.post_commit.configuration_id || '';
+                _log(
+                    `Post-job commit ${cid ? cid.slice(0, 8) + '…' : 'ok'}`,
+                    'info',
+                );
+            } else if (job.result?.post_commit_error) {
+                _log(`Post-job commit failed: ${job.result.post_commit_error}`, 'warn');
+            }
+            updateRunStatus(root);
+        }
+    } catch (err) {
+        _log(`Job status poll failed: ${err.message}`, 'warn');
+    }
+}
+
 function getEnsembleTraceFromState() {
     const sess = store.labState?.optimization_session;
     if (store.labState?.system_status === 'OPTIMIZING' && sess?.mode === 'ensemble' && Array.isArray(sess.trace)) {
@@ -429,6 +589,7 @@ function syncEnsembleLossTraceFromState() {
 }
 
 function getEnsembleLiveContext() {
+    const b = builder();
     const sess = store.labState?.optimization_session;
     if (store.labState?.system_status === 'OPTIMIZING' && sess?.mode === 'ensemble') {
         return {
@@ -437,6 +598,16 @@ function getEnsembleLiveContext() {
             lastEval: sess.last_eval,
             maxEvals: builder().maxEvalsForRun || builder().maxEvals || 200,
             running: true,
+        };
+    }
+    if (b.awaitingRunResults && store.labState?.system_status !== 'OPTIMIZING') {
+        return {
+            eval: 0,
+            bestLoss: null,
+            lastEval: null,
+            maxEvals: b.maxEvalsForRun || b.maxEvals || 200,
+            running: true,
+            queued: true,
         };
     }
     const last = store.labState?.last_ensemble_optimization;
@@ -509,7 +680,7 @@ function renderOptimizationTelemetry(root) {
         })
         .join('');
 
-    const statusLabel = ctx.running ? 'Running COBYLA' : 'Completed';
+    const statusLabel = ctx.queued ? 'Job queued' : ctx.running ? 'Running COBYLA' : 'Completed';
     const showProbe = Array.isArray(last?.u) && last.u.length;
 
     el.innerHTML = `
@@ -536,9 +707,29 @@ function maybeAdvanceToResults(root) {
     const last = store.labState?.last_ensemble_optimization;
     if (!b.active || !b.awaitingRunResults || !last?.completed_at) return;
     if (b.lastSeenResultAt === last.completed_at) return;
+
+    const jobId = b.activeJobId;
+    if (jobId && !b.postCommitFetched) {
+        void fetchJob(jobId)
+            .then((job) => {
+                capturePostCommitFromJobResult(b, job);
+                finishAdvanceToResults(root, b, last);
+            })
+            .catch(() => {
+                finishAdvanceToResults(root, b, last);
+            });
+        return;
+    }
+
+    finishAdvanceToResults(root, b, last);
+}
+
+function finishAdvanceToResults(root, b, last) {
+    if (b.lastSeenResultAt === last.completed_at) return;
     b.lastSeenResultAt = last.completed_at;
     b.runCompleted = true;
     b.awaitingRunResults = false;
+    b.activeJobId = null;
     b.viewingLastRun = false;
     syncEnsembleLossTraceFromState();
     if (b.stage !== 6) {
@@ -720,6 +911,7 @@ function updateOptimizationModeLive(root) {
     renderOptimizationTelemetry(root);
     updateRunStatus(root);
     maybeAdvanceToResults(root);
+    void pollOptimizationJobOutcome(root);
 }
 
 function renderAll(root) {
@@ -1176,6 +1368,72 @@ function renderStageRun(body) {
     }
     body.appendChild(stats);
 
+    const repo = store.control?.repoId;
+    const commit = getAppliedCommitId();
+    const canCommit = Boolean(repo) && !isDetached() && !isConfigViewMode();
+    const vcSection = document.createElement('div');
+    vcSection.className = 'opt-job-options';
+
+    if (!repo) {
+        const hint = document.createElement('p');
+        hint.className = 'opt-hint';
+        hint.textContent =
+            'No configuration repo — enable local VC to reconcile before run or commit after success.';
+        vcSection.appendChild(hint);
+    } else {
+        const reconcileLabel = document.createElement('label');
+        reconcileLabel.className = 'opt-job-option';
+        const reconcileCb = document.createElement('input');
+        reconcileCb.type = 'checkbox';
+        reconcileCb.checked = b.reconcileBeforeRun;
+        reconcileCb.disabled = !commit;
+        reconcileCb.addEventListener('change', () => {
+            b.reconcileBeforeRun = reconcileCb.checked;
+        });
+        reconcileLabel.appendChild(reconcileCb);
+        reconcileLabel.appendChild(
+            document.createTextNode(
+                commit
+                    ? ` Reconcile to current commit (${commit.slice(0, 8)}…) before run`
+                    : ' Reconcile before run (set a current commit first)',
+            ),
+        );
+        vcSection.appendChild(reconcileLabel);
+
+        const commitLabel = document.createElement('label');
+        commitLabel.className = 'opt-job-option';
+        const commitCb = document.createElement('input');
+        commitCb.type = 'checkbox';
+        commitCb.checked = b.commitAfterRun;
+        commitCb.disabled = !canCommit;
+        commitCb.addEventListener('change', () => {
+            b.commitAfterRun = commitCb.checked;
+            msgWrap.hidden = !commitCb.checked;
+        });
+        commitLabel.appendChild(commitCb);
+        let commitHint = ' Commit configuration after successful run';
+        if (isDetached()) commitHint += ' (fork first — detached commit)';
+        else if (isConfigViewMode()) commitHint += ' (exit preview first)';
+        commitLabel.appendChild(document.createTextNode(commitHint));
+        vcSection.appendChild(commitLabel);
+
+        const msgWrap = document.createElement('div');
+        msgWrap.className = 'opt-job-commit-msg';
+        msgWrap.hidden = !b.commitAfterRun;
+        const msgInput = document.createElement('input');
+        msgInput.type = 'text';
+        msgInput.className = 'opt-job-commit-input';
+        msgInput.placeholder = 'Commit message (optional)';
+        msgInput.value = b.commitMessage || '';
+        msgInput.disabled = !canCommit;
+        msgInput.addEventListener('input', () => {
+            b.commitMessage = msgInput.value;
+        });
+        msgWrap.appendChild(msgInput);
+        vcSection.appendChild(msgWrap);
+    }
+    body.appendChild(vcSection);
+
     body.appendChild(
         createStageNav([
             {
@@ -1188,7 +1446,7 @@ function renderStageRun(body) {
             {
                 label: 'Start optimization',
                 primary: true,
-                disabled: !payload || store.labState?.system_status === 'OPTIMIZING',
+                disabled: !payload || store.labState?.system_status === 'OPTIMIZING' || builder().awaitingRunResults,
                 onClick: async () => {
                     const blocked = runtimeEditableOrMessage();
                     if (blocked) {
@@ -1199,11 +1457,16 @@ function renderStageRun(body) {
                     b.viewingLastRun = false;
                     b.lastSeenResultAt = null;
                     b.awaitingRunResults = true;
+                    b.activeJobId = null;
+                    b.lastPostCommit = null;
+                    b.lastPostCommitError = null;
+                    b.postCommitFetched = false;
+                    b.lastJobProgress = null;
                     b.maxEvalsForRun = b.maxEvals || 200;
                     store.ensembleLossTrace = [];
                     scrollLivePanelIntoView();
-                    _log('Starting optimization session…', 'info');
-                    const result = await _sendCommand(payload);
+                    _log('Submitting optimization job…', 'info');
+                    const result = await submitEnsembleOptimizationJob(payload);
                     if (!result.ok) _log(`Failed: ${result.error}`, 'error');
                     else void fetchLabState();
                 },
@@ -1305,6 +1568,25 @@ function renderStageResults(body) {
         body.appendChild(setCard);
     }
 
+    if (b.lastPostCommit || b.lastPostCommitError) {
+        const commitCard = document.createElement('div');
+        commitCard.className = 'opt-results-card';
+        if (b.lastPostCommit) {
+            const cid = b.lastPostCommit.configuration_id || '';
+            commitCard.innerHTML = `
+                <h4>Configuration committed</h4>
+                <p class="opt-hint">${b.lastPostCommit.message || 'Post-job commit'}</p>
+                ${cid ? `<code class="opt-commit-id">${cid.slice(0, 12)}…</code>` : ''}
+            `;
+        } else {
+            commitCard.innerHTML = `
+                <h4>Commit failed</h4>
+                <p class="opt-hint opt-hint--warn">${b.lastPostCommitError}</p>
+            `;
+        }
+        body.appendChild(commitCard);
+    }
+
     const hint = document.createElement('p');
     hint.className = 'opt-hint';
     hint.textContent = 'Live trace stays in the panel above. Canvas setpoints reflect final values.';
@@ -1340,6 +1622,7 @@ function renderStageResults(body) {
 function updateRunStatus(root) {
     const el = root.querySelector('#opt-mode-run-status');
     if (!el) return;
+    const b = builder();
     const showStatus =
         document.body.classList.contains('is-optimizing') ||
         document.body.classList.contains('opt-results-ready');
@@ -1355,10 +1638,32 @@ function updateRunStatus(root) {
     const last = store.labState?.last_ensemble_optimization;
     if (st === 'OPTIMIZING' && sess?.mode === 'ensemble') {
         el.className = 'opt-run-status opt-run-status--running';
-        el.textContent = `Running · eval ${sess.eval ?? 0} · best ${Number(sess.best_loss).toFixed(4)}`;
+        const jobBit = b.activeJobId ? ` · ${b.activeJobId.slice(0, 12)}…` : '';
+        el.textContent = `Running · eval ${sess.eval ?? 0} · best ${Number(sess.best_loss).toFixed(4)}${jobBit}`;
+    } else if (b.lastJobProgress?.phase === 'post_commit') {
+        el.className = 'opt-run-status opt-run-status--running';
+        el.textContent = b.lastJobProgress.message || 'Committing configuration…';
+    } else if (b.lastJobProgress?.phase === 'init') {
+        el.className = 'opt-run-status opt-run-status--running';
+        el.textContent = b.lastJobProgress.message || 'Reconciling before run…';
+    } else if (b.awaitingRunResults && (b.activeJobId || store.labState?.active_job_id)) {
+        el.className = 'opt-run-status opt-run-status--running';
+        const jid = b.activeJobId || store.labState?.active_job_id || '';
+        if (jid) {
+            el.innerHTML = `Job queued · <code>${jid.slice(0, 14)}…</code> · <a href="/operations" target="_blank" rel="noopener" style="color:#93c5fd">operations</a>`;
+        } else {
+            el.textContent = 'Job queued…';
+        }
     } else if (last) {
         el.className = 'opt-run-status opt-run-status--done';
-        el.textContent = `Complete · ${last.evals ?? 0} evals · best ${Number(last.best_loss).toFixed(4)}`;
+        let text = `Complete · ${last.evals ?? 0} evals · best ${Number(last.best_loss).toFixed(4)}`;
+        if (b.lastPostCommit) {
+            const cid = b.lastPostCommit.configuration_id || '';
+            text += cid ? ` · commit ${cid.slice(0, 8)}…` : ' · committed';
+        } else if (b.lastPostCommitError) {
+            text += ' · commit failed';
+        }
+        el.textContent = text;
     } else {
         el.textContent = '';
         el.hidden = true;

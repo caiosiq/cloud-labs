@@ -331,6 +331,8 @@ While this block runs, the robot **must not** hold any optimized component. Reas
 
 Objectives map **measurables** (not variables) to a scalar loss. The camera and power meter are often **not** in the variable list.
 
+**Phase E authoring:** Use field-based **objective graphs** (`version: 1`) compiled to this runtime shape — see [`OBJECTIVE_GRAPH.md`](./OBJECTIVE_GRAPH.md). Twin UI and `POST /api/optimization/compile` call the same compiler.
+
 ### 8.1 `weighted_sum` (reference scenario)
 
 ```json
@@ -753,7 +755,7 @@ lab_communicator/
   mock/
     ensemble.py          # synthetic landscape + MockEnsembleBackend
   real/
-    ensemble.py          # Phase 4 hardware bridge (TODO)
+    ensemble.py          # motor-variable bridge (real; invasive touch-and-go deferred)
 ```
 
 ---

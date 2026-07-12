@@ -11,5 +11,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Session / job TorchScript scratch + archives
+.cloudlabs_kernel_sessions/
+
+# Legacy laser-line helper output (scripts/generate_laser_line_fit.py)
+laser_line_fit.npy
+
 # Mock lab table-cam snapshots written by observe (paths stored in measurables)
 backend/lab_communicator/mock/lab_view/camera_captures/

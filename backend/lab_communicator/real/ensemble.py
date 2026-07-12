@@ -8,10 +8,21 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, TYPE_CHECKING
 
 from lab_model import motor_rotation_store as motor_rot
-from lab_model.catalog.schema import resolve_cam_id_for_tag, resolve_hardware_binding, resolve_telemetry_stream_backend
-from lab_model.domain.component import get_measurables, get_tunables
+from lab_model.domain.component import get_tunables
+from lab_model.measurables.capture import (
+    camera_image_meta_from_png,
+    capture_png_for_tag,
+)
 from lab_model.optimization.backend import EnsembleEvaluationBackend
+from lab_model.optimization.eval_sync import sync_measurables_from_objective_eval
+from lab_model.optimization.kernels import apply_kernel_hooks
 from lab_model.optimization.metrics import evaluate_weighted_sum
+from lab_model.optimization.metrics.image_features import decode_png_bytes_to_bgr
+from lab_model.optimization.objective_measurements import (
+    collect_objective_measurements,
+    read_laser_power_readback_mw,
+    read_scalar_from_component_state,
+)
 from lab_model.optimization.paths import parse_variable_path
 from lab_model.optimization.router import ActuatorRouter
 from lab_model.optimization.session import EnsembleOptimizationResult, run_ensemble_optimization
@@ -21,78 +32,8 @@ if TYPE_CHECKING:
     from lab_communicator.real.communicator import RealLabCommunicator
 
 
-def compute_beam_centroid_px(bgr: Any) -> Optional[tuple[float, float]]:
-    """Intensity-weighted centroid of the brightest region in a BGR frame."""
-    if bgr is None:
-        return None
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return None
-
-    if getattr(bgr, "ndim", 0) != 3 or bgr.shape[2] < 3:
-        return None
-
-    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    flat = gray.astype(np.float64).ravel()
-    if flat.size == 0:
-        return None
-
-    threshold = float(np.percentile(flat, 92.0))
-    mask = gray.astype(np.float64) >= threshold
-    weights = gray.astype(np.float64) * mask
-    total = float(weights.sum())
-    if total <= 1e-6:
-        return None
-
-    ys, xs = np.indices(gray.shape)
-    cx = float((xs * weights).sum() / total)
-    cy = float((ys * weights).sum() / total)
-    return cx, cy
-
-
-def compute_beam_power_scalar(bgr: Any) -> Optional[float]:
-    """Normalized bright-pixel energy in [0, 1] for scalar objective terms."""
-    if bgr is None:
-        return None
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return None
-
-    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    flat = gray.astype(np.float64).ravel()
-    if flat.size == 0:
-        return None
-    threshold = float(np.percentile(flat, 90.0))
-    bright = flat[flat >= threshold]
-    if bright.size == 0:
-        return 0.0
-    return float(np.clip(bright.mean() / 255.0, 0.0, 1.0))
-
-
 def _decode_png_bytes_to_bgr(data: bytes) -> Optional[Any]:
-    if not data or len(data) < 8:
-        return None
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return None
-
-    arr = np.frombuffer(data, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
-    if img is None:
-        return None
-    if img.ndim == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-    elif img.ndim == 3 and img.shape[2] == 4:
-        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-    if img.ndim != 3 or img.shape[2] != 3:
-        return None
-    return img
+    return decode_png_bytes_to_bgr(data)
 
 
 def _read_scalar_from_state(
@@ -103,21 +44,7 @@ def _read_scalar_from_state(
     if not path or not path.startswith("measurables."):
         return None
     field_name = path.split(".", 1)[1]
-    entry = (state.get("components") or {}).get(tag_id)
-    if not isinstance(entry, dict):
-        return None
-    meas = get_measurables(entry).get(field_name)
-    if isinstance(meas, dict):
-        for key in ("scalar", "value", "power", "score"):
-            if key in meas:
-                try:
-                    return float(meas[key])
-                except (TypeError, ValueError):
-                    continue
-    try:
-        return float(meas)
-    except (TypeError, ValueError):
-        return None
+    return read_scalar_from_component_state(state, tag_id, field_name)
 
 
 @dataclass
@@ -218,25 +145,45 @@ class RealEnsembleHardwareBridge:
     def _capture_png_for_tag(self, tag_id: str) -> Optional[bytes]:
         comm = self.communicator
         catalog_meta = (comm.catalog_map or {}).get(tag_id) or {}
-        exp_ms = 200.0
-        tun = comm.return_tunables_for_tag(tag_id) or {}
-        if isinstance(tun.get("exposure_time_ms"), (int, float)):
-            exp_ms = float(tun["exposure_time_ms"])
-        exposure_s = exp_ms / 1000.0
+        return capture_png_for_tag(comm, tag_id, catalog_meta)
 
-        binding = resolve_hardware_binding(catalog_meta)
-        stream_backend = resolve_telemetry_stream_backend(catalog_meta)
-        if stream_backend == "overhead" or (
-            binding is not None and binding.backend in ("opencv_usb", "overhead")
-        ):
-            return comm.capture_overhead_cam(exposure=exposure_s)
-
-        cam_id = resolve_cam_id_for_tag(catalog_meta) or 1
-        if hasattr(comm, "table_cam_connect"):
-            connected = getattr(comm, "_table_cam_connected", {}).get(int(cam_id))
-            if not connected:
-                comm.table_cam_connect(int(cam_id))
-        return comm.capture_table_cam(int(cam_id), exposure=exposure_s)
+    def materialize_camera_image(self, tag_id: str, png: Optional[bytes]) -> Optional[Dict[str, Any]]:
+        """Persist PNG and return camera_image measurable metadata for state sync."""
+        if not png:
+            return None
+        comm = self.communicator
+        catalog_meta = (comm.catalog_map or {}).get(tag_id) or {}
+        run_dir = getattr(comm, "_active_optimization_image_dir", None)
+        filename = None
+        if run_dir and os.path.isdir(run_dir):
+            self._eval_counter += 1
+            filename = f"ensemble_eval_{self._eval_counter:04d}.png"
+            # Prefer run dir for MeasurableTensor path during OPTIMIZING
+            meta = camera_image_meta_from_png(
+                comm,
+                tag_id,
+                catalog_meta,
+                png,
+                filename=filename,
+                source="real_ensemble_eval",
+            )
+            # camera_image_meta writes to bridge capture dir; also archive to run_dir
+            try:
+                out_path = os.path.join(run_dir, filename)
+                with open(out_path, "wb") as handle:
+                    handle.write(png)
+                meta = {**meta, "path": out_path}
+            except OSError as exc:
+                print(f"[REAL LAB] ensemble: could not write eval frame {run_dir}: {exc}")
+            return meta
+        return camera_image_meta_from_png(
+            comm,
+            tag_id,
+            catalog_meta,
+            png,
+            filename=f"{tag_id}_ensemble_last.png",
+            source="real_ensemble_eval",
+        )
 
     def maybe_archive_eval_frame(self, tag_id: str, png: Optional[bytes]) -> None:
         if not png:
@@ -324,10 +271,19 @@ class RealEnsembleBackend(EnsembleEvaluationBackend):
         self,
         bridge: RealEnsembleHardwareBridge,
         spec: OptimizeEnsembleParameters,
+        *,
+        kernels: Optional[Sequence[str]] = None,
     ) -> None:
         self.bridge = bridge
         self.spec = spec
         self.variables_by_id = {v.id: v for v in spec.variables}
+        merged = list(kernels or [])
+        for kid in getattr(spec, "kernels", None) or []:
+            if kid not in merged:
+                merged.append(kid)
+        self.kernels = merged
+        self._last_sync: Optional[Dict[str, Any]] = None
+        self._last_kernel_notes: Optional[Dict[str, Any]] = None
 
     def router_for_block(
         self,
@@ -349,45 +305,47 @@ class RealEnsembleBackend(EnsembleEvaluationBackend):
     ) -> None:
         router.apply_eval(physical, block_id=block_id)
 
+    def _eval_flags(self) -> Dict[str, Any]:
+        context: Dict[str, Any] = {"backend": "real"}
+        notes = apply_kernel_hooks(self.kernels, hook="evaluate", context=context)
+        self._last_kernel_notes = notes
+        return context
+
     def _measurements_for_objective(
         self,
         objective: ObjectiveSpec,
-    ) -> Dict[str, Dict[str, Any]]:
-        state = self.bridge.communicator.current_state
-        out: Dict[str, Dict[str, Any]] = {}
-        capture_cache: Dict[str, Any] = {}
+        *,
+        write_camera_image: bool = True,
+    ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+        comm = self.bridge.communicator
+        state = comm.current_state
+        catalog_map = comm.catalog_map or {}
+        camera_images: Dict[str, Dict[str, Any]] = {}
 
-        for term in objective.terms:
-            kind = term.source.kind
-            tag_id = term.source.tag_id
-
-            if kind == "derived_centroid":
-                if tag_id not in capture_cache:
-                    png = self.bridge._capture_png_for_tag(tag_id)
-                    self.bridge.maybe_archive_eval_frame(tag_id, png)
-                    capture_cache[tag_id] = _decode_png_bytes_to_bgr(png) if png else None
-                bgr = capture_cache[tag_id]
-                centroid = compute_beam_centroid_px(bgr)
-                if centroid is None:
-                    out[term.id] = {"centroid_x": float("nan"), "centroid_y": float("nan")}
-                else:
-                    out[term.id] = {"centroid_x": centroid[0], "centroid_y": centroid[1]}
-
-            elif kind == "measurable_scalar":
-                scalar = _read_scalar_from_state(state, tag_id, term.source.path)
-                if scalar is None and tag_id not in capture_cache:
-                    png = self.bridge._capture_png_for_tag(tag_id)
-                    self.bridge.maybe_archive_eval_frame(tag_id, png)
-                    capture_cache[tag_id] = _decode_png_bytes_to_bgr(png) if png else None
-                if scalar is None:
-                    scalar = compute_beam_power_scalar(capture_cache.get(tag_id))
-                out[term.id] = {"scalar": float(scalar if scalar is not None else 0.0)}
-
+        def _capture_bgr(tag_id: str) -> Any:
+            png = self.bridge._capture_png_for_tag(tag_id)
+            if write_camera_image:
+                meta = self.bridge.materialize_camera_image(tag_id, png)
+                if meta:
+                    camera_images[tag_id] = meta
             else:
-                scalar = _read_scalar_from_state(state, tag_id, term.source.path)
-                out[term.id] = {"scalar": float(scalar if scalar is not None else 0.0)}
+                self.bridge.maybe_archive_eval_frame(tag_id, png)
+            return _decode_png_bytes_to_bgr(png) if png else None
 
-        return out
+        def _read_scalar(tag_id: str, field: str) -> Optional[float]:
+            if field == "output_power_readback_mw":
+                return read_laser_power_readback_mw(comm, tag_id, state)
+            return read_scalar_from_component_state(state, tag_id, field)
+
+        meas = collect_objective_measurements(
+            objective,
+            state=state,
+            catalog_map=catalog_map,
+            capture_bgr_for_tag=_capture_bgr,
+            read_scalar=_read_scalar,
+            allow_image_scalar_fallback=True,
+        )
+        return meas, camera_images
 
     def evaluate_loss(
         self,
@@ -397,20 +355,41 @@ class RealEnsembleBackend(EnsembleEvaluationBackend):
         router: ActuatorRouter,
     ) -> tuple[float, Dict[str, float]]:
         del physical, router
-        meas = self._measurements_for_objective(objective)
+        flags = self._eval_flags()
+        write_cam = bool(flags.get("write_camera_image", True))
+        sync = bool(flags.get("sync_measurables", True))
+
+        meas, camera_images = self._measurements_for_objective(
+            objective,
+            write_camera_image=write_cam,
+        )
+
+        if sync:
+            comm = self.bridge.communicator
+            self._last_sync = sync_measurables_from_objective_eval(
+                comm.current_state,
+                objective,
+                meas,
+                catalog_map=comm.catalog_map or {},
+                camera_images=camera_images if write_cam else None,
+                state_lock=getattr(comm, "_state_lock", None),
+            )
+
         return evaluate_weighted_sum(objective, meas)
 
 
 def build_real_ensemble_backend(
     communicator: "RealLabCommunicator",
     spec: OptimizeEnsembleParameters,
+    *,
+    kernels: Optional[Sequence[str]] = None,
 ) -> RealEnsembleBackend:
     bridge = RealEnsembleHardwareBridge(
         communicator=communicator,
         variables_by_id={v.id: v for v in spec.variables},
         settle_ms=int(spec.solver.settle_ms),
     )
-    return RealEnsembleBackend(bridge=bridge, spec=spec)
+    return RealEnsembleBackend(bridge=bridge, spec=spec, kernels=kernels)
 
 
 def run_real_ensemble_session(
@@ -420,14 +399,17 @@ def run_real_ensemble_session(
     *,
     session_id: str,
     progress_callback: Optional[Callable[..., None]] = None,
+    should_abort: Optional[Callable[[], bool]] = None,
+    kernels: Optional[Sequence[str]] = None,
 ) -> EnsembleOptimizationResult:
-    backend = build_real_ensemble_backend(communicator, spec)
+    backend = build_real_ensemble_backend(communicator, spec, kernels=kernels)
     return run_ensemble_optimization(
         spec,
         x0,
         backend=backend,
         session_id=session_id,
         progress_callback=progress_callback,
+        should_abort=should_abort,
     )
 
 
@@ -436,7 +418,5 @@ __all__ = [
     "RealEnsembleBackend",
     "RealEnsembleHardwareBridge",
     "build_real_ensemble_backend",
-    "compute_beam_centroid_px",
-    "compute_beam_power_scalar",
     "run_real_ensemble_session",
 ]

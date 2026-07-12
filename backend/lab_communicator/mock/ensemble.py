@@ -97,6 +97,32 @@ class MockEnsembleLandscape:
                 out[term.id] = {"centroid_x": cx, "centroid_y": cy}
             elif term.source.kind == "measurable_scalar":
                 out[term.id] = {"scalar": power, "power": power}
+            elif term.source.kind in ("torchscript_scalar", "torchscript_features"):
+                kid = str(getattr(term.source, "kernel_id", None) or "").strip()
+                if not kid:
+                    raise RuntimeError(
+                        f"term {term.id!r}: torchscript kind requires kernel_id"
+                    )
+                import numpy as np
+                from lab_model.optimization.kernels.torchscript_runtime import (
+                    run_torchscript_output,
+                )
+
+                level = int(max(0, min(255, round(float(power) * 255.0))))
+                bgr = np.full((64, 64, 3), level, dtype=np.uint8)
+                kind, value = run_torchscript_output(kid, bgr)
+                if kind == "features":
+                    names = list(getattr(term.source, "feature_names", None) or [])
+                    extra = getattr(term.source, "__pydantic_extra__", None) or {}
+                    if not names and isinstance(extra, dict):
+                        names = list(extra.get("feature_names") or [])
+                    out[term.id] = {
+                        "features": list(value),
+                        "feature_names": names,
+                        "scalar": float(value[0]) if value else float("nan"),
+                    }
+                else:
+                    out[term.id] = {"scalar": float(value)}
             else:
                 out[term.id] = {"scalar": power}
         return out
@@ -243,6 +269,42 @@ class MockEnsembleHardwareBridge:
     def set_measurement_context(self, *, held: bool) -> None:
         self._held_for_measure = held
 
+    def sync_measurables_from_eval(
+        self,
+        physical: Mapping[str, float],
+        objective: ObjectiveSpec,
+        *,
+        held: bool,
+    ) -> None:
+        """Write synthetic centroid/power into runtime measurables (mock bridge)."""
+        cx, cy = self.landscape.centroid_px(physical, held=held)
+        power = self.landscape.power_scalar(physical)
+        primary_tag = "tag_20"
+        for term in objective.terms:
+            if term.source.kind == "derived_centroid":
+                primary_tag = term.source.tag_id
+                break
+            if term.source.kind == "measurable_scalar":
+                primary_tag = term.source.tag_id
+
+        def _apply() -> None:
+            entry = (self.state.get("components") or {}).get(primary_tag)
+            if not isinstance(entry, dict):
+                return
+            sc = entry.setdefault("statecontrol", {})
+            meas = sc.setdefault("measurables", {})
+            if isinstance(meas, dict):
+                meas["centroid_x_px"] = float(cx)
+                meas["centroid_y_px"] = float(cy)
+                meas["last_optimization_score"] = float(power)
+                meas["mock_ensemble_power"] = float(power)
+
+        if self.state_lock is not None:
+            with self.state_lock:
+                _apply()
+        else:
+            _apply()
+
     def _write_variable(self, variable_id: str, value: float, var: VariableRef) -> None:
         def _apply() -> None:
             parsed = parse_variable_path(var.path)
@@ -313,6 +375,11 @@ class MockEnsembleBackend(EnsembleEvaluationBackend):
             objective,
             held=held,
         )
+        self.bridge.sync_measurables_from_eval(
+            physical,
+            objective,
+            held=held,
+        )
         return evaluate_weighted_sum(objective, meas)
 
 
@@ -354,6 +421,7 @@ def run_mock_ensemble_session(
     session_id: str,
     progress_callback: Optional[Callable[..., None]] = None,
     state_lock: Any = None,
+    should_abort: Optional[Callable[[], bool]] = None,
 ) -> EnsembleOptimizationResult:
     backend = build_mock_ensemble_backend(
         state, spec, x0, state_lock=state_lock,
@@ -364,6 +432,7 @@ def run_mock_ensemble_session(
         backend=backend,
         session_id=session_id,
         progress_callback=progress_callback,
+        should_abort=should_abort,
     )
 
 

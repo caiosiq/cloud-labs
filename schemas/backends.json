@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "Backends registered on this cloud-labs server. Users/scripts pick one at connect time; the server does not choose a default communicator from .env.",
+  "backends": [
+    {
+      "backend_id": "mock.default",
+      "label": "Mock bench (default)",
+      "lab_view_path": "backend/lab_communicator/mock/lab_view",
+      "enabled": true
+    },
+    {
+      "backend_id": "real.default",
+      "label": "Real bench (requires lab_automation)",
+      "lab_view_path": "backend/lab_communicator/real/lab_view/default",
+      "enabled": true,
+      "notes": "Marked unavailable at runtime when lab_automation_path is missing on this host."
+    }
+  ]
+}

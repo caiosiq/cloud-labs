@@ -16,6 +16,7 @@ import {
     RECONCILE_POLL_INTERVAL_MS,
     RECONCILE_STEP_TIMEOUT_MS,
 } from '../config.js';
+import { backendHeaders } from '../state/backend-selection.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -110,7 +111,7 @@ function clearAllHighlights() {
 async function postPrimitive(envelope) {
     const res = await fetch('/api/command', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: backendHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
             action: envelope.action,
             target_id: envelope.target_id,

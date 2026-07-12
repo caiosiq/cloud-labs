@@ -1,0 +1,48 @@
+{
+  "pins": [
+    {
+      "pin_id": "optical-cavity-main",
+      "display_name": "optical-cavity / main (Full-Aligned)",
+      "repo_id": "default",
+      "configuration_id": "d720029825b846168b2c1f382f4d7b64",
+      "branch": "main",
+      "backend_id": "mock.default",
+      "approved_at": "2026-07-11T20:20:00.000000Z",
+      "approved_by": "static:seed",
+      "requested_by": "static:seed"
+    },
+    {
+      "pin_id": "optical-cavity-interferometer",
+      "display_name": "optical-cavity / Interferometer (alligning-bs)",
+      "repo_id": "default",
+      "configuration_id": "03b3c7a294084c3294fc860957ba9b6f",
+      "branch": "Interferometer",
+      "backend_id": "mock.default",
+      "approved_at": "2026-07-11T20:20:00.000000Z",
+      "approved_by": "static:seed",
+      "requested_by": "static:seed"
+    },
+    {
+      "pin_id": "laser-cavity-main",
+      "display_name": "laser-cavity / main (lasing)",
+      "repo_id": "laser-cavity",
+      "configuration_id": "86f37bd640e54a0d85c13d1f6e095b61",
+      "branch": "main",
+      "backend_id": "mock.default",
+      "approved_at": "2026-07-11T20:20:00.000000Z",
+      "approved_by": "static:seed",
+      "requested_by": "static:seed"
+    },
+    {
+      "pin_id": "laser-cavity-interference",
+      "display_name": "laser-cavity / interference (beam-splittler-alligned)",
+      "repo_id": "laser-cavity",
+      "configuration_id": "931163e5aa51410c9d16e9b9e936193a",
+      "branch": "interference",
+      "backend_id": "mock.default",
+      "approved_at": "2026-07-11T20:20:00.000000Z",
+      "approved_by": "static:seed",
+      "requested_by": "static:seed"
+    }
+  ]
+}

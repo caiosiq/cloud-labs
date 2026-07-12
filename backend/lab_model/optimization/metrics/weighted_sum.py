@@ -7,6 +7,8 @@ from lab_model.optimization.spec import ObjectiveSpec
 
 from . import one_minus_normalized as one_minus_normalized  # noqa: F401 — register
 from . import rms_distance_px as rms_distance_px  # noqa: F401 — register
+from . import squared_error as squared_error  # noqa: F401 — register
+from . import feature_metrics as feature_metrics  # noqa: F401 — register
 from .registry import get_metric
 
 
