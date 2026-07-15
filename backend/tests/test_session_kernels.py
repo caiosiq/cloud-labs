@@ -214,6 +214,38 @@ class CatalogCuratedKernels(unittest.TestCase):
             self.assertGreaterEqual(score, 0.0)
             self.assertLessEqual(score, 1.0)
 
+    def test_builtin_physics_feature_kernels(self) -> None:
+        from lab_model.optimization.kernels import get_kernel
+
+        for kid, nfeat in (
+            ("builtin.roi_centroid", 2),
+            ("builtin.gaussian_beam_fit", 5),
+        ):
+            desc = get_kernel(kid)
+            self.assertIsNotNone(desc)
+            assert desc is not None
+            self.assertTrue(desc.artifact_present)
+            self.assertEqual(desc.output_kind, "features")
+            self.assertEqual(len(desc.feature_names or []), nfeat)
+
+        img = np.zeros((80, 100, 3), dtype=np.uint8)
+        img[35:46, 65:76] = 220
+        kind, feats = run_torchscript_output("builtin.roi_centroid", img)
+        self.assertEqual(kind, "features")
+        self.assertEqual(len(feats), 2)
+        self.assertAlmostEqual(feats[0], 70.0, delta=3.0)
+        self.assertAlmostEqual(feats[1], 40.0, delta=3.0)
+
+        kind, gfeats = run_torchscript_output("builtin.gaussian_beam_fit", img)
+        self.assertEqual(kind, "features")
+        self.assertEqual(len(gfeats), 5)
+        amp, cx, cy, sx, sy = gfeats
+        self.assertGreater(amp, 0.5)
+        self.assertAlmostEqual(cx, 70.0, delta=3.0)
+        self.assertAlmostEqual(cy, 40.0, delta=3.0)
+        self.assertGreater(sx, 0.5)
+        self.assertGreater(sy, 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

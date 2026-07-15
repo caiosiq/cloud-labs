@@ -823,7 +823,7 @@ Paste the `parameters` object from [`two_mirror_mock.json`](../schemas/ensemble_
 | Multi-mirror bench alignment | [`two_mirror_mock.json`](../schemas/ensemble_optimization_examples/two_mirror_mock.json) |
 | Robot-held lens after mirrors | Add `invasive_discrete` variable in stage 2 (pose Y on **tag_11**) and a second solver block in advanced JSON |
 
-Legacy mode remains available: `"mode": "legacy_strategy"` (default) with `"strategy": "NEWTON"` \| `"COBYLA"`.
+Legacy mode remains available for real-bench telemetry parity: `"mode": "legacy_strategy"` (default) with `"strategy": "NEWTON"` \| `"COBYLA"`. **Deprecated for new work (Step E)** — prefer `mode=ensemble`, SDK `run_optimize` / `run_cobyla`, Twin Alignment session, and closed-loop jobs. Optional mock redirect: `CLOUDLABS_LEGACY_OPTIMIZE_REDIRECT=1`. See `GET /api/optimization/capabilities`.
 
 ---
 

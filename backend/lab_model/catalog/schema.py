@@ -42,6 +42,7 @@ SUPPORTED_SCHEMA_VERSIONS: FrozenSet[int] = frozenset({1})
 #: §14.1 tunable widgets.
 KNOWN_WIDGETS_TUNABLE: FrozenSet[str] = frozenset({
     "TablePose",
+    "PoseReadout",  # reported_pose (read-only bench report of the pose tunable)
     "NudgeMotorGroup",
     "FloatRange",
     "IntRange",
@@ -274,6 +275,14 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
 
     tunables: Dict[str, Any] = {
         "nominal_pose": {"widget": "TablePose"},
+        "reported_pose": {
+            "widget": "PoseReadout",
+            "physical_interpretation": (
+                "Bench-reported table pose for the same DOF as nominal_pose "
+                "(mm / degrees). Refresh from scan or settle after motion — "
+                "not a measurable."
+            ),
+        },
     }
     teleop: Dict[str, Any] = {
         "rz": {

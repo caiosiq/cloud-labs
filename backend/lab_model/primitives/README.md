@@ -14,11 +14,22 @@ UI contract: [`../../../docs/primitive_ui_contract.md`](../../../docs/primitive_
 
 | Call site | What runs |
 |-----------|-----------|
-| **`main.py`** `POST /api/command` | `parse_command_payload` → `schedule_validated_command` → `execute_validated_command` → atomic `lab.*` calls (see macros below). **`RECORD_MEASURABLES`** is awaited inline and returns fresh **`measurables`**. |
+| **`main.py`** `POST /api/command` | `parse_command_payload` → `schedule_validated_command` → `execute_validated_command` → atomic `lab.*` calls (see macros below). **`RECORD_MEASURABLES`** and **`EVAL_KERNEL`** are awaited inline and return payloads. |
 | **`main.py`** GET tunables/measurables | `fetch_read_primitive` → `return_tunables_for_tag` / `return_measurables_for_tag` (saved state only) |
 | **`main.py`** `POST /api/components/{tag_id}/measurables/record` | `record_measurables_for_tag` then same slice as GET measurables |
 | **`main.py`** TeleOp / live feed routes | `POST .../teleop/start\|end`, `POST .../telemetry/jog`, `POST .../telemetry/live-feed/start\|end` |
 | **`execute_recipe`** | same parse + **await** `execute_validated_command` |
+
+### Kernels vs primitives
+
+**User language = primitives only.** TorchScript kernels are **packaged edge functions** used as **inputs** to kernel-capable actions:
+
+| Primitive | Role of kernels |
+|-----------|-----------------|
+| **`EVAL_KERNEL`** | Authoring probe: one capture + `run_torchscript_output` (`parameters.kernel_id`) |
+| **`OPTIMIZE`** (ensemble) | Closed-loop: objective terms reference `kernel_id`; optional `parameters.kernels` allowlist. Eval runs **in-process** on the edge inside the optimize loop — not via `EVAL_KERNEL` per iteration. |
+
+`register_kernel` / catalog packaging is **artifact management**, not a lab primitive.
 
 ### Macros (implemented)
 

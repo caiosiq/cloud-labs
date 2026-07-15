@@ -72,6 +72,7 @@ from lab_model import motor_rotation_store as motor_rot
 
 from lab_model.primitives import (
     ConfirmHoldingTagBody,
+    EvalKernelBody,
     HoverBody,
     MoveComponentBody,
     PickComponentBody,
@@ -127,6 +128,8 @@ from lab_model.jobs.job_manager import JobNotFoundError, parse_snapshot_ref, val
 from lab_model.jobs.initialization_policy import normalize_initialization_policy
 from lab_model.jobs.runner import run_job, schedule_job_runner
 from lab_model.backends.server import BackendSession, require_backend, resolve_backend_id
+from lab_model.edge import edge_agent_registry, edge_command_queue
+from lab_model.edge.registry import DEFAULT_STALE_AFTER_S
 
 backend_registry = BackendRegistry.from_project(_project_root)
 set_backend_registry(backend_registry)
@@ -134,6 +137,36 @@ job_hub = JobManagerHub()
 session_lease_manager = SessionLeaseManager()
 lab = RequestLab(backend_registry)
 runtime_manager = RequestRuntimeManager(backend_registry)
+
+
+def _on_edge_evicted(rec) -> None:
+    """Fail-closed: drop leases and fail open jobs when an edge goes stale."""
+    backend_id = rec.backend_id
+    reason = rec.disconnected_reason or "edge disconnected"
+    error = f"edge offline: {reason}"
+    try:
+        lease = session_lease_manager.release_backend(backend_id)
+        if lease is not None:
+            logger.warning(
+                "edge eviction released lease backend=%s lease_id=%s",
+                backend_id,
+                lease.lease_id,
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("edge eviction lease release failed backend=%s", backend_id)
+    try:
+        failed = job_hub.for_backend(backend_id).fail_open_work(error=error)
+        if failed:
+            logger.warning(
+                "edge eviction failed %d job(s) backend=%s",
+                len(failed),
+                backend_id,
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("edge eviction job fail failed backend=%s", backend_id)
+
+
+edge_agent_registry.set_on_evict(_on_edge_evicted)
 
 
 def _active_backend_id() -> str:
@@ -165,7 +198,17 @@ def _catalog_pins_store():
     return catalog_pins_for_request(backend_registry)
 
 def _kick_job_runner_for(backend_id: str) -> None:
-    """Start the next queued job for one backend on the running event loop."""
+    """Start the next queued job for one backend on the running event loop.
+
+    When an edge agent is attached for this backend, leave the job queued for
+    the agent to claim via ``GET /api/edge/work`` (coordinator ≠ edge).
+    """
+    if edge_agent_registry.is_attached(backend_id):
+        logger.info(
+            "edge attached for %s — skipping in-process job runner",
+            backend_id,
+        )
+        return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -200,6 +243,31 @@ def _kick_job_runner() -> None:
         mgr = job_hub.for_backend(bid)
         if mgr.runner_should_start():
             _kick_job_runner_for(bid)
+
+
+async def _proxy_to_edge(
+    *,
+    backend_id: str,
+    kind: str,
+    payload: Dict[str, Any],
+    timeout_s: float = 120.0,
+) -> Dict[str, Any]:
+    """Enqueue work for an attached edge agent and wait for its result (Step B.1)."""
+    if not edge_agent_registry.is_attached(backend_id):
+        raise HTTPException(
+            status_code=409,
+            detail=f"no edge agent attached for {backend_id!r}",
+        )
+    done = await asyncio.to_thread(
+        edge_command_queue.submit_and_wait,
+        backend_id=backend_id,
+        kind=kind,
+        payload=payload,
+        timeout_s=timeout_s,
+    )
+    if done.error:
+        raise HTTPException(status_code=502, detail=done.error)
+    return done.result if isinstance(done.result, dict) else {"status": "ok"}
 
 
 def _command_lease_required() -> bool:
@@ -304,23 +372,40 @@ def _persist_session_checkpoint_on_shutdown() -> None:
 @asynccontextmanager
 async def _app_lifespan(_: FastAPI):
     _install_windows_connection_reset_handler()
-    yield
-    # Phase 8 teardown: stop the TELEOP stale-lease sweeper thread (if it
-    # ever started) before persisting the session checkpoint, so the
-    # checkpoint reflects a quiesced state instead of one mid-sweep.
-    for bid in backend_registry.known_backend_ids():
+
+    async def _edge_stale_sweeper() -> None:
+        while True:
+            try:
+                edge_agent_registry.sweep_stale()
+            except Exception:  # noqa: BLE001
+                logger.exception("edge stale sweeper failed")
+            await asyncio.sleep(1.0)
+
+    sweeper = asyncio.create_task(_edge_stale_sweeper(), name="edge-stale-sweeper")
+    try:
+        yield
+    finally:
+        sweeper.cancel()
         try:
-            rt = require_backend(backend_registry, bid, init=False)
-            if rt.lab is None:
-                continue
-            with BackendSession(rt):
-                shutdown = getattr(rt.lab, "shutdown_lab_processes", None)
-                if callable(shutdown):
-                    shutdown()
-                rt.lab.stop_teleop_sweeper()
-        except Exception:
+            await sweeper
+        except asyncio.CancelledError:
             pass
-    _persist_session_checkpoint_on_shutdown()
+        # Phase 8 teardown: stop the TELEOP stale-lease sweeper thread (if it
+        # ever started) before persisting the session checkpoint, so the
+        # checkpoint reflects a quiesced state instead of one mid-sweep.
+        for bid in backend_registry.known_backend_ids():
+            try:
+                rt = require_backend(backend_registry, bid, init=False)
+                if rt.lab is None:
+                    continue
+                with BackendSession(rt):
+                    shutdown = getattr(rt.lab, "shutdown_lab_processes", None)
+                    if callable(shutdown):
+                        shutdown()
+                    rt.lab.stop_teleop_sweeper()
+            except Exception:
+                pass
+        _persist_session_checkpoint_on_shutdown()
 
 
 app = FastAPI(lifespan=_app_lifespan)
@@ -1543,13 +1628,62 @@ async def get_component_camera_image(tag_id: str):
 
 @app.get("/api/lab-state")
 async def get_lab_state():
-    logger.debug("GET /api/lab-state backend=%s", _active_backend_id())
+    """Return runtime lab state.
+
+    When an edge agent is attached, the **edge** is the source of truth:
+    prefer the latest heartbeat snapshot, otherwise proxy ``get_lab_state``.
+    """
+    bid = _active_backend_id()
+    logger.debug("GET /api/lab-state backend=%s", bid)
     try:
-        state = lab.get_lab_state()
-        logger.debug("GET /api/lab-state: ok")
+        state: Optional[Dict[str, Any]] = None
+        edge_source = False
+        if edge_agent_registry.is_attached(bid):
+            cached = edge_agent_registry.get_cached_lab_state(bid)
+            if isinstance(cached, dict):
+                state = cached
+                edge_source = True
+            else:
+                # On-demand fetch from edge (agent must poll commands).
+                try:
+                    proxied = await _proxy_to_edge(
+                        backend_id=bid,
+                        kind="get_lab_state",
+                        payload={},
+                        timeout_s=5.0,
+                    )
+                    if isinstance(proxied, dict) and isinstance(
+                        proxied.get("lab_state"), dict
+                    ):
+                        state = proxied["lab_state"]
+                        edge_source = True
+                        # Refresh cache so subsequent polls are cheap.
+                        rec = edge_agent_registry.get_for_backend(bid)
+                        if rec is not None:
+                            edge_agent_registry.heartbeat(
+                                rec.agent_id, lab_state=state
+                            )
+                except HTTPException as exc:
+                    disconnect = edge_agent_registry.last_disconnect(bid)
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "message": (
+                                "edge attached but lab_state unavailable "
+                                f"({exc.detail})"
+                            ),
+                            "edge_offline": disconnect,
+                        },
+                    ) from exc
+
+        if state is None:
+            state = lab.get_lab_state()
+
+        logger.debug("GET /api/lab-state: ok edge_source=%s", edge_source)
         if isinstance(state, dict):
-            bid = _active_backend_id()
             active_runtime = runtime_manager.mode.upper()
+            disconnect = edge_agent_registry.last_disconnect(bid)
+            edge_rec = edge_agent_registry.get_for_backend(bid)
             state = {
                 **state,
                 "lab_mode": active_runtime,
@@ -1557,6 +1691,11 @@ async def get_lab_state():
                 "session_lease": _session_lease_runtime_field(bid),
                 "active_backend_id": bid,
                 "active_job_id": job_hub.active_job_id(bid),
+                "edge_attached": edge_rec is not None,
+                "edge_state_source": "edge" if edge_source else "coordinator",
+                "edge_agent": edge_rec.to_api_dict() if edge_rec else None,
+                "edge_offline": disconnect,
+                "edge_stale_after_s": DEFAULT_STALE_AFTER_S,
             }
         return JSONResponse(content=state)
     except HTTPException:
@@ -1610,7 +1749,8 @@ def _pose_refresh_offers_dict(scope_tag_ids: Optional[List[str]] = None) -> Dict
         "thresholds": thresholds_dict,
         "offers": [],
         "hardware_note": (
-            "Applying refresh runs a camera scan and updates measurables.pose "
+            "Applying refresh runs a camera scan and updates tunables.reported_pose "
+            "(bench report of the pose tunable; legacy measurables.pose is mirrored)."
             "for checked components."
         ),
     }
@@ -3174,13 +3314,12 @@ async def download_session_kernel_artifact(
 
 @app.post("/api/kernels/eval")
 async def eval_kernel_on_edge(request: Request, body: Dict[str, Any] = Body(...)):
-    """Capture a measurable and run a TorchScript kernel on the edge (lease required)."""
-    from lab_model.optimization.kernels import session_store
-    from lab_model.optimization.kernels.torchscript_runtime import (
-        bgr_uint8_to_nchw_float,
-        run_torchscript_output,
-    )
+    """Compat shim: authoring probe via EVAL_KERNEL primitive (lease required).
 
+    Prefer ``POST /api/command`` with ``action: EVAL_KERNEL``. This route
+    remains so older SDK clients keep working; it builds the same primitive
+    envelope (edge uses ``kind=primitive``, not a parallel ``kernel_eval``).
+    """
     backend_id = str(body.get("backend_id") or _active_backend_id()).strip()
     lease_id = _extract_lease_id(body, request)
     if not lease_id:
@@ -3196,33 +3335,54 @@ async def eval_kernel_on_edge(request: Request, body: Dict[str, Any] = Body(...)
 
     kernel_id = str(body.get("kernel_id") or "").strip()
     tag_id = str(body.get("tag_id") or "").strip()
+    field = str(body.get("field") or "camera_image").strip() or "camera_image"
     if not kernel_id or not tag_id:
         raise HTTPException(status_code=400, detail="kernel_id and tag_id required")
 
-    session_store.activate_lease_roots(backend_id, lease_id)
+    command = {
+        "action": "EVAL_KERNEL",
+        "target_id": tag_id,
+        "parameters": {
+            "kernel_id": kernel_id,
+            "field": field,
+            "lease_id": lease_id,
+        },
+        "lease_id": lease_id,
+    }
+
+    if edge_agent_registry.is_attached(backend_id):
+        try:
+            parse_command_payload(command)
+        except ValidationError as e:
+            raise HTTPException(status_code=400, detail=validation_error_detail(e))
+        return await _proxy_to_edge(
+            backend_id=backend_id,
+            kind="primitive",
+            payload={"command": command},
+            timeout_s=60.0,
+        )
+
     rt = require_backend(backend_registry, backend_id, init=True)
     if rt.lab is None:
         raise HTTPException(status_code=503, detail="lab not initialized")
 
     try:
-        import numpy as np
-
+        cmd = parse_command_payload(command)
         with BackendSession(rt):
-            lab = rt.lab
-            bgr = None
-            reader = getattr(lab, "read_camera_bgr", None)
-            if callable(reader):
-                bgr = reader(tag_id)
-            if bgr is None:
-                # Mock-friendly synthetic frame when no camera hook exists
-                bgr = np.full((64, 64, 3), 128, dtype=np.uint8)
-            kind, value = run_torchscript_output(kernel_id, bgr)
+            lab_inst = rt.lab
+            lab_inst._command_lease_id = lease_id
+            lab_inst._command_backend_id = backend_id
+            result = await execute_validated_command(lab_inst, cmd)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if kind == "features":
-        return {"kind": "features", "features": list(value), "kernel_id": kernel_id}
-    return {"kind": "scalar", "scalar": float(value), "kernel_id": kernel_id}
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=500, detail="EVAL_KERNEL returned no result")
+    # Drop internal status wrapper fields if present.
+    out = {k: v for k, v in result.items() if k != "status"}
+    return out
 
 
 @app.post("/api/optimization/compile")
@@ -3290,6 +3450,29 @@ async def optimization_compile(body: Dict[str, Any] = Body(...)):
                 result["ok"] = False
 
     return result
+
+
+@app.get("/api/optimization/capabilities")
+async def optimization_capabilities():
+    """Preferred optimize path + legacy deprecation flags (Step E)."""
+    redirect = (os.environ.get("CLOUDLABS_LEGACY_OPTIMIZE_REDIRECT") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    return {
+        "preferred_mode": "ensemble",
+        "legacy_strategy_deprecated": True,
+        "closed_loop_requires_ensemble": True,
+        "legacy_redirect_enabled": redirect,
+        "legacy_redirect_env": "CLOUDLABS_LEGACY_OPTIMIZE_REDIRECT",
+        "sdk_entrypoints": ["run_optimize", "run_cobyla"],
+        "ui_entrypoints": ["Twin Optimization → Alignment session", "Operations job monitor"],
+        "notes": (
+            "Legacy NEWTON/COBYLA via component panel or command console remain for "
+            "real-bench MJPEG/place-UI parity; new work should use ensemble jobs."
+        ),
+    }
 
 
 @app.get("/api/jobs")
@@ -3526,6 +3709,167 @@ async def reject_publish_request(request_id: str, body: Dict[str, Any] = Body(de
     return record
 
 
+@app.post("/api/edge/register")
+async def edge_register(body: Dict[str, Any] = Body(...)):
+    """Edge agent announces itself for a backend (outbound attach)."""
+    backend_id = str(body.get("backend_id") or "").strip()
+    if not backend_id:
+        raise HTTPException(status_code=400, detail="backend_id required")
+    require_backend(backend_registry, backend_id, init=False)
+    try:
+        rec = edge_agent_registry.register(
+            backend_id=backend_id,
+            label=str(body.get("label") or ""),
+            agent_id=str(body.get("agent_id") or "").strip() or None,
+            meta=body.get("meta") if isinstance(body.get("meta"), dict) else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info(
+        "edge registered backend=%s agent_id=%s",
+        backend_id,
+        rec.agent_id,
+    )
+    return {"ok": True, "agent": rec.to_api_dict()}
+
+
+@app.post("/api/edge/heartbeat")
+async def edge_heartbeat(body: Dict[str, Any] = Body(...)):
+    """Keep an edge agent registration alive; optional ``lab_state`` cache update."""
+    agent_id = str(body.get("agent_id") or "").strip()
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="agent_id required")
+    lab_state = body.get("lab_state") if isinstance(body.get("lab_state"), dict) else None
+    try:
+        rec = edge_agent_registry.heartbeat(agent_id, lab_state=lab_state)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"unknown agent {agent_id!r}") from exc
+    return {"ok": True, "agent": rec.to_api_dict()}
+
+
+@app.post("/api/edge/unregister")
+async def edge_unregister(body: Dict[str, Any] = Body(...)):
+    agent_id = str(body.get("agent_id") or "").strip()
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="agent_id required")
+    ok = edge_agent_registry.unregister(agent_id)
+    return {"ok": ok}
+
+
+@app.get("/api/edge/work")
+async def edge_claim_work(
+    backend_id: str = Query(...),
+    agent_id: str = Query(...),
+):
+    """Claim the next queued job for an attached edge agent (or empty)."""
+    backend_id = backend_id.strip()
+    agent_id = agent_id.strip()
+    rec = edge_agent_registry.get_for_backend(backend_id)
+    if rec is None or rec.agent_id != agent_id:
+        raise HTTPException(
+            status_code=409,
+            detail="edge agent not attached for this backend (register + heartbeat first)",
+        )
+    try:
+        edge_agent_registry.heartbeat(agent_id)
+    except KeyError:
+        pass
+    mgr = job_hub.for_backend(backend_id)
+    job = mgr.claim_next_queued()
+    if job is None:
+        return {"job": None}
+    return {"job": job.to_api_dict()}
+
+
+@app.post("/api/edge/jobs/{job_id}/progress")
+async def edge_job_progress(job_id: str, body: Dict[str, Any] = Body(...)):
+    """Edge pushes closed-loop telemetry into the coordinator job record."""
+    found = job_hub.find_job(job_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"job {job_id!r} not found")
+    _, mgr = found
+    patch = body.get("progress") if isinstance(body.get("progress"), dict) else body
+    if not isinstance(patch, dict):
+        raise HTTPException(status_code=400, detail="progress object required")
+    try:
+        record = mgr.update_progress(job_id, dict(patch))
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "job": record.to_api_dict()}
+
+
+@app.post("/api/edge/jobs/{job_id}/complete")
+async def edge_job_complete(job_id: str, body: Dict[str, Any] = Body(...)):
+    """Edge reports terminal job status + optional result payload."""
+    found = job_hub.find_job(job_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"job {job_id!r} not found")
+    _, mgr = found
+    status = str(body.get("status") or "").strip().lower()
+    if status not in {"succeeded", "failed", "cancelled"}:
+        raise HTTPException(
+            status_code=400,
+            detail="status must be succeeded|failed|cancelled",
+        )
+    result = body.get("result") if isinstance(body.get("result"), dict) else None
+    error = body.get("error")
+    try:
+        record = mgr.complete(
+            job_id,
+            status=status,  # type: ignore[arg-type]
+            result=result,
+            error=str(error) if error else None,
+        )
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "job": record.to_api_dict()}
+
+
+@app.get("/api/edge/commands")
+async def edge_poll_commands(
+    backend_id: str = Query(...),
+    agent_id: str = Query(...),
+):
+    """Claim the next pending imperative/eval command for an attached edge."""
+    backend_id = backend_id.strip()
+    agent_id = agent_id.strip()
+    rec = edge_agent_registry.get_for_backend(backend_id)
+    if rec is None or rec.agent_id != agent_id:
+        raise HTTPException(
+            status_code=409,
+            detail="edge agent not attached for this backend (register + heartbeat first)",
+        )
+    try:
+        edge_agent_registry.heartbeat(agent_id)
+    except KeyError:
+        pass
+    cmd = edge_command_queue.poll(backend_id)
+    if cmd is None:
+        return {"command": None}
+    return {"command": cmd.to_api_dict()}
+
+
+@app.post("/api/edge/commands/{command_id}/complete")
+async def edge_complete_command(command_id: str, body: Dict[str, Any] = Body(...)):
+    """Edge reports result (or error) for a proxied command."""
+    error = body.get("error")
+    result = body.get("result") if isinstance(body.get("result"), dict) else None
+    try:
+        edge_command_queue.complete(
+            command_id,
+            result=result,
+            error=str(error) if error else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown command {command_id!r}",
+        ) from exc
+    return {"ok": True}
+
+
 @app.post("/api/jobs/lease/acquire")
 async def acquire_session_lease(body: Dict[str, Any] = Body(...)):
     """Acquire an exclusive session lease on a backend (Phase B SDK)."""
@@ -3622,13 +3966,11 @@ async def receive_command(
 ):
     print(f"Received Command: {payload}")
 
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab Communicator not initialized")
-
+    backend_id = _active_backend_id()
     lease_id = _extract_lease_id(payload, request)
     try:
         session_lease_manager.validate_command_lease(
-            backend_id=_active_backend_id(),
+            backend_id=backend_id,
             lease_id=lease_id,
             require_when_locked=_command_lease_required(),
         )
@@ -3638,6 +3980,27 @@ async def receive_command(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except LeaseExpiredError as exc:
         raise HTTPException(status_code=410, detail=str(exc)) from exc
+
+    # Step B.1: imperative path goes to the attached edge agent (not coordinator lab).
+    if edge_agent_registry.is_attached(backend_id):
+        try:
+            cmd = parse_command_payload(payload)
+        except ValidationError as e:
+            raise HTTPException(status_code=400, detail=validation_error_detail(e))
+        if runtime_manager is not None and not runtime_manager.supports_primitive(cmd.action):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{cmd.action} is unavailable in {runtime_manager.mode} mode",
+            )
+        return await _proxy_to_edge(
+            backend_id=backend_id,
+            kind="primitive",
+            payload={"command": payload},
+            timeout_s=180.0,
+        )
+
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab Communicator not initialized")
 
     state = lab.get_lab_state()
     current_status = state.get("system_status")
@@ -3657,6 +4020,10 @@ async def receive_command(
             detail=f"{cmd.action} is unavailable in {runtime_manager.mode} mode",
         )
 
+    # Sync primitives that return a payload (not background-accepted).
+    lab._command_lease_id = lease_id
+    lab._command_backend_id = backend_id
+
     if isinstance(cmd, RecordMeasurablesBody):
         if runtime_manager is None:
             await execute_validated_command(lab, cmd)
@@ -3671,6 +4038,8 @@ async def receive_command(
         except Exception as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         try:
+            target_lab._command_lease_id = lease_id
+            target_lab._command_backend_id = backend_id
             await execute_validated_command(target_lab, cmd)
             meas = fetch_read_primitive(
                 target_lab,
@@ -3680,6 +4049,27 @@ async def receive_command(
         finally:
             runtime_manager.release_operation(token)
         return {"status": "ok", "measurables": meas}
+
+    if isinstance(cmd, EvalKernelBody):
+        try:
+            if runtime_manager is None:
+                result = await execute_validated_command(lab, cmd)
+            else:
+                try:
+                    target_lab, token = runtime_manager.reserve_operation()
+                except Exception as exc:
+                    raise HTTPException(status_code=409, detail=str(exc)) from exc
+                try:
+                    target_lab._command_lease_id = lease_id
+                    target_lab._command_backend_id = backend_id
+                    result = await execute_validated_command(target_lab, cmd)
+                finally:
+                    runtime_manager.release_operation(token)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not isinstance(result, dict):
+            raise HTTPException(status_code=500, detail="EVAL_KERNEL returned no result")
+        return {"status": "ok", **result}
 
     if runtime_manager is None:
         return schedule_validated_command(lab, cmd, background_tasks)
@@ -3979,7 +4369,7 @@ async def read_catalog():
 
 @app.get("/wiki")
 async def read_wiki():
-    """Live capability wiki — tunables / measurables / parameters with SDK handles."""
+    """In-app Wiki: Learn curriculum + live Catalog (components / kernels)."""
     path = os.path.join(frontend_path, "wiki.html")
     with open(path, "r", encoding="utf-8") as f:
         html = f.read()

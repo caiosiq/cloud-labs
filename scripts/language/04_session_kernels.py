@@ -1,49 +1,33 @@
 #!/usr/bin/env python3
-"""Showcase: define your own TorchScript kernel in this script, run it on the edge.
+"""04 — Author a TorchScript kernel, register it, run feature OPTIMIZE.
 
-What this teaches
------------------
-1. You author a small ``nn.Module`` here (PyTorch tensor ops only — no numpy/scipy).
-2. ``lab.register_kernel(...)`` compiles it to TorchScript and uploads it for this
-   lease as a ``session.*`` kernel id.
-3. Measure once with ``eval_kernel`` (authoring-time), then bake targets into the
-   job IR — the closed-loop cannot call back into this process.
-4. COBYLA runs on the edge using **your** artifact every eval.
-5. A multi-term **feature** objective (``run_optimize``) proves features != loss:
-   weights/targets live in the IR; change them without recompiling the ``.pt``.
+1. Author a small ``nn.Module`` (PyTorch tensor ops only).
+2. ``lab.register_kernel(...)`` uploads an **artifact** (not a lab action).
+3. ``probe_kernel`` (EVAL_KERNEL) measures once; bake targets into the job IR.
+4. Edge OPTIMIZE / ``run_optimize`` uses your artifact every eval (in-process).
 
-For a minimal catalog-kernel COBYLA (~80 lines), see
-``scripts/example_torchscript_cobyla_mirror.py``.
+Minimal catalog-kernel path: ``03_closed_loop_catalog.py``.
+See ``docs/SESSION_KERNELS.md``.
 
-Run (server must be up on mock)::
+Run (mock server up)::
 
-    python scripts/example_session_kernel_author.py
-
-See: docs/SESSION_KERNELS.md
+    pip install -e ./packages/cloudlabs
+    python scripts/language/04_session_kernels.py
 """
 from __future__ import annotations
 
-import os
-import sys
 from typing import Any, List
 
-_BACKEND_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend")
-)
-if _BACKEND_DIR not in sys.path:
-    sys.path.insert(0, _BACKEND_DIR)
+import torch
+import torch.nn as nn
 
-import torch  # noqa: E402
-import torch.nn as nn  # noqa: E402
-
-from lab_model.optimization.sdk import (  # noqa: E402
+from cloudlabs import (
     ObjectiveGraphBuilder,
     configure_logging,
     connect,
     resolve_backend_id,
 )
 
-# --- Hard-coded demo knobs -------------------------------------------------
 BASE_URL = "http://127.0.0.1:8000"
 CATALOG_PIN = "laser-cavity-main"
 START_MOTOR_DEG = 0.5
@@ -56,13 +40,8 @@ CAMERA_TAG = "tag_22"
 MOTOR_PATH = "tunables.nominal_motor_positions.1"
 
 
-# --- Author-defined kernels (this is the point of the showcase) -------------
-
 class CenterRoiMean(nn.Module):
-    """Scalar score: mean intensity of the center half of the frame.
-
-    Input layout after SDK conversion: float RGB, shape NCHW, values in [0, 1].
-    """
+    """Scalar score: mean intensity of the center half of the frame."""
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         if image.dim() == 3:
@@ -74,7 +53,7 @@ class CenterRoiMean(nn.Module):
 
 
 class ImageMoments(nn.Module):
-    """Feature vector: [brightness, contrast, peak] — loss stays in the objective IR."""
+    """Feature vector: [brightness, contrast, peak] — loss stays in the IR."""
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         if image.dim() == 3:
@@ -101,53 +80,39 @@ def main() -> int:
     with connect(
         backend_id,
         base_url=BASE_URL,
-        holder="example:session_kernel_author",
+        holder="language:04_session_kernels",
         verbose=True,
     ) as lab:
         lab.prepare(catalog_pin=CATALOG_PIN, reconcile=RECONCILE)
 
-        # ------------------------------------------------------------------
-        # 1) Register a scalar kernel YOU defined above
-        # ------------------------------------------------------------------
         score_id = lab.register_kernel(
             "center_roi_mean",
             module=CenterRoiMean(),
             output_kind="scalar",
-            description="Author showcase: center-ROI mean intensity",
+            description="Author demo: center-ROI mean intensity",
         )
         print(f"registered scalar kernel  {score_id}")
 
-        # ------------------------------------------------------------------
-        # 2) Register a feature kernel (measure now; use in a graph later)
-        # ------------------------------------------------------------------
         feat_names = ["brightness", "contrast", "peak"]
         feat_id = lab.register_kernel(
             "image_moments",
             module=ImageMoments(),
             output_kind="features",
             feature_names=feat_names,
-            description="Author showcase: brightness / contrast / peak",
+            description="Author demo: brightness / contrast / peak",
         )
         print(f"registered feature kernel {feat_id}")
 
         lab.set_tunable(MIRROR_TAG, MOTOR_PATH, START_MOTOR_DEG)
         lab.wait_until_idle()
 
-        # ------------------------------------------------------------------
-        # 3) Authoring-time measurement (same artifacts the edge will use)
-        # ------------------------------------------------------------------
-        m0 = lab.eval_kernel(CAMERA_TAG, "camera_image", kernel_id=score_id)
+        m0 = lab.probe_kernel(CAMERA_TAG, "camera_image", kernel_id=score_id)
         print(f"M0 (center ROI mean) = {float(m0):.6f}")
 
-        feats = lab.eval_kernel(CAMERA_TAG, "camera_image", kernel_id=feat_id)
+        feats = lab.probe_kernel(CAMERA_TAG, "camera_image", kernel_id=feat_id)
         _print_features(feat_names, feats)
-        brightness0 = (
-            float(feats[0]) if isinstance(feats, list) else float(feats)
-        )
+        brightness0 = float(feats[0]) if isinstance(feats, list) else float(feats)
 
-        # ------------------------------------------------------------------
-        # 4) Closed-loop: edge COBYLA matches YOUR scalar kernel to M0
-        # ------------------------------------------------------------------
         result = lab.run_cobyla(
             variables=[
                 lab.variable(
@@ -177,10 +142,6 @@ def main() -> int:
         if status != "succeeded":
             return 1
 
-        # ------------------------------------------------------------------
-        # 5) Multi-term feature objective (features != loss)
-        #    Match brightness to authoring-time value; lightly minimize contrast.
-        # ------------------------------------------------------------------
         graph = (
             ObjectiveGraphBuilder()
             .term(

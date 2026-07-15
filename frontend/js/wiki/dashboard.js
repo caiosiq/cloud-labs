@@ -1,11 +1,5 @@
 /**
- * Capability Wiki — live component / measurable documentation hub.
- *
- * Data sources (backend-scoped):
- *   GET /api/backends
- *   GET /api/catalog/library-rows?backend_id=
- *   GET /api/catalog/active-tags?backend_id=
- *   GET /api/platform/registries
+ * Cloud Labs Wiki — Learn curriculum + live Catalog (components / kernels).
  */
 import {
     fetchBackends,
@@ -17,12 +11,23 @@ import { normalizeCapabilities } from '../component-state.js';
 import { loadPlatformRegistries } from '../lab-capabilities.js';
 import {
     connectPreamble,
+    componentPhysicalInterpretation,
+    kernelPhysicalInterpretation,
     measurableHandle,
+    measurablePhysicalInterpretation,
     torchscriptTermSnippet,
     tunableHandles,
 } from './handles.js';
+import { renderMarkdown } from './markdown.js';
 
+const GUIDES_BASE = '/static/wiki/guides';
+
+const sectionBar = document.getElementById('section-bar');
 const backendSelect = document.getElementById('backend-select');
+const catalogControls = document.getElementById('catalog-controls');
+const guidePane = document.getElementById('guide-pane');
+const guideList = document.getElementById('guide-list');
+const guideListLabel = document.getElementById('guide-list-label');
 const compFilter = document.getElementById('comp-filter');
 const compList = document.getElementById('comp-list');
 const kernelList = document.getElementById('kernel-list');
@@ -32,6 +37,12 @@ const tabKernels = document.getElementById('tab-kernels');
 const componentsPane = document.getElementById('components-pane');
 const kernelsPane = document.getElementById('kernels-pane');
 
+/** @type {object|null} */
+let manifest = null;
+/** @type {string} */
+let activeSectionId = 'learn';
+/** @type {string|null} */
+let activeChapterId = null;
 /** @type {object[]} */
 let backends = [];
 /** @type {Map<string, object>} */
@@ -47,7 +58,8 @@ let kernels = [];
 /** @type {string|null} */
 let selectedKernelId = null;
 /** @type {'components'|'kernels'} */
-let activeTab = 'components';
+let catalogTab = 'components';
+let catalogLoaded = false;
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -61,6 +73,12 @@ async function fetchJson(url) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`${url} → ${res.status}`);
     return res.json();
+}
+
+async function fetchText(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url} → ${res.status}`);
+    return res.text();
 }
 
 async function copyText(text, btn) {
@@ -80,8 +98,221 @@ async function copyText(text, btn) {
     }
 }
 
+function currentSection() {
+    return (manifest?.sections || []).find((s) => s.id === activeSectionId) || null;
+}
+
+function sectionChapters(section) {
+    return Array.isArray(section?.chapters) ? section.chapters : [];
+}
+
+function readHash() {
+    const raw = (window.location.hash || '').replace(/^#/, '');
+    if (!raw) return null;
+    const [section, chapter] = raw.split('/');
+    return { section: section || null, chapter: chapter || null };
+}
+
+function writeHash() {
+    if (!activeSectionId) return;
+    const sec = currentSection();
+    if (sec?.mode === 'catalog') {
+        window.history.replaceState(null, '', `#${activeSectionId}`);
+        return;
+    }
+    if (activeChapterId) {
+        window.history.replaceState(null, '', `#${activeSectionId}/${activeChapterId}`);
+    }
+}
+
+function renderSectionBar() {
+    if (!sectionBar || !manifest) return;
+    const sections = manifest.sections || [];
+    sectionBar.innerHTML = sections
+        .map((s) => {
+            const active = s.id === activeSectionId ? 'active' : '';
+            return `<button type="button" class="section-btn ${active}" data-section="${escapeHtml(s.id)}">${escapeHtml(s.label)}</button>`;
+        })
+        .join('');
+    sectionBar.querySelectorAll('[data-section]').forEach((btn) => {
+        btn.addEventListener('click', () => setWikiSection(btn.dataset.section));
+    });
+}
+
+function setCatalogChrome(visible) {
+    if (catalogControls) catalogControls.hidden = !visible;
+    if (guidePane) guidePane.hidden = visible;
+    if (!visible) {
+        if (componentsPane) componentsPane.hidden = true;
+        if (kernelsPane) kernelsPane.hidden = true;
+    }
+}
+
+async function setWikiSection(sectionId, chapterId = null) {
+    const sections = manifest?.sections || [];
+    const sec = sections.find((s) => s.id === sectionId) || sections[0];
+    if (!sec) return;
+    activeSectionId = sec.id;
+
+    if (sec.mode === 'catalog') {
+        activeChapterId = null;
+        setCatalogChrome(true);
+        renderSectionBar();
+        writeHash();
+        setCatalogTab(catalogTab);
+        if (!catalogLoaded) {
+            await ensureCatalog();
+        } else if (catalogTab === 'components') {
+            renderSidebar();
+            renderDetail();
+        } else {
+            renderKernelSidebar();
+            renderKernelDetail();
+        }
+        return;
+    }
+
+    setCatalogChrome(false);
+    const chapters = sectionChapters(sec);
+    if (!chapterId || !chapters.some((c) => c.id === chapterId)) {
+        chapterId = chapters[0]?.id || null;
+    }
+    activeChapterId = chapterId;
+    if (guideListLabel) {
+        guideListLabel.textContent = sec.label === 'Learn' ? 'Chapters' : sec.label;
+    }
+    renderSectionBar();
+    renderGuideSidebar();
+    writeHash();
+    await renderGuideArticle();
+}
+
+function renderGuideSidebar() {
+    const sec = currentSection();
+    const chapters = sectionChapters(sec);
+    if (!guideList) return;
+    if (!chapters.length) {
+        guideList.innerHTML = '<div class="empty">No chapters.</div>';
+        return;
+    }
+    guideList.innerHTML = chapters
+        .map((ch, idx) => {
+            const active = ch.id === activeChapterId ? 'active' : '';
+            return `
+                <button type="button" class="guide-item ${active}" data-chapter="${escapeHtml(ch.id)}">
+                    ${escapeHtml(`${idx + 1}. ${ch.title}`)}
+                </button>`;
+        })
+        .join('');
+    guideList.querySelectorAll('[data-chapter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            activeChapterId = btn.dataset.chapter;
+            renderGuideSidebar();
+            writeHash();
+            renderGuideArticle();
+        });
+    });
+}
+
+async function renderGuideArticle() {
+    const sec = currentSection();
+    const chapters = sectionChapters(sec);
+    const ch = chapters.find((c) => c.id === activeChapterId);
+    if (!ch) {
+        detail.innerHTML = '<div class="empty">Select a chapter.</div>';
+        return;
+    }
+    detail.innerHTML = '<div class="empty">Loading chapter…</div>';
+    try {
+        const md = await fetchText(`${GUIDES_BASE}/${ch.file}`);
+        const idx = chapters.findIndex((c) => c.id === ch.id);
+        const prev = idx > 0 ? chapters[idx - 1] : null;
+        const next = idx >= 0 && idx < chapters.length - 1 ? chapters[idx + 1] : null;
+        detail.innerHTML = `
+            <article class="guide-article">
+                ${renderMarkdown(md)}
+                <div class="guide-nav">
+                    <button type="button" data-nav-prev ${prev ? '' : 'disabled'}>
+                        ${prev ? `← ${escapeHtml(prev.title)}` : '←'}
+                    </button>
+                    <button type="button" data-nav-next ${next ? '' : 'disabled'}>
+                        ${next ? `${escapeHtml(next.title)} →` : '→'}
+                    </button>
+                </div>
+            </article>`;
+        await inlineGuideFigures(detail.querySelector('.guide-article'));
+        detail.querySelector('[data-nav-prev]')?.addEventListener('click', () => {
+            if (prev) {
+                activeChapterId = prev.id;
+                renderGuideSidebar();
+                writeHash();
+                renderGuideArticle();
+            }
+        });
+        detail.querySelector('[data-nav-next]')?.addEventListener('click', () => {
+            if (next) {
+                activeChapterId = next.id;
+                renderGuideSidebar();
+                writeHash();
+                renderGuideArticle();
+            }
+        });
+    } catch (err) {
+        detail.innerHTML = `<div class="empty">Failed to load chapter: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+/**
+ * Replace guide figure &lt;img&gt; nodes with inlined &lt;svg&gt; in the live DOM.
+ * External SVG &lt;img&gt; tags were failing to paint inside the wiki scroll pane.
+ * @param {Element | null} root
+ */
+async function inlineGuideFigures(root) {
+    if (!root) return;
+    const imgs = [...root.querySelectorAll('img.guide-figure')];
+    if (!imgs.length) return;
+    await Promise.all(
+        imgs.map(async (img) => {
+            const src = img.getAttribute('src');
+            if (!src) return;
+            try {
+                const svgText = (await fetchText(src)).trim();
+                if (!svgText.startsWith('<svg')) {
+                    throw new Error('response is not SVG');
+                }
+                const holder = document.createElement('div');
+                holder.innerHTML = svgText;
+                const svg = holder.querySelector('svg');
+                if (!svg) throw new Error('no <svg> root');
+                svg.classList.add('guide-figure');
+                svg.setAttribute('role', 'img');
+                if (img.alt) svg.setAttribute('aria-label', img.alt);
+                img.replaceWith(svg);
+            } catch (err) {
+                console.warn('Wiki figure failed to inline:', src, err);
+            }
+        }),
+    );
+}
+
+function setCatalogTab(tab) {
+    catalogTab = tab;
+    const isComp = tab === 'components';
+    tabComponents?.classList.toggle('active', isComp);
+    tabKernels?.classList.toggle('active', !isComp);
+    if (componentsPane) componentsPane.hidden = !isComp;
+    if (kernelsPane) kernelsPane.hidden = isComp;
+    if (isComp) {
+        renderSidebar();
+        renderDetail();
+    } else {
+        renderKernelSidebar();
+        renderKernelDetail();
+    }
+}
+
 function filteredRows() {
-    const q = (compFilter.value || '').trim().toLowerCase();
+    const q = (compFilter?.value || '').trim().toLowerCase();
     const rows = [...rowsByTag.values()].sort((a, b) =>
         String(a.tag_id || '').localeCompare(String(b.tag_id || '')),
     );
@@ -95,6 +326,7 @@ function filteredRows() {
 }
 
 function renderSidebar() {
+    if (!compList) return;
     const rows = filteredRows();
     if (!rows.length) {
         compList.innerHTML = '<div class="empty">No components match.</div>';
@@ -175,8 +407,6 @@ function renderDetail() {
     const caps = normalizeCapabilities(row.capabilities);
     const tunables = caps.statecontrol?.tunables || {};
     const measurables = caps.statecontrol?.measurables || {};
-    const teleop = caps.telemetry?.teleop || {};
-    const liveFeed = caps.telemetry?.live_feed || {};
     const primitives = Array.isArray(caps.primitives) ? caps.primitives : [];
     const onBench = activeTags.has(selectedTag);
 
@@ -196,6 +426,10 @@ function renderDetail() {
             <span class="badge ${onBench ? 'on-bench' : 'library'}">${onBench ? 'on bench' : 'library only'}</span>
             <code>${escapeHtml(row.type || '—')}</code>
         </div>
+        <section class="section">
+            <h3>Physical interpretation</h3>
+            <p class="connect-hint">${escapeHtml(componentPhysicalInterpretation(row))}</p>
+        </section>
         <p class="connect-hint">
             Backend <code>${escapeHtml(backendId)}</code> ·
             <button type="button" class="copy" data-copy-connect>Copy connect()</button>
@@ -246,7 +480,7 @@ function renderDetail() {
                         <thead>
                             <tr>
                                 <th>Path</th>
-                                <th>Widget</th>
+                                <th>Physical interpretation</th>
                                 <th>Format / shape</th>
                                 <th>Domain</th>
                                 <th>Script handle</th>
@@ -259,7 +493,13 @@ function renderDetail() {
                                     (m, i) => `
                                 <tr>
                                     <td class="mono">${escapeHtml(m.path)}</td>
-                                    <td>${escapeHtml(m.widget)}</td>
+                                    <td>${escapeHtml(
+                                        measurablePhysicalInterpretation(m.field, {
+                                            description: m.description,
+                                            domain: m.domain,
+                                            format: m.format,
+                                        }),
+                                    )}</td>
                                     <td class="mono">${escapeHtml(m.format)} / ${escapeHtml(m.shape)}</td>
                                     <td>${escapeHtml(m.domain)}</td>
                                     <td><pre class="snippet">${escapeHtml(m.snippet)}</pre></td>
@@ -300,45 +540,14 @@ function renderDetail() {
         </section>
 
         <section class="section">
-            <h3>Primitives (${primitives.length})</h3>
-            ${
-                primitives.length
-                    ? `<div class="pill-row">${primitives
-                          .map((pid) => {
-                              const meta = registries?.primitives?.[pid];
-                              const ro = meta?.read_only ? ' ro' : '';
-                              const title = meta
-                                  ? `kind=${meta.kind || '—'}; handler=${meta.handler || '—'}`
-                                  : '';
-                              return `<span class="pill${ro}" title="${escapeHtml(title)}">${escapeHtml(pid)}</span>`;
-                          })
-                          .join('')}</div>`
-                    : '<div class="empty">No primitives list on this component.</div>'
-            }
-        </section>
-
-        <section class="section">
-            <h3>Telemetry</h3>
-            <table>
-                <thead><tr><th>Channel</th><th>Keys</th></tr></thead>
-                <tbody>
-                    <tr>
-                        <td>teleop</td>
-                        <td class="mono">${escapeHtml(Object.keys(teleop).join(', ') || '—')}</td>
-                    </tr>
-                    <tr>
-                        <td>live_feed</td>
-                        <td class="mono">${escapeHtml(Object.keys(liveFeed).join(', ') || '—')}</td>
-                    </tr>
-                </tbody>
-            </table>
+            <h3>Primitives</h3>
+            <p class="connect-hint mono">${escapeHtml(primitives.join(', ') || '—')}</p>
         </section>
     `;
 
     detail.querySelector('[data-copy-connect]')?.addEventListener('click', (ev) => {
         copyText(connectPreamble(backendId), ev.currentTarget);
     });
-
     detail.querySelectorAll('[data-copy-tunable]').forEach((btn) => {
         btn.addEventListener('click', () => {
             const i = Number(btn.dataset.copyTunable);
@@ -346,7 +555,6 @@ function renderDetail() {
             if (rowHandle) copyText(rowHandle.snippet, btn);
         });
     });
-
     detail.querySelectorAll('[data-copy-measurable]').forEach((btn) => {
         btn.addEventListener('click', () => {
             const i = Number(btn.dataset.copyMeasurable);
@@ -354,22 +562,6 @@ function renderDetail() {
             if (rowHandle) copyText(rowHandle.snippet, btn);
         });
     });
-}
-
-function setActiveTab(tab) {
-    activeTab = tab;
-    const isComp = tab === 'components';
-    tabComponents?.classList.toggle('active', isComp);
-    tabKernels?.classList.toggle('active', !isComp);
-    if (componentsPane) componentsPane.hidden = !isComp;
-    if (kernelsPane) kernelsPane.hidden = isComp;
-    if (isComp) {
-        renderSidebar();
-        renderDetail();
-    } else {
-        renderKernelSidebar();
-        renderKernelDetail();
-    }
 }
 
 function renderKernelSidebar() {
@@ -429,6 +621,10 @@ function renderKernelDetail() {
                 row.runtime || 'builtin',
             )}</span>
         </div>
+        <section class="section">
+            <h3>Physical interpretation</h3>
+            <p class="connect-hint">${escapeHtml(kernelPhysicalInterpretation(row))}</p>
+        </section>
         <p class="connect-hint">${escapeHtml(row.description || '')}</p>
         <section class="section">
             <h3>Metadata</h3>
@@ -479,9 +675,8 @@ async function loadKernels() {
         const data = await fetchJson('/api/kernels');
         kernels = Array.isArray(data.kernels) ? data.kernels : [];
         if (!selectedKernelId || !kernels.some((k) => k.id === selectedKernelId)) {
-            selectedKernelId = kernels.find((k) => k.runtime === 'torchscript')?.id
-                || kernels[0]?.id
-                || null;
+            selectedKernelId =
+                kernels.find((k) => k.runtime === 'torchscript')?.id || kernels[0]?.id || null;
         }
     } catch (err) {
         kernels = [];
@@ -492,6 +687,7 @@ async function loadKernels() {
 }
 
 function fillBackendSelect() {
+    if (!backendSelect) return;
     const ready = backends.filter((b) => b.availability === 'ready');
     const pool = ready.length ? ready : backends;
     backendSelect.innerHTML = pool
@@ -517,14 +713,7 @@ async function loadCatalogForBackend() {
     activeTags = new Set();
     selectedTag = null;
 
-    if (!backendId) {
-        renderSidebar();
-        renderDetail();
-        return;
-    }
-
-    compList.innerHTML = '<div class="empty">Loading catalog…</div>';
-    detail.innerHTML = '<div class="empty">Loading…</div>';
+    if (!backendId) return;
 
     const [libraryRows, active] = await Promise.all([
         fetchJson(withBackendQuery('/api/catalog/library-rows')),
@@ -536,41 +725,48 @@ async function loadCatalogForBackend() {
     });
     (Array.isArray(active?.tag_ids) ? active.tag_ids : []).forEach((t) => activeTags.add(t));
 
-    // Prefer first on-bench component if present
     const firstActive = [...activeTags].find((t) => rowsByTag.has(t));
     selectedTag = firstActive || [...rowsByTag.keys()][0] || null;
+}
 
-    renderSidebar();
-    renderDetail();
+async function ensureCatalog() {
+    if (catalogLoaded) return;
+    backends = await fetchBackends();
+    registries = await loadPlatformRegistries();
+    fillBackendSelect();
+    await Promise.all([loadCatalogForBackend(), loadKernels()]);
+    catalogLoaded = true;
 }
 
 async function boot() {
     try {
-        backends = await fetchBackends();
-        registries = await loadPlatformRegistries();
-        fillBackendSelect();
-        await Promise.all([loadCatalogForBackend(), loadKernels()]);
-        if (activeTab === 'kernels') {
-            renderKernelSidebar();
-            renderKernelDetail();
-        }
+        manifest = await fetchJson(`${GUIDES_BASE}/manifest.json`);
+        const hash = readHash();
+        const defaultSection = hash?.section || manifest.defaultSection || 'learn';
+        const defaultChapter = hash?.chapter || manifest.defaultChapter || null;
+        await setWikiSection(defaultSection, defaultChapter);
     } catch (err) {
-        detail.innerHTML = `<div class="empty">Failed to load wiki: ${escapeHtml(err.message)}</div>`;
-        if (compList) compList.innerHTML = '<div class="empty">Error</div>';
+        detail.innerHTML = `<div class="empty">Failed to load Wiki: ${escapeHtml(err.message)}</div>`;
     }
 }
 
-backendSelect.addEventListener('change', async () => {
+backendSelect?.addEventListener('change', async () => {
     setSelectedBackendId(backendSelect.value);
-    await loadCatalogForBackend();
-    if (activeTab === 'kernels') {
-        renderKernelSidebar();
-        renderKernelDetail();
+    catalogLoaded = false;
+    await ensureCatalog();
+    if (currentSection()?.mode === 'catalog') {
+        setCatalogTab(catalogTab);
     }
 });
 
 compFilter?.addEventListener('input', () => renderSidebar());
-tabComponents?.addEventListener('click', () => setActiveTab('components'));
-tabKernels?.addEventListener('click', () => setActiveTab('kernels'));
+tabComponents?.addEventListener('click', () => setCatalogTab('components'));
+tabKernels?.addEventListener('click', () => setCatalogTab('kernels'));
+
+window.addEventListener('hashchange', () => {
+    const hash = readHash();
+    if (!hash?.section) return;
+    setWikiSection(hash.section, hash.chapter);
+});
 
 boot();

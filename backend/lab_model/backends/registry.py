@@ -273,7 +273,36 @@ class BackendRegistry:
         )
         active_job = job_hub.active_job_id(rt.backend_id)
         row["active_job_id"] = active_job
-        if rt.lab is not None:
+        edge = None
+        disconnect = None
+        stale_after = 5.0
+        try:
+            from lab_model.edge import edge_agent_registry as _edge_reg
+
+            stale_after = float(_edge_reg.stale_after_s)
+            edge = _edge_reg.get_for_backend(rt.backend_id)
+            disconnect = _edge_reg.last_disconnect(rt.backend_id)
+        except Exception:
+            edge = None
+            disconnect = None
+        row["edge_attached"] = edge is not None
+        row["edge_agent"] = edge.to_api_dict() if edge is not None else None
+        row["edge_offline"] = disconnect
+        row["edge_stale_after_s"] = (
+            stale_after if edge is not None or disconnect else None
+        )
+        if edge is not None:
+            row["health"] = "edge_attached"
+            if isinstance(edge.lab_state, dict):
+                row["system_status"] = edge.lab_state.get("system_status")
+                components = edge.lab_state.get("components")
+                row["component_count"] = (
+                    len(components) if isinstance(components, dict) else 0
+                )
+        elif disconnect is not None:
+            row["health"] = "edge_offline"
+            row["system_status"] = None
+        elif rt.lab is not None:
             try:
                 with backend_context(rt.paths, rt.manifest):
                     state = rt.lab.get_lab_state() or {}

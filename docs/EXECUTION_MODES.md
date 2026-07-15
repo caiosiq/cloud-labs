@@ -161,7 +161,7 @@ with cloudlabs.session(backend="real.chicago_bench_1", mode="imperative") as lab
 | Lease | **Implemented** — §4 |
 | Tensor fetch | `GET /api/components/{tag}/measurables/{field}/tensor` (**Phase D**) |
 | SDK | `lab.measurable(tag, field).resolve()` (**Phase D**) |
-| Package | `lab_model.optimization.sdk` |
+| Package | `cloudlabs` (`pip install -e ./packages/cloudlabs`) |
 
 ---
 

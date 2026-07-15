@@ -113,7 +113,32 @@ function backendDetailHtml(selected) {
                 <dt>Repos</dt><dd>${escapeHtml(repos)}</dd>
                 <dt>Queue</dt><dd>${escapeHtml(busy)}</dd>
                 <dt>Lease</dt><dd>${escapeHtml(lease ? lease.holder : '—')}</dd>
+                <dt>Edge</dt><dd class="${
+                    selected.edge_offline
+                        ? 'backend-status-bad'
+                        : selected.edge_attached
+                          ? ''
+                          : ''
+                }">${escapeHtml(
+                    selected.edge_attached
+                        ? `attached (${selected.edge_agent?.agent_id || 'agent'})`
+                        : selected.edge_offline
+                          ? `OFFLINE — ${selected.edge_offline.reason || 'stale heartbeat'}`
+                          : 'not attached (in-process)'
+                )}</dd>
             </dl>
+            ${
+                selected.edge_offline
+                    ? `<p class="backend-unavailable-msg">
+                        Edge agent disconnected. Jobs/leases were fail-closed.
+                        ${
+                            selected.edge_offline.disconnected_at
+                                ? `<br><code>${escapeHtml(selected.edge_offline.disconnected_at)}</code>`
+                                : ''
+                        }
+                       </p>`
+                    : ''
+            }
             ${
                 !ready
                     ? `<p class="backend-unavailable-msg">

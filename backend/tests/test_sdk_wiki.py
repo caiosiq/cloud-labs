@@ -2,7 +2,7 @@
 
 import unittest
 
-from lab_model.optimization.sdk.wiki import (
+from cloudlabs.wiki import (
     describe_component_row,
     measurable_script_handle,
     normalize_capabilities,

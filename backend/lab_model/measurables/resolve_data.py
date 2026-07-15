@@ -24,19 +24,18 @@ def resolve_tensor_data(tensor: MeasurableTensor) -> MeasurableTensor:
 
 
 def _load_image_array(ref: LazyRef) -> Optional["np.ndarray"]:
-    import numpy as np
-
+    """Load camera PNG/JPEG as BGR uint8 HxWx3 (manifest ``bgr_hwc_uint8``)."""
     path = _path_from_lazy(ref)
     if not path or not os.path.isfile(path):
         return None
     try:
-        from PIL import Image
-    except ImportError:
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except OSError:
         return None
-    with Image.open(path) as img:
-        rgb = img.convert("RGB")
-        arr = np.asarray(rgb, dtype=np.uint8)
-    return arr
+    from lab_model.optimization.metrics.image_features import decode_png_bytes_to_bgr
+
+    return decode_png_bytes_to_bgr(data)
 
 
 def _path_from_lazy(ref: LazyRef) -> Optional[str]:

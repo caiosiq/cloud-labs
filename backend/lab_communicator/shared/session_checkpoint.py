@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from lab_communicator.shared.lab_view_config import atomic_write_json, get_lab_view_paths_optional
-from lab_model.domain.component import get_measurables, get_tunables
+from lab_model.domain.component import get_measurables, get_tunables, reported_pose
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +198,8 @@ def merge_offers_with_debug(
         b = ck[tid]
         if not isinstance(a, dict) or not isinstance(b, dict):
             continue
-        pa = get_measurables(a).get("pose") or {}
-        pb = get_measurables(b).get("pose") or {}
+        pa = reported_pose(a) if isinstance(a, dict) else {}
+        pb = reported_pose(b) if isinstance(b, dict) else {}
         if not isinstance(pa, dict) or not isinstance(pb, dict):
             continue
         if not poses_close(pa, pb, thresholds):

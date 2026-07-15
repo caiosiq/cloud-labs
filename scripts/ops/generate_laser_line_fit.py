@@ -7,10 +7,10 @@ Lab coordinates use x = a*y + b (mm). Canvas origin is table center; grid dots a
 - Typical tuning: b ≈ (hole_count) * (hole_spacing_mm). Old fit was ~389 mm (~15.5 × 25).
 
 Examples (from project root):
-  python scripts/generate_laser_line_fit.py --holes 16 --spacing-mm 25
-  python scripts/generate_laser_line_fit.py --holes 15 --spacing-mm 25
-  python scripts/generate_laser_line_fit.py --inches 16          # b = 16 * 25.4 mm
-  python scripts/generate_laser_line_fit.py --b 400 --slope 0    # set b directly
+  python scripts/ops/generate_laser_line_fit.py --holes 16 --spacing-mm 25
+  python scripts/ops/generate_laser_line_fit.py --holes 15 --spacing-mm 25
+  python scripts/ops/generate_laser_line_fit.py --inches 16          # b = 16 * 25.4 mm
+  python scripts/ops/generate_laser_line_fit.py --b 400 --slope 0    # set b directly
 
 If the UI breadboard grid is shifted by ¼\" (see BREADBOARD_GRID_OFFSET_X_MM in frontend/js/config.js), subtract the same
 amount from b so the laser overlay matches: e.g. after --holes 16 --spacing-mm 25 (b=400), use --b 393.65
@@ -26,7 +26,7 @@ import numpy as np
 
 
 def main() -> None:
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     default_out = os.path.join(root, "laser_line_fit.npy")
 
     p = argparse.ArgumentParser(description="Generate laser_line_fit.npy (x = a*y + b in lab mm).")

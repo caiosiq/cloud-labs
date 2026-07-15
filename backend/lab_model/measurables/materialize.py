@@ -70,7 +70,7 @@ def _materialize_camera_image(
         field="camera_image",
         dtype="uint8",
         shape=(),  # filled on resolve
-        axes={"y": "pixel", "x": "pixel", "c": "channel"},
+        axes={"y": "pixel", "x": "pixel", "c": "bgr"},
         units={},
         domain="spatial",
         data=lazy,

@@ -13,7 +13,7 @@ from lab_model.optimization.errors import EnsemblePreflightError
 from lab_model.optimization.graph import ObjectiveGraphSpec
 from lab_model.optimization.metrics import weighted_sum as _metrics  # noqa: F401 — register
 from lab_model.optimization.preflight import preflight_ensemble, preflight_objective_sources
-from lab_model.optimization.sdk.objective import ObjectiveGraphBuilder, objective_term
+from cloudlabs.objective import ObjectiveGraphBuilder, objective_term
 from lab_model.optimization.spec import ObjectiveSpec
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]

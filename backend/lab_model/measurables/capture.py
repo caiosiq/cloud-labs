@@ -45,6 +45,31 @@ def capture_png_for_tag(
     return png if isinstance(png, (bytes, bytearray)) else None
 
 
+def read_camera_bgr_for_tag(
+    bridge: Any,
+    tag_id: str,
+    catalog_meta: Optional[Mapping[str, Any]] = None,
+    *,
+    exposure_s: Optional[float] = None,
+) -> Optional[Any]:
+    """Capture one still and decode to OpenCV BGR uint8 HxWx3 (Step C bridge).
+
+    Same routing as :func:`capture_png_for_tag`. Returns ``None`` when capture
+    or decode fails (real benches must not invent synthetic frames).
+    """
+    from lab_model.optimization.metrics.image_features import decode_png_bytes_to_bgr
+
+    png = capture_png_for_tag(
+        bridge,
+        tag_id,
+        catalog_meta,
+        exposure_s=exposure_s,
+    )
+    if not png:
+        return None
+    return decode_png_bytes_to_bgr(bytes(png))
+
+
 def write_png_capture(
     png: bytes,
     *,
@@ -168,5 +193,6 @@ __all__ = [
     "camera_image_meta_from_png",
     "capture_and_materialize_camera_image",
     "capture_png_for_tag",
+    "read_camera_bgr_for_tag",
     "write_png_capture",
 ]

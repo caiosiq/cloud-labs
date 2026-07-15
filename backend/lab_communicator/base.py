@@ -346,6 +346,70 @@ class LabCommunicator:
         """Trigger a fresh measurement — see :func:`lab_model.orchestration.run_record_measurables`."""
         return await run_record_measurables(self, tag_id)
 
+    async def eval_kernel_for_tag(
+        self,
+        tag_id: str,
+        kernel_id: str,
+        *,
+        field: str = "camera_image",
+        lease_id: Optional[str] = None,
+        backend_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """EVAL_KERNEL primitive: capture BGR and run a TorchScript kernel.
+
+        Kernels are **inputs** (``kernel_id``), not peer verbs. Closed-loop
+        OPTIMIZE runs kernels in-process via the ensemble backends — this
+        method is the authoring/probe path (and DAG/command IR for one probe).
+
+        ``field`` is reserved for measurable selection; capture uses camera BGR today.
+        """
+        from lab_model.optimization.kernels import session_store
+        from lab_model.optimization.kernels.torchscript_runtime import (
+            run_torchscript_output,
+        )
+
+        kid = str(kernel_id or "").strip()
+        tid = str(tag_id or "").strip()
+        if not kid or not tid:
+            raise ValueError("kernel_id and tag_id required")
+
+        if kid.startswith("session."):
+            lid = str(lease_id or getattr(self, "_command_lease_id", None) or "").strip()
+            bid = str(
+                backend_id or getattr(self, "_command_backend_id", None) or ""
+            ).strip()
+            if lid and bid:
+                session_store.activate_lease_roots(bid, lid)
+
+        bgr = self.read_camera_bgr(tid)
+        if bgr is None:
+            import numpy as np
+
+            # Mock-only gray fallback; real backends must not invent frames.
+            mode = str(getattr(self, "lab_mode", "") or "").upper()
+            is_mock = mode == "MOCK" or type(self).__name__.startswith("Mock")
+            if not is_mock:
+                raise RuntimeError(
+                    f"camera capture failed for {tid!r} "
+                    "(no frame from edge/real communicator)"
+                )
+            bgr = np.full((64, 64, 3), 128, dtype=np.uint8)
+
+        kind, value = run_torchscript_output(kid, bgr)
+        if kind == "features":
+            return {
+                "kind": "features",
+                "features": list(value),
+                "kernel_id": kid,
+                "field": field,
+            }
+        return {
+            "kind": "scalar",
+            "scalar": float(value),
+            "kernel_id": kid,
+            "field": field,
+        }
+
     async def _primitive_record_measurables(
         self, tag_id: str, catalog_meta: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
@@ -1075,6 +1139,7 @@ class LabCommunicator:
         from lab_model.domain.component import (
             PRESENCE_BREADBOARD,
             measurables_bucket,
+            set_reported_pose,
             tunables_bucket,
         )
 
@@ -1083,13 +1148,12 @@ class LabCommunicator:
         if component_data.get("type"):
             entry["type"] = component_data["type"]
         tun = tunables_bucket(entry)
-        meas = measurables_bucket(entry)
         pose = {"x": 0.0, "y": 0.0, "rotation": 0.0}
         tun["presence"] = PRESENCE_BREADBOARD
         tun["nominal_pose"] = dict(pose)
         tun["storage"] = {"in_storage": False, "slot": None}
         tun["placement"] = {"mode": "MANUAL"}
-        meas["pose"] = dict(pose)
+        set_reported_pose(entry, pose)
         return entry
 
     async def _primitive_add_component_to_state(
@@ -1422,6 +1486,22 @@ class LabCommunicator:
         a synthetic PNG for UI testing (overridden on the mock class).
         """
         return None
+
+    def read_camera_bgr(self, tag_id: str):
+        """Capture one frame for ``tag_id`` as OpenCV BGR uint8 HxWx3.
+
+        Shared Step C data-plane hook used by ``POST /api/kernels/eval``,
+        edge agents, and any path that needs the same layout TorchScript
+        kernels already consume. Returns ``None`` when capture fails —
+        callers must not invent synthetic frames on real backends.
+        """
+        from lab_model.measurables.capture import read_camera_bgr_for_tag
+
+        meta = None
+        cmap = getattr(self, "catalog_map", None)
+        if isinstance(cmap, dict):
+            meta = cmap.get(tag_id)
+        return read_camera_bgr_for_tag(self, tag_id, meta)
 
     def table_cam_connect(self, cam_id: int) -> Tuple[bool, str]:
         """Optional HTTP hook for lazy table-cam ownership (real cloudlabs build)."""

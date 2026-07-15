@@ -122,8 +122,8 @@ Batch **declarative** runs (JSON list of steps) can be executed by a **thin runn
 
 ### Phase 1 — Spike & transport choice
 
-- [x] Document decision: in-process communicator access vs HTTP client (or both behind one façade). **HTTP client chosen for Phase B** (`lab_model.optimization.sdk`).
-- [x] Spike script: one move (or noop-safe call) via chosen transport; print lab state before/after. **`scripts/smoke_sdk.py`**
+- [x] Document decision: in-process communicator access vs HTTP client (or both behind one façade). **HTTP client chosen for Phase B** (`cloudlabs` package / `lab_model.optimization.sdk` shim).
+- [x] Spike script: one move (or noop-safe call) via chosen transport; print lab state before/after. **`scripts/language/01_hello_lab.py`**
 - [ ] Spike: same action via alternate transport for comparison (optional second spike).
 
 ### Phase 2 — Minimal Python API
@@ -134,7 +134,7 @@ Batch **declarative** runs (JSON list of steps) can be executed by a **thin runn
 
 ### Phase 3 — Long-run ergonomics
 
-- [x] Example: loop with **measure** step between commands (log path, timestamp). **`scripts/smoke_sdk.py`**
+- [x] Example: loop with **measure** step between commands (log path, timestamp). **`scripts/language/01_hello_lab.py`**
 - [x] Example: wait for optimization step / image folder if needed by your workflow. **`wait_for_primitive_settled` for reconcile steps**
 - [x] Clear errors: robot failures, **409** busy, disconnect. **Typed SDK exceptions**
 
@@ -153,31 +153,36 @@ Batch **declarative** runs (JSON list of steps) can be executed by a **thin runn
 
 ## 11. Running the SDK (Phase B.1)
 
-**Prerequisites:** FastAPI server running (`python backend/main.py`). Server prints `ACTIVE_BACKEND_ID` (e.g. `mock.default`).
-
-**Smoke test (move + capture):**
+**Prerequisites:**
 
 ```powershell
-cd backend
-python ..\scripts\smoke_sdk.py
+pip install -e ./packages/cloudlabs
+# optional: pip install -e "./packages/cloudlabs[kernels,images]"
+python backend/main.py   # FastAPI; prints ACTIVE_BACKEND_ID
+```
+
+**Hello lab (move + capture):**
+
+```powershell
+python scripts/language/01_hello_lab.py
 ```
 
 **With hardware reconcile** (monitored step-by-step, same primitive path as the UI reconcile runner):
 
 ```powershell
-python ..\scripts\smoke_sdk.py --reconcile laser-cavity main
+python scripts/language/01_hello_lab.py --reconcile laser-cavity main
 ```
 
 **Notebook / script:**
 
 ```python
-from lab_model.optimization.sdk import connect, resolve_backend_id
+from cloudlabs import connect, resolve_backend_id
 
 with connect(resolve_backend_id(), verbose=True) as lab:
     lab.prepare(catalog_pin="laser-cavity-main", reconcile=True)
-    lab.set_tunable("tag_20", "tunables.nominal_pose.x", 10.0)
-    lab.wait_until_idle()
-    tensor = lab.measurable("tag_22", "camera_image").resolve(record=True)
+    lab.components.tag_20.move(x=10.0).wait_until_idle()
+    # or: lab.set_tunable("tag_20", "tunables.nominal_pose.x", 10.0)
+    tensor = lab.components.tag_22.measurable("camera_image").resolve(record=True)
     # Closed-loop: lab.run_cobyla(...) or lab.run_optimize(objective=...)
 ```
 
@@ -185,8 +190,13 @@ with connect(resolve_backend_id(), verbose=True) as lab:
 
 | Script | Role |
 |--------|------|
-| [`scripts/example_torchscript_cobyla_mirror.py`](../scripts/example_torchscript_cobyla_mirror.py) | Minimal catalog-kernel COBYLA |
-| [`scripts/example_session_kernel_author.py`](../scripts/example_session_kernel_author.py) | Author-defined session kernels + feature `run_optimize` |
+| [`scripts/language/01_hello_lab.py`](../scripts/language/01_hello_lab.py) | Connect, prepare, fluent move, capture |
+| [`scripts/language/02_kernels_and_match.py`](../scripts/language/02_kernels_and_match.py) | `probe_kernel` (EVAL_KERNEL) + `kernel_match` |
+| [`scripts/language/03_closed_loop_catalog.py`](../scripts/language/03_closed_loop_catalog.py) | Catalog kernel as OPTIMIZE input |
+| [`scripts/language/04_session_kernels.py`](../scripts/language/04_session_kernels.py) | Session artifacts + feature OPTIMIZE |
+| [`scripts/language/05_jobs_and_modes.py`](../scripts/language/05_jobs_and_modes.py) | Compiled DAG + closed-loop jobs |
+| [`scripts/language/README.md`](../scripts/language/README.md) | Ladder index |
+| [`packages/cloudlabs/README.md`](../packages/cloudlabs/README.md) | Package install |
 | [`docs/SESSION_KERNELS.md`](./SESSION_KERNELS.md) | Session package policy + API |
 
 | Env var | Purpose |
@@ -196,4 +206,4 @@ with connect(resolve_backend_id(), verbose=True) as lab:
 
 **Lease heartbeat:** enabled by default (60 s). Long notebooks stay locked without expiring at 10 min. Pass `heartbeat_s=0` to disable.
 
-**Import path:** run from `backend/` or set `PYTHONPATH` to `backend` so `lab_model` resolves.
+**Compat:** `from lab_model.optimization.sdk import …` still works as a thin re-export after `pip install -e ./packages/cloudlabs` (and `PYTHONPATH=backend` for server tests).

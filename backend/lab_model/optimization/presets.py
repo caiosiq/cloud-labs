@@ -23,7 +23,8 @@ def compile_legacy_strategy(
     """
     Build an ensemble-shaped dict equivalent to legacy NEWTON/COBYLA on one tag.
 
-    Not executed automatically in Phase 1 — used for migration and tests.
+    Used for migration/tests and optional Step E redirect
+    (``CLOUDLABS_LEGACY_OPTIMIZE_REDIRECT=1`` on mock). Not the default on real.
     """
     strategy_u = (strategy or "NEWTON").upper()
     mids = motor_ids if motor_ids else [1, 3]

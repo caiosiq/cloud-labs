@@ -3,7 +3,7 @@
 **Status:** backlog / sequencing (not an active sprint plan)  
 **Last updated:** 2026-07-12  
 **Context:** Mock-first authoring is closed (`connect` / `prepare` / `run_optimize` / session kernels).  
-**Hard gate:** do **not** deepen `lab_communicator/real` or `lab_automation` until **Step A** and preferably **Step B** below are done.
+**Hard gate:** do **not** deepen TeleOp / ComponentRegistry / full `lab_automation` ownership until Steps A–C are done (shipped on mock + capture bridge). Step D+ may use real beams; invasive hardware work stays gated by [`REAL_BENCH_ROADMAP.md`](./REAL_BENCH_ROADMAP.md).
 
 **Related:** [`PROGRAMMABLE_LAB_VISION.md`](./PROGRAMMABLE_LAB_VISION.md), [`EXECUTION_MODES.md`](./EXECUTION_MODES.md), [`SESSION_KERNELS.md`](./SESSION_KERNELS.md), [`REAL_BENCH_ROADMAP.md`](./REAL_BENCH_ROADMAP.md) (hardware TeleOp — later).
 
@@ -23,41 +23,40 @@ Closed-loop already assumes **edge-owned** eval loops ([`EXECUTION_MODES.md`](./
 
 ```mermaid
 flowchart LR
-  subgraph next [Next — no real hardware]
+  subgraph done [Done]
     A[A: Extract cloudlabs pip SDK]
-    B[B: Document + stub 3-tier control plane]
-  end
-  subgraph after [After A/B]
+    B[B: Mock edge agent MVP]
+    B1[B.1: Imperative + eval proxy]
     C[C: Real MeasurableTensor bridge]
     D[D: Curated physics builtins]
-    E[E: Deprecate legacy OPTIMIZE]
+    E[E: Soft-deprecate legacy OPTIMIZE]
     F[F: Fluent component API]
   end
-  A --> B --> C --> D --> E --> F
+  A --> B --> B1 --> C --> D --> E --> F
 ```
 
 ---
 
-## Step A — Extract a standalone `cloudlabs` SDK package *(next priority)*
+## Step A — Extract a standalone `cloudlabs` SDK package *(done on develop/caio-distributed)*
 
 **Goal:** Authors never clone this monorepo just to call `connect()`.
 
-**Do:**
+**Done:**
 
-1. Carve current `backend/lab_model/optimization/sdk/` into a distributable package (keep monorepo for now), e.g. `packages/cloudlabs/` or `cloudlabs-sdk/` with its own `pyproject.toml`.
-2. Public import: `import cloudlabs` / `from cloudlabs import connect` (thin re-export or rename).
-3. Minimal deps: `requests`/`httpx`, typing; optional extras e.g. `cloudlabs[kernels]` for TorchScript compile-on-laptop.
-4. Editable install: `pip install -e ./packages/cloudlabs`.
-5. Point examples + [`Run_CloudLab_Scripts.md`](./Run_CloudLab_Scripts.md) at the package; keep server importing the same code or a thin shim during transition.
-6. **Do not** invent fluent `lab.components.tag_20...` in this step (that is Step F).
+1. Package at [`packages/cloudlabs/`](../packages/cloudlabs/) with `src/cloudlabs/` + `pyproject.toml`
+2. Public import: `from cloudlabs import connect`
+3. Deps: `requests`, `pydantic`; extras `kernels`, `images`
+4. Editable install: `pip install -e ./packages/cloudlabs`
+5. Examples + [`Run_CloudLab_Scripts.md`](./Run_CloudLab_Scripts.md) use the package; `lab_model.optimization.sdk` is a re-export shim
+6. Catalog + session `eval_kernel` via edge `POST /api/kernels/eval` (no monorepo TorchScript on the laptop)
 
-**Exit:** A notebook **outside** this repo can `pip install -e …` and run `connect(base_url=...)` against a running mock server.
+**Exit:** A notebook outside this repo can `pip install -e …` and run `connect(base_url=...)` against a running mock server.
 
-**Non-goals:** PyPI publish (optional later); rewriting FastAPI; real hardware.
+**Non-goals (still):** PyPI publish; Step B edge process split; real hardware.
 
 ---
 
-## Step B — Three-tier topology (control plane vs edge) — still mock-first
+## Step B — Three-tier topology (control plane vs edge) — **MVP shipped (mock)**
 
 **Goal:** Stop assuming “server process == edge process.” Matchmaker stays central; fast loops stay on the edge.
 
@@ -84,61 +83,148 @@ flowchart LR
 3. Session kernel packages and objective IR travel **with the job** to the edge (already the mock pattern via `kernel_packages`).
 4. Mock can validate the split by running **coordinator + edge agent as two processes** on one machine before any real bench.
 
-**Exit:** Job submit + lease + closed-loop work when communicator is a **separate edge process** speaking the same HTTP/WS contract; UI and SDK unchanged in spirit.
+### MVP shipped (2026-07-12)
 
-**Hard gate reminder:** Step B may use a **mock** edge agent. Real/`lab_automation` waits for Step C.
+| Piece | Location |
+|-------|----------|
+| Edge registry | [`backend/lab_model/edge/`](../backend/lab_model/edge/) |
+| APIs | `POST /api/edge/register`, `/heartbeat`, `/unregister`; `GET /api/edge/work`; `POST /api/edge/jobs/{id}/progress\|complete` |
+| Dispatch gate | `_kick_job_runner_for` skips in-process runner when edge attached |
+| Mock agent | [`scripts/ops/mock_edge_agent.py`](../scripts/ops/mock_edge_agent.py) — closed_loop + compiled_dag + command poll |
 
----
+**Runbook (two terminals):**
 
-## Step C — Real data-plane bridge (Horizon 2)
+```powershell
+# T1 — coordinator
+$env:PYTHONPATH="backend"; python backend/main.py
 
-**Only after A (+ preferably B).**
+# T2 — edge (start BEFORE submitting jobs)
+python scripts/ops/mock_edge_agent.py --base-url http://127.0.0.1:8000
 
-- Materialize real camera frames into `MeasurableTensor` with the same layout mock kernels already consume (BGR/bytes → NCHW float for TorchScript).
-- Wire session + catalog kernels on real ensemble eval without synthetic fallback for torchscript terms.
-- See also older TeleOp-oriented notes in [`REAL_BENCH_ROADMAP.md`](./REAL_BENCH_ROADMAP.md) — reconcile; do not fork two “real” stories.
-
-**Exit:** One real camera frame → one session/catalog kernel scalar/features on the edge, observable in job telemetry.
-
----
-
-## Step D — Curated physics kernel library (Horizon 3)
-
-**After C** (so fits are validated on real beams, not only mock noise).
-
-Candidates (TorchScript / allowlisted builtins):
-
-- `builtin.gaussian_beam_fit` → `[amplitude, cx, cy, sigma_x, sigma_y]` (or features kind)
-- `builtin.roi_centroid` — sub-pixel CoM in a bbox
-- Scope/array kernels (e.g. bandpass) only when non-image measurables share the same tensor pipeline
-
-Authors keep writing custom `session.*` modules; builtins are the high-value defaults.
-
----
-
-## Step E — Unify / deprecate legacy OPTIMIZE (Horizon 1)
-
-**After C** (and ideally D for UI parity).
-
-- Route new UI/scripts through ensemble IR + `run_optimize`.
-- Treat single-knob tunes as one-variable / one-term ensemble jobs.
-- Deprecate standalone Newton/legacy loops once Operators and Twin flows have parity (telemetry, cancel, kernels).
-
-**Do not** rip out legacy paths before real closed-loop telemetry matches what operators trust today.
-
----
-
-## Step F — Fluent component API (Horizon 4)
-
-**Last among these.** Ergonomics only; helpers already unblock science scripts.
-
-```python
-# Target shape (illustrative — not implemented)
-lab.components.tag_20.move(x=12.5)
-# or catalog-driven attributes — exact surface TBD
+# T3 — client
+pip install -e ./packages/cloudlabs
+python scripts/language/03_closed_loop_catalog.py
 ```
 
-Depends on stable capability catalog from the coordinator; natural follow-on once the pip SDK (Step A) is the only author surface.
+`GET /api/backends` shows `edge_attached: true` while the agent heartbeats.
+
+**Still deferred after Step B MVP:** see **Step B.1** below (imperative proxy shipped there).
+
+**Exit (MVP):** Job submit + lease + closed-loop complete with communicator in a **separate** mock edge process; SDK unchanged.
+
+**Hard gate reminder:** Real/`lab_automation` waits for Step C.
+
+---
+
+## Step B.1 — Deepen mock edge (imperative + eval + compiled_dag) — **shipped**
+
+**Goal:** End the split-brain where closed-loop runs on the edge but `/api/command` and `/api/kernels/eval` still hit the coordinator’s in-process lab.
+
+### Shipped
+
+| Piece | Behavior |
+|-------|----------|
+| Edge command queue | [`backend/lab_model/edge/commands.py`](../backend/lab_model/edge/commands.py) |
+| APIs | `GET /api/edge/commands`, `POST /api/edge/commands/{id}/complete` |
+| Proxy | When `edge_attached`, `/api/command` and `/api/kernels/eval` enqueue and wait |
+| Mock agent | Polls commands first, then jobs; runs `closed_loop` + `compiled_dag` |
+
+**Still deferred after B.1:** TeleOp WS through coordinator; client↔edge peer tunnels; production session-kernel policy.
+
+**Ops hardening:** edge lab-state SoT (heartbeat cache / `get_lab_state` proxy); **5s** stale eviction fail-closes jobs+leases; Operations shows `edge_offline`; mock heartbeat default **1.5s** with `lab_state` push.
+
+**Exit:** With edge attached, imperative move / `eval_kernel` / closed-loop all touch the **edge** communicator.
+
+---
+
+## Step C — Real data-plane bridge (Horizon 2) — **shipped (MVP)**
+
+**Goal:** One camera frame on the edge → same BGR layout kernels already consume → TorchScript scalar/features, **without** inventing synthetic frames on real backends.
+
+### Shipped
+
+| Piece | Behavior |
+|-------|----------|
+| Shared capture→BGR | [`read_camera_bgr_for_tag`](../backend/lab_model/measurables/capture.py) + `LabCommunicator.read_camera_bgr` |
+| MeasurableTensor resolve | Camera images materialize as **BGR uint8 HWC** (`axes.c = "bgr"`), matching manifest `bgr_hwc_uint8` |
+| Kernel eval | `POST /api/kernels/eval` uses `read_camera_bgr`; **real** returns 503 on capture failure; **mock** keeps gray fallback for CI |
+| Real ensemble | `RealEnsembleHardwareBridge.capture_bgr_for_tag` uses the shared helper (already fed TorchScript via `collect_objective_measurements`) |
+| Tests | [`test_step_c_camera_bridge.py`](../backend/tests/test_step_c_camera_bridge.py) |
+
+**Still deferred:** deep `lab_automation` / TeleOp WS; mock ensemble landscape still uses synthetic BGR for TorchScript terms (intentional for CI without a connected mock cam).
+
+**Exit:** Captured PNG → BGR → `demo.image_mean_score` (or session kernel) on real/edge path; no gray `np.full` on real mode.
+
+---
+
+## Step D — Curated physics kernel library (Horizon 3) — **shipped (MVP)**
+
+**Goal:** High-value catalog feature kernels authors can use without writing `session.*` modules.
+
+### Shipped
+
+| Id | Output | Notes |
+|----|--------|-------|
+| `builtin.roi_centroid` | `[cx, cy]` | Sub-pixel CoM in center-half ROI (full-frame px) |
+| `builtin.gaussian_beam_fit` | `[amplitude, cx, cy, sigma_x, sigma_y]` | Intensity-weighted moments (not NLLS) |
+
+| Piece | Location |
+|-------|----------|
+| Build | [`scripts/ops/build_torchscript_kernels.py`](../scripts/ops/build_torchscript_kernels.py) |
+| Manifest + `.pt` | [`schemas/kernels/`](../schemas/kernels/) |
+| SDK | `lab.kernel_match(..., target=(x,y))` → `rms_distance` on feature pair |
+| Example | [`scripts/language/02_kernels_and_match.py`](../scripts/language/02_kernels_and_match.py) |
+
+**Still deferred:** parameterized bbox in catalog schema; scope/array (non-image) kernels; nonlinear least-squares Gaussian fit.
+
+**Exit:** Catalog lists both builtins; synthetic spot recovers known centroid; SDK can optimize toward `target_px` via `builtin.roi_centroid`.
+
+---
+
+## Step E — Unify / deprecate legacy OPTIMIZE — **shipped (soft deprecate)**
+
+**Goal:** Route new work through ensemble IR + jobs; keep real-bench NEWTON/COBYLA until visual telemetry parity.
+
+### Shipped
+
+| Piece | Behavior |
+|-------|----------|
+| Deprecation warning | `run_optimize_component` logs + `DeprecationWarning` on legacy path |
+| Optional redirect | `CLOUDLABS_LEGACY_OPTIMIZE_REDIRECT=1` compiles legacy → ensemble via `compile_legacy_strategy` (**mock only**; never on REAL) |
+| Capabilities API | `GET /api/optimization/capabilities` |
+| Job errors | Closed-loop reject message points authors to ensemble / SDK |
+| Schema / strategies | `OptimizeParameters` + `schemas/strategies.json` marked deprecated; BAYESIAN flagged unimplemented |
+| Twin UI | Component OPTIMIZE panel + console help show deprecation; strategies labeled legacy |
+| Docs | README + ENSEMBLE_OPTIMIZATION migration note |
+
+**Not deleted:** real `primitive_optimize_component`, MJPEG optimization stream, Newton place-UI hook, Twin/console legacy buttons.
+
+**Exit:** New scripts/UI docs prefer ensemble; legacy still runs when operators need it; mock can opt into redirect.
+
+---
+
+## Step F — Fluent component API (Horizon 4) — **shipped (MVP)**
+
+**Goal:** Ergonomic authoring without new HTTP primitives.
+
+```python
+lab.components.tag_20.move(x=12.5).wait_until_idle()
+lab.components.tag_20.motor(1, 0.5)
+lab.components["tag_22"].eval_kernel("camera_image", kernel_id="builtin.roi_centroid")
+```
+
+### Shipped
+
+| Piece | Location |
+|-------|----------|
+| Proxies | [`packages/cloudlabs/src/cloudlabs/components.py`](../packages/cloudlabs/src/cloudlabs/components.py) |
+| Client | `lab.components` property |
+| Example | [`scripts/language/01_hello_lab.py`](../scripts/language/01_hello_lab.py) |
+| Tests | [`backend/tests/test_sdk_components.py`](../backend/tests/test_sdk_components.py) |
+
+**Still deferred:** catalog-driven magic attributes per tunable; codegen from capability catalog.
+
+**Exit:** Authors can write fluent scripts that call the same move/eval/optimize paths as before.
 
 ---
 
@@ -151,11 +237,11 @@ Depends on stable capability catalog from the coordinator; natural follow-on onc
 | Promote `session.*` → catalog pin UI | Policy UX after authors use Step A package |
 | Client↔edge direct (bypass coordinator) after pairing | Proven need post Step B |
 | PyPI release of `cloudlabs` | Local editable install works (Step A exit) |
+| **Loss kernels** (`torchscript_loss` / `output_kind=loss`) | Design locked in [`LOSS_KERNELS.md`](./LOSS_KERNELS.md); implement when custom losses outgrow metric ids |
 
 ---
 
 ## One-line summary
 
-**Next:** ship `cloudlabs` as a pip package so authors are not server operators.  
-**Then:** split coordinator vs edge (mock agent first).  
-**Only then:** real tensors, curated physics kernels, kill legacy OPTIMIZE, fluent API.
+**Done (A→F):** standalone `cloudlabs` SDK, mock edge + command proxy, camera→BGR bridge, physics builtins, soft-deprecated legacy OPTIMIZE, fluent `lab.components`.  
+**Later:** PyPI publish; TeleOp WS through coordinator; deeper real/`lab_automation` when operators need it ([`REAL_BENCH_ROADMAP.md`](./REAL_BENCH_ROADMAP.md)).

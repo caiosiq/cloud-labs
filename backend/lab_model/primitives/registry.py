@@ -35,6 +35,16 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "handler": "record_measurables_for_tag",
         "http": "POST /api/components/{tag_id}/measurables/record",
     },
+    PrimitiveId.EVAL_KERNEL: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "eval_kernel_for_tag",
+        "http": "POST /api/command (action=EVAL_KERNEL)",
+        "notes": (
+            "Authoring probe; kernels are inputs (kernel_id). "
+            "Closed-loop OPTIMIZE runs kernels in-process — not via this primitive per eval."
+        ),
+    },
     PrimitiveId.MOVE_COMPONENT: {
         "kind": PrimitiveKind.ATOMIC,
         "read_only": False,

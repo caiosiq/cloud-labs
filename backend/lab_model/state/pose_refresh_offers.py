@@ -1,4 +1,4 @@
-"""Build pose-refresh offers by comparing current measurables to scan preview."""
+"""Build pose-refresh offers by comparing current reported pose to scan preview."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from lab_communicator.shared.session_checkpoint import (
     poses_close,
     yaw_diff_deg,
 )
-from lab_model.domain.component import PRESENCE_BREADBOARD, PRESENCE_STORAGE, get_measurables, get_tunables
+from lab_model.domain.component import PRESENCE_BREADBOARD, PRESENCE_STORAGE, get_tunables, reported_pose
 
 
 def _eligible_for_pose_refresh(comp: Mapping[str, Any]) -> bool:
@@ -26,7 +26,7 @@ def build_pose_refresh_offers(
     proposed_poses: Mapping[str, Mapping[str, Any]],
     thresholds: ReconciliationThresholds,
 ) -> List[Dict[str, Any]]:
-    """Return per-tag scan deltas vs current ``measurables.pose``.
+    """Return per-tag scan deltas vs current ``tunables.reported_pose``.
 
     ``default_apply`` is ``True`` when the delta exceeds reconciliation thresholds
     (operator should refresh); ``False`` when within tolerance (skip by default).
@@ -43,7 +43,7 @@ def build_pose_refresh_offers(
         if not isinstance(proposed, dict):
             continue
 
-        current_pose = get_measurables(comp).get("pose") or {}
+        current_pose = reported_pose(dict(comp))
         if not isinstance(current_pose, dict):
             current_pose = {}
 

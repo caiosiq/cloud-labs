@@ -4,13 +4,13 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from lab_model.optimization.sdk.client import CloudLabsClient, KernelMatchSpec, VariableSpec
-from lab_model.optimization.sdk.intent import (
+from cloudlabs import CloudLabsClient, KernelMatchSpec, VariableSpec
+from cloudlabs.intent import (
     build_cobyla_ensemble,
     build_ensemble_parameters,
     collect_kernel_ids,
 )
-from lab_model.optimization.sdk.objective import ObjectiveGraphBuilder
+from cloudlabs.objective import ObjectiveGraphBuilder
 
 
 class IntentBuilderTests(unittest.TestCase):
@@ -131,7 +131,7 @@ class RunOptimizeClientTests(unittest.TestCase):
         ) as release_mock, patch.object(
             client, "optimize", return_value=submitted
         ) as opt_mock, patch(
-            "lab_model.optimization.sdk.jobs.wait_for_job", return_value=finished
+            "cloudlabs.jobs.wait_for_job", return_value=finished
         ), patch.object(
             client, "acquire_lease"
         ) as acquire_mock:

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="300" viewBox="0 0 720 300" role="img" aria-labelledby="title desc">
+  <title id="title">Imperative vs closed-loop execution</title>
+  <desc id="desc">Imperative mode keeps the author laptop in the decision loop; closed-loop runs capture-score-actuate on the edge.</desc>
+  <rect width="720" height="300" fill="#13151a"/>
+  <!-- Left: Imperative -->
+  <text x="180" y="36" text-anchor="middle" fill="#f1f5f9" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="600">Imperative</text>
+  <text x="180" y="54" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">author in the loop</text>
+  <rect x="48" y="72" width="140" height="48" rx="8" fill="#181b21" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="118" y="101" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui, sans-serif" font-size="13">Laptop</text>
+  <line x1="118" y1="120" x2="118" y2="148" stroke="#64748b" stroke-width="1.5"/>
+  <polygon points="118,148 113,138 123,138" fill="#64748b"/>
+  <text x="148" y="140" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10">HTTP</text>
+  <rect x="48" y="152" width="140" height="48" rx="8" fill="#181b21" stroke="#2a2e36" stroke-width="1.5"/>
+  <text x="118" y="181" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui, sans-serif" font-size="13">Edge act / sense</text>
+  <line x1="118" y1="200" x2="118" y2="228" stroke="#64748b" stroke-width="1.5"/>
+  <polygon points="118,228 113,218 123,218" fill="#64748b"/>
+  <rect x="48" y="232" width="140" height="40" rx="8" fill="#181b21" stroke="#2a2e36" stroke-width="1.5"/>
+  <text x="118" y="257" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">decide again&</text>
+  <!-- Divider -->
+  <line x1="360" y1="40" x2="360" y2="280" stroke="#2a2e36" stroke-width="1" stroke-dasharray="4 4"/>
+  <!-- Right: Closed-loop -->
+  <text x="540" y="36" text-anchor="middle" fill="#f1f5f9" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="600">Closed-loop</text>
+  <text x="540" y="54" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">edge in the loop</text>
+  <rect x="470" y="72" width="140" height="40" rx="8" fill="#181b21" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="540" y="97" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui, sans-serif" font-size="13">Laptop: OPTIMIZE</text>
+  <line x1="540" y1="112" x2="540" y2="136" stroke="#64748b" stroke-width="1.5"/>
+  <polygon points="540,136 535,126 545,126" fill="#64748b"/>
+  <text x="568" y="130" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10">job</text>
+  <!-- Edge loop box -->
+  <rect x="430" y="144" width="220" height="120" rx="10" fill="#181b21" stroke="#34d399" stroke-width="1.5"/>
+  <text x="540" y="168" text-anchor="middle" fill="#6ee7b7" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" letter-spacing="0.04em">EDGE INNER LOOP</text>
+  <text x="540" y="196" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui, sans-serif" font-size="13">capture � score � actuate</text>
+  <text x="540" y="218" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">many iterations locally</text>
+  <text x="540" y="244" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">laptop waits for result</text>
+</svg>

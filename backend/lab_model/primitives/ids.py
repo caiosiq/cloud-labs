@@ -30,6 +30,9 @@ class PrimitiveId(StrEnum):
     GET_TUNABLES = "GET_TUNABLES"
     GET_MEASURABLES = "GET_MEASURABLES"
     RECORD_MEASURABLES = "RECORD_MEASURABLES"
+    #: Authoring probe: capture + run a TorchScript kernel (non-mutating of tunables).
+    #: Kernels are not peer verbs — they parameterize this primitive and OPTIMIZE.
+    EVAL_KERNEL = "EVAL_KERNEL"
 
     MOVE_COMPONENT = "MOVE_COMPONENT"
     MOVE_MOTOR = "MOVE_MOTOR"

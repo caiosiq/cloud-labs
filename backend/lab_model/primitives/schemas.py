@@ -76,10 +76,31 @@ class MotorIdParameters(BaseModel):
 
 
 class OptimizeParameters(BaseModel):
+    """OPTIMIZE primitive parameters.
+
+    Ensemble mode accepts kernel **inputs** (not separate verbs):
+    ``objective`` terms may reference ``kernel_id``; optional top-level
+    ``kernels`` allowlists edge artifacts. Full ensemble shape is validated
+    as ``OptimizeEnsembleParameters`` during preflight.
+    """
+
     model_config = ConfigDict(extra="allow")
 
-    mode: Literal["legacy_strategy", "ensemble"] = "legacy_strategy"
+    # Step E: prefer mode=ensemble (SDK run_optimize / Twin Alignment session).
+    # legacy_strategy remains for real-bench Newton/COBYLA telemetry parity.
+    mode: Literal["legacy_strategy", "ensemble"] = Field(
+        default="legacy_strategy",
+        description=(
+            "DEPRECATED default: legacy_strategy (NEWTON/COBYLA). "
+            "Prefer ensemble for new work (jobs, kernels, cancel)."
+        ),
+    )
     strategy: str = "NEWTON"
+    #: Ensemble only — edge kernel ids referenced by the objective (inputs).
+    kernels: list[str] | None = Field(
+        default=None,
+        description="Optional allowlist of kernel ids for ensemble OPTIMIZE.",
+    )
 
 
 # --- Command bodies (discriminated union on action) ---
@@ -185,6 +206,27 @@ class RecordMeasurablesBody(BaseModel):
     action: Literal["RECORD_MEASURABLES"]
     target_id: str = Field(..., min_length=1)
     parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EvalKernelParameters(BaseModel):
+    """Inputs for the EVAL_KERNEL authoring-probe primitive."""
+
+    kernel_id: str = Field(..., min_length=1)
+    #: Measurable field name (e.g. ``camera_image``); capture uses camera BGR today.
+    field: str = Field(default="camera_image", min_length=1)
+    #: Optional lease for ``session.*`` package roots (also accepted top-level on /api/command).
+    lease_id: str | None = None
+
+
+class EvalKernelBody(BaseModel):
+    """Authoring probe: run a catalog/session TorchScript kernel on a tag's capture.
+
+    Kernels are **inputs** (``parameters.kernel_id``), not peer lab verbs.
+    """
+
+    action: Literal["EVAL_KERNEL"]
+    target_id: str = Field(..., min_length=1)
+    parameters: EvalKernelParameters
 
 
 # --- In-air manipulation bodies (see new_primitives.md) -----------------------
@@ -366,6 +408,7 @@ ValidatedCommand = Annotated[
         ScanBody,
         RemoveComponentBody,
         RecordMeasurablesBody,
+        EvalKernelBody,
         PickComponentBody,
         HoverBody,
         PlaceFromHoverBody,

@@ -17,7 +17,7 @@ has to know which backend it's running under.
 
 Used today only by :mod:`lab_communicator.real.optimization` (Newton
 place hook). Lives in ``shared/`` because the format of the snapshot
-mutation -- ``measurables.pose`` vs ``tunables.nominal_pose``, the
+mutation -- ``tunables.reported_pose`` vs ``tunables.nominal_pose``, the
 ``placement.mode`` value -- is owned by ``lab_model`` and is the same
 contract every backend speaks.
 
@@ -125,12 +125,13 @@ def apply_placement_ui_phase(
         if not comp_entry:
             return
         tun = comp_entry.setdefault("tunables", default_tunables())
-        meas = comp_entry.setdefault("measurables", default_measurables())
         if phase == "ghost":
             tun["nominal_pose"] = dict(pose)
             tun["placement"] = {"mode": "NEWTON"}
         else:
-            meas["pose"] = dict(pose)
+            from lab_model.domain.component import set_reported_pose
+
+            set_reported_pose(comp_entry, pose)
             set_presence_and_storage(
                 comp_entry, PRESENCE_BREADBOARD, in_storage=False, slot=None
             )

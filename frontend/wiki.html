@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cloud Labs | Capability Wiki</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <title>Cloud Labs | Wiki</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg: #0f1115;
@@ -15,11 +15,12 @@
             --accent: #3b82f6;
             --ok: #10b981;
             --warn: #f59e0b;
+            --code-bg: #13151a;
         }
         * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: Inter, sans-serif;
+            font-family: Inter, system-ui, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
@@ -29,15 +30,17 @@
             align-items: center;
             justify-content: space-between;
             gap: 16px;
-            padding: 16px 24px;
+            padding: 12px 24px;
             border-bottom: 1px solid var(--border);
             background: var(--panel);
         }
-        header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+        header h1 { margin: 0; font-size: 17px; font-weight: 600; }
         header .sub {
-            margin: 4px 0 0;
+            margin: 2px 0 0;
             font-size: 12px;
             color: var(--muted);
+            max-width: 420px;
+            line-height: 1.4;
         }
         header nav a {
             color: var(--muted);
@@ -47,20 +50,50 @@
         }
         header nav a:hover,
         header nav a.active { color: var(--accent); }
+        .section-bar {
+            display: flex;
+            gap: 6px;
+            padding: 8px 24px;
+            border-bottom: 1px solid var(--border);
+            background: #13151a;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .section-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            border-radius: 6px;
+            padding: 5px 12px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .section-btn:hover { color: var(--text); border-color: #3a4050; }
+        .section-btn.active {
+            color: var(--text);
+            border-color: var(--accent);
+            background: rgba(59, 130, 246, 0.15);
+        }
         .layout {
             display: grid;
             grid-template-columns: 280px 1fr;
-            min-height: calc(100vh - 73px);
+            min-height: calc(100vh - 98px);
         }
         .sidebar {
             border-right: 1px solid var(--border);
             background: var(--panel);
-            padding: 16px;
+            padding: 16px 12px;
             display: flex;
             flex-direction: column;
             gap: 12px;
-            max-height: calc(100vh - 73px);
+            max-height: calc(100vh - 98px);
             overflow: hidden;
+            scrollbar-color: #3a4050 transparent;
+        }
+        .sidebar::-webkit-scrollbar { width: 8px; }
+        .sidebar::-webkit-scrollbar-thumb {
+            background: #3a4050;
+            border-radius: 4px;
         }
         .sidebar label {
             display: block;
@@ -69,22 +102,47 @@
             letter-spacing: 0.06em;
             color: var(--muted);
             margin-bottom: 6px;
+            font-weight: 500;
         }
         select, input[type="search"] {
             width: 100%;
-            background: #13151a;
+            background: var(--code-bg);
             border: 1px solid var(--border);
             color: var(--text);
             border-radius: 6px;
             padding: 8px 10px;
             font-size: 13px;
         }
+        .sidebar-tabs {
+            display: flex;
+            gap: 6px;
+        }
+        .sidebar-tabs button {
+            flex: 1;
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            color: var(--muted);
+            border-radius: 6px;
+            padding: 7px 8px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .sidebar-tabs button.active {
+            color: var(--text);
+            border-color: var(--accent);
+        }
         .comp-list {
             flex: 1;
             overflow: auto;
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 2px;
+            scrollbar-color: #3a4050 transparent;
+        }
+        .comp-list::-webkit-scrollbar { width: 8px; }
+        .comp-list::-webkit-scrollbar-thumb {
+            background: #3a4050;
+            border-radius: 4px;
         }
         .comp-item {
             text-align: left;
@@ -108,6 +166,29 @@
             font-size: 11px;
             margin-top: 2px;
         }
+        .guide-item {
+            text-align: left;
+            background: transparent;
+            border: 1px solid transparent;
+            border-left: 3px solid transparent;
+            border-radius: 0 6px 6px 0;
+            color: #cbd5e1;
+            padding: 8px 10px 8px 12px;
+            cursor: pointer;
+            font-size: 13.5px;
+            line-height: 1.35;
+            font-weight: 400;
+        }
+        .guide-item:hover {
+            background: rgba(19, 21, 26, 0.9);
+            color: var(--text);
+        }
+        .guide-item.active {
+            border-left-color: var(--accent);
+            background: rgba(59, 130, 246, 0.12);
+            color: #f8fafc;
+            font-weight: 600;
+        }
         .badge {
             display: inline-block;
             font-size: 10px;
@@ -119,45 +200,28 @@
             vertical-align: middle;
         }
         .badge.on-bench { color: var(--ok); border-color: rgba(16, 185, 129, 0.4); }
-        .badge.library { color: var(--muted); }
-        main {
-            padding: 20px 24px 40px;
+        .badge.library { color: var(--warn); border-color: rgba(245, 158, 11, 0.35); }
+        main#detail {
+            padding: 28px 32px 64px;
             overflow: auto;
-            max-height: calc(100vh - 73px);
+            max-height: calc(100vh - 98px);
+            scrollbar-color: #3a4050 transparent;
         }
-        .empty {
-            color: var(--muted);
-            font-size: 13px;
+        main#detail::-webkit-scrollbar { width: 10px; }
+        main#detail::-webkit-scrollbar-thumb {
+            background: #3a4050;
+            border-radius: 5px;
         }
-        .detail-header {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: baseline;
-            gap: 10px 16px;
-            margin-bottom: 16px;
-        }
-        .detail-header h2 {
-            margin: 0;
-            font-size: 22px;
-            font-weight: 600;
-        }
-        .detail-header code {
-            font-family: "JetBrains Mono", monospace;
-            font-size: 12px;
-            color: var(--muted);
-        }
-        .section {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 16px;
-            margin-bottom: 14px;
-        }
+        .empty { color: var(--muted); font-size: 13px; }
+        .detail-header h2 { margin: 0 0 6px; font-size: 22px; }
+        .detail-header code { font-size: 12px; color: var(--muted); margin-right: 8px; }
+        .connect-hint { font-size: 13px; color: var(--muted); line-height: 1.5; }
+        .section { margin-top: 22px; }
         .section h3 {
             margin: 0 0 10px;
-            font-size: 12px;
+            font-size: 13px;
             text-transform: uppercase;
-            letter-spacing: 0.06em;
+            letter-spacing: 0.05em;
             color: var(--muted);
         }
         table {
@@ -166,91 +230,177 @@
             font-size: 12px;
         }
         th, td {
-            text-align: left;
-            padding: 8px 6px;
             border-bottom: 1px solid var(--border);
+            padding: 8px 6px;
+            text-align: left;
             vertical-align: top;
         }
         th { color: var(--muted); font-weight: 500; }
-        .mono {
-            font-family: "JetBrains Mono", monospace;
-            font-size: 11px;
-        }
-        .snippet {
-            font-family: "JetBrains Mono", monospace;
-            font-size: 11px;
-            background: #13151a;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 6px 8px;
-            white-space: pre-wrap;
-            word-break: break-word;
+        .mono { font-family: "JetBrains Mono", monospace; font-size: 11px; }
+        pre.snippet {
             margin: 0;
+            padding: 12px 14px;
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-family: "JetBrains Mono", monospace;
+            font-size: 12px;
+            overflow: auto;
+            white-space: pre-wrap;
         }
         button.copy {
             background: transparent;
             border: 1px solid var(--border);
-            color: var(--text);
+            color: var(--muted);
             border-radius: 6px;
-            padding: 4px 10px;
-            font-size: 11px;
-            cursor: pointer;
-            white-space: nowrap;
-        }
-        button.copy:hover { border-color: var(--accent); color: var(--accent); }
-        button.copy.copied { border-color: var(--ok); color: var(--ok); }
-        .pill-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-        }
-        .pill {
-            font-family: "JetBrains Mono", monospace;
-            font-size: 11px;
             padding: 4px 8px;
-            border-radius: 6px;
-            border: 1px solid var(--border);
-            background: #13151a;
-            color: var(--text);
-        }
-        .pill.ro { color: var(--muted); }
-        .connect-hint {
-            font-size: 12px;
-            color: var(--muted);
-            margin-bottom: 14px;
-        }
-        .connect-hint code {
-            font-family: "JetBrains Mono", monospace;
-            font-size: 11px;
-            color: var(--text);
-        }
-        .sidebar-tabs {
-            display: flex;
-            gap: 6px;
-        }
-        .sidebar-tabs button {
-            flex: 1;
-            background: #13151a;
-            border: 1px solid var(--border);
-            color: var(--muted);
-            border-radius: 6px;
-            padding: 6px 8px;
-            font-size: 12px;
             cursor: pointer;
+            font-size: 11px;
         }
-        .sidebar-tabs button.active {
+        button.copy.copied { color: var(--ok); border-color: rgba(16, 185, 129, 0.45); }
+
+        /* Learn articles */
+        .guide-article {
+            max-width: 48rem;
+            margin: 0 auto;
+            font-family: Inter, system-ui, sans-serif;
+            font-size: 15px;
+            line-height: 1.65;
+            color: #cbd5e1;
+        }
+        .guide-article h1 {
+            font-size: 26px;
+            font-weight: 600;
+            margin: 0 0 16px;
+            line-height: 1.25;
+            color: #f8fafc;
+            letter-spacing: -0.02em;
+        }
+        .guide-article h2 {
+            font-size: 15px;
+            font-weight: 600;
+            margin: 28px 0 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
+            color: #f1f5f9;
+            letter-spacing: 0.01em;
+        }
+        .guide-article h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin: 20px 0 8px;
+            text-transform: none;
+            letter-spacing: 0;
+            color: #e2e8f0;
+        }
+        .guide-article p { margin: 0 0 14px; }
+        .guide-article ul,
+        .guide-article ol {
+            margin: 0 0 16px;
+            padding-left: 1.5em;
+        }
+        .guide-article ul { list-style: disc; }
+        .guide-article ol { list-style: decimal; }
+        .guide-article li { margin-bottom: 8px; padding-left: 2px; }
+        .guide-article li::marker { color: var(--muted); }
+        .guide-article strong { color: #f8fafc; font-weight: 600; }
+        .guide-article em { font-style: italic; color: #e2e8f0; }
+        .guide-article a { color: var(--accent); text-decoration: none; }
+        .guide-article a:hover { text-decoration: underline; }
+        .guide-article table {
+            margin: 12px 0 20px;
+            font-size: 13px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .guide-article th {
+            background: rgba(24, 27, 33, 0.8);
+            padding: 10px 12px;
+        }
+        .guide-article td { padding: 10px 12px; }
+        .guide-article code {
+            font-family: "JetBrains Mono", monospace;
+            font-size: 0.86em;
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 4px;
+            padding: 1px 6px;
+            color: #bfdbfe;
+        }
+        .guide-article pre {
+            margin: 0 0 16px;
+            padding: 14px 16px;
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-family: "JetBrains Mono", monospace;
+            font-size: 12.5px;
+            overflow: auto;
+            white-space: pre-wrap;
+            color: #cbd5e1;
+            line-height: 1.5;
+        }
+        .guide-article pre code {
+            background: none;
+            border: none;
+            padding: 0;
+            color: inherit;
+            font-size: inherit;
+        }
+        .guide-figure {
+            display: block;
+            width: 100%;
+            max-width: 40rem;
+            height: auto;
+            margin: 8px 0 6px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--code-bg);
+        }
+        svg.guide-figure {
+            /* Inline SVG inherits the same frame as img figures */
+            overflow: hidden;
+        }
+        .guide-article img.guide-figure + p,
+        .guide-article svg.guide-figure + p {
+            margin: 0 0 20px;
+            font-size: 13px;
+            color: var(--muted);
+            line-height: 1.45;
+            max-width: 40rem;
+        }
+        .guide-nav {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-top: 40px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+        .guide-nav button {
+            background: transparent;
+            border: 1px solid var(--border);
             color: var(--text);
+            border-radius: 6px;
+            padding: 10px 14px;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: Inter, sans-serif;
+        }
+        .guide-nav button:hover:not(:disabled) {
             border-color: var(--accent);
+            color: #f8fafc;
+        }
+        .guide-nav button:disabled {
+            opacity: 0.35;
+            cursor: default;
         }
         @media (max-width: 900px) {
             .layout { grid-template-columns: 1fr; }
-            .sidebar {
-                max-height: none;
-                border-right: none;
-                border-bottom: 1px solid var(--border);
-            }
+            .sidebar { max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
             .comp-list { max-height: 220px; }
-            main { max-height: none; }
+            main#detail { max-height: none; }
         }
     </style>
 </head>
@@ -258,7 +408,7 @@
     <header>
         <div>
             <h1><a href="/" style="color:inherit;text-decoration:none">Cloud Labs</a> · Wiki</h1>
-            <p class="sub">Live tunables, measurables, parameters, and edge kernels — copy SDK handles</p>
+            <p class="sub">Concepts, SDK usage, and live Catalog lookup.</p>
         </div>
         <nav>
             <a href="/twin">Twin UI</a>
@@ -268,17 +418,26 @@
             <a href="/debug" target="_blank">Debugger</a>
         </nav>
     </header>
+    <div class="section-bar" id="section-bar" aria-label="Wiki sections"></div>
     <div class="layout">
         <aside class="sidebar">
-            <div>
-                <label for="backend-select">Backend</label>
-                <select id="backend-select"></select>
+            <div id="catalog-controls" hidden>
+                <div>
+                    <label for="backend-select">Backend</label>
+                    <select id="backend-select"></select>
+                </div>
+                <div class="sidebar-tabs">
+                    <button type="button" id="tab-components" class="active">Components</button>
+                    <button type="button" id="tab-kernels">Kernels</button>
+                </div>
             </div>
-            <div class="sidebar-tabs">
-                <button type="button" id="tab-components" class="active">Components</button>
-                <button type="button" id="tab-kernels">Kernels</button>
+            <div id="guide-pane">
+                <label id="guide-list-label">Chapters</label>
+                <div id="guide-list" class="comp-list" style="margin-top:8px">
+                    <div class="empty">Loading…</div>
+                </div>
             </div>
-            <div id="components-pane">
+            <div id="components-pane" hidden>
                 <div>
                     <label for="comp-filter">Components</label>
                     <input id="comp-filter" type="search" placeholder="Filter by tag, name, type…" />
@@ -294,7 +453,7 @@
             </div>
         </aside>
         <main id="detail">
-            <div class="empty">Select a backend and component to inspect its capability contract.</div>
+            <div class="empty">Loading Wiki…</div>
         </main>
     </div>
     <script type="module" src="/static/js/wiki/dashboard.js"></script>

@@ -1,0 +1,46 @@
+Metadata-Version: 2.4
+Name: cloudlabs
+Version: 0.1.0
+Summary: Cloud Labs imperative Python SDK (HTTP client for leases, jobs, and closed-loop optimize)
+Author: Cloud Labs
+License: Proprietary
+Project-URL: Homepage, https://github.com/cloud-labs
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: requests>=2.28.0
+Requires-Dist: pydantic>=2.0.0
+Provides-Extra: kernels
+Requires-Dist: torch; extra == "kernels"
+Provides-Extra: images
+Requires-Dist: numpy>=1.24.0; extra == "images"
+Requires-Dist: Pillow>=9.0.0; extra == "images"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+
+# cloudlabs — imperative SDK for Cloud Labs
+
+Install from the monorepo (editable)::
+
+    pip install -e ./packages/cloudlabs
+
+Optional extras::
+
+    pip install -e "./packages/cloudlabs[kernels,images]"
+
+Usage (server must be running)::
+
+    from cloudlabs import connect, resolve_backend_id
+
+    with connect(resolve_backend_id(), base_url="http://127.0.0.1:8000") as lab:
+        lab.prepare(catalog_pin="laser-cavity-main", reconcile=False)
+        lab.components.tag_20.move(x=10.0).wait_until_idle()
+
+Fluent + builtins example::
+
+    python scripts/example_fluent_components.py
+
+Author-defined TorchScript kernels + feature objectives::
+
+    python scripts/example_session_kernel_author.py
+
+See ``docs/SESSION_KERNELS.md`` and ``docs/Run_CloudLab_Scripts.md``.

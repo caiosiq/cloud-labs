@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Iterable, Mapping, Optional
 
 from lab_model.domain.component import (
     PRESENCE_BREADBOARD,
     PRESENCE_STORAGE,
-    default_measurables,
-    get_measurables,
     get_tunables,
+    reported_pose,
+    set_reported_pose,
 )
 
 
@@ -46,8 +46,7 @@ def build_mock_scan_proposed_poses(
         tun = get_tunables(comp)
         if tun.get("presence") not in (PRESENCE_BREADBOARD, PRESENCE_STORAGE):
             continue
-        meas = get_measurables(comp)
-        pose = meas.get("pose") if isinstance(meas.get("pose"), dict) else {}
+        pose = reported_pose(dict(comp))
         np = tun.get("nominal_pose") if isinstance(tun.get("nominal_pose"), dict) else {}
         base_x = float(np.get("x", pose.get("x", 0.0)))
         base_y = float(np.get("y", pose.get("y", 0.0)))
@@ -59,16 +58,16 @@ def build_mock_scan_proposed_poses(
 
 
 def apply_mock_scan_to_component(comp: Dict[str, Any], proposed_pose: Mapping[str, float]) -> Dict[str, Any]:
-    """Return a component copy with ``measurables.pose`` set to ``proposed_pose``."""
+    """Return a component copy with ``tunables.reported_pose`` set to ``proposed_pose``."""
     import json
 
     refreshed = json.loads(json.dumps(comp))
-    if "statecontrol" in refreshed:
-        meas = refreshed["statecontrol"].setdefault("measurables", default_measurables())
-    else:
-        meas = refreshed.setdefault("measurables", default_measurables())
-    pose = meas.setdefault("pose", {})
-    pose["x"] = float(proposed_pose.get("x", 0.0))
-    pose["y"] = float(proposed_pose.get("y", 0.0))
-    pose["rotation"] = float(proposed_pose.get("rotation", 0.0))
+    set_reported_pose(
+        refreshed,
+        {
+            "x": float(proposed_pose.get("x", 0.0)),
+            "y": float(proposed_pose.get("y", 0.0)),
+            "rotation": float(proposed_pose.get("rotation", 0.0)),
+        },
+    )
     return refreshed

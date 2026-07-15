@@ -179,6 +179,16 @@ class SessionLeaseManager:
             self._drop_locked(record)
             return record
 
+    def release_backend(self, backend_id: str) -> Optional[SessionLeaseRecord]:
+        """Force-drop the active lease for a backend (edge fail-closed)."""
+        with self._lock:
+            self._sweep_expired_locked()
+            record = self._by_backend.get(backend_id.strip())
+            if record is None:
+                return None
+            self._drop_locked(record)
+            return record
+
     def validate_command_lease(
         self,
         *,

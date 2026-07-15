@@ -80,8 +80,11 @@ export async function fetchCatalogMap() {
 export async function fetchStrategies() {
     store.availableStrategies = {
         NEWTON: {
-            name: 'Newton Strategy',
-            description: 'Aligns a component by minimizing beam deviation.',
+            name: 'Newton Strategy (legacy)',
+            deprecated: true,
+            migrate_to: 'ensemble',
+            description:
+                'Legacy: aligns a component by minimizing beam deviation. Prefer Optimization → Alignment session (ensemble).',
             parameters: {
                 camera_number: { type: 'integer', default: 2, description: 'Target Camera ID' },
                 target_x_pixel: { type: 'integer', default: 2744, description: 'Target X (pixel)' },
@@ -95,8 +98,11 @@ export async function fetchStrategies() {
             },
         },
         COBYLA: {
-            name: 'Cobyla Alignment',
-            description: 'Constrained Optimization by Linear Approximation.',
+            name: 'Cobyla Alignment (legacy)',
+            deprecated: true,
+            migrate_to: 'ensemble',
+            description:
+                'Legacy COBYLA. Prefer ensemble IR + kernels (builtin.roi_centroid / run_cobyla).',
             parameters: {
                 objective_threshold: { type: 'float', default: 100.0, description: 'Threshold' },
                 exposure: {

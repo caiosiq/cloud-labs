@@ -42,6 +42,7 @@ from lab_model.domain.component import (
     live_feed_channel,
     measurables_bucket,
     set_presence_and_storage,
+    set_reported_pose,
     teleop_bucket,
     tunables_bucket,
 )
@@ -94,7 +95,7 @@ def commit_pick(
         meas = measurables_bucket(entry)
         tun["nominal_pose"] = dict(pose)
         tun["placement"] = {"mode": PLACEMENT_MODE_PICK}
-        meas["pose"] = dict(pose)
+        set_reported_pose(entry, pose)
     set_holding(
         state,
         tag_id=target_id,
@@ -141,7 +142,7 @@ def commit_hover(
         meas = measurables_bucket(entry)
         tun["nominal_pose"] = dict(cmd)
         tun["placement"] = {"mode": PLACEMENT_MODE_HOVER}
-        meas["pose"] = achieved
+        set_reported_pose(entry, achieved)
     set_holding(
         state,
         tag_id=target_id,
@@ -177,7 +178,7 @@ def commit_place_from_hover(
         meas = measurables_bucket(entry)
         tun["nominal_pose"] = dict(pose)
         tun["placement"] = {"mode": PLACEMENT_MODE_MANUAL}
-        meas["pose"] = dict(pose)
+        set_reported_pose(entry, pose)
         set_presence_and_storage(entry, PRESENCE_BREADBOARD, in_storage=False, slot=None)
     clear_holding(state)
 
@@ -218,11 +219,11 @@ def commit_scan_rotation(
             if z is not None:
                 base["z"] = float(z)
             tun["nominal_pose"] = dict(base)
-            meas["pose"] = dict(base)
+            set_reported_pose(entry, base)
         else:  # placed
             base = {"x": float(x), "y": float(y), "rotation": rot}
             tun["nominal_pose"] = dict(base)
-            meas["pose"] = dict(base)
+            set_reported_pose(entry, base)
     if mode == "held":
         held = get_holding(state)
         nominal = dict(held.get("nominal_pose") or {})
@@ -269,7 +270,7 @@ def commit_move_to_breadboard(
         meas = measurables_bucket(entry)
         tun["nominal_pose"] = dict(cmd)
         tun["placement"] = {"mode": PLACEMENT_MODE_MANUAL}
-        meas["pose"] = achieved
+        set_reported_pose(entry, achieved)
         set_presence_and_storage(entry, PRESENCE_BREADBOARD, in_storage=False, slot=None)
 
 
@@ -307,7 +308,7 @@ def commit_move_to_storage(
         meas = measurables_bucket(entry)
         tun["nominal_pose"] = dict(cmd)
         tun["placement"] = {"mode": PLACEMENT_MODE_STORAGE}
-        meas["pose"] = achieved
+        set_reported_pose(entry, achieved)
         set_presence_and_storage(
             entry,
             PRESENCE_STORAGE,
@@ -408,7 +409,7 @@ def commit_optimization_complete(
             "y": float(final_pose.get("y", 0.0)),
             "rotation": float(final_pose.get("rotation", 0.0)),
         }
-        meas["pose"] = pose
+        set_reported_pose(entry, pose)
         meas["last_optimized_pose"] = dict(pose)
         tun["nominal_pose"] = dict(pose)
     else:
@@ -432,32 +433,18 @@ def null_measurables_for_targets(
     state: Dict[str, Any],
     target_ids: List[str],
 ) -> None:
-    """Phase 3 / Golden Rule: null measurables for the listed targets.
+    """Null stale observations while a target is in motion / optimizing.
 
-    Called on BUSY/OPTIMIZING entry for every motion primitive (see
-    ``universal_component_architecture.md`` §3.2 "Golden Rule of
-    Measurables"). The intent: while a component is in motion or
-    being teleoperated, its ``measurables.*`` (pose, motor encoder
-    readback, camera image, optimization score/pose) do not reflect
-    physical reality and must be advertised as ``null`` to every
-    consumer. The motion primitive's own commit helper repopulates
-    ``measurables.pose`` (commanded pose) on completion; the
-    high-fidelity readback is only available after an explicit
-    ``RECORD_MEASURABLES`` primitive.
+    Called on BUSY/OPTIMIZING entry for every motion primitive. While a
+    component moves, **reported pose** (tunable family) and true
+    **measurables** (camera image, scores) do not reflect settled reality and
+    must be advertised as ``null``. Motion commits repopulate
+    ``tunables.reported_pose`` (mirrored to legacy ``measurables.pose``);
+    camera / score fields return only after an explicit capture /
+    ``RECORD_MEASURABLES``.
 
-    Implementation notes:
-
-    - We keep ``measurables`` itself as a dict (not ``None``) so
-      every downstream consumer that does
-      ``(comp.get("measurables") or {}).get("pose")`` keeps working;
-      only the leaf fields flip to ``None``.
-    - ``measurables.pose`` is set to ``None`` rather than ``{}`` so
-      :func:`inject_motor_rotations_into_state` skips the motor
-      injection (the ``isinstance(pose, dict)`` guard there). Motor
-      rotations are part of the readback, so they should disappear
-      from the polled state too.
-    - Tunables (intent) are untouched — that's the canvas-truth
-      pose and stays stable across motion.
+    Tunables *command* (``nominal_pose``) is untouched — that is canvas-truth
+    intent and stays stable across motion.
     """
     components = state.get("components") or {}
     if not isinstance(components, dict):
@@ -468,10 +455,10 @@ def null_measurables_for_targets(
         entry = components.get(tag_id)
         if not isinstance(entry, dict):
             continue
+        set_reported_pose(entry, None)
         meas = measurables_bucket(entry)
         if not isinstance(meas, dict):
             continue
-        meas["pose"] = None
         meas["camera_image"] = None
         meas["last_optimization_score"] = None
         meas["last_optimized_pose"] = None
@@ -482,10 +469,11 @@ def commit_observed_measurables(
     tag_id: str,
     observed: Dict[str, Any],
 ) -> None:
-    """Merge a partial measurables dict after ``RECORD_MEASURABLES``.
+    """Merge a partial observation dict after ``RECORD_MEASURABLES``.
 
-    Keys follow catalog ``capabilities.measurables`` field names
-    (``camera_image``, ``motor_rotations``, ``last_optimization_score``, …).
+    Keys follow catalog field names (``camera_image``, ``motor_rotations``,
+    ``last_optimization_score``, …). A legacy ``pose`` key is routed to
+    :func:`set_reported_pose` (pose is a reported tunable, not a measurable).
     ``None`` values are skipped so callers can omit fields they did not
     observe.
     """
@@ -493,9 +481,11 @@ def commit_observed_measurables(
         return
     components = state.setdefault("components", {})
     entry = components.setdefault(tag_id, {})
+    if "pose" in observed and observed["pose"] is not None:
+        set_reported_pose(entry, observed["pose"])
     meas = measurables_bucket(entry)
     for key, val in observed.items():
-        if val is None:
+        if val is None or key == "pose":
             continue
         meas[key] = val
 
@@ -715,7 +705,7 @@ def commit_teleop_session_pose(
                 base[key] = float(live_pose[key])
 
     tun["nominal_pose"] = dict(base)
-    meas["pose"] = dict(base)
+    set_reported_pose(entry, base)
 
     if held_tag(state) == tag_id:
         holding = get_holding(state)

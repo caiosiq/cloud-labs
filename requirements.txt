@@ -1,5 +1,6 @@
 # Cloud Labs - Backend API (FastAPI)
 # Install from project root: pip install -r requirements.txt
+# Also install the author SDK: pip install -e ./packages/cloudlabs
 # Run from backend/: uvicorn main:app --reload
 
 # --- Cloud Labs (mock + API) ---

@@ -8,20 +8,11 @@ See ``README.md`` in this directory for an overview. Design narrative: ``../../p
 (``GET_TUNABLES``, ``GET_MEASURABLES``) use ``fetch_read_primitive`` with GET routes.
 """
 
-from .dispatch import (
-    execute_validated_command,
-    fetch_read_primitive,
-    parse_command_payload,
-    schedule_validated_command,
-    validation_error_detail,
-)
-from .ids import MACRO_PRIMITIVE_IDS, READ_PRIMITIVE_IDS, PrimitiveId, PrimitiveKind
-from .protocol import LabPrimitiveSurface
-from .registry import PRIMITIVE_REGISTRY
 from .schemas import (
     ConfirmHoldingTagBody,
     EndTeleopBody,
     EndLiveFeedBody,
+    EvalKernelBody,
     HoverBody,
     MoveComponentBody,
     OptimizeBody,
@@ -37,6 +28,16 @@ from .schemas import (
     TeleopJogBody,
     TeleopJogParameters,
 )
+from .ids import MACRO_PRIMITIVE_IDS, READ_PRIMITIVE_IDS, PrimitiveId, PrimitiveKind
+from .protocol import LabPrimitiveSurface
+from .registry import PRIMITIVE_REGISTRY
+from .dispatch import (
+    execute_validated_command,
+    fetch_read_primitive,
+    parse_command_payload,
+    schedule_validated_command,
+    validation_error_detail,
+)
 
 __all__ = [
     "PrimitiveId",
@@ -46,6 +47,7 @@ __all__ = [
     "PRIMITIVE_REGISTRY",
     "TagQuery",
     "RecordMeasurablesBody",
+    "EvalKernelBody",
     "MoveComponentBody",
     "OptimizeBody",
     "PickComponentBody",

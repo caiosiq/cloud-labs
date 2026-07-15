@@ -1,6 +1,6 @@
 {
   "system_status": "IDLE",
-  "last_updated": "2026-07-11T23:20:16.631116",
+  "last_updated": "2026-07-15T14:37:23.321906",
   "components": {
     "tag_9": {
       "id": "tag_9",
@@ -138,7 +138,7 @@
             "rotation": 0.0
           },
           "nominal_motor_positions": {
-            "1": 1.1200000000000006,
+            "1": 1.9200000000000004,
             "3": 0.0
           },
           "storage": {
@@ -147,16 +147,21 @@
           },
           "placement": {
             "mode": "ENSEMBLE"
-          }
+          },
+          "reported_pose": null
         },
         "measurables": {
           "pose": null,
-          "last_optimization_score": 0.00038450311381144076,
+          "last_optimization_score": 0.0014506566827918732,
           "last_optimized_pose": null,
           "camera_image": null,
-          "centroid_x_px": 538.080662767701,
-          "centroid_y_px": 372.4085943254662,
-          "mock_ensemble_power": 0.48241363361398937
+          "centroid_x_px": 555.360662767701,
+          "centroid_y_px": 364.7285943254662,
+          "mock_ensemble_power": 0.13333322343313067,
+          "motor_rotations": {
+            "1": 0.5,
+            "3": 0.0
+          }
         }
       },
       "telemetry": {
@@ -265,7 +270,8 @@
           "placement": {
             "mode": "MANUAL"
           },
-          "exposure_time_ms": 200.0
+          "exposure_time_ms": 200.0,
+          "reported_pose": null
         },
         "measurables": {
           "pose": null,
@@ -565,13 +571,26 @@
           },
           "placement": {
             "mode": "MANUAL"
+          },
+          "reported_pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "rotation": 0.0,
+            "motor_rotations": {
+              "1": 15.0,
+              "3": 0.0
+            }
           }
         },
         "measurables": {
           "pose": {
             "x": 0.0,
             "y": 0.0,
-            "rotation": 0.0
+            "rotation": 0.0,
+            "motor_rotations": {
+              "1": 15.0,
+              "3": 0.0
+            }
           },
           "last_optimization_score": null,
           "last_optimized_pose": null,
@@ -626,20 +645,13 @@
             "slot": null
           },
           "placement": {
-            "mode": "MANUAL"
-          }
+            "mode": "ENSEMBLE"
+          },
+          "reported_pose": null
         },
         "measurables": {
-          "pose": {
-            "x": 0.0,
-            "y": 0.0,
-            "rotation": 0.0,
-            "motor_rotations": {
-              "1": 0.0,
-              "3": 0.0
-            }
-          },
-          "last_optimization_score": null,
+          "pose": null,
+          "last_optimization_score": 5.385142157745213,
           "last_optimized_pose": null,
           "camera_image": null
         }
@@ -728,20 +740,20 @@
     ]
   },
   "last_ensemble_optimization": {
-    "session_id": "0bba1d9b104d0243",
-    "session_label": "author ImageMoments features -> COBYLA  brightness0=0.5020",
-    "best_loss": 0.00038450311381144076,
+    "session_id": "70e9ad67c555d909",
+    "session_label": "author ImageMoments features -> COBYLA  brightness0=0.2106",
+    "best_loss": 0.0014506566827918732,
     "evals": 8,
     "final_values": {
-      "v_tag_20_1": 1.1200000000000006
+      "v_tag_20_1": 1.9200000000000004
     },
     "trace": [
       {
         "eval": 1,
-        "loss": 0.21413283918575843,
-        "best_loss": 0.21413283918575843,
+        "loss": 0.5686203193529187,
+        "best_loss": 0.5686203193529187,
         "terms": {
-          "match_brightness": 0.2141327795786907,
+          "match_brightness": 0.568620259745851,
           "minimize_contrast": 5.960706772611957e-08
         },
         "block_id": "block_0",
@@ -754,10 +766,10 @@
       },
       {
         "eval": 2,
-        "loss": 0.13016542133468434,
-        "best_loss": 0.13016542133468434,
+        "loss": 0.4252458046580385,
+        "best_loss": 0.4252458046580385,
         "terms": {
-          "match_brightness": 0.13016539153115048,
+          "match_brightness": 0.42524577485450465,
           "minimize_contrast": 2.9803533863059783e-08
         },
         "block_id": "block_0",
@@ -770,10 +782,10 @@
       },
       {
         "eval": 3,
-        "loss": 0.0482276811803537,
-        "best_loss": 0.0482276811803537,
+        "loss": 0.2610517957442211,
+        "best_loss": 0.2610517957442211,
         "terms": {
-          "match_brightness": 0.048227651376819836,
+          "match_brightness": 0.26105176594068724,
           "minimize_contrast": 2.9803533863059783e-08
         },
         "block_id": "block_0",
@@ -786,10 +798,10 @@
       },
       {
         "eval": 4,
-        "loss": 0.008858136041767217,
-        "best_loss": 0.008858136041767217,
+        "loss": 0.03889045542981173,
+        "best_loss": 0.03889045542981173,
         "terms": {
-          "match_brightness": 0.008858136041767217,
+          "match_brightness": 0.03889045542981173,
           "minimize_contrast": 0.0
         },
         "block_id": "block_0",
@@ -802,69 +814,69 @@
       },
       {
         "eval": 5,
-        "loss": 0.10851212724269943,
-        "best_loss": 0.008858136041767217,
+        "loss": 0.0014506566827918732,
+        "best_loss": 0.0014506566827918732,
         "terms": {
-          "match_brightness": 0.10851212724269943,
+          "match_brightness": 0.0014506566827918732,
           "minimize_contrast": 0.0
         },
         "block_id": "block_0",
         "u": [
-          0.855
+          0.8550000000000001
         ],
         "values": {
-          "v_tag_20_1": 1.92
+          "v_tag_20_1": 1.9200000000000004
         }
       },
       {
         "eval": 6,
-        "loss": 0.0034602071999678685,
-        "best_loss": 0.0034602071999678685,
+        "loss": 0.021871869061618254,
+        "best_loss": 0.0014506566827918732,
         "terms": {
-          "match_brightness": 0.0034602071999678685,
+          "match_brightness": 0.021871869061618254,
           "minimize_contrast": 0.0
         },
         "block_id": "block_0",
         "u": [
-          0.6150000000000001
+          1.0
         ],
         "values": {
-          "v_tag_20_1": 0.9600000000000004
+          "v_tag_20_1": 2.5
         }
       },
       {
         "eval": 7,
-        "loss": 0.0482276811803537,
-        "best_loss": 0.0034602071999678685,
+        "loss": 0.004079821724801258,
+        "best_loss": 0.0014506566827918732,
         "terms": {
-          "match_brightness": 0.048227651376819836,
-          "minimize_contrast": 2.9803533863059783e-08
+          "match_brightness": 0.0040798068230343265,
+          "minimize_contrast": 1.4901766931529892e-08
         },
         "block_id": "block_0",
         "u": [
-          0.5350000000000001
+          0.7750000000000001
         ],
         "values": {
-          "v_tag_20_1": 0.6400000000000006
+          "v_tag_20_1": 1.6000000000000005
         }
       },
       {
         "eval": 8,
-        "loss": 0.00038450311381144076,
-        "best_loss": 0.00038450311381144076,
+        "loss": 0.005975781692685755,
+        "best_loss": 0.0014506566827918732,
         "terms": {
-          "match_brightness": 0.0003844733102775777,
-          "minimize_contrast": 2.9803533863059783e-08
+          "match_brightness": 0.0059757779672440225,
+          "minimize_contrast": 3.725441732882473e-09
         },
         "block_id": "block_0",
         "u": [
-          0.6550000000000001
+          0.8950000000000001
         ],
         "values": {
-          "v_tag_20_1": 1.1200000000000006
+          "v_tag_20_1": 2.0800000000000005
         }
       }
     ],
-    "completed_at": "2026-07-11T23:20:16.626730"
+    "completed_at": "2026-07-15T14:37:23.316331"
   }
 }

@@ -1,36 +1,24 @@
 #!/usr/bin/env python3
-"""Educational example: catalog pin -> move mirror -> TorchScript M -> COBYLA on (M-M0)^2.
+"""03 — Catalog pin → catalog TorchScript → OPTIMIZE (COBYLA).
 
-Closed-loop math runs on the edge, not in this process. Measure M0 once here
-(or hard-code it), then bake it as ``target_scalar`` in the job IR — the edge
-loop cannot call back into Python.
+Closed-loop math runs on the edge inside the OPTIMIZE primitive. Measure M0
+once with ``probe_kernel`` (EVAL_KERNEL), then bake it as ``target`` in the
+job IR — the edge cannot call back into Python.
 
-Minimal catalog-kernel path (~80 lines). For author-defined ``session.*``
-kernels and multi-term feature objectives, see
-``scripts/example_session_kernel_author.py``.
+For author-defined ``session.*`` kernels see ``04_session_kernels.py``.
 
-Run (server must be up on mock)::
+Requires::
 
-    python scripts/example_torchscript_cobyla_mirror.py
+    pip install -e ./packages/cloudlabs
+
+Run (mock server up)::
+
+    python scripts/language/03_closed_loop_catalog.py
 """
 from __future__ import annotations
 
-import os
-import sys
+from cloudlabs import configure_logging, connect, resolve_backend_id
 
-_BACKEND_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend")
-)
-if _BACKEND_DIR not in sys.path:
-    sys.path.insert(0, _BACKEND_DIR)
-
-from lab_model.optimization.sdk import (  # noqa: E402
-    configure_logging,
-    connect,
-    resolve_backend_id,
-)
-
-# --- Hard-coded demo knobs -------------------------------------------------
 BASE_URL = "http://127.0.0.1:8000"
 CATALOG_PIN = "laser-cavity-main"
 START_MOTOR_DEG = 0.5
@@ -56,7 +44,7 @@ def main() -> int:
         m0 = (
             float(M0)
             if M0 is not None
-            else lab.eval_kernel(CAMERA_TAG, "camera_image", kernel_id=KERNEL_ID)
+            else float(lab.probe_kernel(CAMERA_TAG, "camera_image", kernel_id=KERNEL_ID))
         )
         print(f"M0={m0}")
 
@@ -78,8 +66,9 @@ def main() -> int:
             max_evals=MAX_EVALS,
         )
 
-    status = str(result.get("status") or "")
-    return 0 if status == "succeeded" else 1
+        status = str(result.get("status") or "")
+        print(f"optimize status = {status}")
+        return 0 if status == "succeeded" else 1
 
 
 if __name__ == "__main__":

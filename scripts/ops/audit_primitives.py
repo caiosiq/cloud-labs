@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Print primitive handler coverage (Phase 0 audit). Run from repo root:
 
-    python scripts/audit_primitives.py
+    python scripts/ops/audit_primitives.py
 """
 from __future__ import annotations
 
 import os
 import sys
 
-_BACKEND = os.path.join(os.path.dirname(__file__), "..", "backend")
+_BACKEND = os.path.join(os.path.dirname(__file__), "..", "..", "backend")
 if _BACKEND not in sys.path:
     sys.path.insert(0, os.path.abspath(_BACKEND))
 

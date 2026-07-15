@@ -17,6 +17,7 @@ from .schemas import (
     ApplyTunablesPatchBody,
     ConfirmHoldingTagBody,
     EndTeleopBody,
+    EvalKernelBody,
     HoverBody,
     MoveComponentBody,
     MotorSendHomeBody,
@@ -82,6 +83,7 @@ ValidatedCommand = Union[
     ScanBody,
     RemoveComponentBody,
     RecordMeasurablesBody,
+    EvalKernelBody,
     PickComponentBody,
     HoverBody,
     PlaceFromHoverBody,
@@ -149,8 +151,11 @@ async def _invoke_atomic(
     cmd: ValidatedCommand,
     *,
     macro_parent: str | None = None,
-) -> None:
-    """One ``LabCommunicator`` call per command. ``MOTOR_SEND_HOME`` must not reach here—use macro path."""
+) -> Dict[str, Any] | None:
+    """One ``LabCommunicator`` call per command. ``MOTOR_SEND_HOME`` must not reach here—use macro path.
+
+    Returns an optional result dict for sync primitives (e.g. EVAL_KERNEL).
+    """
     if isinstance(cmd, MoveComponentBody):
         _log_primitive("MOVE_COMPONENT", cmd.target_id, macro_parent=macro_parent)
         await lab.move_component(cmd.target_id, cmd.parameters.model_dump())
@@ -204,6 +209,18 @@ async def _invoke_atomic(
     elif isinstance(cmd, RecordMeasurablesBody):
         _log_primitive("RECORD_MEASURABLES", cmd.target_id, macro_parent=macro_parent)
         await lab.record_measurables_for_tag(cmd.target_id)
+    elif isinstance(cmd, EvalKernelBody):
+        _log_primitive("EVAL_KERNEL", cmd.target_id, macro_parent=macro_parent)
+        p = cmd.parameters
+        lease_id = p.lease_id or getattr(lab, "_command_lease_id", None)
+        backend_id = getattr(lab, "_command_backend_id", None)
+        return await lab.eval_kernel_for_tag(
+            cmd.target_id,
+            p.kernel_id,
+            field=p.field,
+            lease_id=lease_id,
+            backend_id=backend_id,
+        )
     elif isinstance(cmd, ScanBody):
         _log_primitive("SCAN", cmd.target_id, macro_parent=macro_parent)
         _LOG.warning(
@@ -251,19 +268,25 @@ async def _invoke_atomic(
         await lab.teleop_goto(cmd.target_id, params)
     else:
         raise NotImplementedError(type(cmd))
+    return None
 
 
-async def execute_validated_command(lab: LabCommunicator, cmd: ValidatedCommand) -> None:
-    """Await one command (used by recipe executor). Macros expand into atomic steps."""
+async def execute_validated_command(
+    lab: LabCommunicator, cmd: ValidatedCommand
+) -> Dict[str, Any] | None:
+    """Await one command (used by recipe executor). Macros expand into atomic steps.
+
+    Returns an optional result dict for sync primitives such as EVAL_KERNEL.
+    """
     if isinstance(cmd, MotorSendHomeBody):
         _log_primitive("MOTOR_SEND_HOME", cmd.target_id)
         await run_motor_send_home(lab, cmd)
-        return
+        return None
     if isinstance(cmd, ApplyTunablesPatchBody):
         _log_primitive("APPLY_TUNABLES_PATCH", cmd.target_id)
         await run_apply_tunables_patch(lab, cmd)
-        return
-    await _invoke_atomic(lab, cmd)
+        return None
+    return await _invoke_atomic(lab, cmd)
 
 
 def schedule_validated_command(
@@ -404,6 +427,14 @@ def schedule_validated_command(
         return {
             "status": "accepted",
             "message": f"Measurables recording queued for {cmd.target_id}",
+        }
+
+    if isinstance(cmd, EvalKernelBody):
+        # Prefer sync path in receive_command; scheduling loses the scalar/features.
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": f"EVAL_KERNEL queued for {cmd.target_id} ({cmd.parameters.kernel_id})",
         }
 
     if isinstance(cmd, PickComponentBody):

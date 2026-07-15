@@ -13,13 +13,13 @@ from lab_model.jobs.lease_manager import (
     SessionLeaseRecord,
     active_backend_id,
 )
-from lab_model.optimization.sdk.client import (
+from cloudlabs.client import (
     CloudLabsClient,
     _normalize_measurable_path,
     _read_nominal_pose,
     resolve_backend_id,
 )
-from lab_model.optimization.sdk.reconcile import build_reconcile_steps
+from cloudlabs.reconcile import build_reconcile_steps
 
 
 class SessionLeaseManagerTests(unittest.TestCase):
@@ -190,9 +190,13 @@ class ResolveBackendIdTests(unittest.TestCase):
     def test_resolve_backend_id(self) -> None:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {"active_backend_id": "mock.default"}
+        mock_resp.json.return_value = {
+            "backends": [
+                {"backend_id": "mock.default", "availability": "ready"},
+            ]
+        }
         mock_resp.raise_for_status = MagicMock()
-        with patch("lab_model.optimization.sdk.client.requests.get", return_value=mock_resp):
+        with patch("cloudlabs.client.requests.get", return_value=mock_resp):
             self.assertEqual(resolve_backend_id("http://test"), "mock.default")
 
 

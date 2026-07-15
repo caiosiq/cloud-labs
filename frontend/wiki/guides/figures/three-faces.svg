@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="220" viewBox="0 0 720 220" role="img" aria-labelledby="title desc">
+  <title id="title">Three faces of Cloud Labs</title>
+  <desc id="desc">Client SDK and UI connect over HTTP to the Central Coordinator, which connects to the Edge Agent with LabCommunicator.</desc>
+  <rect width="720" height="220" fill="#13151a"/>
+  <!-- Client -->
+  <rect x="28" y="48" width="180" height="110" rx="8" fill="#181b21" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="118" y="78" text-anchor="middle" fill="#93c5fd" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" letter-spacing="0.06em">CLIENT</text>
+  <text x="118" y="108" text-anchor="middle" fill="#f1f5f9" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="600">SDK &amp; Twin UI</text>
+  <text x="118" y="130" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">intent � lease</text>
+  <!-- Arrow to coordinator -->
+  <line x1="208" y1="95" x2="268" y2="95" stroke="#64748b" stroke-width="1.5"/>
+  <polygon points="268,95 258,90 258,100" fill="#64748b"/>
+  <text x="238" y="84" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10">HTTP</text>
+  <line x1="268" y1="115" x2="208" y2="115" stroke="#475569" stroke-width="1.25" stroke-dasharray="4 3"/>
+  <polygon points="208,115 218,110 218,120" fill="#475569"/>
+  <text x="238" y="132" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10">state</text>
+  <!-- Coordinator -->
+  <rect x="278" y="48" width="180" height="110" rx="8" fill="#181b21" stroke="#2a2e36" stroke-width="1.5"/>
+  <text x="368" y="78" text-anchor="middle" fill="#93c5fd" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" letter-spacing="0.06em">COORDINATOR</text>
+  <text x="368" y="108" text-anchor="middle" fill="#f1f5f9" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="600">Central server</text>
+  <text x="368" y="130" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">validate � queue</text>
+  <!-- Arrow to edge -->
+  <line x1="458" y1="95" x2="518" y2="95" stroke="#64748b" stroke-width="1.5"/>
+  <polygon points="518,95 508,90 508,100" fill="#64748b"/>
+  <line x1="518" y1="115" x2="458" y2="115" stroke="#475569" stroke-width="1.25" stroke-dasharray="4 3"/>
+  <polygon points="458,115 468,110 468,120" fill="#475569"/>
+  <text x="488" y="84" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10">proxy</text>
+  <!-- Edge -->
+  <rect x="528" y="48" width="168" height="110" rx="8" fill="#181b21" stroke="#2a2e36" stroke-width="1.5"/>
+  <text x="612" y="78" text-anchor="middle" fill="#93c5fd" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" letter-spacing="0.06em">EDGE</text>
+  <text x="612" y="108" text-anchor="middle" fill="#f1f5f9" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="600">LabCommunicator</text>
+  <text x="612" y="130" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">instruments</text>
+  <!-- Foot labels -->
+  <text x="118" y="190" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">Author laptop</text>
+  <text x="368" y="190" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">Network / server</text>
+  <text x="612" y="190" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">Bench PC or mock</text>
+</svg>

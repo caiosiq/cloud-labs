@@ -101,6 +101,23 @@ class JobManager:
                 return record
             return None
 
+    def claim_next_queued(self) -> Optional[JobRecord]:
+        """Pop the next queued job and mark it running (for an external edge agent)."""
+        with self._lock:
+            if self._active_job_id is not None:
+                return None
+            while self._queue:
+                job_id = self._queue.pop(0)
+                record = self._by_id.get(job_id)
+                if record is None or record.status != "queued":
+                    continue
+                record.status = "running"
+                record.started_at = datetime.now(timezone.utc)
+                self._active_job_id = job_id
+                self._runner_scheduled = True
+                return record
+            return None
+
     def mark_running(self, job_id: str, *, lease_id: Optional[str] = None) -> JobRecord:
         with self._lock:
             record = self._require(job_id)
@@ -138,6 +155,7 @@ class JobManager:
             record.error = error
             if self._active_job_id == job_id:
                 self._active_job_id = None
+            self._runner_scheduled = False
             return record
 
     def request_cancel(self, job_id: str) -> JobRecord:
@@ -175,6 +193,28 @@ class JobManager:
                 for jid in self._queue
                 if (rec := self._by_id.get(jid)) and rec.status == "queued"
             )
+
+    def fail_open_work(self, *, error: str) -> List[JobRecord]:
+        """Fail every queued/running job (edge disconnect fail-closed)."""
+        error = (error or "edge disconnected").strip() or "edge disconnected"
+        failed: List[JobRecord] = []
+        with self._lock:
+            targets = [
+                rec
+                for rec in self._by_id.values()
+                if rec.status in ("queued", "running")
+            ]
+            now = datetime.now(timezone.utc)
+            for record in targets:
+                record.status = "failed"
+                record.finished_at = now
+                record.error = error
+                record.cancel_requested = True
+                failed.append(record)
+            self._queue = []
+            self._active_job_id = None
+            self._runner_scheduled = False
+        return failed
 
     def _require(self, job_id: str) -> JobRecord:
         record = self._by_id.get(job_id)
@@ -253,7 +293,11 @@ def validate_submit_spec(
         if not isinstance(params, dict):
             raise ValueError("command.parameters is required")
         if params.get("mode") != "ensemble":
-            raise ValueError("closed_loop OPTIMIZE requires parameters.mode=ensemble")
+            raise ValueError(
+                "closed_loop OPTIMIZE requires parameters.mode=ensemble "
+                "(legacy_strategy / NEWTON|COBYLA via POST /api/command is deprecated; "
+                "use SDK run_optimize/run_cobyla or Twin Alignment session)"
+            )
         # Also validate kernels nested in parameters
         if params.get("kernels") is not None:
             params = dict(params)

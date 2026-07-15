@@ -49,7 +49,9 @@ def build_fixture_component_entry(catalog_row: Dict[str, Any]) -> Dict[str, Any]
         slot=None,
     )
     if comp_type in ("OPTICAL_CAMERA", "CEILING_CAMERA", "LASER_SOURCE"):
-        entry["statecontrol"]["measurables"]["pose"] = None
+        from lab_model.domain.component import set_reported_pose
+
+        set_reported_pose(entry, None)
 
     exp_ms = _default_exposure_ms(catalog_row)
     if exp_ms is not None:

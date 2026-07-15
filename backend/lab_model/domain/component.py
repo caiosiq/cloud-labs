@@ -2,8 +2,12 @@
 Per-component shape: ``statecontrol`` (formal intent/observe) + ``telemetry`` (live sessions).
 
 StateControl:
-  - tunables — commanded intent (nominal pose, exposure, storage, …)
-  - measurables — recorded observations (pose, camera_image, scores, …)
+  - tunables — commanded intent *and* reported values for the same degrees of
+    freedom (``nominal_pose`` / ``reported_pose``, motor setpoints / readback).
+    A reported value is still the tunable family: refresh it from the lab when
+    command and reality may drift. It is *not* a measurable.
+  - measurables — observations with no 1:1 tunable counterpart (camera frames,
+    kernel scores, …). These must be captured; they can be stochastic.
 
 Telemetry:
   - teleop — fast control lease (analogous to tunables)
@@ -27,6 +31,8 @@ def default_tunables() -> Dict[str, Any]:
     return {
         "presence": PRESENCE_BREADBOARD,
         "nominal_pose": {"x": 0.0, "y": 0.0, "rotation": 0.0},
+        # Bench-reported pose for the same DOF as nominal_pose (not a measurable).
+        "reported_pose": {"x": 0.0, "y": 0.0, "rotation": 0.0},
         "nominal_motor_positions": {},
         "storage": {"in_storage": False, "slot": None},
         "placement": {"mode": "MANUAL"},
@@ -35,6 +41,8 @@ def default_tunables() -> Dict[str, Any]:
 
 def default_measurables() -> Dict[str, Any]:
     return {
+        # Legacy mirror of tunables.reported_pose — prefer reported_pose.
+        # Kept so older state files and consumers keep working during migration.
         "pose": {"x": 0.0, "y": 0.0, "rotation": 0.0},
         "last_optimization_score": None,
         "last_optimized_pose": None,
@@ -113,6 +121,8 @@ def ensure_component_shape(entry: Dict[str, Any]) -> None:
                         top["active"] = True
                     if last_jog is not None:
                         top["last_jog_ts"] = last_jog
+            # Migrate legacy measurables.pose → tunables.reported_pose
+            _migrate_reported_pose_from_legacy(sc)
         tel = entry.setdefault("telemetry", default_telemetry())
         lf = tel.setdefault("live_feed", default_telemetry()["live_feed"])
         for ch in ("stream",):
@@ -153,6 +163,7 @@ def ensure_component_shape(entry: Dict[str, Any]) -> None:
             meas[k] = v
 
     entry["statecontrol"] = {"tunables": tun, "measurables": meas}
+    _migrate_reported_pose_from_legacy(entry["statecontrol"])
     tel = default_telemetry()
     tel["teleop"]["active"] = teleop_active
     tel["teleop"]["ready"] = teleop_active
@@ -160,6 +171,28 @@ def ensure_component_shape(entry: Dict[str, Any]) -> None:
     if teleop_active and teleop_last_jog_ts is not None:
         tel["teleop"]["lease_ts"] = float(teleop_last_jog_ts)
     entry["telemetry"] = tel
+
+
+def _migrate_reported_pose_from_legacy(sc: Dict[str, Any]) -> None:
+    """If ``reported_pose`` is missing, lift legacy ``measurables.pose`` into tunables."""
+    if not isinstance(sc, dict):
+        return
+    tun = sc.setdefault("tunables", default_tunables())
+    meas = sc.setdefault("measurables", default_measurables())
+    if not isinstance(tun, dict) or not isinstance(meas, dict):
+        return
+    if "reported_pose" in tun and tun.get("reported_pose") is not None:
+        # Keep legacy mirror in sync when reported already exists
+        if isinstance(tun.get("reported_pose"), dict) and meas.get("pose") is None:
+            meas["pose"] = dict(tun["reported_pose"])
+        return
+    legacy = meas.get("pose")
+    if isinstance(legacy, dict):
+        tun["reported_pose"] = dict(legacy)
+    elif legacy is None and "reported_pose" not in tun:
+        tun["reported_pose"] = None
+    elif "reported_pose" not in tun:
+        tun["reported_pose"] = dict(default_tunables()["reported_pose"])
 
 
 def tunables_bucket(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -205,9 +238,11 @@ def new_component_entry(
     tun = default_tunables()
     tun["presence"] = presence
     tun["nominal_pose"] = dict(nominal_pose)
+    tun["reported_pose"] = dict(meas_pose)
     tun["storage"] = {"in_storage": in_storage, "slot": slot}
     tun["placement"] = {"mode": placement_mode}
     meas = default_measurables()
+    # Legacy mirror — reported_pose is canonical.
     meas["pose"] = dict(meas_pose)
     return {
         "id": tag_id,
@@ -261,8 +296,37 @@ def is_on_table(entry: Dict[str, Any]) -> bool:
     return presence_of(entry) in (PRESENCE_BREADBOARD, PRESENCE_STORAGE)
 
 
+def reported_pose(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Bench-reported pose for the pose tunable (not a measurable).
+
+    Prefers ``tunables.reported_pose``; falls back to legacy ``measurables.pose``.
+    """
+    ensure_component_shape(entry)
+    rp = get_tunables(entry).get("reported_pose")
+    if isinstance(rp, dict):
+        return dict(rp)
+    if rp is None:
+        return {}
+    legacy = get_measurables(entry).get("pose")
+    return dict(legacy) if isinstance(legacy, dict) else {}
+
+
+def set_reported_pose(entry: Dict[str, Any], pose: Optional[Dict[str, Any]]) -> None:
+    """Write reported pose under tunables; mirror to legacy ``measurables.pose``."""
+    tun = tunables_bucket(entry)
+    meas = measurables_bucket(entry)
+    if pose is None:
+        tun["reported_pose"] = None
+        meas["pose"] = None
+        return
+    payload = dict(pose)
+    tun["reported_pose"] = payload
+    meas["pose"] = dict(payload)
+
+
 def meas_pose(entry: Dict[str, Any]) -> Dict[str, Any]:
-    return dict(get_measurables(entry).get("pose") or {})
+    """Alias for :func:`reported_pose` (historical name; pose is not a measurable)."""
+    return reported_pose(entry)
 
 
 def nominal_pose(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -273,8 +337,8 @@ def nominal_pose(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def resolve_pick_table_pose(entry: Dict[str, Any]) -> Dict[str, float]:
-    """XY + rotation for PICK: meas pose when recorded, else tunables nominal (table Z ignored)."""
-    mp = meas_pose(entry)
+    """XY + rotation for PICK: reported pose when present, else tunables nominal."""
+    mp = reported_pose(entry)
     if mp.get("x") is not None or mp.get("y") is not None:
         src = mp
     else:

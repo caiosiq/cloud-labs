@@ -139,8 +139,11 @@ class RealEnsembleHardwareBridge:
         self._sync_move_motor(var.tag_id, int(parsed.motor_id), target)
 
     def capture_bgr_for_tag(self, tag_id: str) -> Optional[Any]:
-        png = self._capture_png_for_tag(tag_id)
-        return _decode_png_bytes_to_bgr(png) if png else None
+        from lab_model.measurables.capture import read_camera_bgr_for_tag
+
+        comm = self.communicator
+        catalog_meta = (comm.catalog_map or {}).get(tag_id) or {}
+        return read_camera_bgr_for_tag(comm, tag_id, catalog_meta)
 
     def _capture_png_for_tag(self, tag_id: str) -> Optional[bytes]:
         comm = self.communicator

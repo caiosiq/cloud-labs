@@ -5,9 +5,15 @@ import { getStatecontrol, normalizeCapabilities, tunableValue } from './componen
 /**
  * Client-side accessors for tunables vs measurables.
  *
- * See `universal_component_architecture.md` §7-8 for the canvas-truth model:
- * the canvas draws `tunables.nominal_pose` (intent), and `measurables` are
- * off-canvas receipts (encoder readback, camera_image, optimization score).
+ * - **Tunables** — commanded intent (`nominal_pose`, motor setpoints) and
+ *   **reported** values of the same DOFs (`reported_pose`, encoder angles).
+ *   Refreshing pose from the lab updates the reported tunable; it is not a
+ *   measurable.
+ * - **Measurables** — observations with no 1:1 tunable (camera_image, scores).
+ *
+ * Canvas draws commanded pose via `drawPose` → `nominal_pose` (ghost). Solid
+ * overlays / readouts that need bench-reported pose use `measPose` /
+ * `reportedPose` (legacy name kept for call sites).
  *
  * ## Pose intent editing (three surfaces)
  *
@@ -26,11 +32,9 @@ import { getStatecontrol, normalizeCapabilities, tunableValue } from './componen
  * `ghostState` (see `interaction.js`).
  *
  * - `drawPose(c)` — canvas-truth pose for drawing, collision, ghost init.
- *   Prefers `tunables.nominal_pose`; falls back to `measurables.pose` for
- *   legacy state files.
- * - `nominalPose(c)` — strict tunables lookup (intent semantics).
- * - `measPose(c)` — strict measurables.pose (encoder readback only; never
- *   use as an editor source).
+ *   Prefers `tunables.nominal_pose`; falls back to reported pose for legacy.
+ * - `nominalPose(c)` — strict commanded pose.
+ * - `reportedPose(c)` / `measPose(c)` — bench-reported pose (tunable family).
  */
 
 export const PRESENCE_BREADBOARD = 'breadboard';
@@ -38,13 +42,24 @@ export const PRESENCE_STORAGE = 'storage';
 export const PRESENCE_OFF_TABLE = 'off_table';
 
 /**
- * Strict `measurables.pose` accessor. **Not** the canvas-truth pose; see
- * `drawPose` for that. Reserved for off-canvas readouts that genuinely
- * need the hardware-reported value (e.g. motor encoder rotations).
+ * Bench-reported pose (`tunables.reported_pose`), with legacy fallback to
+ * `measurables.pose`. Not a measurable — same DOF as `nominal_pose`.
+ * @param {object | undefined} c
+ */
+export function reportedPose(c) {
+    const sc = getStatecontrol(c);
+    const rp = sc.tunables?.reported_pose;
+    if (rp && typeof rp === 'object') return rp;
+    return sc.measurables?.pose || {};
+}
+
+/**
+ * @deprecated Prefer {@link reportedPose}. Historical name from when pose
+ * lived under measurables.
  * @param {object | undefined} c
  */
 export function measPose(c) {
-    return getStatecontrol(c).measurables?.pose || {};
+    return reportedPose(c);
 }
 
 export function nominalPose(c) {
@@ -59,17 +74,14 @@ export function nominalMotorPositions(c) {
 }
 
 /**
- * Canvas-truth pose: `tunables.nominal_pose` with a defensive fallback to
- * `measurables.pose` for state files that haven't been migrated to the
- * tunables-only canvas model yet. Use this everywhere the canvas, ghost
- * state, layout validation, or collision detection needs "where the user
- * intends this component to sit".
+ * Canvas-truth pose: commanded `tunables.nominal_pose`, with defensive
+ * fallback to reported pose for incomplete state files.
  * @param {object | undefined} c
  */
 export function drawPose(c) {
     const np = nominalPose(c);
     if (np && (typeof np.x === 'number' || typeof np.y === 'number')) return np;
-    return measPose(c);
+    return reportedPose(c);
 }
 
 /** @param {object | undefined} c */

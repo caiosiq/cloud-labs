@@ -1,8 +1,9 @@
 /**
- * `PoseReadout` — measurable widget (§14.2).
+ * `PoseReadout` — read-only pose display.
  *
- * Read-only encoder confirmation from ``measurables.pose``.
- * May be null during motion per the Golden Rule.
+ * Prefer ``tunables.reported_pose`` (bench report of the pose tunable).
+ * Legacy ``measurables.pose`` may still supply the value during migration.
+ * May be null during motion.
  */
 import { widgetCard, widgetTitle, row, fmtNum, nullPlaceholder } from './common.js';
 
