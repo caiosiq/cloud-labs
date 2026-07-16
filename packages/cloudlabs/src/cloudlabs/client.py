@@ -116,6 +116,7 @@ def connect(
     *,
     base_url: str = "http://127.0.0.1:8000",
     holder: Optional[str] = None,
+    client_id: Optional[str] = None,
     mode: ExecutionMode = "imperative",
     snapshot_ref: Optional[str] = None,
     initialization_policy: str = "force_reconcile",
@@ -128,6 +129,7 @@ def connect(
         backend_id=backend_id,
         base_url=base_url,
         holder=holder,
+        client_id=client_id,
         mode=mode,
         snapshot_ref=snapshot_ref,
         initialization_policy=initialization_policy,
@@ -180,7 +182,10 @@ class CloudLabsClient:
     base_url:
         FastAPI origin (no trailing slash).
     holder:
-        Lease owner label. Defaults to ``sdk:<uuid>``.
+        Lease owner label. Defaults to ``sdk:<client_id>``.
+    client_id:
+        Stable client identity sent as ``X-CloudLabs-Client``. Defaults to a
+        fresh short UUID (same suffix used in the default holder).
     mode:
         Execution mode recorded on the lease (imperative for scripts).
     snapshot_ref:
@@ -199,6 +204,7 @@ class CloudLabsClient:
         *,
         base_url: str = "http://127.0.0.1:8000",
         holder: Optional[str] = None,
+        client_id: Optional[str] = None,
         mode: ExecutionMode = "imperative",
         snapshot_ref: Optional[str] = None,
         initialization_policy: str = "force_reconcile",
@@ -211,7 +217,8 @@ class CloudLabsClient:
             raise ValueError("backend_id must be a non-empty string")
 
         self.base_url = base_url.rstrip("/")
-        self.holder = holder or f"sdk:{uuid.uuid4().hex[:12]}"
+        self.client_id = (client_id or "").strip() or uuid.uuid4().hex[:12]
+        self.holder = holder or f"sdk:{self.client_id}"
         self.mode = mode
         self.snapshot_ref = snapshot_ref
         self.initialization_policy = initialization_policy
@@ -221,6 +228,7 @@ class CloudLabsClient:
 
         self._session = requests.Session()
         self._session.headers["X-CloudLabs-Backend"] = self.backend_id
+        self._session.headers["X-CloudLabs-Client"] = self.client_id
         self._lease: Optional[SessionLease] = None
         self._released = False
         self._heartbeat_stop = threading.Event()

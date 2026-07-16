@@ -83,6 +83,10 @@ def tunable_script_handles(
                     "widget": widget,
                     "unit": unit or "deg",
                     "bounds": bounds,
+                    "note": (
+                        "Lab observe / tracker recalculates this same tunable "
+                        "— not a measurable."
+                    ),
                     "snippet": f'lab.move_component({tag_id!r}, {path!r}, <value>)',
                 }
             )
@@ -108,14 +112,35 @@ def tunable_script_handles(
 def measurable_script_handle(tag_id: str, field: str, decl: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """Build a measurable SDK handle row."""
     decl = decl or {}
+    # Pose / motor angles recalculate tunables — never advertise as measurables.
+    if field in ("pose", "motor_rotations", "last_optimized_pose"):
+        return {}
+    dtype = decl.get("dtype")
+    layout = decl.get("layout")
+    shape = decl.get("shape") or decl.get("tensor_shape")
+    axes = decl.get("axes") if isinstance(decl.get("axes"), Mapping) else {}
+    tensor_lines = []
+    if dtype or layout or shape:
+        tensor_lines.append(
+            " · ".join(str(x) for x in (dtype, layout, shape) if x)
+        )
+    if isinstance(axes, Mapping):
+        for k, v in axes.items():
+            tensor_lines.append(f"{k}: {v}")
+    if decl.get("wire_format"):
+        tensor_lines.append(f"wire: {decl.get('wire_format')}")
     return {
         "path": f"measurables.{field}",
         "field": field,
         "widget": decl.get("widget") or "—",
-        "format": decl.get("format"),
-        "shape": decl.get("shape") or decl.get("tensor_shape"),
+        "dtype": dtype,
+        "layout": layout,
+        "shape": shape,
+        "axes": dict(axes) if isinstance(axes, Mapping) else {},
+        "tensor_text": "\n".join(tensor_lines) if tensor_lines else None,
         "domain": decl.get("domain"),
         "description": decl.get("description") or decl.get("label"),
+        "physical_interpretation": decl.get("physical_interpretation"),
         "snippet": f'lab.measurable({tag_id!r}, {field!r}).resolve(record=True)',
     }
 
@@ -153,8 +178,13 @@ def describe_component_row(
         )
 
     measurable_rows = [
-        measurable_script_handle(tag_id, field, decl if isinstance(decl, Mapping) else {})
+        row
         for field, decl in measurables_decl.items()
+        if (
+            row := measurable_script_handle(
+                tag_id, field, decl if isinstance(decl, Mapping) else {}
+            )
+        )
     ]
 
     parameters: Dict[str, Any] = {}

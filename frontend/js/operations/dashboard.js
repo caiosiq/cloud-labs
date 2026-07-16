@@ -190,7 +190,7 @@ function ensureBackendsShell() {
             Twin + jobs below follow this selection. Unavailable backends are listed but not selectable.
             <a href="/twin">Take control (Twin UI)</a> ·
             <a href="/wiki">Wiki</a> ·
-            <a href="/catalog">Catalog</a>
+            <a href="/wiki#backends">Backends</a>
         </p>`;
     backendsShellReady = true;
 

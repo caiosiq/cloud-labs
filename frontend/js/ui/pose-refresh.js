@@ -92,7 +92,7 @@ function promptRefreshPoseOffersModal(payload) {
         const sub = document.createElement('p');
         sub.style.cssText = 'margin:0 0 8px 0;color:#94a3b8;font-size:13px;line-height:1.5;';
         sub.textContent =
-            'Checked components will receive scan updates (measurables.pose). Unchecked rows stay frozen. Applying runs a camera scan on the bench.';
+            'Checked components will receive scan updates (tunables.reported_pose). Unchecked rows stay frozen. Applying runs a camera scan on the bench.';
 
         const meta = document.createElement('p');
         meta.style.cssText = 'margin:0 0 12px 0;color:#64748b;font-size:12px;';
@@ -463,7 +463,7 @@ export async function runScopedPoseRefresh(tagIds, { skipModal = false } = {}) {
     }
 }
 
-/** Same behavior as the Refresh Pose button (shared with Command Console): camera pose pass → measurables.pose. */
+/** Same behavior as the Refresh Pose button (shared with Command Console): camera pose pass → tunables.reported_pose. */
 export async function runLabPoseRefresh() {
     const blocked = runtimeEditableOrMessage();
     if (blocked) {

@@ -7,6 +7,14 @@
  * View mode is active when preview differs from what is applied on the bench.
  */
 import { store } from '../state/store.js';
+import {
+    acquireSessionLease,
+    commandLeaseRequired,
+    otherHoldsSessionLease,
+    releaseSessionLease,
+    weHoldSessionLease,
+} from '../api/session-lease.js';
+import { log } from '../ui/log.js';
 
 /** The backend working-tree mirror (`store.control.working`), or an empty shape. */
 function working() {
@@ -164,11 +172,12 @@ export function isRuntimeEditable() {
 
 /** User-facing block reason, or null if edits are allowed. */
 export function runtimeEditableOrMessage() {
-    const lease = store.labState?.session_lease;
-    const backendId = String(store.labState?.active_backend_id || '');
-    const isMock = backendId.startsWith('mock.');
-    if (lease?.holder && !isMock) {
-        return `Bench leased by ${lease.holder}. Wait for the job to finish or release the lease from Operations.`;
+    if (otherHoldsSessionLease()) {
+        const holder = store.labState?.session_lease?.holder || 'another client';
+        return `Bench leased by ${holder}. Wait, or ask them to release control.`;
+    }
+    if (commandLeaseRequired() && !weHoldSessionLease()) {
+        return 'Take control of this backend before editing (session lease).';
     }
     if (isConfigViewMode()) {
         return 'You are viewing a configuration preview. Return to bench or apply on bench before editing.';
@@ -179,30 +188,89 @@ export function runtimeEditableOrMessage() {
     return null;
 }
 
+async function _refreshLabStateSoft() {
+    try {
+        const { fetchLabState } = await import('../state/lab-state.js');
+        await fetchLabState();
+    } catch (_) {
+        /* poll will catch up */
+    }
+}
+
 /** Update the Twin UI lease banner from lab-state polling. */
 export function refreshSessionLeaseBanner() {
     const el = document.getElementById('session-lease-banner');
     if (!el) return;
+
     const lease = store.labState?.session_lease;
-    if (!lease?.holder) {
-        el.style.display = 'none';
-        el.textContent = '';
-        return;
-    }
-    const backendId = String(store.labState?.active_backend_id || '');
-    const isMock = backendId.startsWith('mock.');
+    const solo = Boolean(store.coordinatorPolicy?.solo);
+    const ours = weHoldSessionLease();
+    const other = otherHoldsSessionLease();
+    const needLease = commandLeaseRequired();
+
     el.style.display = 'block';
-    if (isMock) {
-        el.style.color = '#cbd5e1';
-        el.style.borderColor = 'rgba(148, 163, 184, 0.35)';
-        el.style.background = 'rgba(148, 163, 184, 0.1)';
-        el.innerHTML = `Session lease: <strong>${lease.holder}</strong> (mock — controls stay available unless CLOUDLABS_STRICT_LEASE=1). <a href="/operations" target="_blank" style="color:inherit">Operations</a>`;
+    el.style.lineHeight = '1.45';
+
+    const wire = (html) => {
+        el.innerHTML = html;
+        el.querySelector('[data-lease-action="take"]')?.addEventListener('click', async () => {
+            const r = await acquireSessionLease();
+            if (!r.ok) log(r.error || 'Take control failed', 'warn');
+            await _refreshLabStateSoft();
+            refreshSessionLeaseBanner();
+        });
+        el.querySelector('[data-lease-action="release"]')?.addEventListener('click', async () => {
+            await releaseSessionLease();
+            await _refreshLabStateSoft();
+            refreshSessionLeaseBanner();
+        });
+    };
+
+    if (ours) {
+        el.style.color = '#86efac';
+        el.style.borderColor = 'rgba(34, 197, 94, 0.4)';
+        el.style.background = 'rgba(34, 197, 94, 0.12)';
+        wire(
+            `You have control as <strong>${lease?.holder || 'this client'}</strong>. `
+            + `<button type="button" data-lease-action="release" style="margin-left:8px;cursor:pointer;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:4px;padding:2px 8px">Release</button> `
+            + `<a href="/operations" target="_blank" style="color:inherit;margin-left:6px">Operations</a>`,
+        );
         return;
     }
-    el.style.color = '#93c5fd';
-    el.style.borderColor = 'rgba(59, 130, 246, 0.35)';
-    el.style.background = 'rgba(59, 130, 246, 0.12)';
-    el.innerHTML = `Bench leased by <strong>${lease.holder}</strong> — direct control disabled. <a href="/operations" target="_blank" style="color:inherit">View on Operations</a>`;
+
+    if (other) {
+        el.style.color = '#93c5fd';
+        el.style.borderColor = 'rgba(59, 130, 246, 0.35)';
+        el.style.background = 'rgba(59, 130, 246, 0.12)';
+        wire(
+            `Bench leased by <strong>${lease.holder}</strong> — direct control disabled. `
+            + `<a href="/operations" target="_blank" style="color:inherit">Operations</a>`,
+        );
+        return;
+    }
+
+    if (needLease) {
+        el.style.color = '#fde68a';
+        el.style.borderColor = 'rgba(234, 179, 8, 0.4)';
+        el.style.background = 'rgba(234, 179, 8, 0.1)';
+        wire(
+            `No session lease — `
+            + `<button type="button" data-lease-action="take" style="cursor:pointer;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:4px;padding:2px 8px">Take control</button> `
+            + `to edit this backend.`,
+        );
+        return;
+    }
+
+    el.style.color = '#cbd5e1';
+    el.style.borderColor = 'rgba(148, 163, 184, 0.35)';
+    el.style.background = 'rgba(148, 163, 184, 0.1)';
+    wire(
+        (solo ? 'Solo mode — ' : 'Mock soft lease — ')
+        + `edits allowed without a lease. `
+        + `<button type="button" data-lease-action="take" style="cursor:pointer;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:4px;padding:2px 8px">Take control</button> `
+        + `to lock others out. `
+        + `<a href="/operations" target="_blank" style="color:inherit">Operations</a>`,
+    );
 }
 
 /** Clear stale preview pointers when on an uncommitted working table. */

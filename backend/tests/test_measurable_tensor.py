@@ -11,20 +11,20 @@ from lab_model.measurables.tensor import LazyRef, MeasurableTensor
 
 
 class MeasurableTensorTests(unittest.TestCase):
-    def test_materialize_pose(self) -> None:
+    def test_materialize_score_scalar(self) -> None:
         tensor = materialize_measurable(
-            "tag_20",
-            "pose",
-            {"x": 10.0, "y": -5.0, "rotation": 45.0},
+            "tag_19",
+            "last_optimization_score",
+            0.42,
             backend_id="mock.default",
         )
-        self.assertEqual(tensor.tag_id, "tag_20")
-        self.assertEqual(tensor.field, "pose")
-        self.assertEqual(tensor.domain, "spatial")
-        self.assertEqual(tensor.shape, (3,))
-        self.assertEqual(tensor.data, [10.0, -5.0, 45.0])
+        self.assertEqual(tensor.tag_id, "tag_19")
+        self.assertEqual(tensor.field, "last_optimization_score")
+        self.assertEqual(tensor.domain, "scalar")
+        self.assertEqual(tensor.shape, ())
+        self.assertAlmostEqual(tensor.data, 0.42)
 
-    def test_materialize_scalar(self) -> None:
+    def test_materialize_power_scalar(self) -> None:
         tensor = materialize_measurable(
             "tag_19",
             "output_power_readback_mw",
@@ -47,9 +47,12 @@ class MeasurableTensorTests(unittest.TestCase):
         self.assertEqual(tensor.data.href, "/api/components/tag_22/camera-image")
         self.assertEqual(tensor.dtype, "uint8")
         self.assertEqual(tensor.domain, "spatial")
+        self.assertEqual(tensor.axes.get("c"), "bgr")
 
     def test_to_api_dict_roundtrip(self) -> None:
-        original = materialize_measurable("tag_20", "pose", {"x": 1.0, "y": 2.0, "rotation": 0.0})
+        original = materialize_measurable(
+            "tag_19", "last_optimization_score", 1.5, backend_id="mock.default"
+        )
         payload = original.to_api_dict()
         restored = MeasurableTensor.from_api_dict(payload)
         self.assertEqual(restored.tag_id, original.tag_id)
@@ -58,9 +61,11 @@ class MeasurableTensorTests(unittest.TestCase):
     def test_read_measurable_from_state(self) -> None:
         state = {
             "components": {
-                "tag_20": {
+                "tag_22": {
                     "statecontrol": {
-                        "measurables": {"pose": {"x": 1.0, "y": 2.0, "rotation": 0.0}},
+                        "measurables": {
+                            "camera_image": {"path": "/tmp/a.png", "format": "png"},
+                        },
                         "tunables": {},
                     },
                     "telemetry": {
@@ -70,13 +75,13 @@ class MeasurableTensorTests(unittest.TestCase):
                 }
             }
         }
-        val = read_measurable_from_state(state, "tag_20", "pose")
-        self.assertEqual(val, {"x": 1.0, "y": 2.0, "rotation": 0.0})
+        val = read_measurable_from_state(state, "tag_22", "camera_image")
+        self.assertEqual(val, {"path": "/tmp/a.png", "format": "png"})
 
     def test_resolve_image_from_file(self) -> None:
         try:
             from PIL import Image
-            import numpy as np
+            import numpy as np  # noqa: F401
         except ImportError:
             self.skipTest("Pillow/numpy not available")
 

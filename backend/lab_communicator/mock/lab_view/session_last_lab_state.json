@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "saved_at": "2026-07-15T19:53:44.584634+00:00",
+  "saved_at": "2026-07-16T19:24:47.044322+00:00",
   "lab_mode": "MOCK",
   "lab_state": {
     "system_status": "IDLE",
-    "last_updated": "2026-07-15T16:52:37.037141",
+    "last_updated": "2026-07-16T13:21:27.913194",
     "components": {
       "tag_9": {
         "id": "tag_9",
@@ -152,7 +152,7 @@
               "rotation": 0.0
             },
             "nominal_motor_positions": {
-              "1": 1.9200000000000004,
+              "1": 2.6,
               "3": 0.0
             },
             "storage": {
@@ -166,7 +166,7 @@
           },
           "measurables": {
             "pose": null,
-            "last_optimization_score": 0.0014506566827918732,
+            "last_optimization_score": null,
             "last_optimized_pose": null,
             "camera_image": null,
             "centroid_x_px": 555.360662767701,
@@ -296,7 +296,12 @@
             "pose": null,
             "last_optimization_score": null,
             "last_optimized_pose": null,
-            "camera_image": null
+            "camera_image": {
+              "path": "C:\\Users\\User\\OneDrive - The University of Chicago\\cloud-labs\\backend\\lab_communicator\\mock\\lab_view\\camera_captures\\tag_22_last.png",
+              "source": "mock_table_cam",
+              "cam_id": 1,
+              "format": "png"
+            }
           }
         },
         "telemetry": {

@@ -40,9 +40,8 @@ import {
     isHoldingState,
     isOffTableComponent,
     isStoredComponent,
-    measPose,
 } from '../component-model.js';
-import { componentDataSnapshot } from '../component-state.js';
+import { componentDataSnapshot, getTunables } from '../component-state.js';
 import { renderComponentPanel } from './component-popup.js';
 import { syncComponentSidebarHighlights } from './updateUI.js';
 import { hideSelectedPartTab, showSelectedPartTab } from './workspace-tabs.js';
@@ -190,7 +189,7 @@ export function updateMotorAngleLabels(tagId) {
     if (!tagId || !store.labState || !store.labState.components) return;
     const comp = store.labState.components[tagId];
     if (!comp) return;
-    const mr = (measPose(comp).motor_rotations) || {};
+    const mr = getTunables(comp).nominal_motor_positions || {};
     document.querySelectorAll(`[data-motor-angle^="${tagId}:"]`).forEach((el) => {
         const mid = (el.dataset.motorAngle || '').split(':')[1];
         if (!mid) return;

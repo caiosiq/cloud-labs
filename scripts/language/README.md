@@ -10,9 +10,10 @@ Prerequisites: FastAPI on `:8000` and `pip install -e ./packages/cloudlabs`.
 |--------|---------|
 | `01_hello_lab.py` | `connect` / lease, `prepare`, fluent move/motor, capture + tensor |
 | `02_kernels_and_match.py` | `probe_kernel` (EVAL_KERNEL), builtins, `kernel_match` → OPTIMIZE |
-| `03_closed_loop_catalog.py` | Catalog pin + catalog TorchScript as OPTIMIZE inputs |
+| `03_closed_loop_catalog.py` | Catalog pin + catalog TorchScript as OPTIMIZE inputs (edge loop) |
 | `04_session_kernels.py` | Author artifact → register → probe → feature OPTIMIZE |
 | `05_jobs_and_modes.py` | Objective compile, `submit_compiled_dag`, closed-loop job |
+| `06_client_side_measurable_loop.py` | Author-in-the-loop: resolve `camera_image` locally, `for` loop on laptop (no kernel / no OPTIMIZE) |
 
 ```powershell
 python scripts/language/01_hello_lab.py
@@ -20,4 +21,5 @@ python scripts/language/02_kernels_and_match.py
 python scripts/language/03_closed_loop_catalog.py
 python scripts/language/04_session_kernels.py
 python scripts/language/05_jobs_and_modes.py
+python scripts/language/06_client_side_measurable_loop.py
 ```

@@ -1,10 +1,8 @@
 /**
- * `MotorRotationsReadout` — measurable widget (§14.2).
+ * `MotorRotationsReadout` — optional readout for motor angle maps.
  *
- * Read-only display of confirmed motor angles. Source is
- * ``measurables.pose.motor_rotations`` (encoder readback), which goes
- * **null** during motion per Phase 3's Golden Rule and is repopulated
- * by ``RECORD_MEASURABLES`` or the next successful primitive commit.
+ * Prefer binding this to ``tunables.nominal_motor_positions`` (lab observe
+ * recalculates that same tunable). Motor angles are not a measurable.
  */
 import { widgetCard, widgetTitle, fmtNum, nullPlaceholder } from './common.js';
 
@@ -13,7 +11,7 @@ export default function MotorRotationsReadout({ fieldName, descriptor, value }) 
     card.appendChild(widgetTitle(fieldName, descriptor));
 
     if (!value || typeof value !== 'object' || !Object.keys(value).length) {
-        card.appendChild(nullPlaceholder('\u2014 null (in motion / not yet recorded)'));
+        card.appendChild(nullPlaceholder('\u2014 no motor angles yet'));
         return card;
     }
 

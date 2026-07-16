@@ -20,11 +20,11 @@ Open **Twin**. The breadboard map shows:
 Select a component. The floating panel issues **primitives**—the same action
 family scripts use.
 
-## 3. Wiki Catalog
+## 3. Wiki Backends
 
-In this Wiki, open **Catalog**. Set the **Backend** dropdown to the same lab.
-Select a tag you touched in the Twin. Read **Physical interpretation**, then
-skim tunables (command vs report) versus measurables (e.g. camera frames).
+In this Wiki, open **Backends**. Select the same lab card you used in Twin.
+Open **Components**, pick a tag you touched, and read **Physical interpretation**.
+Then skim tunables (command vs report) versus measurables (e.g. camera frames).
 
 ## 4. Python
 
@@ -48,7 +48,7 @@ use the in-process mock path your deployment provides.
 | Goal | Location |
 |------|----------|
 | Backends and `connect()` | Learn → *Connecting and backends* |
-| Kernels | Learn → *Kernels*; Catalog → Kernels |
+| Kernels | Learn → *Kernels*; Backends → Kernels |
 | Closed-loop | `03_closed_loop_catalog.py` |
 | Author a measurement | `04_session_kernels.py` |
 | Script ladder | `scripts/language/README.md` |

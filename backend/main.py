@@ -278,10 +278,35 @@ def _mock_auto_approve_publish() -> bool:
     return _mock_auto_approve_publish_for(_active_backend_id())
 
 
+def _solo_mode() -> bool:
+    """Local single-operator mode: mutations do not require a session lease."""
+    flag = (os.environ.get("CLOUDLABS_SOLO") or "").strip().lower()
+    return flag in ("1", "true", "yes")
+
+
+def _strict_lease_mock() -> bool:
+    strict = (os.environ.get("CLOUDLABS_STRICT_LEASE") or "").strip().lower()
+    return strict in ("1", "true", "yes")
+
+
+def _coordinator_policy() -> Dict[str, Any]:
+    return {
+        "solo": _solo_mode(),
+        "strict_lease_mock": _strict_lease_mock(),
+    }
+
+
 def _command_lease_required_for(backend_id: str) -> bool:
+    """Whether mutating commands must present a matching session lease.
+
+    - ``CLOUDLABS_SOLO=1``: never required (laptop / single operator).
+    - ``mock.*``: required only when ``CLOUDLABS_STRICT_LEASE=1``.
+    - real / other backends: always required (Take control or SDK ``connect``).
+    """
+    if _solo_mode():
+        return False
     if backend_id.startswith("mock."):
-        strict = (os.environ.get("CLOUDLABS_STRICT_LEASE") or "").strip().lower()
-        return strict in ("1", "true", "yes")
+        return _strict_lease_mock()
     return True
 
 
@@ -356,10 +381,16 @@ def _lease_conflict_response(exc: LeaseConflictError) -> JSONResponse:
 
 
 def _persist_session_checkpoint_on_shutdown() -> None:
+    """Persist checkpoints only for backends that were already initialized.
+
+    Never call ``init=True`` / ``require_backend`` here: a failed bind, an
+    unavailable backend (e.g. missing lab_automation), or a coordinator that
+    never served a Twin session must not construct communicators or log 503s.
+    """
     for bid in backend_registry.known_backend_ids():
         try:
-            rt = require_backend(backend_registry, bid, init=True)
-            if rt.lab is None:
+            rt = backend_registry.get_runtime(bid, init=False)
+            if rt.availability != "ready" or rt.lab is None:
                 continue
             with BackendSession(rt):
                 saver = getattr(rt.lab, "save_session_checkpoint_if_enabled", None)
@@ -395,8 +426,8 @@ async def _app_lifespan(_: FastAPI):
         # checkpoint reflects a quiesced state instead of one mid-sweep.
         for bid in backend_registry.known_backend_ids():
             try:
-                rt = require_backend(backend_registry, bid, init=False)
-                if rt.lab is None:
+                rt = backend_registry.get_runtime(bid, init=False)
+                if rt.availability != "ready" or rt.lab is None:
                     continue
                 with BackendSession(rt):
                     shutdown = getattr(rt.lab, "shutdown_lab_processes", None)
@@ -663,7 +694,8 @@ def _session_reconciliation_offers_dict() -> Dict[str, Any]:
     except Exception:
         resp["manifest"] = None
     print(
-        f"[session-reconcile] enabled={resp['enabled']} skipped={resp.get('skipped_reason')!r} "
+        f"[session-reconcile] backend_id={_active_backend_id()!r} "
+        f"enabled={resp['enabled']} skipped={resp.get('skipped_reason')!r} "
         f"offers={len(offer_ids)} checkpoint={chk_path!r} "
         f"exists={os.path.isfile(chk_path) if chk_path else False} "
         f"debug={merge_debug}",
@@ -3160,7 +3192,7 @@ async def list_backends():
                 except JobNotFoundError:
                     row["active_job"] = None
         rows.append(row)
-    return {"backends": rows, "schema_version": 1}
+    return {"backends": rows, "schema_version": 1, "policy": _coordinator_policy()}
 
 
 @app.get("/api/optimization/metrics")
@@ -3968,11 +4000,20 @@ async def receive_command(
 
     backend_id = _active_backend_id()
     lease_id = _extract_lease_id(payload, request)
+    require_lease = _command_lease_required()
+    if require_lease and not lease_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "X-CloudLabs-Lease required — acquire via Twin Take control "
+                "or SDK connect()/acquire_lease()"
+            ),
+        )
     try:
         session_lease_manager.validate_command_lease(
             backend_id=backend_id,
             lease_id=lease_id,
-            require_when_locked=_command_lease_required(),
+            require_when_locked=require_lease,
         )
     except LeaseConflictError as exc:
         return _lease_conflict_response(exc)
@@ -4355,21 +4396,21 @@ async def list_golden_states():
                         pass
     return golden_states
 
+@app.get("/snapshots")
+async def read_snapshots_redirect():
+    """Snapshots live under Wiki → Backends."""
+    return RedirectResponse(url="/wiki#backends", status_code=307)
+
+
 @app.get("/catalog")
-async def read_catalog():
-    path = os.path.join(frontend_path, "catalog.html")
-    with open(path, "r", encoding="utf-8") as f:
-        html = f.read()
-    return Response(content=html, media_type="text/html", headers={
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "Expires": "0",
-    })
+async def read_catalog_redirect():
+    """Legacy Catalog URL → Wiki Backends hub."""
+    return RedirectResponse(url="/wiki#backends", status_code=307)
 
 
 @app.get("/wiki")
 async def read_wiki():
-    """In-app Wiki: Learn curriculum + live Catalog (components / kernels)."""
+    """In-app Wiki: Learn curriculum + live Capabilities (components / kernels)."""
     path = os.path.join(frontend_path, "wiki.html")
     with open(path, "r", encoding="utf-8") as f:
         html = f.read()

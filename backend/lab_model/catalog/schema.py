@@ -58,8 +58,6 @@ KNOWN_WIDGETS_TUNABLE: FrozenSet[str] = frozenset({
 
 #: §14.2 measurable widgets.
 KNOWN_WIDGETS_MEASURABLE: FrozenSet[str] = frozenset({
-    "PoseReadout",
-    "MotorRotationsReadout",
     "ImageViewer",
     "NumberBadge",
     "Timestamp",
@@ -264,8 +262,9 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
     - Every component gets ``MOVE_COMPONENT`` + storage/pick/hover/place +
       ``RECORD_MEASURABLES`` in ``primitives``.
     - If ``motor_ids`` is set, append motor primitives + add
-      ``nominal_motor_positions`` tunable and ``motor_rotations`` +
-      ``last_optimization_score`` measurables.
+      ``nominal_motor_positions`` tunable and ``last_optimization_score``
+      measurable. Lab motor angles recalculate ``nominal_motor_positions``
+      (they are not a separate measurable).
     - ``OPTICAL_CAMERA`` adds ``exposure_time_ms`` tunable, ``camera_image``
       measurable, and the ``stream`` telemetry channel.
     """
@@ -310,9 +309,23 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(motor_ids, list) and motor_ids:
         tunables["nominal_motor_positions"] = {
             "widget": "JsonInspector",
+            "unit": "deg",
+            "physical_interpretation": (
+                "Motor angles for this mount (degrees). Lab observe / tracker "
+                "recalculates this same tunable — it is not a measurable."
+            ),
         }
-        measurables["motor_rotations"] = {"widget": "MotorRotationsReadout"}
-        measurables["last_optimization_score"] = {"widget": "NumberBadge", "format": ".3f"}
+        measurables["last_optimization_score"] = {
+            "widget": "NumberBadge",
+            "format": ".3f",
+            "dtype": "float64",
+            "layout": "scalar",
+            "domain": "scalar",
+            "physical_interpretation": (
+                "Last closed-loop / optimize scalar for this part. Captured, "
+                "not commanded."
+            ),
+        }
         primitives.extend(list(_MOTOR_TUNABLE_PRIMITIVES))
 
     if comp_type == "OPTICAL_CAMERA":
@@ -324,7 +337,24 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
             "unit": "ms",
         }
         primitives.extend(list(_CAMERA_TUNABLE_PRIMITIVES))
-        measurables["camera_image"] = {"widget": "ImageViewer", "format": "png"}
+        measurables["camera_image"] = {
+            "widget": "ImageViewer",
+            "dtype": "uint8",
+            "layout": "bgr_hwc_uint8",
+            "domain": "spatial",
+            "shape": "(H, W, 3)",
+            "axes": {
+                "H": "rows (y), pixels top→bottom",
+                "W": "cols (x), pixels left→right",
+                "3": "BGR channels (OpenCV / kernel layout)",
+            },
+            "wire_format": "png",
+            "physical_interpretation": (
+                "Still frame from this camera. Kernels and "
+                "lab.measurable(...).resolve() use BGR uint8 H×W×3; PNG is "
+                "storage/wire only."
+            ),
+        }
         # Phase 6 owns the route; URLs are direct per §16.6.
         if tag_id:
             url_stream = f"/api/components/{_TAG_TOKEN}/telemetry/stream"
@@ -342,6 +372,13 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
             "widget": "NumberBadge",
             "format": ".2f",
             "unit": "mW",
+            "dtype": "float64",
+            "layout": "scalar",
+            "domain": "scalar",
+            "physical_interpretation": (
+                "Measured optical output power (mW). A captured sensor "
+                "summary — not a command."
+            ),
         }
         primitives.extend(list(_LASER_TUNABLE_PRIMITIVES))
 

@@ -29,37 +29,42 @@
           "file": "04-primitives.md"
         },
         {
+          "id": "versioning",
+          "title": "Version control and lab history",
+          "file": "05-version-control.md"
+        },
+        {
           "id": "features",
           "title": "TeleOp, telemetry, and optimize",
-          "file": "05-teleop-telemetry-optimize.md"
+          "file": "06-teleop-telemetry-optimize.md"
         },
         {
           "id": "kernels",
           "title": "Kernels",
-          "file": "06-kernels.md"
+          "file": "07-kernels.md"
         },
         {
           "id": "modes",
           "title": "Imperative vs closed-loop",
-          "file": "07-imperative-vs-closed-loop.md"
+          "file": "08-imperative-vs-closed-loop.md"
         },
         {
           "id": "connecting",
           "title": "Connecting and backends",
-          "file": "08-connecting-and-backends.md"
+          "file": "09-connecting-and-backends.md"
         },
         {
           "id": "first",
           "title": "Your first experiment",
-          "file": "09-first-experiment.md"
+          "file": "10-first-experiment.md"
         }
       ]
     },
     {
-      "id": "catalog",
-      "label": "Catalog",
-      "blurb": "Live components and kernels for the selected backend.",
-      "mode": "catalog"
+      "id": "backends",
+      "label": "Backends",
+      "blurb": "Live labs — components, kernels, and snapshots.",
+      "mode": "backends"
     }
   ]
 }

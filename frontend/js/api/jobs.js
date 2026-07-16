@@ -5,6 +5,8 @@
  * ``POST /api/command`` so runs acquire a lease and appear on /operations.
  */
 import { store } from '../state/store.js';
+import { getClientHolder } from '../state/client-id.js';
+import { backendHeaders } from '../state/backend-selection.js';
 
 /** @param {unknown} detail */
 function formatApiDetail(detail) {
@@ -41,7 +43,7 @@ export async function submitClosedLoopJob(command, opts = {}) {
     const backendId = opts.backendId || store.labState?.active_backend_id;
     const body = {
         mode: 'closed_loop',
-        holder: opts.holder || 'ui:optimization-mode',
+        holder: opts.holder || getClientHolder('optimization'),
         command: {
             action: command.action,
             target_id: command.target_id,
@@ -56,7 +58,7 @@ export async function submitClosedLoopJob(command, opts = {}) {
     try {
         const response = await fetch('/api/jobs/submit', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(body),
         });
         const result = await response.json().catch(() => ({}));
@@ -101,7 +103,7 @@ export async function fetchJob(jobId) {
 export async function submitCompiledDagJob(opts) {
     const body = {
         mode: 'compiled_dag',
-        holder: opts.holder || 'ui:operations-reconcile',
+        holder: opts.holder || getClientHolder('reconcile'),
         steps: opts.steps,
     };
     if (opts.backendId) body.backend_id = opts.backendId;
@@ -113,7 +115,7 @@ export async function submitCompiledDagJob(opts) {
     try {
         const response = await fetch('/api/jobs/submit', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(body),
         });
         const result = await response.json().catch(() => ({}));

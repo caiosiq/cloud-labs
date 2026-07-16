@@ -34,9 +34,9 @@ export function componentPhysicalInterpretation(row = {}) {
         return `${name} captures light as an image. Use RECORD_MEASURABLES / probe_kernel when you need numbers from that image, not only a live view.`;
     }
     if (type.includes('MIRROR') || type.includes('MOUNT')) {
-        return `${name} is a steerable optic. Tunables are command and report for the same DOFs; measurables are observations (e.g. camera frames) with no matching setpoint.`;
+        return `${name} is a steerable optic. Tunables are degrees of freedom you set (and the lab may recalculate); measurables are observations with no matching setpoint (e.g. camera frames).`;
     }
-    return `${name} (${type || 'component'}) participates in the optical layout. Tunables express command (and report); measurables are captured observations without a 1:1 tunable.`;
+    return `${name} (${type || 'component'}) participates in the optical layout. Tunables are DOFs you control via primitives; measurables are captured observations without a 1:1 tunable.`;
 }
 
 /**
@@ -50,21 +50,98 @@ export function measurablePhysicalInterpretation(field, decl = {}) {
     if (decl.description && decl.description.length > 40) return String(decl.description);
     const f = String(field || '');
     if (f === 'camera_image' || f.includes('image')) {
-        return 'A still frame from this camera in the lab frame — the 2D intensity pattern the beam (or scene) paints on the sensor. Kernels read this as BGR pixels; humans see it as a picture. No tunable sets this field — it must be captured.';
+        return 'A still frame from this camera — intensity on the sensor. Kernels read BGR pixels; humans see a picture. No tunable sets this field — it must be captured.';
     }
     if (f.includes('centroid')) {
         return 'The intensity-weighted “center of mass” of the spot on the camera, in pixels. Useful as an alignment error signal toward a target pixel.';
     }
-    if (f.includes('pose') || f === 'measured_pose') {
-        return 'Legacy pose field under measurables — prefer tunables.reported_pose. Pose is the reported value of the pose tunable (same DOF as nominal_pose), not an independent measurable.';
-    }
     if (f.includes('power') || f.includes('score') || f.includes('intensity')) {
         return 'A scalar summary of how much light (or how good a match) the current setting produces — higher or lower depending on the metric you chose. Captured, not commanded.';
     }
-    if (decl.domain === 'spatial' || (decl.format || '').includes('image')) {
+    if (decl.domain === 'spatial' || (decl.format || '').includes('image') || decl.layout === 'bgr_hwc_uint8') {
         return 'Spatial data from the bench (typically an image). Interpret axes in the camera’s pixel grid unless a calibration maps them to millimetres.';
     }
-    return `Observed quantity “${f}” — a measurement with no matching tunable. Prefer the catalog description when present; tensor shape alone is not the physics.`;
+    return `Observed quantity “${f}” — a measurement with no matching tunable. Prefer the catalog description when present.`;
+}
+
+/** Fields that must never appear as Wiki measurables (tunable recalculate paths). */
+export const NON_MEASURABLE_FIELDS = new Set(['pose', 'motor_rotations', 'last_optimized_pose']);
+
+/**
+ * Canonical analysis-tensor specs for known measurables.
+ * Catalog decls override when they provide dtype/layout/axes/domain.
+ * @type {Record<string, {dtype: string, layout: string, shape: string, domain: string, axes: Record<string, string>, wire?: string}>}
+ */
+export const MEASURABLE_TENSOR_SPEC = {
+    camera_image: {
+        dtype: 'uint8',
+        layout: 'bgr_hwc_uint8',
+        shape: '(H, W, 3)',
+        domain: 'spatial',
+        axes: {
+            H: 'rows (y), pixels top→bottom',
+            W: 'cols (x), pixels left→right',
+            '3': 'BGR channels (OpenCV / kernel layout)',
+        },
+        wire: 'PNG on disk / HTTP — not the analysis type',
+    },
+    last_optimization_score: {
+        dtype: 'float64',
+        layout: 'scalar',
+        shape: '()',
+        domain: 'scalar',
+        axes: {},
+    },
+    output_power_readback_mw: {
+        dtype: 'float64',
+        layout: 'scalar',
+        shape: '()',
+        domain: 'scalar',
+        axes: {},
+        unit: 'mW',
+    },
+};
+
+/**
+ * @param {string} field
+ * @param {object} decl
+ */
+export function resolveMeasurableTensor(field, decl = {}) {
+    const base = MEASURABLE_TENSOR_SPEC[field] || {};
+    const axes =
+        decl.axes && typeof decl.axes === 'object' && !Array.isArray(decl.axes)
+            ? decl.axes
+            : base.axes || {};
+    return {
+        dtype: decl.dtype || base.dtype || '—',
+        layout: decl.layout || base.layout || '—',
+        shape: decl.shape || decl.tensor_shape || base.shape || '—',
+        domain: decl.domain || base.domain || inferDomain(field, decl),
+        axes,
+        wire: decl.wire_format ? `wire: ${decl.wire_format}` : base.wire || '',
+        unit: decl.unit || base.unit || '',
+    };
+}
+
+/**
+ * Human-readable multi-line tensor cell (dtype, layout, axis meanings).
+ * @param {ReturnType<typeof resolveMeasurableTensor>} tensor
+ */
+export function formatTensorCell(tensor) {
+    const lines = [
+        `${tensor.dtype} · ${tensor.layout} · ${tensor.shape}`,
+    ];
+    if (tensor.unit) lines.push(`unit: ${tensor.unit}`);
+    const axisEntries = Object.entries(tensor.axes || {});
+    if (axisEntries.length) {
+        for (const [k, v] of axisEntries) {
+            lines.push(`${k}: ${v}`);
+        }
+    } else if (tensor.layout === 'scalar' || tensor.shape === '()') {
+        lines.push('no axes (0-D scalar)');
+    }
+    if (tensor.wire) lines.push(tensor.wire);
+    return lines.join('\n');
 }
 
 /**
@@ -122,6 +199,12 @@ export function tunableHandles(tagId, field, decl, row = {}) {
     const unit = decl?.unit || '';
     const bounds = formatBounds(decl);
 
+    if (field === 'reported_pose') {
+        // Legacy internal mirror — not a first-class tunable in the product model.
+        // Lab observe recalculates the pose tunable itself; Twin ghost is UI draft only.
+        return [];
+    }
+
     if (field === 'nominal_pose') {
         return ['x', 'y', 'rotation'].map((axis) => {
             const path = `tunables.nominal_pose.${axis}`;
@@ -132,21 +215,7 @@ export function tunableHandles(tagId, field, decl, row = {}) {
                 unit: unitHint,
                 bounds: bounds || '—',
                 snippet: `lab.move_component(${JSON.stringify(tagId)}, ${JSON.stringify(path)}, <value>)`,
-            };
-        });
-    }
-
-    if (field === 'reported_pose') {
-        return ['x', 'y', 'rotation'].map((axis) => {
-            const path = `tunables.reported_pose.${axis}`;
-            const unitHint = axis === 'rotation' ? 'deg' : 'mm';
-            return {
-                path,
-                widget,
-                unit: unitHint,
-                bounds: '—',
-                snippet: `# read-only reported pose (refresh via Twin / pose-refresh)\n# ${path}`,
-                note: 'Reported value of the pose tunable — not a measurable.',
+                note: 'Pose tunable. Twin ghost is a visual draft before you confirm; scan/observe recalculates this same field.',
             };
         });
     }
@@ -163,6 +232,7 @@ export function tunableHandles(tagId, field, decl, row = {}) {
                 unit: unit || 'deg',
                 bounds: bounds || '—',
                 snippet: `lab.move_component(${JSON.stringify(tagId)}, ${JSON.stringify(path)}, <value>)`,
+                note: 'Lab observe / tracker recalculates this same tunable — not a measurable.',
             };
         });
     }
@@ -187,15 +257,18 @@ export function tunableHandles(tagId, field, decl, row = {}) {
  * @param {object} decl
  */
 export function measurableHandle(tagId, field, decl = {}) {
+    if (NON_MEASURABLE_FIELDS.has(field)) return null;
     const path = `measurables.${field}`;
+    const tensor = resolveMeasurableTensor(field, decl);
     return {
         path,
         field,
         widget: decl.widget || '—',
-        format: decl.format || '—',
-        domain: decl.domain || inferDomain(field, decl),
-        shape: decl.shape || decl.tensor_shape || '—',
+        domain: tensor.domain,
+        tensor,
+        tensorText: formatTensorCell(tensor),
         description: decl.description || decl.label || '—',
+        physical_interpretation: decl.physical_interpretation || '',
         snippet: `lab.measurable(${JSON.stringify(tagId)}, ${JSON.stringify(field)}).resolve(record=True)`,
     };
 }

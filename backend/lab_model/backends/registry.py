@@ -24,6 +24,8 @@ class BackendSpec:
     lab_view_path: str
     enabled: bool = True
     notes: str = ""
+    description: str = ""
+    image: str = ""
 
 
 @dataclass
@@ -125,6 +127,8 @@ class BackendRegistry:
                     lab_view_path=lvp,
                     enabled=bool(raw.get("enabled", True)),
                     notes=str(raw.get("notes") or "").strip(),
+                    description=str(raw.get("description") or "").strip(),
+                    image=str(raw.get("image") or "").strip(),
                 )
             )
         if not specs:
@@ -257,6 +261,8 @@ class BackendRegistry:
         row: Dict[str, Any] = {
             "backend_id": rt.backend_id,
             "label": rt.spec.label,
+            "description": rt.spec.description or None,
+            "image": rt.spec.image or None,
             "communicator": rt.manifest.communicator if rt.availability != "unavailable" else None,
             "lab_mode": rt.manifest.lab_mode if rt.availability != "unavailable" else None,
             "lab_view_path": rt.spec.lab_view_path,

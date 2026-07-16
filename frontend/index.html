@@ -1806,7 +1806,7 @@
         <nav>
             <a href="/twin" class="active">Twin UI</a>
             <a href="/operations">Operations</a>
-            <a href="/catalog">Catalog</a>
+            <a href="/wiki#backends">Backends</a>
             <a href="/wiki">Wiki</a>
             <a href="/debug" target="_blank">Debugger</a>
         </nav>
@@ -1845,7 +1845,7 @@
         </div>
 
         <div class="controls-area">
-            <button id="refresh-btn" class="btn btn-secondary" title="Re-localize component poses from the overhead / table camera (updates measurables.pose).">
+            <button id="refresh-btn" class="btn btn-secondary" title="Re-localize component poses from the overhead / table camera (recalculates tunables.reported_pose).">
                 <span class="material-icons-round">sync</span> Refresh Pose
             </button>
         </div>
@@ -1888,13 +1888,13 @@
                     <span class="material-icons-round" aria-hidden="true">save</span>
                     <span class="sr-only">Commit</span>
                 </button>
-                <button id="control-publish-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-publish-btn" title="Request publish to remote catalog">
+                <button id="control-publish-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-publish-btn" title="Request publish to Snapshots">
                     <span class="material-icons-round" aria-hidden="true">publish</span>
                     <span class="sr-only">Publish</span>
                 </button>
-                <button id="control-catalog-pin-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-catalog-pin-btn" title="Start from catalog pin (frozen snapshot)">
+                <button id="control-catalog-pin-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-catalog-pin-btn" title="Start from snapshot pin (frozen)">
                     <span class="material-icons-round" aria-hidden="true">push_pin</span>
-                    <span class="sr-only">Catalog pin</span>
+                    <span class="sr-only">Snapshot pin</span>
                 </button>
                 <span id="control-head-label" class="control-graph-head-pill" title="Branch HEAD">
                     <span class="control-graph-head-pill__tag">HEAD</span>

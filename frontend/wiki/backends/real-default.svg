@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Real bench">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#334155"/>
+      <stop offset="40%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="laser" cx="70%" cy="35%" r="40%">
+      <stop offset="0%" stop-color="#f43f5e" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#f43f5e" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#sky)"/>
+  <rect width="640" height="360" fill="url(#laser)"/>
+  <rect x="64" y="72" width="512" height="216" rx="10" fill="#111827" stroke="#64748b" stroke-opacity="0.5" stroke-width="2"/>
+  <rect x="96" y="108" width="160" height="100" rx="6" fill="#1f2937" stroke="#94a3b8" stroke-opacity="0.4"/>
+  <rect x="280" y="120" width="120" height="80" rx="6" fill="#1e293b" stroke="#cbd5e1" stroke-opacity="0.35"/>
+  <rect x="430" y="100" width="110" height="140" rx="6" fill="#0f172a" stroke="#f87171" stroke-opacity="0.55"/>
+  <path d="M176 158 L340 160 L485 150" fill="none" stroke="#fb7185" stroke-width="2.5" stroke-opacity="0.9"/>
+  <circle cx="176" cy="158" r="8" fill="#fecdd3"/>
+  <circle cx="485" cy="150" r="10" fill="#fda4af"/>
+  <text x="88" y="320" fill="#94a3b8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="600">REAL · hardware edge</text>
+</svg>

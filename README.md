@@ -32,7 +32,7 @@ Everything in this repository is easiest to understand as three cooperating role
 | Face | Where it runs | What it is for |
 |------|----------------|----------------|
 | **Client SDK (author laptop)** | Your notebook or the browser Twin | Write experiments in Python or click them in the UI. Acquire a **lease** so only one author owns the bench at a time. |
-| **Central coordinator (cloud server)** | FastAPI in this repo (`backend/main.py`) | Matchmaking: which backend is active, who holds the lease, which jobs are queued. Serves Twin, Catalog, Operations, and Wiki. |
+| **Central coordinator (cloud server)** | FastAPI in this repo (`backend/main.py`) | Matchmaking: which backend is active, who holds the lease, which jobs are queued. Serves Twin, Operations, and Wiki. |
 | **Edge agent (bench PC)** | Process next to the instruments (or a mock) | Owns the **LabCommunicator** — the bridge to cameras, motors, and the robot. Runs closed-loop optimization where latency matters. |
 
 A useful metaphor: the coordinator is **air-traffic control**; the edge is the
@@ -48,8 +48,7 @@ throttle cable directly to the passenger — it goes through the tower.
 | **Landing** | `/` | Orient yourself; pick a lab |
 | **Twin** | `/twin` | Direct control + digital twin of the table |
 | **Operations** | `/operations` | Watch jobs and edge health |
-| **Catalog** | `/catalog` | Frozen experiment configurations (pins) |
-| **Wiki** | `/wiki` | Capabilities: what each part can do, and what kernels *mean* physically |
+| **Wiki** | `/wiki` | **Learn** curriculum + **Backends** hub (components, kernels, snapshots) |
 
 **Python scripting** lives in the `cloudlabs` package — see
 [`packages/cloudlabs/README.md`](packages/cloudlabs/README.md) and the
@@ -73,13 +72,13 @@ pip install -e ./packages/cloudlabs
 python scripts/language/01_hello_lab.py
 ```
 
-Open **http://127.0.0.1:8000/** — Twin, Operations, Catalog, and Wiki are linked
+Open **http://127.0.0.1:8000/** — Twin, Operations, and Wiki are linked
 from the landing page.
 
 **New here?** Start in the in-app Wiki → **Learn**
 (http://127.0.0.1:8000/wiki#learn/why) — architecture, primitives, backends,
-and how to call the lab from Python. The **Catalog** tab lists live
-capabilities for whichever backend you select.
+and how to call the lab from Python. Wiki → **Backends** is the live hub for
+components, kernels, and frozen snapshots per lab.
 
 Point **`LAB_VIEW_PATH`** in `.env` at a lab deployment bundle when **running
 the server** (catalog, layout, lasers, recipes). That is operator setup, not
@@ -125,7 +124,7 @@ not a second programming language.
 
 ```text
 backend/          Coordinator API, lab_model (semantics), lab_communicator (hardware bridge)
-frontend/         Twin, Operations, Catalog, Wiki (static ES modules)
+frontend/         Twin, Operations, Wiki (static ES modules)
 packages/cloudlabs/   Author-facing Python SDK
 scripts/language/ Language demos    scripts/ops/    Edge agent, scaffolds, builders
 schemas/          Reference JSON, approved kernel manifests

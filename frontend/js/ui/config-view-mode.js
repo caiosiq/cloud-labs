@@ -288,7 +288,7 @@ export function syncConfigViewMode() {
             _els.sourceLabel.classList.remove('is-local');
             _els.sourceLabel.textContent = `Catalog · ${name}`;
             _els.sourceLabel.title =
-                'Frozen catalog pin — does not follow local branch heads';
+                'Frozen snapshot pin — does not follow local branch heads';
         } else if (store.control.viewingCommitId) {
             const repo = store.control.repoId || 'repo';
             const branch = store.control.branch || 'main';

@@ -5,12 +5,16 @@
     {
       "backend_id": "mock.default",
       "label": "Mock bench (default)",
+      "description": "In-process teaching simulator — full Twin, scripts, and closed-loop without hardware. Soft session leases unless CLOUDLABS_STRICT_LEASE=1.",
+      "image": "/static/wiki/backends/mock-default.png",
       "lab_view_path": "backend/lab_communicator/mock/lab_view",
       "enabled": true
     },
     {
       "backend_id": "real.default",
       "label": "Real bench (requires lab_automation)",
+      "description": "Hardware communicator for a physical optical bench. Requires lab_automation on this host. Exclusive lease for mutations.",
+      "image": "/static/wiki/backends/real-default.png",
       "lab_view_path": "backend/lab_communicator/real/lab_view/default",
       "enabled": true,
       "notes": "Marked unavailable at runtime when lab_automation_path is missing on this host."

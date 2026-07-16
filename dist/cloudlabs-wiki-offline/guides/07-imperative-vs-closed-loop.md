@@ -10,16 +10,24 @@ Experiments choose between two execution modes according to **latency** and
 ## Imperative — author in the loop
 
 Each step is a primitive round-trip: decide → edge acts → observe → decide
-again. Author-side Python (plots, SciPy, branching) sits between steps.
+again. Author-side Python (plots, SciPy, branching) sits between steps. You can
+pull a camera **measurable** onto the laptop and score it locally — no kernel
+and no edge `OPTIMIZE`:
 
 ```python
-lab.components.tag_20.move(x=12.5).wait_until_idle()
-score = lab.probe_kernel("tag_22", "camera_image", kernel_id="demo.image_mean_score")
+tensor = lab.components.tag_22.measurable("camera_image").resolve(record=True)
+# tensor.data is BGR HxWx3 uint8 — score / branch here, then set a tunable
+lab.set_tunable("tag_20", "tunables.nominal_motor_positions.1", next_angle)
+lab.wait_until_idle()
 ```
+
+See `scripts/language/06_client_side_measurable_loop.py` for a full `for`
+loop. (You may still use `probe_kernel` when you want a packaged measurement
+function without owning the closed-loop.)
 
 | | |
 |--|--|
-| **Appropriate for** | Setup, teaching, slow sweeps, branching that belongs on the laptop |
+| **Appropriate for** | Setup, teaching, slow sweeps, branching / SciPy that belongs on the laptop |
 | **Cost** | One network RTT per step; poor fit for hundreds of camera evaluations |
 
 ## Closed-loop — edge in the loop
@@ -44,11 +52,13 @@ lab.run_cobyla(
 ## Shared rule
 
 Both modes speak **primitives**. Closed-loop is not a second language; it is
-OPTIMIZE owning a long-running action on the edge.
+OPTIMIZE owning a long-running action on the edge. Imperative measurable loops
+keep the decision on the client and pay one RTT per iteration.
 
 ## Practice
 
-- Imperative: `01_hello_lab.py`
+- Imperative (fluent + one capture): `01_hello_lab.py`
+- Imperative (local measurable `for` loop): `06_client_side_measurable_loop.py`
 - Closed-loop: `03_closed_loop_catalog.py`
 - Jobs / DAG: `05_jobs_and_modes.py`
 

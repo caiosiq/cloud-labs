@@ -303,7 +303,8 @@ class LabCommunicator:
 
         - Acquires the state lock for the copy.
         - Injects software motor angles into
-          ``statecontrol.measurables.pose.motor_rotations`` (readback).
+          ``statecontrol.tunables.nominal_motor_positions`` (recalculated
+          from the motor tracker — not a measurable).
           Seeds missing ``statecontrol.tunables.nominal_motor_positions``
           keys only — never overwrites committed setpoints.
         - Normalizes ``state["holding"]`` so the UI never sees

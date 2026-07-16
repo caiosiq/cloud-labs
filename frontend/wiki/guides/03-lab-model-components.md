@@ -15,7 +15,7 @@ in ad hoc lab software:
 
 ![Parameters, tunables, and measurables](/static/wiki/guides/figures/component-triple.svg)
 
-*Identity (parameters); commanded and reported values of the same degrees of freedom (tunables); observations with no matching tunable (measurables).*
+*Identity (parameters); degrees of freedom you set via primitives (tunables); observations with no matching setpoint (measurables).*
 
 ### Parameters — identity
 
@@ -23,24 +23,33 @@ Catalog identity: type (mirror, camera, …), geometry hints, and which
 primitives are allowed. Parameters do not change because a motor was jogged;
 they change when the part definition changes.
 
-### Tunables — command and report
+### Tunables — degrees of freedom you control
 
-A **tunable** is a lab degree of freedom you can command—breadboard pose, motor
-setpoints, exposure intent, storage placement.
+A **tunable** is a lab degree of freedom you can set—breadboard pose, motor
+angles, exposure, storage placement. There is **one** value for that DOF in
+the model. Scripts and Twin panels change it by issuing **primitives** (or
+confirming a Twin edit)—not by silently patching lab JSON.
 
-Because the lab may not achieve the command exactly, each such quantity also
-has a **reported** value: what the bench currently believes that same DOF is.
-Refreshing pose from a camera scan, or reading motor encoders, updates the
-*reported* side of the tunable. That is **not** a measurable: there is still a
-1:1 link to the command you issued.
+**Lab observe recalculates the same tunable.** A camera scan or motor tracker
+updates that DOF’s value from the bench. That is **not** a measurable and
+**not** a second “reported tunable.” Getting data from the lab about a DOF is
+how you refresh that tunable (and whatever depends on it).
 
-In the Twin:
+#### Ghost vs solid in the Twin (UI only)
 
-- **Ghost** (semi-transparent) ≈ **commanded** pose (`nominal_pose`)
-- **Solid** ≈ **reported** pose (`reported_pose`) after refresh or motion settle
+In the Twin canvas:
 
-Mutations to commanded tunables go through **primitives** (or Twin panels that
-issue them). Clients do not silently patch lab JSON.
+- **Ghost** (semi-transparent) is your **visual control** for a pose tunable:
+  drag / place the intended pose, then **confirm** so the change is sent as a
+  primitive.
+- **Solid** shows the part’s **current** pose in lab state (after motion
+  settles or after a scan recalculates the tunable).
+
+Ghost is not a separate field in the lab model. It is how the UI lets you
+compose a change before you confirm it. Confirming a ghost runs a
+**primitive** on the live bench; it is not a ControlManager history
+**commit**. For saving layouts on the branch graph, see
+[Version control and lab history](#).
 
 ### Measurables — observations without a matching tunable
 
@@ -53,20 +62,21 @@ high-dimensional:
 - other sensor summaries that are not “the value of a setpoint”
 
 These refresh when you **record** / capture / probe—not when you merely
-re-read a motor angle.
+recalculate a motor angle or pose tunable from the lab.
 
-**Working rule:** scripts write commanded tunables via actions; they may
-**refresh** reported tunables from the lab; they **capture** measurables.
-Optimizers consume measurables (and may actuate tunables). A camera frame is
-not a free variable assigned in Python.
+**Working rule:** scripts **set** tunables via actions (or Twin confirm);
+the lab may **recalculate** those same tunables from observe; scripts
+**capture** measurables. Optimizers consume measurables (and may actuate
+tunables). A camera frame is not a free variable assigned in Python.
 
 ## Why the split matters
 
 | Ambiguity | Lab-model resolution |
 |-----------|----------------------|
-| Did the robot reach the commanded pose? | Compare `nominal_pose` (command) to `reported_pose` (same tunable family) |
-| Why does the ghost lead the solid? | Move in progress—command leads report until settle / refresh |
-| Is pose a measurable? | No—pose readback refreshes the tunable; cameras and scores are measurables |
+| Did my Twin move land? | Confirm ghost → primitive runs → solid catches up to the updated tunable |
+| Why is the ghost offset from the solid? | You are editing a proposed pose; it is not applied until you confirm |
+| Is pose a measurable? | No—pose is a tunable; scan/observe recalculates that tunable |
+| Is encoder angle a measurable? | No—it recalculates `nominal_motor_positions` (same tunable) |
 | Can a script invent a camera image? | No—only capture primitives refresh images |
 
 ## Telemetry (preview)
@@ -77,10 +87,10 @@ observation channel, covered with TeleOp and Optimize in the next chapters.
 
 ## Practice
 
-1. Wiki → **Catalog** → select a camera tag → read **Physical interpretation**.
+1. Wiki → **Backends** → open a lab → select a camera tag → read **Physical interpretation**.
 2. Inspect **Measurables**—for example `camera_image` as an optical observation,
-   not only an `HxWx3` array. Pose fields belong with **tunables** (command vs
-   report), not here.
-3. In the Twin, move a part and observe ghost (command) versus solid (report).
+   not only an `HxWx3` array. Pose and motor angles belong under **Tunables**.
+3. In the Twin, drag the **ghost**, confirm the move, and watch the **solid**
+   follow once the lab applies / settles that tunable.
 
 Next: [Primitives](#)—the actions that change the lab.

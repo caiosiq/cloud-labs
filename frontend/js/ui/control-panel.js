@@ -943,13 +943,13 @@ function updateStashUi() {
         const canPublish = Boolean(publishCommitId) && !viewing;
         _els.publishBtn.disabled = !canPublish;
         _els.publishBtn.title = canPublish
-            ? `Request publish of ${shortCommitId(publishCommitId)} to remote catalog`
+            ? `Request publish of ${shortCommitId(publishCommitId)} to Snapshots`
             : 'Select or apply a commit before publishing';
     }
     if (_els.catalogPinBtn) {
         _els.catalogPinBtn.disabled = false;
         _els.catalogPinBtn.title =
-            'Preview a frozen catalog pin (separate from local branch heads)';
+            'Preview a frozen snapshot pin (separate from local branch heads)';
     }
 
     const graphPanel = document.getElementById('control-graph-panel');
@@ -1280,7 +1280,7 @@ async function onSaveConfiguration() {
 
 async function onStartFromCatalogPin() {
     if (isDirty()) {
-        promptResolveDirty('opening a catalog pin');
+        promptResolveDirty('opening a snapshot pin');
         return;
     }
 
@@ -1289,14 +1289,14 @@ async function onStartFromCatalogPin() {
         const payload = await fetchCatalogPins();
         pins = Array.isArray(payload.pins) ? payload.pins : [];
     } catch (e) {
-        showErrorModal('Catalog pins', `Could not load pins: ${e.message || e}`);
+        showErrorModal('Snapshots', `Could not load pins: ${e.message || e}`);
         return;
     }
 
     if (!pins.length) {
         showErrorModal(
-            'Catalog pins',
-            'No approved catalog pins on this backend. Publish from Twin UI or seed pins in the catalog store.',
+            'Snapshots',
+            'No approved snapshot pins on this backend. Publish from Twin or seed pins in the snapshots store.',
             { kind: 'dismissible' },
         );
         return;
@@ -1315,7 +1315,7 @@ async function onStartFromCatalogPin() {
         'background:#181b21;border:1px solid rgba(59,130,246,0.35);border-radius:10px;padding:22px;max-width:480px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,0.65);';
 
     let html =
-        '<h3 style="margin:0 0 6px 0;color:#e2e8f0;font-size:16px;">Start from catalog pin</h3>' +
+        '<h3 style="margin:0 0 6px 0;color:#e2e8f0;font-size:16px;">Start from snapshot pin</h3>' +
         '<p style="margin:0 0 14px 0;color:#94a3b8;font-size:12px;line-height:1.45;">' +
         'Frozen approved snapshots — not live local branches. Selecting a pin opens a ' +
         'read-only preview of that commit (same as viewing a graph node).</p>' +
@@ -1329,7 +1329,7 @@ async function onStartFromCatalogPin() {
         html +=
             `<button type="button" class="btn btn-secondary catalog-pin-pick" data-pin="${id}" ` +
             `style="width:100%;justify-content:flex-start;text-align:left;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;">` +
-            `<span><span style="color:#93c5fd;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;margin-right:6px;">Catalog pin</span>${name}</span>` +
+            `<span><span style="color:#93c5fd;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;margin-right:6px;">Snapshot pin</span>${name}</span>` +
             `<span style="opacity:0.65;font-size:11px;font-family:ui-monospace,monospace;">${id} · ${origin} · ${commit}</span>` +
             `</button>`;
     }
@@ -1363,7 +1363,7 @@ async function applyCatalogPinPreview(pin) {
     const configurationId = String(pin.configuration_id || pin.commit || '').trim();
     const pinId = String(pin.pin_id || '').trim();
     if (!repoId || !configurationId || !pinId) {
-        showErrorModal('Catalog pin', 'Pin is incomplete (missing repo or commit).');
+        showErrorModal('Snapshot pin', 'Pin is incomplete (missing repo or commit).');
         return;
     }
 
@@ -1396,14 +1396,14 @@ async function applyCatalogPinPreview(pin) {
             message: pin.display_name || pinId,
         });
         log(
-            `Catalog pin <code>${escapeHtml(pinId)}</code> — frozen commit ` +
+            `Snapshot pin <code>${escapeHtml(pinId)}</code> — frozen commit ` +
                 `${shortCommitId(configurationId)} (does not follow local branch heads)`,
             'info',
         );
     } catch (e) {
         console.error('[control-panel] catalog pin preview failed', e);
         store.control.snapshotSource = null;
-        showErrorModal('Catalog pin', e.message || String(e));
+        showErrorModal('Snapshot pin', e.message || String(e));
     }
 }
 
@@ -1418,7 +1418,7 @@ async function onPublishToCatalog() {
         getAppliedCommitId() || store.control.selectedCommitId || store.control.liveHeadId;
     if (!configurationId) {
         showErrorModal(
-            'Publish to catalog',
+            'Publish to Snapshots',
             'No committed configuration to publish. Commit your layout first.',
             { kind: 'dismissible' },
         );
@@ -1427,12 +1427,12 @@ async function onPublishToCatalog() {
 
     const repo = store.control.repoId;
     const branch = store.control.branch || 'main';
-    const defaultMsg = `catalog pin ${shortCommitId(configurationId)}`;
-    const message = prompt('Catalog display name / message:', defaultMsg);
+    const defaultMsg = `snapshot pin ${shortCommitId(configurationId)}`;
+    const message = prompt('Snapshot display name / message:', defaultMsg);
     if (message == null) return;
 
     const pinIdRaw = prompt(
-        'Optional catalog pin id (leave blank for auto-generated id):',
+        'Optional snapshot pin id (leave blank for auto-generated id):',
         `${repo}-${shortCommitId(configurationId)}`,
     );
     if (pinIdRaw == null) return;
@@ -1445,14 +1445,14 @@ async function onPublishToCatalog() {
             branch,
             message: message.trim() || defaultMsg,
             pinId: pinIdRaw.trim() || undefined,
-            requestedBy: 'ui:twin',
+            requestedBy: undefined, // catalog defaults to getClientHolder('twin')
             backendId,
         });
 
         if (result.status === 'approved') {
             const pin = result.catalog_pin_id || '—';
             log(
-                `Published to catalog as pin <code>${pin}</code> — see <a href="/catalog" target="_blank">Catalog</a>`,
+                `Published as snapshot pin <code>${pin}</code> — see <a href="/wiki#backends" target="_blank">Wiki → Backends</a>`,
                 'info',
             );
         } else {

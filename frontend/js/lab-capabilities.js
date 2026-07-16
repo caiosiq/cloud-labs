@@ -15,9 +15,8 @@ export const TUNABLE_WRITE_PRIMITIVE_FALLBACK = {
 /** @type {Record<string, string>} */
 export const MEASURABLE_WIDGET_FALLBACK = {
     camera_image: 'ImageViewer',
-    motor_rotations: 'MotorRotationsReadout',
     last_optimization_score: 'NumberBadge',
-    pose: 'PoseReadout',
+    output_power_readback_mw: 'NumberBadge',
 };
 
 export const MEASURABLE_RECORD_PRIMITIVE_FALLBACK = 'RECORD_MEASURABLES';

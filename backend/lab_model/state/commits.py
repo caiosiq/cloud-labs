@@ -471,11 +471,11 @@ def commit_observed_measurables(
 ) -> None:
     """Merge a partial observation dict after ``RECORD_MEASURABLES``.
 
-    Keys follow catalog field names (``camera_image``, ``motor_rotations``,
-    ``last_optimization_score``, …). A legacy ``pose`` key is routed to
-    :func:`set_reported_pose` (pose is a reported tunable, not a measurable).
-    ``None`` values are skipped so callers can omit fields they did not
-    observe.
+    True measurable keys (``camera_image``, ``last_optimization_score``, …)
+    land in the measurables bucket. Legacy ``pose`` recalculates
+    :func:`set_reported_pose`. Legacy ``motor_rotations`` recalculates
+    ``tunables.nominal_motor_positions`` (not a measurable). ``None``
+    values are skipped.
     """
     if not observed:
         return
@@ -483,9 +483,23 @@ def commit_observed_measurables(
     entry = components.setdefault(tag_id, {})
     if "pose" in observed and observed["pose"] is not None:
         set_reported_pose(entry, observed["pose"])
+    if "motor_rotations" in observed and observed["motor_rotations"] is not None:
+        raw = observed["motor_rotations"]
+        if isinstance(raw, dict):
+            tun = tunables_bucket(entry)
+            nm = tun.setdefault("nominal_motor_positions", {})
+            if not isinstance(nm, dict):
+                nm = {}
+                tun["nominal_motor_positions"] = nm
+            for k, v in raw.items():
+                try:
+                    nm[str(k)] = float(v)
+                except (TypeError, ValueError):
+                    continue
     meas = measurables_bucket(entry)
+    skip = {"pose", "motor_rotations"}
     for key, val in observed.items():
-        if val is None or key == "pose":
+        if val is None or key in skip:
             continue
         meas[key] = val
 

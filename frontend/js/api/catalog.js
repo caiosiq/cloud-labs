@@ -1,6 +1,9 @@
 /**
  * Remote catalog API — approved pins and publish requests (Phase G.5).
  */
+import { getClientHolder } from '../state/client-id.js';
+import { backendHeaders } from '../state/backend-selection.js';
+
 
 async function parseJson(res) {
     const data = await res.json().catch(() => ({}));
@@ -16,14 +19,14 @@ async function parseJson(res) {
 }
 
 export async function fetchCatalogPins() {
-    const res = await fetch('/api/catalog/pins');
+    const res = await fetch('/api/catalog/pins', { headers: backendHeaders() });
     return parseJson(res);
 }
 
 export async function fetchPublishRequests(status = undefined) {
     let url = '/api/catalog/publish-requests';
     if (status) url += `?status=${encodeURIComponent(status)}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: backendHeaders() });
     return parseJson(res);
 }
 
@@ -41,14 +44,14 @@ export async function fetchPublishRequests(status = undefined) {
 export async function submitPublishRequest(opts) {
     const res = await fetch('/api/catalog/publish-requests', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: backendHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
             repo_id: opts.repoId,
             configuration_id: opts.configurationId,
             branch: opts.branch || 'main',
             message: opts.message || '',
             pin_id: opts.pinId || null,
-            requested_by: opts.requestedBy || 'ui:twin',
+            requested_by: opts.requestedBy || getClientHolder('twin'),
             backend_id: opts.backendId || null,
         }),
     });

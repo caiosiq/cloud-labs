@@ -14,9 +14,9 @@ Naming overlaps; keep these distinct:
 
 | Kind | Definition | Where it appears |
 |------|------------|------------------|
-| **Catalog TorchScript** | Shipped `.pt` + manifest (`demo.*`, `builtin.roi_centroid`, …) | Wiki **Catalog → Kernels** |
+| **Catalog TorchScript** | Shipped `.pt` + manifest (`demo.*`, `builtin.roi_centroid`, …) | Wiki **Backends → Kernels** |
 | **Session kernels** | Author an `nn.Module`, `register_kernel` for this lease | Scripts such as `04_session_kernels.py` |
-| **Runtime “builtin” hooks** | Python ensemble plumbing (`ensemble.eval.*`) | Listed in Catalog; not image models |
+| **Runtime “builtin” hooks** | Python ensemble plumbing (`ensemble.eval.*`) | Listed under Backends → Kernels; not image models |
 
 Ids such as `builtin.roi_centroid` are **TorchScript catalog** entries
 (“builtin” = product-shipped). A Wiki badge `builtin` on `ensemble.*` denotes
@@ -43,7 +43,7 @@ move because OPTIMIZE or MOVE (or another actuation primitive) said so.
 
 ## Practice
 
-1. Wiki → **Catalog** → **Kernels** → `builtin.roi_centroid` → **Physical
+1. Wiki → **Backends** → **Kernels** → `builtin.roi_centroid` → **Physical
    interpretation**.
 2. Run `scripts/language/02_kernels_and_match.py`.
 3. Compare with `04_session_kernels.py`—catalog shelf versus session-authored

@@ -5,6 +5,7 @@
  * scripts must pick one explicitly — it is no longer chosen via .env LAB_VIEW_PATH.
  */
 import { store } from './store.js';
+import { getClientId } from './client-id.js';
 
 const STORAGE_KEY = 'cloudlabs.selectedBackendId';
 
@@ -34,10 +35,15 @@ export function setSelectedBackendId(backendId) {
 }
 
 export async function fetchBackends() {
-    const res = await fetch('/api/backends');
+    const res = await fetch('/api/backends', {
+        headers: { 'X-CloudLabs-Client': getClientId() },
+    });
     if (!res.ok) throw new Error(`/api/backends → ${res.status}`);
     const data = await res.json();
     store.backends = Array.isArray(data.backends) ? data.backends : [];
+    if (data.policy && typeof data.policy === 'object') {
+        store.coordinatorPolicy = data.policy;
+    }
     return store.backends;
 }
 
@@ -66,7 +72,11 @@ export function withBackendQuery(url) {
 }
 
 export function backendHeaders(extra = {}) {
+    const headers = {
+        ...extra,
+        'X-CloudLabs-Client': getClientId(),
+    };
     const id = getSelectedBackendId();
-    if (!id) return extra;
-    return { ...extra, 'X-CloudLabs-Backend': id };
+    if (id) headers['X-CloudLabs-Backend'] = id;
+    return headers;
 }

@@ -55,7 +55,7 @@ as a second command language.
 ## Practice
 
 - Twin: start a live feed on a camera-capable tag.
-- Catalog: open a kernel and read **Physical interpretation**—that score is
+- Backends → Kernels: open a kernel and read **Physical interpretation**—that score is
   what OPTIMIZE can target.
 - Scripts: `03_closed_loop_catalog.py` for a minimal OPTIMIZE.
 

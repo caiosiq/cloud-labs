@@ -43,21 +43,16 @@ export function tunableValue(comp, fieldName) {
 }
 
 /**
- * Resolve a measurable field. Handles nested pose fields declared at catalog top level.
+ * Resolve a measurable field from statecontrol.
+ * Pose and motor angles are tunables (recalculated from the lab) — not measurables.
  * @param {object | undefined} comp
  * @param {string} fieldName
  */
 export function measurableValue(comp, fieldName) {
-    const meas = getMeasurables(comp);
-    if (fieldName === 'motor_rotations') {
-        const nested = meas.pose?.motor_rotations;
-        if (nested && typeof nested === 'object') return nested;
-        return meas.motor_rotations;
+    if (fieldName === 'motor_rotations' || fieldName === 'pose') {
+        return undefined;
     }
-    if (fieldName === 'pose') {
-        return meas.pose;
-    }
-    return meas[fieldName];
+    return getMeasurables(comp)[fieldName];
 }
 
 /**

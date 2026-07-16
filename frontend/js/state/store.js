@@ -5,6 +5,11 @@ export const store = {
     selectedBackendId: null,
     /** Cached rows from GET /api/backends. */
     backends: [],
+    /**
+     * Coordinator policy from GET /api/backends (solo / strict mock lease).
+     * @type {{ solo?: boolean, strict_lease_mock?: boolean } | null}
+     */
+    coordinatorPolicy: null,
     runtimeMode: null,
     /**
      * Ghost (canvas-truth) pose per tag: ``{x, y, rotation}``.

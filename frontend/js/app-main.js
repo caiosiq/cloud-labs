@@ -40,7 +40,10 @@ import {
     sendCommand,
 } from './api/commands.js';
 import { endTeleopBeacon } from './api/teleop.js';
+import { releaseSessionLeaseBeacon } from './api/session-lease.js';
 import { fetchLabState, initLabState, startLabStatePolling } from './state/lab-state.js';
+import { fetchBackends } from './state/backend-selection.js';
+import { getClientId } from './state/client-id.js';
 import { initBenchChromeBar, initBenchChromeBarInteraction } from './ui/bench-chrome-bar.js';
 import { initBackendPicker } from './ui/backend-picker.js';
 import { initRuntimeMode } from './ui/runtime-mode.js';
@@ -238,6 +241,18 @@ function initAlignmentDockTools() {
 
 function init() {
     log("Interface loaded.");
+    log(`Client id ${getClientId()}`, 'info');
+    void fetchBackends()
+        .then(() => {
+            const p = store.coordinatorPolicy;
+            if (p) {
+                log(
+                    `Coordinator policy: solo=${Boolean(p.solo)} strict_mock=${Boolean(p.strict_lease_mock)}`,
+                    'info',
+                );
+            }
+        })
+        .catch((e) => console.warn('fetchBackends (policy) failed', e));
     loadPlatformRegistries()
         .then((reg) => {
             console.info('[cloud-labs] platform registries loaded', {
@@ -275,8 +290,7 @@ function init() {
     // Phase 9c removed the lab-wide LIVE FEED pane.
     // Phase 9d removed the table-cam dock; cameras live in the component panel.
 
-    // Best-effort END_TELEOP on browser unload. Fires sendBeacon for every
-    // tag with an active TeleOp session so leases do not linger after tab close.
+    // Best-effort END_TELEOP + session-lease release on browser unload.
     const fireTeleopEndBeacons = () => {
         const comps = store.labState && store.labState.components;
         if (!comps) return;
@@ -286,8 +300,17 @@ function init() {
             }
         });
     };
-    window.addEventListener('pagehide', fireTeleopEndBeacons);
-    window.addEventListener('beforeunload', fireTeleopEndBeacons);
+    const fireSessionLeaseRelease = () => {
+        releaseSessionLeaseBeacon();
+    };
+    window.addEventListener('pagehide', () => {
+        fireTeleopEndBeacons();
+        fireSessionLeaseRelease();
+    });
+    window.addEventListener('beforeunload', () => {
+        fireTeleopEndBeacons();
+        fireSessionLeaseRelease();
+    });
 }
 
 // --- Command Console (ES module `js/command-console.js`): dependency injection ---

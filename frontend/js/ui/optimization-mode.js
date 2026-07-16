@@ -424,7 +424,6 @@ export function buildPayloadFromBuilder(b) {
 
 function buildJobSubmitOptions(b) {
     const opts = {
-        holder: 'ui:optimization-mode',
         initializationPolicy: 'force_reconcile',
     };
     const repo = store.control?.repoId;

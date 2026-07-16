@@ -13,7 +13,6 @@
             --text: #e8eef7;
             --muted: #8b9bb0;
             --accent: #4f8cff;
-            --accent-soft: rgba(79, 140, 255, 0.18);
         }
         * { box-sizing: border-box; }
         html, body {
@@ -41,33 +40,6 @@
             position: absolute;
             inset: 0;
             z-index: 0;
-        }
-
-        #landing-canvas-wrap {
-            position: absolute;
-            inset: -2%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0.38;
-            filter: saturate(0.85) contrast(1.05);
-            transform: scale(1.04);
-            transition: opacity 1.2s ease;
-        }
-
-        #landing-canvas-wrap.is-ready {
-            opacity: 0.48;
-        }
-
-        #landing-canvas-wrap.is-failed {
-            opacity: 0;
-        }
-
-        #optical-table {
-            display: block;
-            width: min(1200px, 110vw);
-            height: auto;
-            max-width: none;
         }
 
         .hero-sheen {
@@ -231,44 +203,29 @@
         }
 
         .below-links a:hover { text-decoration: underline; }
-
-        #landing-boot-hint {
-            position: absolute;
-            left: 16px;
-            bottom: 14px;
-            z-index: 5;
-            font-size: 10px;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            color: rgba(139, 155, 176, 0.55);
-        }
     </style>
 </head>
 <body>
     <section class="hero" aria-label="Cloud Labs">
         <div class="hero-atmosphere" aria-hidden="true">
-            <div id="landing-canvas-wrap">
-                <canvas id="optical-table" width="1000" height="700"></canvas>
-            </div>
             <div class="hero-sheen"></div>
             <div class="hero-vignette"></div>
         </div>
 
         <div class="hero-content">
             <h1 class="brand">Cloud Labs</h1>
-            <p class="tagline">A programmable optical bench — direct control, catalog pins, and closed-loop jobs on the edge.</p>
+            <p class="tagline">A programmable optical bench — direct control, snapshot pins, and closed-loop jobs on the edge.</p>
             <div class="cta-row">
                 <a class="cta-primary" href="/twin">Enter Twin</a>
                 <nav class="quiet-links" aria-label="Surfaces">
                     <a href="/operations">Operations</a>
                     <span class="dot">·</span>
-                    <a href="/catalog">Catalog</a>
+                    <a href="/wiki#backends">Backends</a>
                     <span class="dot">·</span>
                     <a href="/wiki">Wiki</a>
                 </nav>
             </div>
         </div>
-        <div id="landing-boot-hint"></div>
     </section>
 
     <section class="below">
@@ -279,11 +236,9 @@
         <div class="below-links">
             <a href="/twin">Twin UI</a>
             <a href="/operations">Operations</a>
-            <a href="/catalog">Catalog</a>
+            <a href="/wiki#backends">Backends</a>
             <a href="/wiki">Wiki</a>
         </div>
     </section>
-
-    <script type="module" src="/static/js/home/landing.js"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /**
- * Cloud Labs Wiki — Learn curriculum + live Catalog (components / kernels).
+ * Cloud Labs Wiki — Learn curriculum + live Backends hub.
  */
 import {
     fetchBackends,
@@ -19,6 +19,13 @@ import {
     tunableHandles,
 } from './handles.js';
 import { renderMarkdown } from './markdown.js';
+import {
+    getCatalogHostNodes,
+    hideBackendsHub,
+    initBackendsHub,
+    parseBackendsHash,
+    showBackendsHub,
+} from './backends-hub.js';
 
 const GUIDES_BASE = '/static/wiki/guides';
 
@@ -31,7 +38,9 @@ const guideListLabel = document.getElementById('guide-list-label');
 const compFilter = document.getElementById('comp-filter');
 const compList = document.getElementById('comp-list');
 const kernelList = document.getElementById('kernel-list');
-const detail = document.getElementById('detail');
+const detailMain = document.getElementById('detail');
+/** @type {HTMLElement|null} */
+let detail = detailMain;
 const tabComponents = document.getElementById('tab-components');
 const tabKernels = document.getElementById('tab-kernels');
 const componentsPane = document.getElementById('components-pane');
@@ -98,6 +107,12 @@ async function copyText(text, btn) {
     }
 }
 
+function normalizeSectionId(sectionId) {
+    // Legacy hashes → Backends hub.
+    if (sectionId === 'catalog' || sectionId === 'capabilities') return 'backends';
+    return sectionId;
+}
+
 function currentSection() {
     return (manifest?.sections || []).find((s) => s.id === activeSectionId) || null;
 }
@@ -109,19 +124,23 @@ function sectionChapters(section) {
 function readHash() {
     const raw = (window.location.hash || '').replace(/^#/, '');
     if (!raw) return null;
-    const [section, chapter] = raw.split('/');
-    return { section: section || null, chapter: chapter || null };
+    const parts = raw.split('/');
+    const section = parts[0] || null;
+    const rest = parts.slice(1).join('/') || null;
+    const chapter = parts[1] || null;
+    return { section, chapter, rest };
 }
 
 function writeHash() {
     if (!activeSectionId) return;
     const sec = currentSection();
-    if (sec?.mode === 'catalog') {
-        window.history.replaceState(null, '', `#${activeSectionId}`);
+    if (sec?.mode === 'backends') {
         return;
     }
     if (activeChapterId) {
         window.history.replaceState(null, '', `#${activeSectionId}/${activeChapterId}`);
+    } else {
+        window.history.replaceState(null, '', `#${activeSectionId}`);
     }
 }
 
@@ -140,7 +159,7 @@ function renderSectionBar() {
 }
 
 function setCatalogChrome(visible) {
-    if (catalogControls) catalogControls.hidden = !visible;
+    if (catalogControls) catalogControls.hidden = true; // picker lives in Backends hub now
     if (guidePane) guidePane.hidden = visible;
     if (!visible) {
         if (componentsPane) componentsPane.hidden = true;
@@ -148,31 +167,63 @@ function setCatalogChrome(visible) {
     }
 }
 
-async function setWikiSection(sectionId, chapterId = null) {
+function leaveCatalogFromHub() {
+    detail = detailMain;
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar && componentsPane && componentsPane.parentElement !== sidebar) {
+        sidebar.appendChild(componentsPane);
+    }
+    if (sidebar && kernelsPane && kernelsPane.parentElement !== sidebar) {
+        sidebar.appendChild(kernelsPane);
+    }
+    if (componentsPane) componentsPane.hidden = true;
+    if (kernelsPane) kernelsPane.hidden = true;
+}
+
+async function mountCatalogIntoHub(tab) {
+    const { side, detail: hostDetail } = getCatalogHostNodes();
+    if (!side || !hostDetail) return;
+
+    detail = hostDetail;
+    // Reparent list panes into hub sidebar host
+    side.innerHTML = '';
+    if (componentsPane) side.appendChild(componentsPane);
+    if (kernelsPane) side.appendChild(kernelsPane);
+
+    catalogTab = tab === 'kernels' ? 'kernels' : 'components';
+    if (!catalogLoaded) {
+        await ensureCatalog();
+    } else {
+        await loadCatalogForBackend();
+        await loadKernels();
+    }
+    setCatalogTab(catalogTab);
+}
+
+async function setWikiSection(sectionId, chapterId = null, hashRest = null) {
     const sections = manifest?.sections || [];
-    const sec = sections.find((s) => s.id === sectionId) || sections[0];
+    const normalized = normalizeSectionId(sectionId);
+    const sec = sections.find((s) => s.id === normalized) || sections[0];
     if (!sec) return;
     activeSectionId = sec.id;
 
-    if (sec.mode === 'catalog') {
+    if (sec.mode === 'backends') {
         activeChapterId = null;
-        setCatalogChrome(true);
+        setCatalogChrome(false);
+        if (guidePane) guidePane.hidden = true;
         renderSectionBar();
-        writeHash();
-        setCatalogTab(catalogTab);
-        if (!catalogLoaded) {
-            await ensureCatalog();
-        } else if (catalogTab === 'components') {
-            renderSidebar();
-            renderDetail();
-        } else {
-            renderKernelSidebar();
-            renderKernelDetail();
-        }
+        const route = parseBackendsHash(sectionId, hashRest);
+        await showBackendsHub(route || { backendId: null, tab: 'overview' });
         return;
     }
 
+    hideBackendsHub();
+    leaveCatalogFromHub();
     setCatalogChrome(false);
+    if (guidePane) guidePane.hidden = false;
+    const layout = document.querySelector('.layout');
+    if (layout) layout.hidden = false;
+
     const chapters = sectionChapters(sec);
     if (!chapterId || !chapters.some((c) => c.id === chapterId)) {
         chapterId = chapters[0]?.id || null;
@@ -199,7 +250,7 @@ function renderGuideSidebar() {
         .map((ch, idx) => {
             const active = ch.id === activeChapterId ? 'active' : '';
             return `
-                <button type="button" class="guide-item ${active}" data-chapter="${escapeHtml(ch.id)}">
+                <button type="button" class="guide-item ${active}" data-chapter="${escapeHtml(ch.id)}" style="animation-delay:${idx * 35}ms">
                     ${escapeHtml(`${idx + 1}. ${ch.title}`)}
                 </button>`;
         })
@@ -392,7 +443,7 @@ function enrichTunableDecl(field, decl) {
 function renderDetail() {
     const backendId = getSelectedBackendId();
     if (!backendId) {
-        detail.innerHTML = '<div class="empty">Choose a backend to load its capability catalog.</div>';
+        detail.innerHTML = '<div class="empty">Choose a backend to load its capabilities.</div>';
         return;
     }
     if (!selectedTag || !rowsByTag.has(selectedTag)) {
@@ -414,9 +465,9 @@ function renderDetail() {
     for (const [field, decl] of Object.entries(tunables)) {
         tunableRows.push(...tunableHandles(selectedTag, field, enrichTunableDecl(field, decl), row));
     }
-    const measurableRows = Object.entries(measurables).map(([field, decl]) =>
-        measurableHandle(selectedTag, field, decl || {}),
-    );
+    const measurableRows = Object.entries(measurables)
+        .map(([field, decl]) => measurableHandle(selectedTag, field, decl || {}))
+        .filter(Boolean);
     const params = parameterRows(row);
 
     detail.innerHTML = `
@@ -480,8 +531,8 @@ function renderDetail() {
                         <thead>
                             <tr>
                                 <th>Path</th>
-                                <th>Physical interpretation</th>
-                                <th>Format / shape</th>
+                                <th>What it measures</th>
+                                <th>Tensor (dtype · layout · axes)</th>
                                 <th>Domain</th>
                                 <th>Script handle</th>
                                 <th></th>
@@ -497,10 +548,11 @@ function renderDetail() {
                                         measurablePhysicalInterpretation(m.field, {
                                             description: m.description,
                                             domain: m.domain,
-                                            format: m.format,
+                                            physical_interpretation: m.physical_interpretation,
+                                            layout: m.tensor?.layout,
                                         }),
                                     )}</td>
-                                    <td class="mono">${escapeHtml(m.format)} / ${escapeHtml(m.shape)}</td>
+                                    <td class="mono" style="white-space:pre-line;font-size:11px;line-height:1.45">${escapeHtml(m.tensorText || '—')}</td>
                                     <td>${escapeHtml(m.domain)}</td>
                                     <td><pre class="snippet">${escapeHtml(m.snippet)}</pre></td>
                                     <td><button type="button" class="copy" data-copy-measurable="${i}">Copy</button></td>
@@ -540,8 +592,21 @@ function renderDetail() {
         </section>
 
         <section class="section">
-            <h3>Primitives</h3>
-            <p class="connect-hint mono">${escapeHtml(primitives.join(', ') || '—')}</p>
+            <h3>Primitives (${primitives.length})</h3>
+            <p class="connect-hint">
+                Declared actions for this component (catalog subset of the platform inventory).
+                See Learn → <em>Primitives</em> for the full Cloud Labs verb set.
+            </p>
+            ${
+                primitives.length
+                    ? `<div class="primitive-chip-grid">${primitives
+                          .map(
+                              (p) =>
+                                  `<code class="primitive-chip">${escapeHtml(String(p))}</code>`,
+                          )
+                          .join('')}</div>`
+                    : '<div class="empty">No primitives declared on this row.</div>'
+            }
         </section>
     `;
 
@@ -740,13 +805,20 @@ async function ensureCatalog() {
 
 async function boot() {
     try {
+        initBackendsHub({
+            onCatalogTab: (tab) => mountCatalogIntoHub(tab),
+            onLeaveCatalog: () => leaveCatalogFromHub(),
+        });
         manifest = await fetchJson(`${GUIDES_BASE}/manifest.json`);
         const hash = readHash();
         const defaultSection = hash?.section || manifest.defaultSection || 'learn';
         const defaultChapter = hash?.chapter || manifest.defaultChapter || null;
-        await setWikiSection(defaultSection, defaultChapter);
+        await setWikiSection(defaultSection, defaultChapter, hash?.rest || null);
     } catch (err) {
-        detail.innerHTML = `<div class="empty">Failed to load Wiki: ${escapeHtml(err.message)}</div>`;
+        const host = detail || detailMain;
+        if (host) {
+            host.innerHTML = `<div class="empty">Failed to load Wiki: ${escapeHtml(err.message)}</div>`;
+        }
     }
 }
 
@@ -754,7 +826,7 @@ backendSelect?.addEventListener('change', async () => {
     setSelectedBackendId(backendSelect.value);
     catalogLoaded = false;
     await ensureCatalog();
-    if (currentSection()?.mode === 'catalog') {
+    if (currentSection()?.mode === 'backends') {
         setCatalogTab(catalogTab);
     }
 });
@@ -766,7 +838,7 @@ tabKernels?.addEventListener('click', () => setCatalogTab('kernels'));
 window.addEventListener('hashchange', () => {
     const hash = readHash();
     if (!hash?.section) return;
-    setWikiSection(hash.section, hash.chapter);
+    void setWikiSection(hash.section, hash.chapter, hash.rest);
 });
 
 boot();

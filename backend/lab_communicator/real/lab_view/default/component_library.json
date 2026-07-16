@@ -27,16 +27,19 @@
               "widget": "TablePose"
             },
             "nominal_motor_positions": {
-              "widget": "JsonInspector"
+              "widget": "JsonInspector",
+              "unit": "deg",
+              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable — it is not a measurable."
             }
           },
           "measurables": {
-            "motor_rotations": {
-              "widget": "MotorRotationsReadout"
-            },
             "last_optimization_score": {
               "widget": "NumberBadge",
-              "format": ".3f"
+              "format": ".3f",
+              "dtype": "float64",
+              "layout": "scalar",
+              "domain": "scalar",
+              "physical_interpretation": "Last closed-loop / optimize scalar for this part. Captured, not commanded."
             }
           }
         },
@@ -134,7 +137,17 @@
           "measurables": {
             "camera_image": {
               "widget": "ImageViewer",
-              "format": "png"
+              "dtype": "uint8",
+              "layout": "bgr_hwc_uint8",
+              "domain": "spatial",
+              "shape": "(H, W, 3)",
+              "axes": {
+                "H": "rows (y), pixels top→bottom",
+                "W": "cols (x), pixels left→right",
+                "3": "BGR channels (OpenCV / kernel layout)"
+              },
+              "wire_format": "png",
+              "physical_interpretation": "Still frame from this camera. Kernels and lab.measurable(...).resolve() use BGR uint8 HxWx3; PNG is storage/wire only."
             }
           }
         },
@@ -235,7 +248,17 @@
           "measurables": {
             "camera_image": {
               "widget": "ImageViewer",
-              "format": "png"
+              "dtype": "uint8",
+              "layout": "bgr_hwc_uint8",
+              "domain": "spatial",
+              "shape": "(H, W, 3)",
+              "axes": {
+                "H": "rows (y), pixels top→bottom",
+                "W": "cols (x), pixels left→right",
+                "3": "BGR channels (OpenCV / kernel layout)"
+              },
+              "wire_format": "png",
+              "physical_interpretation": "Still frame from this camera. Kernels and lab.measurable(...).resolve() use BGR uint8 HxWx3; PNG is storage/wire only."
             }
           }
         },
@@ -324,16 +347,19 @@
               "widget": "TablePose"
             },
             "nominal_motor_positions": {
-              "widget": "JsonInspector"
+              "widget": "JsonInspector",
+              "unit": "deg",
+              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable — it is not a measurable."
             }
           },
           "measurables": {
-            "motor_rotations": {
-              "widget": "MotorRotationsReadout"
-            },
             "last_optimization_score": {
               "widget": "NumberBadge",
-              "format": ".3f"
+              "format": ".3f",
+              "dtype": "float64",
+              "layout": "scalar",
+              "domain": "scalar",
+              "physical_interpretation": "Last closed-loop / optimize scalar for this part. Captured, not commanded."
             }
           }
         },
@@ -566,16 +592,19 @@
               "widget": "TablePose"
             },
             "nominal_motor_positions": {
-              "widget": "JsonInspector"
+              "widget": "JsonInspector",
+              "unit": "deg",
+              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable — it is not a measurable."
             }
           },
           "measurables": {
-            "motor_rotations": {
-              "widget": "MotorRotationsReadout"
-            },
             "last_optimization_score": {
               "widget": "NumberBadge",
-              "format": ".3f"
+              "format": ".3f",
+              "dtype": "float64",
+              "layout": "scalar",
+              "domain": "scalar",
+              "physical_interpretation": "Last closed-loop / optimize scalar for this part. Captured, not commanded."
             }
           }
         },
@@ -662,16 +691,19 @@
               "widget": "TablePose"
             },
             "nominal_motor_positions": {
-              "widget": "JsonInspector"
+              "widget": "JsonInspector",
+              "unit": "deg",
+              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable — it is not a measurable."
             }
           },
           "measurables": {
-            "motor_rotations": {
-              "widget": "MotorRotationsReadout"
-            },
             "last_optimization_score": {
               "widget": "NumberBadge",
-              "format": ".3f"
+              "format": ".3f",
+              "dtype": "float64",
+              "layout": "scalar",
+              "domain": "scalar",
+              "physical_interpretation": "Last closed-loop / optimize scalar for this part. Captured, not commanded."
             }
           }
         },
@@ -905,16 +937,19 @@
               "widget": "TablePose"
             },
             "nominal_motor_positions": {
-              "widget": "JsonInspector"
+              "widget": "JsonInspector",
+              "unit": "deg",
+              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable — it is not a measurable."
             }
           },
           "measurables": {
-            "motor_rotations": {
-              "widget": "MotorRotationsReadout"
-            },
             "last_optimization_score": {
               "widget": "NumberBadge",
-              "format": ".3f"
+              "format": ".3f",
+              "dtype": "float64",
+              "layout": "scalar",
+              "domain": "scalar",
+              "physical_interpretation": "Last closed-loop / optimize scalar for this part. Captured, not commanded."
             }
           }
         },
@@ -1007,7 +1042,17 @@
           "measurables": {
             "camera_image": {
               "widget": "ImageViewer",
-              "format": "png"
+              "dtype": "uint8",
+              "layout": "bgr_hwc_uint8",
+              "domain": "spatial",
+              "shape": "(H, W, 3)",
+              "axes": {
+                "H": "rows (y), pixels top→bottom",
+                "W": "cols (x), pixels left→right",
+                "3": "BGR channels (OpenCV / kernel layout)"
+              },
+              "wire_format": "png",
+              "physical_interpretation": "Still frame from this camera. Kernels and lab.measurable(...).resolve() use BGR uint8 HxWx3; PNG is storage/wire only."
             }
           }
         },
@@ -1057,7 +1102,11 @@
             "output_power_readback_mw": {
               "widget": "NumberBadge",
               "format": ".2f",
-              "unit": "mW"
+              "unit": "mW",
+              "dtype": "float64",
+              "layout": "scalar",
+              "domain": "scalar",
+              "physical_interpretation": "Measured optical output power (mW). A captured sensor summary — not a command."
             }
           }
         },

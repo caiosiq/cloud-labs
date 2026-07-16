@@ -38,12 +38,14 @@ def materialize_measurable(
             backend_id=backend_id,
             fetch_url=fetch_url,
         )
-    if field == "pose":
-        return _materialize_pose(tag_id, value, backend_id=backend_id)
-    if field == "motor_rotations":
-        return _materialize_motor_rotations(tag_id, value, backend_id=backend_id)
     if field in ("output_power_readback_mw", "last_optimization_score"):
-        return _materialize_scalar(tag_id, field, value, backend_id=backend_id, unit="mw" if "mw" in field else "1")
+        return _materialize_scalar(
+            tag_id,
+            field,
+            value,
+            backend_id=backend_id,
+            unit="mw" if "mw" in field else "1",
+        )
     return _materialize_generic(tag_id, field, value, backend_id=backend_id)
 
 
@@ -80,53 +82,6 @@ def _materialize_camera_image(
             backend_id=backend_id,
             source=source,
         ),
-    )
-
-
-def _materialize_pose(
-    tag_id: str,
-    value: Any,
-    *,
-    backend_id: Optional[str],
-) -> MeasurableTensor:
-    pose = value if isinstance(value, dict) else {}
-    vec = [
-        float(pose.get("x", 0.0)),
-        float(pose.get("y", 0.0)),
-        float(pose.get("rotation", 0.0)),
-    ]
-    return MeasurableTensor(
-        tag_id=tag_id,
-        field="pose",
-        dtype="float64",
-        shape=(3,),
-        axes={"i": "dof"},
-        units={"x": "mm", "y": "mm", "rotation": "deg"},
-        domain="spatial",
-        data=vec,
-        provenance=_provenance(tag_id=tag_id, field="pose", backend_id=backend_id),
-    )
-
-
-def _materialize_motor_rotations(
-    tag_id: str,
-    value: Any,
-    *,
-    backend_id: Optional[str],
-) -> MeasurableTensor:
-    raw = value if isinstance(value, dict) else {}
-    keys = sorted(raw.keys(), key=lambda k: int(k) if str(k).isdigit() else str(k))
-    vec = [float(raw[k]) for k in keys]
-    return MeasurableTensor(
-        tag_id=tag_id,
-        field="motor_rotations",
-        dtype="float64",
-        shape=(len(vec),),
-        axes={"m": "motor_id"},
-        units={"m": "deg"},
-        domain="scalar",
-        data=vec,
-        provenance=_provenance(tag_id=tag_id, field="motor_rotations", backend_id=backend_id),
     )
 
 
