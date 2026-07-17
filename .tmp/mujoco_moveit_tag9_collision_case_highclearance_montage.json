@@ -1,0 +1,24 @@
+{
+  "ok": false,
+  "error": "MoveIt failed during moveit move above source: MoveIt error code 99999 (FAILURE); request_id=None; log=C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\logs\\mujoco_sessions\\mujoco_20260706_162422_25740.jsonl",
+  "result": null,
+  "tag_id": "tag_9",
+  "target": {
+    "x_mm": -163.0,
+    "y_mm": 118.5,
+    "rotation_deg": 0.0
+  },
+  "profile_id": "optical_housings",
+  "lab_view_path": "C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\.tmp\\mujoco_moveit_record_lab_view_20260706_162422",
+  "output_path": ".tmp\\mujoco_moveit_tag9_collision_case_highclearance_montage.bmp",
+  "frame_count": 2,
+  "frame_times_s": [
+    0.25000000000000017,
+    0.4300000000000003
+  ],
+  "diagnostic_log_path": "C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\logs\\mujoco_sessions\\mujoco_20260706_162422_25740.jsonl",
+  "stage_trace": [
+    "open gripper",
+    "moveit move above source"
+  ]
+}

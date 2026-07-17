@@ -60,6 +60,7 @@ export const store = {
     laserLineCoeffs: null,
     previousSystemStatus: 'IDLE',
     previousRuntimeErrorKey: null,
+    previousRuntimeProgressKey: null,
     /** Tags that were teleop-ready on the previous lab-state poll (ghost sync on exit). */
     previousTeleopReadyTags: new Set(),
     forceGhostSync: false,

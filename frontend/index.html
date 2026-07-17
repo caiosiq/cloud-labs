@@ -72,6 +72,7 @@
 
         /* --- Sidebar (Right) --- */
         #sidebar-right {
+            --system-monitor-height: 150px;
             width: 320px;
             height: 100vh;
             min-height: 0;
@@ -85,6 +86,51 @@
 
         #sidebar-right-pinned {
             flex-shrink: 0;
+        }
+
+        .system-monitor-panel {
+            height: var(--system-monitor-height);
+            min-height: 96px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-resize-handle {
+            flex: 0 0 9px;
+            position: relative;
+            cursor: row-resize;
+            background: #15181e;
+            border-bottom: 1px solid var(--border-color);
+            touch-action: none;
+        }
+
+        .sidebar-resize-handle::before {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 42px;
+            height: 3px;
+            transform: translate(-50%, -50%);
+            border-radius: 999px;
+            background: #3f4451;
+        }
+
+        .sidebar-resize-handle:hover::before,
+        .sidebar-resize-handle:focus-visible::before,
+        .sidebar-resize-handle.is-dragging::before {
+            background: var(--primary-accent);
+        }
+
+        .sidebar-resize-handle:focus-visible {
+            outline: 1px solid var(--primary-accent);
+            outline-offset: -1px;
+        }
+
+        body.sidebar-resizing {
+            cursor: row-resize;
+            user-select: none;
         }
 
         #sidebar-right-scroll {
@@ -884,7 +930,7 @@
         -->
 
         <!-- System Monitor -->
-        <div style="height: 150px; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
+        <div id="system-monitor-panel" class="system-monitor-panel">
             <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <span>System Monitor</span>
                 <div id="system-status-badge" class="system-status active"><span class="status-dot placed"></span> IDLE</div>
@@ -894,6 +940,9 @@
             </div>
         </div>
         </div>
+
+        <div id="sidebar-right-resize-handle" class="sidebar-resize-handle" role="separator"
+            aria-orientation="horizontal" aria-label="Resize System Monitor" tabindex="0"></div>
 
         <div id="sidebar-right-scroll">
         <div id="workspace-tabs" class="workspace-tabs">

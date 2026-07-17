@@ -194,6 +194,19 @@ class RuntimeModeBody(BaseModel):
     mode: str
 
 
+MUJOCO_RUNTIME_MODE_IDS = frozenset({"mujoco", "mujoco_moveit"})
+
+
+def _is_mujoco_runtime_mode(mode: Optional[str]) -> bool:
+    return str(mode or "").strip().lower() in MUJOCO_RUNTIME_MODE_IDS
+
+
+def _active_runtime_is_mujoco() -> bool:
+    return runtime_manager is not None and _is_mujoco_runtime_mode(
+        getattr(runtime_manager, "mode", None)
+    )
+
+
 class SessionReconcileApplyBody(BaseModel):
     tag_ids: List[str]
 
@@ -468,7 +481,13 @@ def _locked_runtime_mode_info() -> Dict[str, Any]:
             {"id": "mock", "label": "Mock UI", "enabled": False, "reason": reason},
             {
                 "id": "mujoco",
-                "label": "Simulator: MuJoCo",
+                "label": "MuJoCo: custom IK",
+                "enabled": False,
+                "reason": reason,
+            },
+            {
+                "id": "mujoco_moveit",
+                "label": "MuJoCo: MoveIt",
                 "enabled": False,
                 "reason": reason,
             },
@@ -1022,8 +1041,8 @@ async def ws_component_teleop_session(websocket: WebSocket, tag_id: str):
     if lab is None:
         await websocket.close(code=1013, reason="Lab not initialized")
         return
-    if runtime_manager is not None and runtime_manager.mode == "mujoco":
-        await websocket.close(code=4403, reason="TeleOp is unavailable in MuJoCo v1")
+    if _active_runtime_is_mujoco():
+        await websocket.close(code=4403, reason="TeleOp is unavailable in MuJoCo")
         return
     catalog_row = (lab.catalog_map or {}).get(tag_id)
     if not isinstance(catalog_row, dict):
@@ -1267,10 +1286,10 @@ async def save_lab_state(payload: StateName):
 async def load_lab_state(payload: StateName):
     if lab is None:
         raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
-    if runtime_manager is not None and runtime_manager.mode == "mujoco":
+    if _active_runtime_is_mujoco():
         raise HTTPException(
             status_code=409,
-            detail="Loading snapshots is unavailable in MuJoCo v1",
+            detail="Loading snapshots is unavailable in MuJoCo",
         )
 
     if hasattr(lab, "get_lab_state"):
@@ -1682,10 +1701,10 @@ async def save_recipe(recipe: Recipe):
 
 @app.post("/api/recipes/{recipe_id}/play")
 async def play_recipe(recipe_id: str, background_tasks: BackgroundTasks):
-    if runtime_manager is not None and runtime_manager.mode == "mujoco":
+    if _active_runtime_is_mujoco():
         raise HTTPException(
             status_code=409,
-            detail="Recipes are unavailable in MuJoCo v1",
+            detail="Recipes are unavailable in MuJoCo",
         )
     file_path = os.path.join(RECIPES_DIR, f"{recipe_id}.json")
     if not os.path.exists(file_path):

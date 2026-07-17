@@ -43,6 +43,7 @@ import { endTeleopBeacon } from './api/teleop.js';
 import { fetchLabState, initLabState, startLabStatePolling } from './state/lab-state.js';
 import { initBenchChromeBar } from './ui/bench-chrome-bar.js';
 import { initRuntimeMode, switchRuntimeMode } from './ui/runtime-mode.js';
+import { initSidebarResize } from './ui/sidebar-resize.js';
 import { initWorkspaceTabs } from './ui/workspace-tabs.js';
 import { initUpdateUI, updateUI } from './ui/updateUI.js';
 import {
@@ -68,6 +69,11 @@ console.info('[cloud-labs] frontend loaded', {
 });
 
 console.log('App main module loading...');
+
+
+function isMujocoRuntimeMode(mode) {
+    return mode === 'mujoco' || mode === 'mujoco_moveit';
+}
 
 
 // DOM Elements
@@ -115,6 +121,7 @@ void initRuntimeMode({
     showErrorModal,
 });
 initWorkspaceTabs();
+initSidebarResize();
 
 // Load guides before first render so junction scan includes pencil lines.
 loadGuideLinesFromStorage();
@@ -140,6 +147,7 @@ initPoseRefresh({
 initCommands({
     render: () => render(),
     updateContextPanel: (tagId) => updateContextPanel(tagId),
+    checkCollision: (id, x, y, opts) => checkCollision(id, x, y, opts),
 });
 initLabState({
     placementUiLabel,
@@ -331,7 +339,7 @@ function init() {
     if (resetOriginalStateBtn) {
         const resetOriginalDemo = async () => {
             try {
-                if (store.runtimeMode?.active_mode === 'mujoco') {
+                if (isMujocoRuntimeMode(store.runtimeMode?.active_mode)) {
                     const switched = await switchRuntimeMode('mock');
                     if (!switched || switched.active_mode !== 'mock') return;
                 }
@@ -344,7 +352,7 @@ function init() {
         };
 
         resetOriginalStateBtn.addEventListener('click', () => {
-            if (store.runtimeMode?.active_mode !== 'mujoco') {
+            if (!isMujocoRuntimeMode(store.runtimeMode?.active_mode)) {
                 void resetOriginalDemo();
                 return;
             }

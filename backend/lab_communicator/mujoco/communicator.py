@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Iterable, Mapping, Optional
 
 from lab_communicator.base import LabCommunicator
 from lab_communicator.mujoco.client import MuJoCoProcessClient
+from lab_communicator.mujoco.runtime import MUJOCO_PLANNER_CUSTOM_IK
 from lab_communicator.mujoco.scene import SceneSpec, build_scene_spec
 from lab_model.state.snapshot import LabPose
 
@@ -58,8 +59,10 @@ class MujocoLabCommunicator(LabCommunicator):
         client_factory: Callable[..., MuJoCoProcessClient] = MuJoCoProcessClient,
         show_viewer: Optional[bool] = None,
         realtime: Optional[bool] = None,
+        planner_backend: str = MUJOCO_PLANNER_CUSTOM_IK,
     ) -> None:
         super().__init__()
+        self.planner_backend = str(planner_backend or MUJOCO_PLANNER_CUSTOM_IK)
         rows = [_simulator_catalog_row(row) for row in catalog_rows]
         self.catalog = rows
         self.catalog_map = {
@@ -76,6 +79,7 @@ class MujocoLabCommunicator(LabCommunicator):
             self.scene,
             show_viewer=show_viewer,
             realtime=realtime,
+            planner_backend=self.planner_backend,
         )
         try:
             self.client.start()
@@ -90,6 +94,7 @@ class MujocoLabCommunicator(LabCommunicator):
         state = super().get_lab_state()
         with self._state_lock:
             state["last_runtime_error"] = copy.deepcopy(self._last_runtime_error)
+        state["simulator"] = self.simulator_status()
         return state
 
     def supports_primitive(self, action: str) -> bool:
@@ -117,12 +122,15 @@ class MujocoLabCommunicator(LabCommunicator):
                 target_rotation_deg=commanded.rotation,
             )
         except Exception as exc:
+            details = getattr(exc, "details", None)
             with self._state_lock:
                 self._last_runtime_error = {
                     "target_id": target_id,
                     "message": str(exc),
                     "timestamp": datetime.now().isoformat(),
                 }
+                if isinstance(details, Mapping):
+                    self._last_runtime_error["details"] = copy.deepcopy(dict(details))
             raise
         return LabPose(
             x=float(result["x_mm"]),

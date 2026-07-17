@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "description": "Deployment identity for this lab view bundle.",
+  "communicator": "mock",
+  "session_checkpoint": true,
+  "session_reconciliation": {
+    "position_mm": 2,
+    "yaw_deg": 5,
+    "stale_warning_hours": 168
+  }
+}

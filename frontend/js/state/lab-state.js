@@ -139,6 +139,18 @@ export async function fetchLabState() {
             const target = runtimeError.target_id ? ` for ${runtimeError.target_id}` : '';
             log(`Simulator move failed${target}: ${runtimeError.message || 'unknown error'}`, 'error');
         }
+        const simulatorProgress = store.labState.simulator?.progress;
+        const simulatorProgressKey =
+            simulatorProgress && typeof simulatorProgress === 'object'
+                ? `${simulatorProgress.timestamp || ''}|${simulatorProgress.request_id || ''}|${simulatorProgress.message || ''}`
+                : null;
+        if (
+            simulatorProgressKey &&
+            simulatorProgressKey !== store.previousRuntimeProgressKey
+        ) {
+            log(`Simulator: ${simulatorProgress.message || 'working...'}`, 'info');
+        }
+        store.previousRuntimeProgressKey = simulatorProgressKey;
 
         const teleopReadyNow = new Set();
         if (store.labState.components) {

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "description": "Mock table camera preview tuning (mirrors real TeleOp profile).",
+  "scale": 0.75,
+  "jpeg_quality": 72,
+  "target_fps": 30,
+  "max_inflight_requests": 3,
+  "teleop": {
+    "scale": 0.25,
+    "jpeg_quality": 50,
+    "poll_fps": 20,
+    "fetch_timeout_s": 0.08,
+    "stream_drain_frames": 12
+  }
+}

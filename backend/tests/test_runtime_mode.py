@@ -35,11 +35,15 @@ class FakeMock:
 
 
 class FakeMujoco(FakeMock):
-    def __init__(self, state, catalog, layout):
+    instances = []
+
+    def __init__(self, state, catalog, layout, **kwargs):
         del catalog, layout
         super().__init__()
         self.state = copy.deepcopy(state)
         self.stopped = False
+        self.planner_backend = kwargs.get("planner_backend")
+        self.instances.append(self)
 
     def simulator_status(self):
         return {
@@ -47,6 +51,7 @@ class FakeMujoco(FakeMock):
             "pid": 456,
             "viewer": True,
             "realtime": True,
+            "planner": self.planner_backend,
             "last_error": None,
         }
 
@@ -64,10 +69,12 @@ class RuntimeModeTests(unittest.TestCase):
         self,
         _layout,
     ):
+        FakeMujoco.instances.clear()
         mock = FakeMock()
         proxy = RuntimeLabProxy(mock)
         info = proxy.switch_mode("mujoco")
         self.assertEqual(info["active_mode"], "mujoco")
+        self.assertEqual(FakeMujoco.instances[-1].planner_backend, "custom_ik")
         self.assertFalse(info["physical_armed"])
         self.assertTrue(proxy.supports_primitive("MOVE_COMPONENT"))
         self.assertFalse(proxy.supports_primitive("PICK_COMPONENT"))
@@ -77,18 +84,33 @@ class RuntimeModeTests(unittest.TestCase):
         self.assertEqual(info["active_mode"], "mock")
         self.assertIsNotNone(mock.loaded)
 
+    @patch("lab_communicator.runtime_mode.load_layout_document", return_value={})
+    @patch("lab_communicator.runtime_mode.MujocoLabCommunicator", FakeMujoco)
+    def test_switches_mock_to_mujoco_moveit(
+        self,
+        _layout,
+    ):
+        FakeMujoco.instances.clear()
+        proxy = RuntimeLabProxy(FakeMock())
+        info = proxy.switch_mode("mujoco_moveit")
+        self.assertEqual(info["active_mode"], "mujoco_moveit")
+        self.assertEqual(FakeMujoco.instances[-1].planner_backend, "moveit")
+        mode_ids = {item["id"] for item in info["available_modes"]}
+        self.assertIn("mujoco", mode_ids)
+        self.assertIn("mujoco_moveit", mode_ids)
+
     def test_refuses_busy_and_reserved_switches(self):
         mock = FakeMock()
         proxy = RuntimeLabProxy(mock)
         mock.state["system_status"] = "BUSY"
         with self.assertRaises(RuntimeModeError):
-            proxy.switch_mode("mujoco")
+            proxy.switch_mode("mujoco_moveit")
 
         mock.state["system_status"] = "IDLE"
         _, token = proxy.reserve_operation()
         try:
             with self.assertRaises(RuntimeModeError):
-                proxy.switch_mode("mujoco")
+                proxy.switch_mode("mujoco_moveit")
         finally:
             proxy.release_operation(token)
 
@@ -100,4 +122,3 @@ class RuntimeModeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

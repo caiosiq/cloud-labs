@@ -1,0 +1,52 @@
+{
+  "id": "recipe_3_41_48_pm_916",
+  "name": "Recipe 3:41:48 PM",
+  "description": "",
+  "steps": [
+    {
+      "step": 1,
+      "action": "MOVE_COMPONENT",
+      "component": "tag_22_cam",
+      "target": null,
+      "parameters": {
+        "target_x": 580,
+        "target_y": 329,
+        "rotation": 180
+      }
+    },
+    {
+      "step": 2,
+      "action": "MOVE_COMPONENT",
+      "component": "tag_33",
+      "target": null,
+      "parameters": {
+        "target_x": 706,
+        "target_y": 200,
+        "rotation": 90
+      }
+    },
+    {
+      "step": 3,
+      "action": "MOVE_COMPONENT",
+      "component": "Mirror_1",
+      "target": null,
+      "parameters": {
+        "target_x": 241,
+        "target_y": 200,
+        "rotation": 45
+      }
+    },
+    {
+      "step": 4,
+      "action": "OPTIMIZE",
+      "component": "Mirror_1",
+      "target": null,
+      "parameters": {
+        "camera_number": 1,
+        "axis": "x",
+        "tolerance_ratio": 0.05,
+        "strategy": "NEWTON"
+      }
+    }
+  ]
+}

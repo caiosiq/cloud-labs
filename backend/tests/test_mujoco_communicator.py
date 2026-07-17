@@ -93,7 +93,15 @@ class MujocoCommunicatorTests(unittest.TestCase):
 
     def test_failure_preserves_nominal_pose(self):
         class FailingClient(FakeClient):
-            fail = True
+            def move_component(self, *args, **kwargs):
+                del args, kwargs
+                raise SimulatorProcessError(
+                    "planned failure",
+                    details={
+                        "request_id": "sim-request-1",
+                        "log_path": "logs/mujoco_sessions/example.jsonl",
+                    },
+                )
 
         communicator = self.make_communicator(FailingClient)
         before = copy.deepcopy(communicator.get_lab_state())
@@ -114,6 +122,14 @@ class MujocoCommunicatorTests(unittest.TestCase):
         self.assertEqual(after["system_status"], "IDLE")
         self.assertEqual(after["last_runtime_error"]["target_id"], "tag_pick")
         self.assertEqual(after["last_runtime_error"]["message"], "planned failure")
+        self.assertEqual(
+            after["last_runtime_error"]["details"]["request_id"],
+            "sim-request-1",
+        )
+        self.assertEqual(
+            after["last_runtime_error"]["details"]["log_path"],
+            "logs/mujoco_sessions/example.jsonl",
+        )
 
     def test_success_clears_previous_runtime_error(self):
         communicator = self.make_communicator()
@@ -134,6 +150,26 @@ class MujocoCommunicatorTests(unittest.TestCase):
             )
         )
         self.assertIsNone(communicator.get_lab_state()["last_runtime_error"])
+
+    def test_lab_state_exposes_simulator_progress(self):
+        class ProgressClient(FakeClient):
+            def status(self):
+                status = super().status()
+                status["progress"] = {
+                    "message": "MoveIt pre-pick feasibility seed 2/4.",
+                    "phase": "prepick_feasibility",
+                    "seed_index": 2,
+                    "seed_total": 4,
+                }
+                return status
+
+        communicator = self.make_communicator(ProgressClient)
+        state = communicator.get_lab_state()
+
+        self.assertEqual(
+            state["simulator"]["progress"]["message"],
+            "MoveIt pre-pick feasibility seed 2/4.",
+        )
 
 
 if __name__ == "__main__":

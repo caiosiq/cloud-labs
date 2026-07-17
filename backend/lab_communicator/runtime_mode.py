@@ -8,6 +8,10 @@ import uuid
 from typing import Any, Dict, Optional, Tuple
 
 from lab_communicator.mujoco import MujocoLabCommunicator
+from lab_communicator.mujoco.runtime import (
+    MUJOCO_PLANNER_CUSTOM_IK,
+    MUJOCO_PLANNER_MOVEIT,
+)
 from lab_communicator.shared.lab_view_config import load_layout_document
 from lab_model.domain.component import get_telemetry
 from lab_model.domain.holding import get_holding
@@ -15,6 +19,23 @@ from lab_model.domain.holding import get_holding
 
 class RuntimeModeError(RuntimeError):
     pass
+
+
+MUJOCO_CUSTOM_IK_MODE = "mujoco"
+MUJOCO_MOVEIT_MODE = "mujoco_moveit"
+MUJOCO_RUNTIME_MODES = frozenset({MUJOCO_CUSTOM_IK_MODE, MUJOCO_MOVEIT_MODE})
+
+
+def is_mujoco_runtime_mode(mode: str | None) -> bool:
+    return str(mode or "").strip().lower() in MUJOCO_RUNTIME_MODES
+
+
+def planner_backend_for_mode(mode: str) -> str:
+    return (
+        MUJOCO_PLANNER_MOVEIT
+        if str(mode).strip().lower() == MUJOCO_MOVEIT_MODE
+        else MUJOCO_PLANNER_CUSTOM_IK
+    )
 
 
 class RuntimeLabProxy:
@@ -76,7 +97,7 @@ class RuntimeLabProxy:
 
     def supports_primitive(self, action: str) -> bool:
         target = self.command_target()
-        if self._mode == "mujoco":
+        if is_mujoco_runtime_mode(self._mode):
             status = target.simulator_status()
             if not status.get("running"):
                 with self._lock:
@@ -101,7 +122,7 @@ class RuntimeLabProxy:
             "profile": None,
             "last_error": last_error,
         }
-        if mode == "mujoco":
+        if is_mujoco_runtime_mode(mode):
             status = getattr(active, "simulator_status", None)
             if callable(status):
                 simulator.update(status())
@@ -114,8 +135,13 @@ class RuntimeLabProxy:
             "available_modes": [
                 {"id": "mock", "label": "Mock UI", "enabled": True},
                 {
-                    "id": "mujoco",
-                    "label": "Simulator: MuJoCo",
+                    "id": MUJOCO_CUSTOM_IK_MODE,
+                    "label": "MuJoCo: custom IK",
+                    "enabled": True,
+                },
+                {
+                    "id": MUJOCO_MOVEIT_MODE,
+                    "label": "MuJoCo: MoveIt",
                     "enabled": True,
                 },
                 {
@@ -131,9 +157,9 @@ class RuntimeLabProxy:
 
     def switch_mode(self, requested_mode: str) -> Dict[str, Any]:
         mode = str(requested_mode or "").strip().lower()
-        if mode not in {"mock", "mujoco"}:
+        if mode not in {"mock", *MUJOCO_RUNTIME_MODES}:
             raise RuntimeModeError(
-                "Mock deployments may switch only between mock and mujoco"
+                "Mock deployments may switch only between mock and MuJoCo modes"
             )
         with self._lock:
             if mode == self._mode:
@@ -141,9 +167,10 @@ class RuntimeLabProxy:
             self._assert_switchable_locked()
             self._switching = True
             source = self._active
+            source_mode = self._mode
 
         try:
-            if mode == "mujoco":
+            if is_mujoco_runtime_mode(mode):
                 snapshot = source.get_lab_state()
                 catalog_rows = source.get_catalog()
                 try:
@@ -151,17 +178,24 @@ class RuntimeLabProxy:
                         snapshot,
                         catalog_rows,
                         load_layout_document(),
+                        planner_backend=planner_backend_for_mode(mode),
                     )
                 except Exception as exc:
                     with self._lock:
                         self._last_simulator_error = str(exc)
-                        self._active = self._mock
-                        self._mode = "mock"
+                        if source is self._mock:
+                            self._active = self._mock
+                            self._mode = "mock"
+                        else:
+                            self._active = source
+                            self._mode = source_mode
                     raise RuntimeModeError(str(exc)) from exc
                 with self._lock:
                     self._active = simulator
-                    self._mode = "mujoco"
+                    self._mode = mode
                     self._last_simulator_error = None
+                if source is not self._mock:
+                    source.shutdown_lab_processes()
             else:
                 snapshot = copy.deepcopy(source.get_lab_state())
                 self._mock.set_lab_state(snapshot)
@@ -203,7 +237,7 @@ class RuntimeLabProxy:
         with self._lock:
             active = self._active
             mode = self._mode
-        if mode == "mujoco":
+        if is_mujoco_runtime_mode(mode):
             try:
                 snapshot = active.get_lab_state()
                 self._mock.set_lab_state(snapshot)

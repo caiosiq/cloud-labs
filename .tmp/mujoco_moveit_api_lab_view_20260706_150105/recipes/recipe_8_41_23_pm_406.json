@@ -1,0 +1,29 @@
+{
+  "id": "recipe_8_41_23_pm_406",
+  "name": "Recipe 8:41:23 PM",
+  "description": "",
+  "steps": [
+    {
+      "step": 1,
+      "action": "MOVE_COMPONENT",
+      "component": "Mirror_1",
+      "target": null,
+      "parameters": {
+        "target_x": 77,
+        "target_y": 200,
+        "rotation": 45
+      }
+    },
+    {
+      "step": 2,
+      "action": "MOVE_COMPONENT",
+      "component": "BeamSplitter_1",
+      "target": null,
+      "parameters": {
+        "target_x": 348,
+        "target_y": 334,
+        "rotation": 90
+      }
+    }
+  ]
+}

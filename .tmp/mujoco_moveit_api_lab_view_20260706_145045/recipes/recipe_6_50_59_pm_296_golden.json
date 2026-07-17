@@ -1,0 +1,265 @@
+{
+  "recipe_id": "recipe_6_50_59_pm_296",
+  "timestamp": "2026-02-19T15:43:25.185452",
+  "components": {
+    "tag_22": {
+      "id": "tag_22",
+      "type": "OPTICAL_MIRROR",
+      "tunables": {
+        "presence": "breadboard",
+        "nominal_pose": {
+          "x": 235,
+          "y": 200,
+          "rotation": 45
+        },
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "NEWTON"
+        }
+      },
+      "measurables": {
+        "pose": {
+          "x": 234.95369576481937,
+          "y": 200.4479608163102,
+          "rotation": 45.22795385869188
+        },
+        "last_optimization_score": 0.99,
+        "last_optimized_pose": {
+          "x": 234.95369576481937,
+          "y": 200.4479608163102,
+          "rotation": 45.22795385869188
+        },
+        "camera_image": null
+      }
+    },
+    "tag_11": {
+      "id": "tag_11",
+      "type": "OPTICAL_LENS",
+      "tunables": {
+        "presence": "breadboard",
+        "nominal_pose": {
+          "x": 315,
+          "y": 200,
+          "rotation": 0
+        },
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
+      },
+      "measurables": {
+        "pose": {
+          "x": 314.62638270224335,
+          "y": 200.37992827336458,
+          "rotation": 0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
+    },
+    "tag_33": {
+      "id": "tag_33",
+      "type": "OPTICAL_BEAMSPLITTER",
+      "tunables": {
+        "presence": "breadboard",
+        "nominal_pose": {
+          "x": 706,
+          "y": 200,
+          "rotation": 90
+        },
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
+      },
+      "measurables": {
+        "pose": {
+          "x": 706.0258591266625,
+          "y": 200.31396227575104,
+          "rotation": 90
+        },
+        "last_optimization_score": 0.99,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
+    },
+    "tag_22_cam": {
+      "id": "tag_22_cam",
+      "type": "OPTICAL_CAMERA",
+      "tunables": {
+        "presence": "breadboard",
+        "nominal_pose": {
+          "x": 571,
+          "y": 200,
+          "rotation": 180
+        },
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "NEWTON"
+        }
+      },
+      "measurables": {
+        "pose": {
+          "x": 571.329807183218,
+          "y": 200.48773737309205,
+          "rotation": 180.98636435505614
+        },
+        "last_optimization_score": 0.99,
+        "last_optimized_pose": {
+          "x": 571.329807183218,
+          "y": 200.48773737309205,
+          "rotation": 180.98636435505614
+        },
+        "camera_image": null
+      }
+    },
+    "Thorlabs Mirror 1": {
+      "id": "tag_101",
+      "type": "OPTICAL_MIRROR",
+      "tunables": {
+        "presence": "breadboard",
+        "nominal_pose": {
+          "x": 309.88022069233944,
+          "y": 469,
+          "rotation": 0
+        },
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
+      },
+      "measurables": {
+        "pose": {
+          "x": 310.2144475632362,
+          "y": 468.6880745880262,
+          "rotation": 0
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
+    },
+    "Beam Splitter Cube": {
+      "id": "tag_103",
+      "type": "OPTICAL_BEAMSPLITTER",
+      "tunables": {
+        "presence": "breadboard",
+        "nominal_pose": {
+          "x": 424.8670071913858,
+          "y": 298,
+          "rotation": 0
+        },
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "NEWTON"
+        }
+      },
+      "measurables": {
+        "pose": {
+          "x": 425.05016796131633,
+          "y": 298.31557031151874,
+          "rotation": 1.12719299732873
+        },
+        "last_optimization_score": 0.99,
+        "last_optimized_pose": {
+          "x": 425.05016796131633,
+          "y": 298.31557031151874,
+          "rotation": 1.12719299732873
+        },
+        "camera_image": null
+      }
+    },
+    "Mirror_1": {
+      "id": "Mirror_1",
+      "type": "OPTICAL_MIRROR",
+      "tunables": {
+        "presence": "breadboard",
+        "nominal_pose": {
+          "x": 241,
+          "y": 200,
+          "rotation": 45
+        },
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "NEWTON"
+        }
+      },
+      "measurables": {
+        "pose": {
+          "x": 241.03851117573942,
+          "y": 199.77411272027103,
+          "rotation": 44.567298569768866
+        },
+        "last_optimization_score": 0.99,
+        "last_optimized_pose": {
+          "x": 241.03851117573942,
+          "y": 199.77411272027103,
+          "rotation": 44.567298569768866
+        },
+        "camera_image": null
+      }
+    },
+    "BeamSplitter_1": {
+      "id": "BeamSplitter_1",
+      "type": "OPTICAL_MIRROR",
+      "tunables": {
+        "presence": "breadboard",
+        "nominal_pose": {
+          "x": 253,
+          "y": 540,
+          "rotation": 90
+        },
+        "nominal_motor_positions": {},
+        "storage": {
+          "in_storage": false,
+          "slot": null
+        },
+        "placement": {
+          "mode": "MANUAL"
+        }
+      },
+      "measurables": {
+        "pose": {
+          "x": 253.07873642619379,
+          "y": 540.4163924581143,
+          "rotation": 90
+        },
+        "last_optimization_score": null,
+        "last_optimized_pose": null,
+        "camera_image": null
+      }
+    }
+  },
+  "metrics": {
+    "completion_status": "SUCCESS"
+  }
+}

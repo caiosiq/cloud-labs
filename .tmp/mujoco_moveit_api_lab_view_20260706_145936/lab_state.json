@@ -1,0 +1,485 @@
+{
+  "system_status": "IDLE",
+  "last_updated": "2026-07-06T14:59:40.118359",
+  "components": {
+    "tag_9": {
+      "id": "tag_9",
+      "type": "OPTICAL_FILTER",
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": 138.42857142857142,
+            "y": -90.08571428571429,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          }
+        },
+        "measurables": {
+          "pose": null,
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
+      },
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "ready": false,
+          "lease_ts": null,
+          "last_jog_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
+      }
+    },
+    "tag_2": {
+      "id": "tag_2",
+      "type": "OPTICAL_BEAMSPLITTER",
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": 0.0,
+            "y": 259.89999999999986,
+            "rotation": 45.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          }
+        },
+        "measurables": {
+          "pose": null,
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
+      },
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "ready": false,
+          "lease_ts": null,
+          "last_jog_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
+      }
+    },
+    "tag_20": {
+      "id": "tag_20",
+      "type": "OPTICAL_MIRROR",
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": 300.0,
+            "y": 200.0,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {
+            "1": 0.0,
+            "3": 0.0
+          },
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          }
+        },
+        "measurables": {
+          "pose": {
+            "x": 300.43896605648774,
+            "y": 200.47577642434604,
+            "rotation": 0.0,
+            "motor_rotations": {
+              "1": 0.0,
+              "3": 0.0
+            }
+          },
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
+      },
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "ready": false,
+          "lease_ts": null,
+          "last_jog_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
+      }
+    },
+    "tag_19": {
+      "id": "tag_19",
+      "type": "OPTICAL_CRYSTAL",
+      "statecontrol": {
+        "tunables": {
+          "presence": "breadboard",
+          "nominal_pose": {
+            "x": 407.3809523809525,
+            "y": -95.0,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          }
+        },
+        "measurables": {
+          "pose": null,
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
+      },
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "ready": false,
+          "lease_ts": null,
+          "last_jog_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
+      }
+    },
+    "tag_22": {
+      "id": "tag_22",
+      "type": "OPTICAL_CAMERA",
+      "statecontrol": {
+        "tunables": {
+          "presence": "off_table",
+          "nominal_pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          },
+          "exposure_time_ms": 200.0
+        },
+        "measurables": {
+          "pose": null,
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
+      },
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "ready": false,
+          "lease_ts": null,
+          "last_jog_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": "table_cam",
+            "resource_id": "cam_gripper_1",
+            "last_error": null
+          }
+        }
+      }
+    },
+    "tag_21": {
+      "id": "tag_21",
+      "type": "OPTICAL_CAMERA",
+      "statecontrol": {
+        "tunables": {
+          "presence": "off_table",
+          "nominal_pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          },
+          "exposure_time_ms": 200.0
+        },
+        "measurables": {
+          "pose": null,
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
+      },
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "ready": false,
+          "lease_ts": null,
+          "last_jog_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": "table_cam",
+            "resource_id": "cam_gripper_2",
+            "last_error": null
+          }
+        }
+      }
+    },
+    "tag_99": {
+      "id": "tag_99",
+      "type": "OPTICAL_CAMERA",
+      "statecontrol": {
+        "tunables": {
+          "presence": "off_table",
+          "nominal_pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          },
+          "exposure_time_ms": 50.0
+        },
+        "measurables": {
+          "pose": null,
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
+      },
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "ready": false,
+          "lease_ts": null,
+          "last_jog_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": "overhead",
+            "resource_id": "cam_table_top",
+            "last_error": null
+          }
+        }
+      }
+    },
+    "tag_50": {
+      "id": "tag_50",
+      "type": "LASER_SOURCE",
+      "statecontrol": {
+        "tunables": {
+          "presence": "off_table",
+          "nominal_pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "rotation": 0.0
+          },
+          "nominal_motor_positions": {},
+          "storage": {
+            "in_storage": false,
+            "slot": null
+          },
+          "placement": {
+            "mode": "MANUAL"
+          },
+          "output_power_mw": 0.0
+        },
+        "measurables": {
+          "pose": null,
+          "last_optimization_score": null,
+          "last_optimized_pose": null,
+          "camera_image": null
+        }
+      },
+      "telemetry": {
+        "teleop": {
+          "active": false,
+          "ready": false,
+          "lease_ts": null,
+          "last_jog_ts": null,
+          "last_error": null,
+          "mode": null,
+          "command": {
+            "target": null,
+            "speed": {
+              "linear_mm_s": 25.0,
+              "angular_deg_s": 15.0
+            },
+            "phase": "idle"
+          }
+        },
+        "live_feed": {
+          "stream": {
+            "connected": false,
+            "live": false,
+            "backend": null,
+            "resource_id": null,
+            "last_error": null
+          }
+        }
+      }
+    }
+  },
+  "holding": {
+    "tag_id": null,
+    "nominal_pose": null,
+    "requires_operator_confirm": false
+  },
+  "optimization_step": 0,
+  "optimization_run_dir": null,
+  "optimization_target_id": null,
+  "last_runtime_error": {
+    "target_id": "tag_9",
+    "message": "MoveIt failed during moveit move above source: MoveIt error code 99999 (FAILURE); request_id=176d15db7ce148a8880caac013cd0bf6; log=C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\logs\\mujoco_sessions\\mujoco_20260706_145938_2600.jsonl (sim_request_id=176d15db7ce148a8880caac013cd0bf6, log=C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\logs\\mujoco_sessions\\mujoco_20260706_145938_2600.jsonl)",
+    "timestamp": "2026-07-06T14:59:40.118359",
+    "details": {
+      "type": "error",
+      "request_id": "176d15db7ce148a8880caac013cd0bf6",
+      "error": "MoveIt failed during moveit move above source: MoveIt error code 99999 (FAILURE); request_id=176d15db7ce148a8880caac013cd0bf6; log=C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\logs\\mujoco_sessions\\mujoco_20260706_145938_2600.jsonl",
+      "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\backend\\lab_communicator\\mujoco\\runtime.py\", line 953, in _moveit_move_stage\n    plan = self.moveit.plan_pose(\n           ^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\backend\\lab_communicator\\mujoco\\moveit_client.py\", line 73, in plan_pose\n    raise MoveItPlannerError(str(message), details=result)\nlab_communicator.mujoco.moveit_client.MoveItPlannerError: MoveIt error code 99999 (FAILURE)\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\backend\\lab_communicator\\mujoco\\runtime.py\", line 1419, in simulation_process_main\n    result = runtime.pick_and_place(\n             ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\backend\\lab_communicator\\mujoco\\runtime.py\", line 1095, in pick_and_place\n    result = self._pick_and_place_moveit(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\backend\\lab_communicator\\mujoco\\runtime.py\", line 1278, in _pick_and_place_moveit\n    self._moveit_move_stage(\n  File \"C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\backend\\lab_communicator\\mujoco\\runtime.py\", line 973, in _moveit_move_stage\n    raise SimulatorError(\nlab_communicator.mujoco.runtime.SimulatorError: MoveIt failed during moveit move above source: MoveIt error code 99999 (FAILURE); request_id=176d15db7ce148a8880caac013cd0bf6; log=C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\logs\\mujoco_sessions\\mujoco_20260706_145938_2600.jsonl\n",
+      "log_path": "C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs\\logs\\mujoco_sessions\\mujoco_20260706_145938_2600.jsonl",
+      "stage_trace": [
+        "open gripper",
+        "moveit move above source"
+      ]
+    }
+  }
+}

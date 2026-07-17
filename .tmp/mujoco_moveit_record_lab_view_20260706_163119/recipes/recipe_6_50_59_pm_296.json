@@ -1,0 +1,76 @@
+{
+  "id": "recipe_6_50_59_pm_296",
+  "name": "Recipe 6:50:59 PM",
+  "description": "",
+  "steps": [
+    {
+      "step": 1,
+      "action": "MOVE_COMPONENT",
+      "component": "tag_22",
+      "target": null,
+      "parameters": {
+        "target_x": 235,
+        "target_y": 200,
+        "rotation": 45
+      }
+    },
+    {
+      "step": 2,
+      "action": "MOVE_COMPONENT",
+      "component": "tag_22_cam",
+      "target": null,
+      "parameters": {
+        "target_x": 571,
+        "target_y": 200,
+        "rotation": 180
+      }
+    },
+    {
+      "step": 3,
+      "action": "OPTIMIZE",
+      "component": "tag_22_cam",
+      "target": null,
+      "parameters": {
+        "camera_number": 1,
+        "axis": "x",
+        "tolerance_ratio": 0.05,
+        "strategy": "NEWTON"
+      }
+    },
+    {
+      "step": 4,
+      "action": "OPTIMIZE",
+      "component": "tag_22",
+      "target": null,
+      "parameters": {
+        "camera_number": 1,
+        "axis": "x",
+        "tolerance_ratio": 0.05,
+        "strategy": "NEWTON"
+      }
+    },
+    {
+      "step": 5,
+      "action": "OPTIMIZE",
+      "component": "Beam Splitter Cube",
+      "target": null,
+      "parameters": {
+        "camera_number": 1,
+        "axis": "x",
+        "tolerance_ratio": 0.05,
+        "strategy": "NEWTON"
+      }
+    },
+    {
+      "step": 6,
+      "action": "MOVE_COMPONENT",
+      "component": "tag_11",
+      "target": null,
+      "parameters": {
+        "target_x": 315,
+        "target_y": 200,
+        "rotation": 0
+      }
+    }
+  ]
+}

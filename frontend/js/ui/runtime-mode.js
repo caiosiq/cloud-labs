@@ -13,6 +13,10 @@ function detailFromResponse(data, fallback) {
     return fallback;
 }
 
+function isMujocoMode(mode) {
+    return mode === 'mujoco' || mode === 'mujoco_moveit';
+}
+
 function renderRuntimeMode(info) {
     const select = document.getElementById('runtime-mode-select');
     const status = document.getElementById('runtime-mode-status');
@@ -34,10 +38,10 @@ function renderRuntimeMode(info) {
     const simulator = info.simulator || {};
     if (status) {
         status.className = 'runtime-mode-status';
-        if (info.active_mode === 'mujoco' && simulator.running) {
+        if (isMujocoMode(info.active_mode) && simulator.running) {
             status.classList.add('runtime-mode-status--ready');
             status.title = `MuJoCo running (PID ${simulator.pid || 'unknown'})`;
-        } else if (info.active_mode === 'mujoco') {
+        } else if (isMujocoMode(info.active_mode)) {
             status.classList.add('runtime-mode-status--error');
             status.title =
                 simulator.last_error || info.last_simulator_error || 'MuJoCo unavailable';

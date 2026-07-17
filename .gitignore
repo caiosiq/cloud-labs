@@ -13,3 +13,6 @@ __pycache__/
 
 # Mock lab table-cam snapshots written by observe (paths stored in measurables)
 backend/lab_communicator/mock/lab_view/camera_captures/
+
+# Local simulator and MoveIt diagnostic traces
+logs/

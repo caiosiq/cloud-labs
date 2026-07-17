@@ -22,6 +22,7 @@ from lab_model.domain.component import (
 
 
 TABLE_SURFACE_Z_M = 0.12
+INCH_TO_M = 0.0254
 DEFAULT_WIDTH_MM = 62.0
 DEFAULT_DEPTH_MM = 62.0
 DEFAULT_HEIGHT_MM = 60.0
@@ -81,7 +82,28 @@ class SceneSpec:
     xml: str
     components: Dict[str, ComponentSpec]
     lab_bounds_mm: Dict[str, float]
+    table_bounds_mm: Dict[str, float]
     profile_id: str
+    static_collision_objects: tuple["StaticCollisionObjectSpec", ...] = ()
+
+
+@dataclass(frozen=True)
+class StaticCollisionObjectSpec:
+    object_id: str
+    geom_name: str
+    position_m: tuple[float, float, float]
+    dimensions_m: tuple[float, float, float]
+
+
+@dataclass(frozen=True)
+class VisualMeshSpec:
+    name: str
+    geom_name: str
+    mesh_path: Path
+    mesh_scale: float
+    position_m: tuple[float, float, float]
+    quat_wxyz: tuple[float, float, float, float]
+    rgba: tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
@@ -95,6 +117,9 @@ class SimulationProfile:
     collision_size_m: tuple[float, float, float] | None = None
     grasp_height_m: float | None = None
     rgba: tuple[float, float, float, float] | None = None
+    visual_meshes: tuple[VisualMeshSpec, ...] = ()
+    static_collision_objects: tuple[StaticCollisionObjectSpec, ...] = ()
+    table_bounds_mm: Dict[str, float] | None = None
 
 
 def _workspace_root() -> Path:
@@ -129,6 +154,223 @@ def _profile_vector(
     )
 
 
+def _rotation_matrix_from_quat_wxyz(
+    quat: tuple[float, float, float, float],
+) -> tuple[tuple[float, float, float], ...]:
+    w, x, y, z = quat
+    norm = math.sqrt(w * w + x * x + y * y + z * z)
+    if norm <= 0:
+        raise SceneValidationError("quaternion must be non-zero")
+    w, x, y, z = (w / norm, x / norm, y / norm, z / norm)
+    return (
+        (
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y - z * w),
+            2.0 * (x * z + y * w),
+        ),
+        (
+            2.0 * (x * y + z * w),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z - x * w),
+        ),
+        (
+            2.0 * (x * z - y * w),
+            2.0 * (y * z + x * w),
+            1.0 - 2.0 * (x * x + y * y),
+        ),
+    )
+
+
+def _mat_vec_mul(
+    matrix: tuple[tuple[float, float, float], ...],
+    vector: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return tuple(
+        sum(matrix[row][col] * vector[col] for col in range(3))
+        for row in range(3)
+    )
+
+
+def _parse_lab_frame_environment(
+    profile_path: Path,
+    frame: Mapping[str, Any],
+) -> tuple[
+    tuple[VisualMeshSpec, ...],
+    tuple[StaticCollisionObjectSpec, ...],
+    Dict[str, float],
+]:
+    outer_size_in = _profile_vector(
+        frame.get("outer_size_in"),
+        label="environment.lab_frame.outer_size_in",
+        length=3,
+    )
+    if any(value <= 0 for value in outer_size_in):
+        raise SceneValidationError("lab frame outer dimensions must be positive")
+    beam_size_in = _finite_float(
+        frame.get("beam_size_in", 0.75),
+        label="environment.lab_frame.beam_size_in",
+    )
+    safety_margin_in = _finite_float(
+        frame.get("safety_margin_in", 3.0),
+        label="environment.lab_frame.safety_margin_in",
+    )
+    camera_reserved_depth_in = _finite_float(
+        frame.get("camera_reserved_depth_in", 6.0),
+        label="environment.lab_frame.camera_reserved_depth_in",
+    )
+    if beam_size_in <= 0 or safety_margin_in < 0 or camera_reserved_depth_in < 0:
+        raise SceneValidationError("lab frame clearance dimensions are invalid")
+
+    outer_x_m, outer_y_m, outer_z_m = (
+        value * INCH_TO_M for value in outer_size_in
+    )
+    wall_thickness_m = (beam_size_in + safety_margin_in) * INCH_TO_M
+    top_thickness_m = (
+        camera_reserved_depth_in + safety_margin_in
+    ) * INCH_TO_M
+    center_z_m = TABLE_SURFACE_Z_M + outer_z_m / 2.0
+    static_objects = (
+        StaticCollisionObjectSpec(
+            object_id="lab_frame_left_clearance",
+            geom_name="lab_frame_left_clearance",
+            position_m=(
+                -outer_x_m / 2.0 + wall_thickness_m / 2.0,
+                0.0,
+                center_z_m,
+            ),
+            dimensions_m=(wall_thickness_m, outer_y_m, outer_z_m),
+        ),
+        StaticCollisionObjectSpec(
+            object_id="lab_frame_right_clearance",
+            geom_name="lab_frame_right_clearance",
+            position_m=(
+                outer_x_m / 2.0 - wall_thickness_m / 2.0,
+                0.0,
+                center_z_m,
+            ),
+            dimensions_m=(wall_thickness_m, outer_y_m, outer_z_m),
+        ),
+        StaticCollisionObjectSpec(
+            object_id="lab_frame_front_clearance",
+            geom_name="lab_frame_front_clearance",
+            position_m=(
+                0.0,
+                -outer_y_m / 2.0 + wall_thickness_m / 2.0,
+                center_z_m,
+            ),
+            dimensions_m=(outer_x_m, wall_thickness_m, outer_z_m),
+        ),
+        StaticCollisionObjectSpec(
+            object_id="lab_frame_back_clearance",
+            geom_name="lab_frame_back_clearance",
+            position_m=(
+                0.0,
+                outer_y_m / 2.0 - wall_thickness_m / 2.0,
+                center_z_m,
+            ),
+            dimensions_m=(outer_x_m, wall_thickness_m, outer_z_m),
+        ),
+        StaticCollisionObjectSpec(
+            object_id="lab_frame_top_camera_clearance",
+            geom_name="lab_frame_top_camera_clearance",
+            position_m=(
+                0.0,
+                0.0,
+                TABLE_SURFACE_Z_M + outer_z_m - top_thickness_m / 2.0,
+            ),
+            dimensions_m=(outer_x_m, outer_y_m, top_thickness_m),
+        ),
+    )
+    table_bounds_mm = {
+        "x_min": -outer_x_m * 500.0,
+        "x_max": outer_x_m * 500.0,
+        "y_min": -outer_y_m * 500.0,
+        "y_max": outer_y_m * 500.0,
+    }
+
+    visual_meshes: tuple[VisualMeshSpec, ...] = ()
+    visual_mesh = frame.get("visual_mesh")
+    if isinstance(visual_mesh, str) and visual_mesh.strip():
+        mesh_path = (profile_path.parent / visual_mesh).resolve()
+        if not mesh_path.is_file():
+            raise SceneValidationError(f"Lab frame visual mesh not found: {mesh_path}")
+        mesh_scale = _finite_float(
+            frame.get("visual_mesh_scale", 0.001),
+            label="environment.lab_frame.visual_mesh_scale",
+        )
+        if mesh_scale <= 0:
+            raise SceneValidationError("lab frame mesh scale must be positive")
+        bounds = frame.get("visual_mesh_bounds_mm")
+        if not isinstance(bounds, Mapping):
+            raise SceneValidationError(
+                "environment.lab_frame.visual_mesh_bounds_mm is required"
+            )
+        bounds_min = _profile_vector(
+            bounds.get("min"),
+            label="environment.lab_frame.visual_mesh_bounds_mm.min",
+            length=3,
+        )
+        bounds_max = _profile_vector(
+            bounds.get("max"),
+            label="environment.lab_frame.visual_mesh_bounds_mm.max",
+            length=3,
+        )
+        if any(low >= high for low, high in zip(bounds_min, bounds_max)):
+            raise SceneValidationError("lab frame visual mesh bounds are invalid")
+        quat = _profile_vector(
+            frame.get("visual_quat_wxyz", (1.0, 0.0, 0.0, 0.0)),
+            label="environment.lab_frame.visual_quat_wxyz",
+            length=4,
+        )
+        rgba = _profile_vector(
+            frame.get("visual_rgba", (0.72, 0.74, 0.76, 1.0)),
+            label="environment.lab_frame.visual_rgba",
+            length=4,
+        )
+        local_center = tuple(
+            ((low + high) / 2.0) * mesh_scale
+            for low, high in zip(bounds_min, bounds_max)
+        )
+        desired_center = (0.0, 0.0, center_z_m)
+        rotated_center = _mat_vec_mul(
+            _rotation_matrix_from_quat_wxyz(quat),
+            local_center,
+        )
+        visual_meshes = (
+            VisualMeshSpec(
+                name="lab_frame_visual_mesh",
+                geom_name="visual_lab_frame",
+                mesh_path=mesh_path,
+                mesh_scale=mesh_scale,
+                position_m=tuple(
+                    desired_center[index] - rotated_center[index]
+                    for index in range(3)
+                ),
+                quat_wxyz=quat,
+                rgba=rgba,
+            ),
+        )
+
+    return visual_meshes, static_objects, table_bounds_mm
+
+
+def _parse_profile_environment(
+    profile_path: Path,
+    document: Mapping[str, Any],
+) -> tuple[
+    tuple[VisualMeshSpec, ...],
+    tuple[StaticCollisionObjectSpec, ...],
+    Dict[str, float] | None,
+]:
+    environment = document.get("environment")
+    if not isinstance(environment, Mapping):
+        return (), (), None
+    frame = environment.get("lab_frame")
+    if not isinstance(frame, Mapping):
+        return (), (), None
+    return _parse_lab_frame_environment(profile_path, frame)
+
+
 def load_simulation_profile(profile_id: str | None = None) -> SimulationProfile:
     selected = str(
         profile_id or os.getenv("CLOUDLAB_SIM_PROFILE") or DEFAULT_PROFILE_ID
@@ -148,6 +390,9 @@ def load_simulation_profile(profile_id: str | None = None) -> SimulationProfile:
         ) from exc
     if not isinstance(document, Mapping):
         raise SceneValidationError(f"Simulation profile {path} must be an object")
+    visual_meshes, static_collision_objects, table_bounds_mm = (
+        _parse_profile_environment(path, document)
+    )
     declared_id = str(document.get("id") or selected)
     if declared_id != selected:
         raise SceneValidationError(
@@ -168,6 +413,9 @@ def load_simulation_profile(profile_id: str | None = None) -> SimulationProfile:
             profile_id=selected,
             kind=kind,
             mass_kg=mass_kg,
+            visual_meshes=visual_meshes,
+            static_collision_objects=static_collision_objects,
+            table_bounds_mm=table_bounds_mm,
         )
     if kind != "mesh":
         raise SceneValidationError(
@@ -237,6 +485,9 @@ def load_simulation_profile(profile_id: str | None = None) -> SimulationProfile:
         collision_size_m=tuple(value / 1000.0 for value in collision_mm),
         grasp_height_m=grasp_height_mm / 1000.0,
         rgba=rgba,
+        visual_meshes=visual_meshes,
+        static_collision_objects=static_collision_objects,
+        table_bounds_mm=table_bounds_mm,
     )
 
 
@@ -426,10 +677,18 @@ def build_scene_spec(
 
     model_path = xarm_model_path()
     asset_dir = model_path.parent / "assets"
-    x_center_m = (bounds["x_min"] + bounds["x_max"]) / 2000.0
-    y_center_m = (bounds["y_min"] + bounds["y_max"]) / 2000.0
-    half_x_m = (bounds["x_max"] - bounds["x_min"]) / 2000.0
-    half_y_m = (bounds["y_max"] - bounds["y_min"]) / 2000.0
+    table_bounds = dict(bounds)
+    if profile.table_bounds_mm is not None:
+        table_bounds = {
+            "x_min": min(bounds["x_min"], profile.table_bounds_mm["x_min"]),
+            "x_max": max(bounds["x_max"], profile.table_bounds_mm["x_max"]),
+            "y_min": min(bounds["y_min"], profile.table_bounds_mm["y_min"]),
+            "y_max": max(bounds["y_max"], profile.table_bounds_mm["y_max"]),
+        }
+    x_center_m = (table_bounds["x_min"] + table_bounds["x_max"]) / 2000.0
+    y_center_m = (table_bounds["y_min"] + table_bounds["y_max"]) / 2000.0
+    half_x_m = (table_bounds["x_max"] - table_bounds["x_min"]) / 2000.0
+    half_y_m = (table_bounds["y_max"] - table_bounds["y_min"]) / 2000.0
 
     bodies: list[str] = []
     welds: list[str] = []
@@ -495,6 +754,13 @@ def build_scene_spec(
         if profile.mesh_path
         else ""
     )}
+    {''.join(
+        f'''
+    <mesh name="{html.escape(mesh.name)}"
+      file="{html.escape(mesh.mesh_path.as_posix())}"
+      scale="{mesh.mesh_scale:.8f} {mesh.mesh_scale:.8f} {mesh.mesh_scale:.8f}"/>'''
+        for mesh in profile.visual_meshes
+    )}
     <texture type="skybox" builtin="gradient" rgb1="0.28 0.42 0.62"
       rgb2="0.02 0.025 0.05" width="512" height="3072"/>
     <texture type="2d" name="table_grid" builtin="checker" mark="edge"
@@ -510,6 +776,24 @@ def build_scene_spec(
       pos="{x_center_m:.8f} {y_center_m:.8f} 0.08"
       size="{half_x_m:.8f} {half_y_m:.8f} 0.04"
       material="table_material" friction="1 0.01 0.001"/>
+    {''.join(
+        f'''
+    <geom name="{html.escape(mesh.geom_name)}" type="mesh"
+      mesh="{html.escape(mesh.name)}"
+      pos="{mesh.position_m[0]:.8f} {mesh.position_m[1]:.8f} {mesh.position_m[2]:.8f}"
+      quat="{mesh.quat_wxyz[0]:.8f} {mesh.quat_wxyz[1]:.8f} {mesh.quat_wxyz[2]:.8f} {mesh.quat_wxyz[3]:.8f}"
+      rgba="{mesh.rgba[0]:.5f} {mesh.rgba[1]:.5f} {mesh.rgba[2]:.5f} {mesh.rgba[3]:.5f}"
+      contype="0" conaffinity="0"/>'''
+        for mesh in profile.visual_meshes
+    )}
+    {''.join(
+        f'''
+    <geom name="{html.escape(obj.geom_name)}" type="box"
+      pos="{obj.position_m[0]:.8f} {obj.position_m[1]:.8f} {obj.position_m[2]:.8f}"
+      size="{obj.dimensions_m[0] / 2.0:.8f} {obj.dimensions_m[1] / 2.0:.8f} {obj.dimensions_m[2] / 2.0:.8f}"
+      rgba="0 0 0 0" friction="1 0.01 0.001"/>'''
+        for obj in profile.static_collision_objects
+    )}
     {''.join(bodies)}
   </worldbody>
   <equality>
@@ -521,5 +805,7 @@ def build_scene_spec(
         xml=xml,
         components=specs,
         lab_bounds_mm=bounds,
+        table_bounds_mm=table_bounds,
         profile_id=profile.profile_id,
+        static_collision_objects=profile.static_collision_objects,
     )
