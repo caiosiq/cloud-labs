@@ -6,15 +6,14 @@
 
 **Related docs:**
 
-- [`PROGRAMMABLE_LAB_VISION.md`](./PROGRAMMABLE_LAB_VISION.md) — OPU analogy, three layers, component pillars
-- [`Run_CloudLab_Scripts.md`](./Run_CloudLab_Scripts.md) — imperative Python SDK (`connect` / `prepare` / `run_optimize`)
+- [`EDGE_CONTRACT_AND_UC_LIVE_PLANE.md`](./EDGE_CONTRACT_AND_UC_LIVE_PLANE.md) — Edge Contract + UC live plane
+- [`../packages/cloudlabs/README.md`](../packages/cloudlabs/README.md) — imperative Python SDK (`connect` / primitives)
 - [`SESSION_KERNELS.md`](./SESSION_KERNELS.md) — author-defined TorchScript packages
 - [`ENSEMBLE_OPTIMIZATION.md`](./ENSEMBLE_OPTIMIZATION.md) — closed-loop ensemble session (implemented)
-- [`CONTROL_RUNTIME_AND_VERSIONING.md`](./CONTROL_RUNTIME_AND_VERSIONING.md) — runtime vs configuration
-- [`LAB_SURFACES_VC_AND_INITIALIZATION.md`](./LAB_SURFACES_VC_AND_INITIALIZATION.md) — Twin / Operations / Catalog split, VC tiers, init policy
-- [`universal_component_architecture.md`](./universal_component_architecture.md) — control vs data plane
-- [`../backend/lab_model/domain/holding.py`](../backend/lab_model/domain/holding.py) — `system_status` constants
-- [`../backend/lab_model/state/state_machine.py`](../backend/lab_model/state/state_machine.py) — primitive refusals
+- [`LAB_SURFACES_VC_AND_INITIALIZATION.md`](./LAB_SURFACES_VC_AND_INITIALIZATION.md) — Twin / Operations / Catalog, VC, init policy
+- Wiki Learn — OPU / three faces
+- [`../backend/lab_model/language/domain/holding.py`](../backend/lab_model/language/domain/holding.py) — `system_status` constants
+- [`../backend/lab_model/coordinator/state/state_machine.py`](../backend/lab_model/coordinator/state/state_machine.py) — primitive refusals
 
 > **Critical rule (Phase B+):** **Every** hardware-affecting entry path — UI, imperative HTTP script, compiled batch job, closed-loop optimizer — must acquire an **exclusive session lease** on exactly one **backend** before issuing primitives. See §4.
 
@@ -171,7 +170,7 @@ with cloudlabs.session(backend="real.chicago_bench_1", mode="imperative") as lab
 
 **Examples:**
 
-- LLM-generated recipe ([`import_json.md`](./import_json.md)) compiled to primitives.
+- LLM-generated or imported recipe compiled to primitives.
 - Parameter sweep: 50 configurations × capture × log.
 - Multi-hour pipeline with retries and structured job trace.
 
@@ -237,7 +236,7 @@ with cloudlabs.session(backend="real.chicago_bench_1", mode="imperative") as lab
 - Ensemble optimization ([`ENSEMBLE_OPTIMIZATION.md`](./ENSEMBLE_OPTIMIZATION.md)).
 - Future: beam stabilization, adaptive optics loop.
 
-**Control flow location:** **Edge** (`lab_model/optimization/session.py` + communicator backend).
+**Control flow location:** **Edge** (`lab_model/execution/optimization/session.py` + communicator backend).
 
 **Data flow:**
 
@@ -286,7 +285,7 @@ with cloudlabs.session(backend="real.chicago_bench_1", mode="imperative") as lab
 |--------|-------|
 | Entry | `POST /api/jobs/submit` closed-loop `OPTIMIZE`, or `POST /api/command` `action=OPTIMIZE` |
 | Status | Job record + `system_status=OPTIMIZING`, `optimization_session` |
-| Edge loop | `run_ensemble_optimization` in `lab_model/optimization/session.py` |
+| Edge loop | `run_ensemble_optimization` in `lab_model/execution/optimization/session.py` |
 | Live UI | Optimization mode telemetry panel; Operations job progress |
 | Lease | **Job/session lease** (export session packages → release → job acquires) — §4 |
 | SDK | `lab.run_cobyla(...)` / `lab.run_optimize(...)` |
@@ -297,9 +296,9 @@ with cloudlabs.session(backend="real.chicago_bench_1", mode="imperative") as lab
 
 ### 4.1. Problem statement *(historical — lease now ships on mock)*
 
-[`Run_CloudLab_Scripts.md`](./Run_CloudLab_Scripts.md) asked whether scripts and UI can share the robot. **Before Phase B:**
+The SDK / Twin lease model asked whether scripts and UI can share the robot. **Before Phase B:**
 
-- Primitives were refused when `system_status` is `BUSY` or `OPTIMIZING` ([`state_machine.py`](../backend/lab_model/state/state_machine.py)).
+- Primitives were refused when `system_status` is `BUSY` or `OPTIMIZING` ([`state_machine.py`](../backend/lab_model/coordinator/state/state_machine.py)).
 - There was **no backend-level exclusive lock**.
 - A **compiled job** and an **imperative HTTP script** could interleave primitives on `real.<bench>` if both saw `IDLE`.
 - **UI clicks** and **notebook cells** used the same `POST /api/command` path — last-writer-wins on a real table is **unsafe**.
@@ -348,7 +347,7 @@ expire(lease_id)
 
 ### 4.4. Interaction with `system_status`
 
-`system_status` *(today)* in [`holding.py`](../backend/lab_model/domain/holding.py):
+`system_status` *(today)* in [`holding.py`](../backend/lab_model/language/domain/holding.py):
 
 | Value | Meaning | Lease interaction |
 |-------|---------|-------------------|
@@ -501,7 +500,7 @@ Failures are recorded in ``job.result.post_commit_error`` without failing the jo
 | Recipe editor | UI-only sequence | Export as compiled DAG job |
 | Mock communicator | Safe to share | Lease optional (config flag) |
 
-**Implemented recently (closed-loop telemetry):** `optimization_session.trace` with `eval`, `loss`, `values` — use as **Job telemetry prototype** ([`optimize_ensemble.py`](../backend/lab_model/orchestration/optimize_ensemble.py)).
+**Implemented recently (closed-loop telemetry):** `optimization_session.trace` with `eval`, `loss`, `values` — use as **Job telemetry prototype** ([`optimize_ensemble.py`](../backend/lab_model/execution/orchestration/optimize_ensemble.py)).
 
 **Implemented recently (live poll):** Mock ensemble releases state lock between evals so `lab-state` updates during `OPTIMIZING` — required for closed-loop monitoring.
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import unittest
 
-from lab_model.domain.component import new_component_entry, PRESENCE_BREADBOARD, PRESENCE_STORAGE
-from lab_model.domain.storage_region import analyze_layout_issues, configure_from_layout_document
+from lab_model.language.domain.component import new_component_entry, PRESENCE_BREADBOARD, PRESENCE_STORAGE
+from lab_model.language.domain.storage_region import analyze_layout_issues, configure_from_layout_document
 
 
 LAYOUT = {

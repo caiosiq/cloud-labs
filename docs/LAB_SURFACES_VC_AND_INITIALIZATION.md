@@ -1,19 +1,23 @@
-# Lab surfaces, version control tiers, and initialization policy
+# Lab surfaces, version control, and initialization
 
-**Status:** Surfaces + catalog pins + init policy **implemented (mock-first)**; publish/approve workflow shipped  
-**Last updated:** 2026-07-11  
+**Status:** Surfaces + catalog pins + ControlManager VC + init policy **implemented (mock-first)**  
+**Last updated:** 2026-07-16  
 **Audience:** cloud-labs maintainers, experimentalists, operators of shared benches  
 
-**Related docs:**
+**Canonical doc** for Twin / Operations / Catalog surfaces, local VC (RuntimeManager + ControlManager), multi-repo rules, and script/job initialization.
 
-- [`PROGRAMMABLE_LAB_VISION.md`](./PROGRAMMABLE_LAB_VISION.md) — OPU analogy, three layers
+**Related:**
+
 - [`EXECUTION_MODES.md`](./EXECUTION_MODES.md) — imperative / compiled / closed-loop + lease
-- [`CONTROL_RUNTIME_AND_VERSIONING.md`](./CONTROL_RUNTIME_AND_VERSIONING.md) — local ControlManager, runtime vs configuration
-- [`Run_CloudLab_Scripts.md`](./Run_CloudLab_Scripts.md) — SDK usage
+- [`EDGE_CONTRACT_AND_UC_LIVE_PLANE.md`](./EDGE_CONTRACT_AND_UC_LIVE_PLANE.md) — Edge Contract + UC live plane
+- [`../packages/cloudlabs/README.md`](../packages/cloudlabs/README.md) — SDK usage
 - [`SESSION_KERNELS.md`](./SESSION_KERNELS.md) — session TorchScript packages
-- [`CONTROL_REPOS_AND_INVENTORY_PLAN.md`](./CONTROL_REPOS_AND_INVENTORY_PLAN.md) — multi-repo local VC (implemented on mock)
+- [`../backend/lab_model/ARCHITECTURE.md`](../backend/lab_model/ARCHITECTURE.md) — platform map
+- Wiki Learn → OPU / three faces, version control
 
 > **Problem this doc solves:** Track 1 (hardware VC) and Track 2 (scripted jobs) were merged on one operations page. Operators saw git-like **“uncommitted changes”** blockers while trying to **browse branches** or **watch jobs**. That is an architectural mistake, not a small UX bug.
+
+> **Naming:** **`ControlManager`** = configuration version history. **`RuntimeManager`** = live working-tree mutations. Do **not** conflate with lab-side `OpticalExperiment` / experiment managers.
 
 ---
 
@@ -309,7 +313,7 @@ Phases are ordered to fix the architectural clash before adding remote catalog.
 ### Phase G.1 — Document alignment (this doc)
 
 - [x] Freeze surfaces, VC tiers, initialization policy
-- [x] Cross-link from `EXECUTION_MODES.md`, `PROGRAMMABLE_LAB_VISION.md`, `CONTROL_RUNTIME_AND_VERSIONING.md`, `Run_CloudLab_Scripts.md`
+- [x] Cross-link from `EXECUTION_MODES.md`, `packages/cloudlabs/README.md`, Wiki Learn
 
 ### Phase G.2 — Backend: initialization policy
 
@@ -352,15 +356,52 @@ Phases are ordered to fix the architectural clash before adding remote catalog.
 - [x] Post-job optional `on_success.commit_configuration` hook on job spec
 - [x] Twin UI optimization **Run** stage: reconcile-before-run snapshot + optional commit-after-run (`on_success`)
 - [x] Operations job telemetry: `init` / `post_commit` phases and commit outcome
-- [x] Shared edge image metrics in `lab_model/optimization/metrics/image_features.py` (real ensemble)
+- [x] Shared edge image metrics in `lab_model/execution/optimization/metrics/image_features.py` (real ensemble)
 - [x] Real bench objective planner: camera capture tag resolve + laser readback (`objective_measurements.py`)
 - [x] Strict real preflight: `LASER_SOURCE` for power terms, catalog camera for centroid
-- [x] `lab_model/optimization/README.md` — ensemble home (replaces removed `backend/lab_automation/` loop)
+- [x] `lab_model/execution/optimization/README.md` — ensemble home (replaces removed `backend/lab_automation/` loop)
 - [ ] Real invasive touch-and-go blocks on ensemble router (deferred)
 
 ---
 
-## 11. Glossary (additions)
+## 11. Runtime vs configuration glossary
+
+| Term | Meaning |
+|------|---------|
+| **Runtime** | Live lab JSON (`GET /api/lab-state`) — working tree; not versioned directly |
+| **Configuration** | Commanded intent (tunables + holding intent) — what commits store |
+| **Observations** | Recorded measurables — pin/compare; never “checkout” physics |
+| **Setup** | Named configuration (+ optional observations) checkpoint |
+| **RuntimeManager** | Centralizes typed runtime mutations (primitives path) |
+| **ControlManager** | Configuration DAG, branches, repos under `control/{repo_id}/` |
+
+Session recovery (`session_last_lab_state.json`) is **not** VC.
+
+---
+
+## 12. Multi-repo local VC (shipped)
+
+```text
+Runtime (working tree)     ← always live; valid with zero commits
+    ↑ soft/hard checkout
+Control repo (commits)     ← optional; first Commit starts history
+    ↑ publish / approve
+Remote catalog pins        ← owner-approved; not auto-filled by local commits
+```
+
+| Concept | Behavior |
+|---------|----------|
+| **Applied** | Last hard-applied / committed config for this repo |
+| **Viewing** | Soft-checked-out preview; view mode when `viewing ≠ applied` |
+| **Uncommitted** | Empty graph OK — UI shows “Working table”, not a fake HEAD |
+| **Repo switch** | No commits → runtime unchanged; has applied → soft-checkout applied |
+| **First commit** | Snapshots current runtime; sets HEAD + applied |
+
+APIs: `GET/POST /api/control/repos`. Modules: `lab_model/coordinator/state/control_manager.py`, Twin control graph UI.
+
+---
+
+## 13. Glossary (surfaces)
 
 | Term | Meaning |
 |------|---------|
@@ -376,4 +417,4 @@ Phases are ordered to fix the architectural clash before adding remote catalog.
 
 ---
 
-*End of spec. Implementation PRs must reference this doc when touching `/operations`, checkout dirty guard, or catalog/publish APIs.*
+*Implementation PRs that touch `/operations`, checkout dirty guard, control repos, or catalog/publish APIs should reference this doc.*

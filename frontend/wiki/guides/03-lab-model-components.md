@@ -19,9 +19,15 @@ in ad hoc lab software:
 
 ### Parameters — identity
 
-Catalog identity: type (mirror, camera, …), geometry hints, and which
-primitives are allowed. Parameters do not change because a motor was jogged;
-they change when the part definition changes.
+Static facts about the part: type, geometry hints, manufacturer, camera
+``max_fps`` / resolution, hardware binding, and similar constants authored in
+the component library under ``parameters``. They do **not** change because a
+motor was jogged; they change when the part definition changes.
+
+Read them with the primitive **`GET_PARAMETERS`**
+(`GET /api/components/{tag_id}/parameters`). Allowed **primitives** for the
+tag still live under catalog ``capabilities.primitives`` (separate from the
+parameters bag).
 
 ### Tunables — degrees of freedom you control
 

@@ -47,7 +47,7 @@ def _install_windows_connection_reset_handler() -> None:
     loop.set_exception_handler(_handler)
 
 
-# Load .env from project root (parent of backend/) — only LAB_VIEW_PATH is required there.
+# Load .env from project root (parent of backend/) â€” only LAB_VIEW_PATH is required there.
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _env_path = os.path.join(_project_root, ".env")
 if os.path.exists(_env_path):
@@ -57,7 +57,7 @@ if os.path.exists(_env_path):
 else:
     print(f"[CONFIG] No .env at {_env_path}")
 
-from lab_communicator.shared.lab_view_config import (
+from lab_model.coordinator.backends.lab_view_config import (
     get_lab_manifest,
     get_lab_view_paths,
     laser_line_coeffs_from_doc,
@@ -68,9 +68,18 @@ from lab_communicator.shared.lab_view_config import (
     two_points_define_line,
     write_laser_lines_doc,
 )
-from lab_model import motor_rotation_store as motor_rot
+from lab_model.language.domain import motor_rotation_store as motor_rot
 
-from lab_model.primitives import (
+# Lab language — HTTP routes and command validation bind to these registries.
+# Hand-written wrappers are fine; the language must not be decorative.
+from lab_model.language import measurables as lab_measurables  # noqa: F401 — register plugins
+from lab_model.language.measurables import (
+    MEASURABLE_REGISTRY,
+    legacy_wire_view,
+    materialize_measurable,
+    resolve_tensor_with_state_path,
+)
+from lab_model.language.primitives import (
     ConfirmHoldingTagBody,
     EvalKernelBody,
     HoverBody,
@@ -96,14 +105,14 @@ from lab_model.primitives import (
 )
 
 
-from lab_model.optimization.errors import EnsemblePreflightError
-from lab_model.optimization.preflight import preflight_ensemble, preflight_objective_sources
-from lab_model.optimization.compiler import compile_objective_payload
-from lab_model.optimization.spec import ObjectiveSpec
-from lab_model.optimization.metrics import METRIC_REGISTRY
-from lab_model.optimization.metrics import weighted_sum as _weighted_sum_metrics  # noqa: F401 — register
-from lab_model.optimization.kernels import list_kernels
-from lab_model.jobs.lease_manager import (
+from lab_model.execution.optimization.errors import EnsemblePreflightError
+from lab_model.execution.optimization.preflight import preflight_ensemble, preflight_objective_sources
+from lab_model.execution.optimization.compiler import compile_objective_payload
+from lab_model.execution.optimization.spec import ObjectiveSpec
+from lab_model.execution.optimization.metrics import METRIC_REGISTRY
+from lab_model.execution.optimization.metrics import weighted_sum as _weighted_sum_metrics  # noqa: F401 â€” register
+from lab_model.execution.optimization.kernels import list_kernels
+from lab_model.coordinator.jobs.lease_manager import (
     LeaseConflictError,
     LeaseExpiredError,
     LeaseNotFoundError,
@@ -111,9 +120,9 @@ from lab_model.jobs.lease_manager import (
     active_backend_id,
     lease_record_to_api_dict,
 )
-from lab_model.backends.job_hub import JobManagerHub
-from lab_model.backends.registry import BackendRegistry, BackendRuntime
-from lab_model.backends.dispatch import (
+from lab_model.coordinator.backends.job_hub import JobManagerHub
+from lab_model.coordinator.backends.registry import BackendRegistry, BackendRuntime
+from lab_model.coordinator.backends.dispatch import (
     RequestLab,
     RequestRuntimeManager,
     active_backend_id_for_request,
@@ -124,12 +133,23 @@ from lab_model.backends.dispatch import (
     reset_request_backend_id,
     set_request_backend_id,
 )
-from lab_model.jobs.job_manager import JobNotFoundError, parse_snapshot_ref, validate_submit_spec
-from lab_model.jobs.initialization_policy import normalize_initialization_policy
-from lab_model.jobs.runner import run_job, schedule_job_runner
-from lab_model.backends.server import BackendSession, require_backend, resolve_backend_id
-from lab_model.edge import edge_agent_registry, edge_command_queue
-from lab_model.edge.registry import DEFAULT_STALE_AFTER_S
+from lab_model.coordinator.jobs.job_manager import JobNotFoundError, parse_snapshot_ref, validate_submit_spec
+from lab_model.coordinator.jobs.initialization_policy import normalize_initialization_policy
+from lab_model.coordinator.jobs.runner import run_job, schedule_job_runner
+from lab_model.coordinator.backends.server import BackendSession, require_backend, resolve_backend_id
+from lab_model.execution.edge import edge_agent_registry, edge_command_queue
+from lab_model.execution.edge.client import (
+    EdgeTransport,
+    HttpEdgeClient,
+    edge_config_for_backend,
+    resolve_edge_client,
+)
+from lab_model.execution.edge.registry import DEFAULT_STALE_AFTER_S
+from lab_model.execution.edge.stream_proxy import (
+    media_type_for_transport,
+    proxy_stream_response,
+    resolve_live_channel_path,
+)
 
 backend_registry = BackendRegistry.from_project(_project_root)
 set_backend_registry(backend_registry)
@@ -201,11 +221,11 @@ def _kick_job_runner_for(backend_id: str) -> None:
     """Start the next queued job for one backend on the running event loop.
 
     When an edge agent is attached for this backend, leave the job queued for
-    the agent to claim via ``GET /api/edge/work`` (coordinator ≠ edge).
+    the agent to claim via ``GET /api/edge/work`` (coordinator â‰  edge).
     """
     if edge_agent_registry.is_attached(backend_id):
         logger.info(
-            "edge attached for %s — skipping in-process job runner",
+            "edge attached for %s â€” skipping in-process job runner",
             backend_id,
         )
         return
@@ -252,7 +272,11 @@ async def _proxy_to_edge(
     payload: Dict[str, Any],
     timeout_s: float = 120.0,
 ) -> Dict[str, Any]:
-    """Enqueue work for an attached edge agent and wait for its result (Step B.1)."""
+    """Enqueue work for an attached edge agent and wait for its result (Step B.1).
+
+    Prefer :func:`_southbound_execute` for new call sites â€” this remains for
+    ``get_lab_state`` and other non-primitive kinds on the poll queue.
+    """
     if not edge_agent_registry.is_attached(backend_id):
         raise HTTPException(
             status_code=409,
@@ -268,6 +292,44 @@ async def _proxy_to_edge(
     if done.error:
         raise HTTPException(status_code=502, detail=done.error)
     return done.result if isinstance(done.result, dict) else {"status": "ok"}
+
+
+def _edge_client_for(backend_id: str | None = None):
+    """Resolve Phase-3 EdgeClient (poll > HTTP edge.base_url > in-process)."""
+    bid = (backend_id or _active_backend_id()).strip()
+    cfg = edge_config_for_backend(backend_registry, bid)
+    return resolve_edge_client(bid, lab=lab, edge_config=cfg)
+
+
+async def _southbound_execute(
+    command: Dict[str, Any],
+    *,
+    backend_id: str | None = None,
+    timeout_s: float = 120.0,
+    lease_id: str | None = None,
+):
+    """Run one primitive via the unified EdgeClient southbound path."""
+    bid = (backend_id or _active_backend_id()).strip()
+    client = _edge_client_for(bid)
+    result = await client.execute_command(
+        command, timeout_s=timeout_s, lease_id=lease_id
+    )
+    if not result.ok:
+        status = 502 if result.transport != EdgeTransport.IN_PROCESS else 409
+        raise HTTPException(status_code=status, detail=result.error or "edge execute failed")
+    return result
+
+
+def _telemetry_after_edge(tag_id: str, edge_result) -> Dict[str, Any]:
+    """Twin alias enrichment: local lab when in-process, else edge result fields."""
+    if edge_result.transport == EdgeTransport.IN_PROCESS and lab is not None:
+        try:
+            return lab.return_telemetry_for_tag(tag_id) or {}
+        except Exception:
+            return {}
+    raw = edge_result.result if isinstance(edge_result.result, dict) else {}
+    tel = raw.get("telemetry")
+    return tel if isinstance(tel, dict) else {}
 
 
 def _command_lease_required() -> bool:
@@ -322,7 +384,7 @@ def _session_lease_runtime_field(backend_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _repo_owns_bench_for(runtime: BackendRuntime, repo_id: str) -> bool:
-    from lab_model.state.control_manager import read_bench_origin, repo_owns_bench
+    from lab_model.coordinator.state.control_manager import read_bench_origin, repo_owns_bench
 
     safe = (repo_id or "default").strip() or "default"
     return repo_owns_bench(runtime.control_dir(), safe)
@@ -445,7 +507,7 @@ app = FastAPI(lifespan=_app_lifespan)
 @app.middleware("http")
 async def _backend_selection_middleware(request: Request, call_next):
     """Bind backend_id + lab-view paths for /api/* routes (except backends listing)."""
-    from lab_model.backends.context import bind_backend_context, reset_backend_context
+    from lab_model.coordinator.backends.context import bind_backend_context, reset_backend_context
 
     path = request.url.path
     skip = (
@@ -481,7 +543,7 @@ async def _backend_selection_middleware(request: Request, call_next):
         except HTTPException as exc:
             return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         token = set_request_backend_id(backend_id)
-        # Paths must be bound here — get_lab_view_paths() / load_layout_document()
+        # Paths must be bound here â€” get_lab_view_paths() / load_layout_document()
         # read contextvars, not the registry singleton.
         if rt.paths.root_dir:
             paths_token = bind_backend_context(rt.paths, rt.manifest)
@@ -546,7 +608,7 @@ class ControlCheckoutBody(BaseModel):
     initialization_policy: Optional[str] = None
     # When true, the frontend has already driven the reconcile primitives one at
     # a time through /api/command (for step-by-step visibility). The endpoint
-    # then only *records* the result — projection + pointer + bench claim — and
+    # then only *records* the result â€” projection + pointer + bench claim â€” and
     # runs no motion of its own.
     finalize: bool = False
 
@@ -569,7 +631,7 @@ class ControlStashBody(BaseModel):
     # See ControlCheckoutBody.finalize. For stash, the frontend must also pass
     # back the ``snapshot`` captured at preview time (the dirty bench, before the
     # primitives drove it back to base) so the stash entry records the right
-    # state. Pop needs no snapshot — the server already holds the stash.
+    # state. Pop needs no snapshot â€” the server already holds the stash.
     finalize: bool = False
     snapshot: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
@@ -617,7 +679,7 @@ class _ReservedBackgroundTasks:
 
 
 def _session_reconciliation_offers_dict() -> Dict[str, Any]:
-    from lab_communicator.shared.session_checkpoint import (
+    from mock_edge.shared.session_checkpoint import (
         checkpoint_age_hours,
         checkpoint_lab_state,
         merge_offers_with_debug,
@@ -683,7 +745,7 @@ def _session_reconciliation_offers_dict() -> Dict[str, Any]:
     resp["offers"] = [{"tag_id": tid} for tid in offer_ids]
     resp["debug"] = merge_debug
     try:
-        from lab_communicator.shared.lab_view_config import get_lab_manifest
+        from lab_model.coordinator.backends.lab_view_config import get_lab_manifest
 
         resp["manifest"] = {
             "session_checkpoint": bool(get_lab_manifest().session_checkpoint),
@@ -806,7 +868,7 @@ def _html_no_cache(path: str, *, bust_index: bool = False) -> Response:
 
 @app.get("/")
 async def read_home():
-    """Cloud Labs landing — not the Twin control room."""
+    """Cloud Labs landing â€” not the Twin control room."""
     return _html_no_cache(os.path.join(frontend_path, "home.html"))
 
 
@@ -827,7 +889,7 @@ async def get_platform_registries():
 async def get_component_catalog():
     """
     Tags listed in ``active_catalog.json`` merged with rows from ``component_library.json``
-    under ``LAB_VIEW_PATH``. Always re-read from disk — see ``lab.get_catalog()``.
+    under ``LAB_VIEW_PATH``. Always re-read from disk â€” see ``lab.get_catalog()``.
     """
     if lab is None:
         return []
@@ -902,7 +964,7 @@ async def set_runtime_mode(payload: RuntimeModeBody):
     try:
         return await asyncio.to_thread(runtime_manager.switch_mode, payload.mode)
     except Exception as exc:
-        from lab_communicator.runtime_mode import RuntimeModeError
+        from mock_edge.host.runtime_mode import RuntimeModeError
 
         if isinstance(exc, RuntimeModeError):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -929,8 +991,8 @@ class ComponentAddFromInventoryBody(BaseModel):
 @app.get("/api/catalog/active-tags")
 async def get_active_catalog_tags():
     """Controlled tag ids (``active_catalog.json``) and full library tag ids."""
-    from lab_model.catalog.active_catalog_store import list_active_catalog_tags
-    from lab_model.catalog.bundle import library_by_tag
+    from lab_model.coordinator.catalog.active_catalog_store import list_active_catalog_tags
+    from lab_model.coordinator.catalog.bundle import library_by_tag
 
     try:
         return {
@@ -945,7 +1007,7 @@ async def get_active_catalog_tags():
 @app.get("/api/catalog/library-rows")
 async def get_library_catalog_rows():
     """All component_library rows (for sidebar display of off-catalog inventory)."""
-    from lab_model.catalog.bundle import library_by_tag
+    from lab_model.coordinator.catalog.bundle import library_by_tag
 
     try:
         return list(library_by_tag().values())
@@ -1037,21 +1099,47 @@ async def get_component_measurables(tag_id: str):
         raise HTTPException(status_code=422, detail=validation_error_detail(e))
 
 
-@app.post("/api/components/{tag_id}/measurables/record")
-async def post_component_record_measurables(tag_id: str):
-    """Record fresh measurables for one component (camera capture, etc.). Primitive: ``RECORD_MEASURABLES``."""
+@app.get("/api/components/{tag_id}/parameters")
+async def get_component_parameters(tag_id: str):
+    """Static identity / manufacturer / constants. Primitive: ``GET_PARAMETERS``."""
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
-    state = lab.get_lab_state()
-    current_status = state.get("system_status")
-    if current_status == "BUSY" or current_status == "OPTIMIZING":
-        raise HTTPException(status_code=409, detail=f"System is {current_status}. Please wait.")
-    await lab.record_measurables_for_tag(tag_id)
     try:
-        meas = fetch_read_primitive(lab, PrimitiveId.GET_MEASURABLES, tag_id)
+        return fetch_read_primitive(lab, PrimitiveId.GET_PARAMETERS, tag_id)
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=validation_error_detail(e))
-    return {"status": "ok", "measurables": meas}
+
+
+@app.post("/api/components/{tag_id}/measurables/record")
+async def post_component_record_measurables(tag_id: str):
+    """Record fresh measurables (``RECORD_MEASURABLES``) via EdgeClient."""
+    client = _edge_client_for()
+    if client.transport == EdgeTransport.IN_PROCESS:
+        if lab is None:
+            raise HTTPException(status_code=503, detail="Lab not initialized")
+        state = lab.get_lab_state()
+        current_status = state.get("system_status")
+        if current_status == "BUSY" or current_status == "OPTIMIZING":
+            raise HTTPException(status_code=409, detail=f"System is {current_status}. Please wait.")
+    edge_result = await _southbound_execute(
+        {"action": PrimitiveId.RECORD_MEASURABLES.value, "target_id": tag_id}
+    )
+    meas = None
+    if edge_result.transport == EdgeTransport.IN_PROCESS and lab is not None:
+        try:
+            meas = fetch_read_primitive(lab, PrimitiveId.GET_MEASURABLES, tag_id)
+        except ValidationError as e:
+            raise HTTPException(status_code=422, detail=validation_error_detail(e))
+    else:
+        raw = edge_result.result if isinstance(edge_result.result, dict) else {}
+        meas = raw.get("measurables")
+    return {
+        "status": "ok",
+        "measurables": meas,
+        "epoch_ms": edge_result.epoch_ms,
+        "latch_quality": edge_result.latch_quality,
+        "edge_transport": edge_result.transport.value,
+    }
 
 
 @app.get("/api/components/{tag_id}/measurables/{field}/tensor")
@@ -1087,9 +1175,8 @@ async def get_measurable_tensor(
             )
         await lab.record_measurables_for_tag(tag_id)
 
-    from lab_model.domain.component import get_measurables  # noqa: PLC0415
-    from lab_model.measurables.materialize import materialize_measurable
-    from lab_model.measurables.resolve_data import resolve_tensor_with_state_path
+    from lab_model.language.domain.component import get_measurables  # noqa: PLC0415
+    from lab_model.language.measurables.tensor import LazyRef
 
     state = lab.get_lab_state()
     entry = (state.get("components") or {}).get(tag_id)
@@ -1110,11 +1197,18 @@ async def get_measurable_tensor(
         safe_field,
         raw,
         backend_id=_active_backend_id(),
-        fetch_url=fetch_url if safe_field == "camera_image" else None,
+        fetch_url=fetch_url if safe_field in MEASURABLE_REGISTRY
+        and MEASURABLE_REGISTRY[safe_field].tensor.layout == "lazy_image"
+        else None,
     )
 
-    if resolve and safe_field == "camera_image" and isinstance(raw, dict):
-        path = raw.get("path")
+    if resolve and isinstance(tensor.data, LazyRef):
+        wire = legacy_wire_view(raw) if isinstance(raw, dict) else None
+        path = None
+        if isinstance(wire, dict):
+            path = wire.get("path")
+        if isinstance(tensor.data, LazyRef) and tensor.data.kind == "file":
+            path = path or tensor.data.href
         if isinstance(path, str) and path:
             tensor = resolve_tensor_with_state_path(tensor, filesystem_path=path)
 
@@ -1122,11 +1216,11 @@ async def get_measurable_tensor(
 
 
 # ---------------------------------------------------------------------------
-# Phase 6 — per-component telemetry routes
+# Phase 6 â€” per-component telemetry routes
 #
 # Catalog entries declare their telemetry channels (e.g. ``stream``,
 # ``preview``) with direct URLs that include a ``{tag_id}`` token (see
-# universal_component_architecture.md §13.2 and §16.6). These routes
+# universal_component_architecture.md Â§13.2 and Â§16.6). These routes
 # resolve those URLs for a given tag, validate the channel against the
 # component's declared ``capabilities.telemetry`` block, and delegate to
 # the existing ``LabCommunicator`` MJPEG / single-frame helpers.
@@ -1156,7 +1250,7 @@ def _telemetry_lookup(tag_id: str, channel: str) -> Tuple[Dict[str, Any], Dict[s
     - 404 if the tag is not in the catalog.
     - 404 if the channel is not declared on the component.
     """
-    from lab_model.catalog.schema import telemetry_channel  # noqa: PLC0415
+    from lab_model.coordinator.catalog.schema import telemetry_channel  # noqa: PLC0415
 
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
@@ -1173,7 +1267,7 @@ def _telemetry_lookup(tag_id: str, channel: str) -> Tuple[Dict[str, Any], Dict[s
 
 
 def _resolve_cam_id_or_400(catalog_row: Dict[str, Any], tag_id: str) -> int:
-    from lab_model.catalog.schema import (  # noqa: PLC0415
+    from lab_model.coordinator.catalog.schema import (  # noqa: PLC0415
         resolve_cam_id_for_tag,
         resolve_hardware_binding,
     )
@@ -1197,16 +1291,39 @@ def _resolve_cam_id_or_400(catalog_row: Dict[str, Any], tag_id: str) -> int:
 
 @app.get("/api/components/{tag_id}/telemetry/stream")
 async def get_component_telemetry_stream(tag_id: str, fps: int = 18):
-    """Per-component MJPEG telemetry stream (Phase 6 / §13.2 ``stream`` channel).
+    """Per-component MJPEG telemetry stream (Phase 6 / Â§13.2 ``stream`` channel).
 
-    Delegates to ``lab.get_table_cam_stream(cam_id, fps)`` for OPTICAL_CAMERA
-    tags. Returns ``multipart/x-mixed-replace`` MJPEG for catalog-driven
-    clients (Phase 6 / §13.2).
+    When an HTTP Edge Contract endpoint is configured, the coordinator
+    **proxies** the edge capability channel (no BGR re-encode). Otherwise
+    delegates to in-process ``lab.get_table_cam_stream`` / ``get_video_stream``.
     """
-    from lab_model.catalog.schema import resolve_telemetry_stream_backend
+    from lab_model.coordinator.catalog.schema import resolve_telemetry_stream_backend
+
+    # Phase 3: HTTP edge stream proxy (Tier B) when edge.base_url is set.
+    client = _edge_client_for()
+    if isinstance(client, HttpEdgeClient):
+        caps = client.get_capabilities()
+        resolved = resolve_live_channel_path(
+            caps,
+            measurable_or_channel=f"{tag_id}.camera_image",
+            prefer_mjpeg=True,
+        )
+        if resolved is None:
+            resolved = resolve_live_channel_path(
+                caps, measurable_or_channel=tag_id, prefer_mjpeg=True
+            )
+        if resolved is not None:
+            path, transport = resolved
+            url = client.absolute_stream_url(path)
+            if url:
+                return proxy_stream_response(
+                    url,
+                    media_type=media_type_for_transport(transport)
+                    or "multipart/x-mixed-replace; boundary=frame",
+                )
 
     catalog_row, _desc = _telemetry_lookup(tag_id, "stream")
-    from lab_model.domain.component import is_live_feed_active
+    from lab_model.language.domain.component import is_live_feed_active
 
     comp = ((lab.current_state or {}).get("components") or {}).get(tag_id)
     if not isinstance(comp, dict) or not is_live_feed_active(comp, "stream"):
@@ -1257,14 +1374,14 @@ async def get_component_telemetry_preview(tag_id: str, exposure: float = 0.2):
     from the preview ring buffer (fast). Otherwise falls back to full ``CAP``
     still capture (slow, used by ``RECORD_MEASURABLES`` contract).
     """
-    from lab_model.catalog.schema import (
+    from lab_model.coordinator.catalog.schema import (
         live_feed_channel,
         resolve_telemetry_stream_backend,
     )
-    from lab_model.domain.component import is_live_feed_active
+    from lab_model.language.domain.component import is_live_feed_active
 
     catalog_row = _catalog_row_or_404(tag_id)
-    # JPEGPoll declares ``live_feed.stream`` with url ``.../telemetry/preview`` —
+    # JPEGPoll declares ``live_feed.stream`` with url ``.../telemetry/preview`` â€”
     # there is no separate ``preview`` catalog channel.
     if (
         live_feed_channel(catalog_row, "stream") is None
@@ -1386,24 +1503,24 @@ async def get_component_optimization_stream(tag_id: str, fps: int = 5):
 
 
 # ---------------------------------------------------------------------------
-# Phase 8 — per-component TELEOP (universal_component_architecture.md §16.5)
+# Phase 8 â€” per-component TELEOP (universal_component_architecture.md Â§16.5)
 #
 # Three routes drive a single component's "in-air manual mode":
 #
 #   POST /api/components/{tag_id}/teleop/start
 #       Acquire the per-component TELEOP lease. Nulls the component's
-#       measurables (Golden Rule §3.2) and stamps a TTL timestamp so the
+#       measurables (Golden Rule Â§3.2) and stamps a TTL timestamp so the
 #       LabCommunicator's stale-lease sweeper can recover from a browser
 #       crash without an explicit END_TELEOP.
 #   POST /api/components/{tag_id}/teleop/end
-#       Release the lease (idempotent — UI fires this on page unload).
+#       Release the lease (idempotent â€” UI fires this on page unload).
 #   POST /api/components/{tag_id}/telemetry/jog
 #       One absolute jog frame: nominal_pose and/or nominal_motor_positions.
 #       Frames are absolute, not deltas, so frame loss is self-healing.
 #
 # All three reuse the standard dispatch pipeline (``execute_validated_command``)
 # so logging, validation, and per-primitive bookkeeping match the rest of
-# the API. We return a synchronous 200 from each — these primitives are
+# the API. We return a synchronous 200 from each â€” these primitives are
 # cheap (state mutations, no hardware blocking calls in Phase 8a) and the
 # operator needs the ack before sending the next frame.
 # ---------------------------------------------------------------------------
@@ -1413,9 +1530,11 @@ def _refuse_teleop_if_lab_down(tag_id: str) -> Dict[str, Any]:
     """Pre-flight check shared by all three TELEOP routes.
 
     Returns the catalog row on success; raises 404/503 on failure.
-    Centralizes the "is the lab booted and does the tag exist?" check so
-    each route stays one-statement-thin.
+    Remote EdgeClient transports skip the in-process catalog gate (edge owns it).
     """
+    client = _edge_client_for()
+    if client.transport != EdgeTransport.IN_PROCESS:
+        return {}
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
     catalog_row = (lab.catalog_map or {}).get(tag_id)
@@ -1429,24 +1548,28 @@ async def post_component_teleop_start(tag_id: str):
     """Acquire the per-component TELEOP lease for ``tag_id``.
 
     Sets ``tunables.teleop_active=True`` and stamps ``teleop_last_jog_ts``.
-    Nulls measurables per §3.2 Golden Rule. Refusals (BUSY/OPTIMIZING with
+    Nulls measurables per Â§3.2 Golden Rule. Refusals (BUSY/OPTIMIZING with
     the strict-quiet manifest knob, another component already teleoped,
     stored part) bubble up as 409 ``Conflict``.
     """
     _refuse_teleop_if_lab_down(tag_id)
     try:
-        cmd = StartTeleopBody(action="START_TELEOP", target_id=tag_id)
+        StartTeleopBody(action="START_TELEOP", target_id=tag_id)
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=validation_error_detail(e))
-    try:
-        await execute_validated_command(lab, cmd)
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    edge_result = await _southbound_execute(
+        {"action": "START_TELEOP", "target_id": tag_id}
+    )
+    tunables = None
+    if edge_result.transport == EdgeTransport.IN_PROCESS and lab is not None:
+        tunables = fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id)
     return {
         "status": "ok",
         "message": f"TELEOP started for {tag_id}",
-        "tunables": fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id),
-        "telemetry": lab.return_telemetry_for_tag(tag_id),
+        "tunables": tunables,
+        "telemetry": _telemetry_after_edge(tag_id, edge_result),
+        "epoch_ms": edge_result.epoch_ms,
+        "edge_transport": edge_result.transport.value,
     }
 
 
@@ -1454,22 +1577,25 @@ async def post_component_teleop_start(tag_id: str):
 async def post_component_teleop_end(tag_id: str):
     """Release the per-component TELEOP lease for ``tag_id`` (idempotent).
 
-    Always returns 200 — ending an already-released session is a success.
+    Always returns 200 â€” ending an already-released session is a success.
     This is the typical browser-unload path; the UI fires END on
     ``beforeunload`` and the server may or may not have already swept the
     stale lease.
     """
     _refuse_teleop_if_lab_down(tag_id)
-    cmd = EndTeleopBody(action="END_TELEOP", target_id=tag_id)
-    try:
-        await execute_validated_command(lab, cmd)
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    edge_result = await _southbound_execute(
+        {"action": "END_TELEOP", "target_id": tag_id}
+    )
+    tunables = None
+    if edge_result.transport == EdgeTransport.IN_PROCESS and lab is not None:
+        tunables = fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id)
     return {
         "status": "ok",
         "message": f"TELEOP ended for {tag_id}",
-        "tunables": fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES, tag_id),
-        "telemetry": lab.return_telemetry_for_tag(tag_id),
+        "tunables": tunables,
+        "telemetry": _telemetry_after_edge(tag_id, edge_result),
+        "epoch_ms": edge_result.epoch_ms,
+        "edge_transport": edge_result.transport.value,
     }
 
 
@@ -1490,10 +1616,10 @@ async def post_component_telemetry_jog(tag_id: str, request: Request):
 
     Refusals:
 
-    - 404 — unknown tag.
-    - 409 — tag is not in TELEOP (must START first).
-    - 422 — malformed body.
-    - 503 — lab not initialized.
+    - 404 â€” unknown tag.
+    - 409 â€” tag is not in TELEOP (must START first).
+    - 422 â€” malformed body.
+    - 503 â€” lab not initialized.
     """
     _refuse_teleop_if_lab_down(tag_id)
     try:
@@ -1507,15 +1633,19 @@ async def post_component_telemetry_jog(tag_id: str, request: Request):
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=validation_error_detail(e))
 
-    cmd = TeleopJogBody(action="TELEOP_JOG", target_id=tag_id, parameters=params)
-    try:
-        await execute_validated_command(lab, cmd)
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    edge_result = await _southbound_execute(
+        {
+            "action": "TELEOP_JOG",
+            "target_id": tag_id,
+            "parameters": params.model_dump(exclude_none=True),
+        }
+    )
     return {
         "status": "ok",
         "frame_id": params.frame_id,
-        "telemetry": lab.return_telemetry_for_tag(tag_id),
+        "telemetry": _telemetry_after_edge(tag_id, edge_result),
+        "epoch_ms": edge_result.epoch_ms,
+        "edge_transport": edge_result.transport.value,
     }
 
 
@@ -1534,14 +1664,18 @@ async def post_component_telemetry_goto(tag_id: str, request: Request):
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=validation_error_detail(e))
 
-    cmd = TeleopGotoBody(action="TELEOP_GOTO", target_id=tag_id, parameters=params)
-    try:
-        await execute_validated_command(lab, cmd)
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    edge_result = await _southbound_execute(
+        {
+            "action": "TELEOP_GOTO",
+            "target_id": tag_id,
+            "parameters": params.model_dump(exclude_none=True),
+        }
+    )
     return {
         "status": "ok",
-        "telemetry": lab.return_telemetry_for_tag(tag_id),
+        "telemetry": _telemetry_after_edge(tag_id, edge_result),
+        "epoch_ms": edge_result.epoch_ms,
+        "edge_transport": edge_result.transport.value,
     }
 
 
@@ -1549,11 +1683,11 @@ async def post_component_telemetry_goto(tag_id: str, request: Request):
 async def get_component_telemetry_live_pose(tag_id: str):
     """High-rate live pose for TeleOp (in-memory; not in lab_state JSON).
 
-    Deprecated hot path — prefer ``WS /api/components/{tag_id}/teleop/session``.
+    Deprecated hot path â€” prefer ``WS /api/components/{tag_id}/teleop/session``.
     Kept for debug clients and HTTP fallback.
     """
     _refuse_teleop_if_lab_down(tag_id)
-    from lab_model.domain.component import is_teleop_ready
+    from lab_model.language.domain.component import is_teleop_ready
 
     state = lab.get_lab_state()
     entry = (state.get("components") or {}).get(tag_id)
@@ -1581,37 +1715,48 @@ async def ws_component_teleop_session(websocket: WebSocket, tag_id: str):
     if not isinstance(catalog_row, dict):
         await websocket.close(code=4404, reason=f"Unknown tag {tag_id!r}")
         return
-    from lab_model.orchestration.teleop_session_ws import run_teleop_session_websocket
+    from lab_model.execution.orchestration.teleop_session_ws import run_teleop_session_websocket
 
     await run_teleop_session_websocket(websocket, lab, tag_id)
 
 
 @app.post("/api/components/{tag_id}/telemetry/live-feed/start")
 async def post_component_live_feed_start(tag_id: str, channel: str = "stream"):
-    """Connect and start live feed (``START_LIVE_FEED``)."""
+    """Connect and start live feed (``START_LIVE_FEED``) via EdgeClient."""
     _refuse_teleop_if_lab_down(tag_id)
-    cmd = StartLiveFeedBody(action="START_LIVE_FEED", target_id=tag_id, channel=channel)
-    try:
-        await execute_validated_command(lab, cmd)
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    edge_result = await _southbound_execute(
+        {
+            "action": "START_LIVE_FEED",
+            "target_id": tag_id,
+            "channel": channel,
+        }
+    )
     return {
         "status": "ok",
         "message": f"Live feed started for {tag_id}",
-        "telemetry": lab.return_telemetry_for_tag(tag_id),
+        "telemetry": _telemetry_after_edge(tag_id, edge_result),
+        "epoch_ms": edge_result.epoch_ms,
+        "edge_transport": edge_result.transport.value,
     }
 
 
 @app.post("/api/components/{tag_id}/telemetry/live-feed/end")
 async def post_component_live_feed_end(tag_id: str, channel: str = "all"):
-    """Stop and disconnect live feed (``END_LIVE_FEED``)."""
+    """Stop and disconnect live feed (``END_LIVE_FEED``) via EdgeClient."""
     _refuse_teleop_if_lab_down(tag_id)
-    cmd = EndLiveFeedBody(action="END_LIVE_FEED", target_id=tag_id, channel=channel)
-    await execute_validated_command(lab, cmd)
+    edge_result = await _southbound_execute(
+        {
+            "action": "END_LIVE_FEED",
+            "target_id": tag_id,
+            "channel": channel,
+        }
+    )
     return {
         "status": "ok",
         "message": f"Live feed ended for {tag_id}",
-        "telemetry": lab.return_telemetry_for_tag(tag_id),
+        "telemetry": _telemetry_after_edge(tag_id, edge_result),
+        "epoch_ms": edge_result.epoch_ms,
+        "edge_transport": edge_result.transport.value,
     }
 
 
@@ -1625,11 +1770,10 @@ async def get_component_telemetry(tag_id: str):
 
 @app.get("/api/components/{tag_id}/camera-image")
 async def get_component_camera_image(tag_id: str):
-    """Stream the PNG referenced by ``measurables.camera_image.path`` for one tag.
+    """Stream the PNG for ``measurables.camera_image`` (tensor LazyRef or legacy wire).
 
     Returns **404** when no image is currently recorded (e.g. after a motion
-    nulled measurables per Phase 3 of ``universal_component_architecture.md``
-    — the operator must POST to ``.../measurables/record`` to regenerate it).
+    nulled measurables — the operator must POST to ``.../measurables/record``).
     Path is read from saved lab state, not from the request, so there is no
     user-controlled path traversal vector; the on-disk file is still checked
     for existence + supported format as defense-in-depth.
@@ -1640,18 +1784,21 @@ async def get_component_camera_image(tag_id: str):
     entry = (state.get("components") or {}).get(tag_id)
     if not isinstance(entry, dict):
         raise HTTPException(status_code=404, detail=f"Unknown tag {tag_id}")
-    from lab_model.domain.component import get_measurables  # noqa: PLC0415
+    from lab_model.language.domain.component import get_measurables  # noqa: PLC0415
 
     ci = get_measurables(entry).get("camera_image")
-    if not isinstance(ci, dict):
+    if ci is None:
         raise HTTPException(status_code=404, detail="No camera image recorded")
-    path = ci.get("path")
+    wire = legacy_wire_view(ci)
+    if not isinstance(wire, dict):
+        raise HTTPException(status_code=404, detail="No camera image recorded")
+    path = wire.get("path")
     if not isinstance(path, str) or not path:
         raise HTTPException(status_code=404, detail="No camera image path")
     abs_path = os.path.abspath(path)
     if not os.path.isfile(abs_path):
         raise HTTPException(status_code=404, detail="Camera image file missing")
-    fmt = str(ci.get("format") or "png").lower()
+    fmt = str(wire.get("format") or "png").lower()
     media_by_fmt = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
     if fmt not in media_by_fmt:
         raise HTTPException(status_code=400, detail=f"Unsupported camera image format {fmt!r}")
@@ -1765,9 +1912,9 @@ def _schedule_pose_refresh(
 
 
 def _pose_refresh_offers_dict(scope_tag_ids: Optional[List[str]] = None) -> Dict[str, Any]:
-    from lab_communicator.shared.session_checkpoint import reconciliation_thresholds_from_manifest
-    from lab_model.state.pose_refresh_offers import build_pose_refresh_offers
-    from lab_model.state.pose_refresh_selection import normalize_tag_id_list
+    from mock_edge.shared.session_checkpoint import reconciliation_thresholds_from_manifest
+    from lab_model.coordinator.state.pose_refresh_offers import build_pose_refresh_offers
+    from lab_model.coordinator.state.pose_refresh_selection import normalize_tag_id_list
 
     thresholds = (
         lab.session_reconciliation_thresholds()
@@ -1903,7 +2050,7 @@ _control_managers: Dict[str, Any] = {}
 
 
 def _get_control_manager(repo_id: str):
-    from lab_model.state.control_manager import ControlManager
+    from lab_model.coordinator.state.control_manager import ControlManager
 
     safe = (repo_id or "default").strip() or "default"
     if safe not in _control_managers:
@@ -1937,7 +2084,7 @@ def _repo_owns_bench(repo_id: str) -> bool:
     Switching repos never moves the bench, so only the owning repo gets
     applied-based dirty detection; other repos diff against the empty state.
     """
-    from lab_model.state.control_manager import read_bench_origin, repo_owns_bench
+    from lab_model.coordinator.state.control_manager import read_bench_origin, repo_owns_bench
 
     safe = (repo_id or "default").strip() or "default"
     owns = repo_owns_bench(_CONTROL_DIR(), safe)
@@ -1955,7 +2102,7 @@ def _repo_owns_bench(repo_id: str) -> bool:
 
 def _claim_bench(repo_id: str, configuration_id: Optional[str]) -> None:
     """Record that ``repo_id`` physically realized the current bench."""
-    from lab_model.state.control_manager import write_bench_origin
+    from lab_model.coordinator.state.control_manager import write_bench_origin
 
     safe = (repo_id or "default").strip() or "default"
     _control_log("claim_bench", repo=safe, configuration_id=configuration_id)
@@ -1993,7 +2140,7 @@ def _invalidate_control_manager_cache(repo_id: Optional[str] = None) -> None:
 
 @app.get("/api/control/repos")
 async def control_list_repos():
-    from lab_model.state.control_manager import list_control_repos
+    from lab_model.coordinator.state.control_manager import list_control_repos
 
     return {"repos": list_control_repos(_CONTROL_DIR())}
 
@@ -2008,8 +2155,8 @@ async def control_backfill_lines(payload: Dict[str, Any] = Body(default={})):
     provided, otherwise from the live runtime; laser lines come from the runtime
     (seeded from the lab bundle).
     """
-    from lab_model.state.control_manager import list_control_repos
-    from lab_model.state.projections import (
+    from lab_model.coordinator.state.control_manager import list_control_repos
+    from lab_model.coordinator.state.projections import (
         normalize_alignment_guides,
         normalize_laser_lines_doc,
     )
@@ -2037,7 +2184,7 @@ async def control_backfill_optimization_metadata():
     ``metadata.optimization`` on each configuration document, and strips
     ``placement`` from stored configuration tunables.
     """
-    from lab_model.state.control_manager import list_control_repos
+    from lab_model.coordinator.state.control_manager import list_control_repos
 
     repos = list_control_repos(_CONTROL_DIR())
     updated = 0
@@ -2049,7 +2196,7 @@ async def control_backfill_optimization_metadata():
 
 @app.post("/api/control/repos")
 async def control_create_repo(payload: ControlCreateRepoBody):
-    from lab_model.state.control_manager import create_control_repo, validate_repo_id
+    from lab_model.coordinator.state.control_manager import create_control_repo, validate_repo_id
 
     try:
         validate_repo_id(payload.repo_id)
@@ -2124,8 +2271,8 @@ async def control_diff(
 @app.post("/api/control/{repo_id}/configurations")
 async def control_commit_configuration(repo_id: str, payload: ControlCommitBody):
     _assert_lab_idle_for_control()
-    from lab_model.catalog.bundle import active_tag_ids, library_by_tag
-    from lab_model.catalog.catalog_hash import compute_active_catalog_hash
+    from lab_model.coordinator.catalog.bundle import active_tag_ids, library_by_tag
+    from lab_model.coordinator.catalog.catalog_hash import compute_active_catalog_hash
 
     runtime = lab.get_lab_state()
     mgr = _get_control_manager(repo_id)
@@ -2171,8 +2318,8 @@ async def control_checkout_report(
     configuration_id: str = Query(..., min_length=1),
 ):
     """Tag/catalog compatibility between a commit and the live runtime bench."""
-    from lab_model.catalog.bundle import active_tag_ids, library_by_tag
-    from lab_model.catalog.catalog_hash import compute_active_catalog_hash
+    from lab_model.coordinator.catalog.bundle import active_tag_ids, library_by_tag
+    from lab_model.coordinator.catalog.catalog_hash import compute_active_catalog_hash
 
     mgr = _get_control_manager(repo_id)
     try:
@@ -2241,7 +2388,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
 
     if mode == "adopt":
         # "Set as node": declare this node as the current node WITHOUT moving the
-        # bench (git reset --soft). No reconcile plan, no projection — the
+        # bench (git reset --soft). No reconcile plan, no projection â€” the
         # physical bench is left exactly as-is and becomes uncommitted edits
         # relative to the adopted node. Used to establish a base when you enter a
         # repo and have no current node yet.
@@ -2305,7 +2452,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
     # Git-like guard applies ONLY to a hard checkout, the one mode that
     # physically moves the bench: you cannot reconcile away from a dirty working
     # table without committing or stashing first. Soft preview is read-only, and
-    # "adopt" (handled above) only repoints the HEAD — both leave the bench
+    # "adopt" (handled above) only repoints the HEAD â€” both leave the bench
     # untouched, so neither is gated. (In particular, an unadopted repo reads as
     # dirty-vs-empty, so gating preview here would block you from ever clicking a
     # node to Set it.)
@@ -2338,8 +2485,8 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
             )
 
     if mode in ("soft", "hard"):
-        from lab_model.catalog.bundle import active_tag_ids, library_by_tag
-        from lab_model.catalog.catalog_hash import compute_active_catalog_hash
+        from lab_model.coordinator.catalog.bundle import active_tag_ids, library_by_tag
+        from lab_model.coordinator.catalog.catalog_hash import compute_active_catalog_hash
         try:
             compat = mgr.checkout_compatibility_report(
                 payload.configuration_id,
@@ -2362,7 +2509,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
     if mode == "soft":
         # Read-only preview. The live bench is NEVER mutated: the frontend
         # renders the returned configuration as an overlay. This is the core of
-        # the state-machine separation — preview can no longer contaminate the
+        # the state-machine separation â€” preview can no longer contaminate the
         # live runtime, so layout/dirty/compat (all computed against the real
         # bench) cannot fire spurious warnings while you are only *viewing* a
         # node. No `set_viewing`, no projection, no persist.
@@ -2393,7 +2540,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
                 "compatibility": compat,
             }
 
-        from lab_model.state.reconcile_executor import (
+        from lab_model.coordinator.state.reconcile_executor import (
             ReconcilePlanError,
             execute_reconcile_plan,
         )
@@ -2464,7 +2611,7 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
     applied = working.get("applied") or {}
     applied_id = applied.get("configuration_id")
 
-    from lab_model.state.projections import (
+    from lab_model.coordinator.state.projections import (
         EMPTY_CONFIGURATION,
         extract_configuration,
         extract_configuration_metadata,
@@ -2472,8 +2619,8 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
 
     # Stash base: the applied node when this repo owns the bench, otherwise the
     # shared empty state (a foreign bench is uncommitted work on top of empty,
-    # so stashing clears the table back to empty — every part returns to
-    # storage — leaving a clean slate to check out this repo's nodes).
+    # so stashing clears the table back to empty â€” every part returns to
+    # storage â€” leaving a clean slate to check out this repo's nodes).
     if applied_id:
         try:
             base_cfg = mgr.get_configuration(applied_id).get("configuration") or {}
@@ -2539,7 +2686,7 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
             "metadata": snapshot_metadata,
         }
 
-    from lab_model.state.reconcile_executor import (
+    from lab_model.coordinator.state.reconcile_executor import (
         ReconcilePlanError,
         execute_reconcile_plan,
     )
@@ -2599,7 +2746,7 @@ async def control_stash_pop(repo_id: str, payload: ControlStashBody = ControlSta
 
     if payload.finalize:
         # Step-by-step pop: the frontend already drove the primitives to restore
-        # the stash snapshot on the bench (which is dirty-vs-applied by design —
+        # the stash snapshot on the bench (which is dirty-vs-applied by design â€”
         # so the pre-pop dirty guard would wrongly reject). Record only: snap
         # tunables to the snapshot and clear the stash slot. No motion.
         runtime_mgr = _lab_runtime_manager()
@@ -2651,7 +2798,7 @@ async def control_stash_pop(repo_id: str, payload: ControlStashBody = ControlSta
             "steps": len(plan),
         }
 
-    from lab_model.state.reconcile_executor import (
+    from lab_model.coordinator.state.reconcile_executor import (
         ReconcilePlanError,
         execute_reconcile_plan,
     )
@@ -2757,7 +2904,7 @@ async def get_layout_conflicts():
     """Semantic vs geometry issues for inventory modals (PLACED in Q3, STORED off-slot, etc.)."""
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
-    from lab_model.domain.storage_region import analyze_layout_issues
+    from lab_model.language.domain.storage_region import analyze_layout_issues
 
     state = lab.get_lab_state()
     comps = state.get("components") or {}
@@ -2772,7 +2919,7 @@ async def get_layout_conflicts():
 @app.get("/api/storage-grid")
 async def get_storage_grid():
     """Inventory grid dimensions for canvas overlay (must match storage_region constants)."""
-    from lab_model.domain.storage_region import storage_grid_spec
+    from lab_model.language.domain.storage_region import storage_grid_spec
 
     return storage_grid_spec()
 
@@ -2780,7 +2927,7 @@ async def get_storage_grid():
 @app.get("/api/lab-layout")
 async def get_lab_layout():
     """Breadboard/table bounds + storage grid overlay (single source matching ``layout.json``)."""
-    from lab_model.domain.storage_region import storage_grid_spec
+    from lab_model.language.domain.storage_region import storage_grid_spec
 
     rt = require_backend(backend_registry, _active_backend_id(), init=False)
     with BackendSession(rt):
@@ -2904,7 +3051,7 @@ async def patch_laser_line(line_id: str, payload: Dict[str, Any] = Body(...)):
             raise HTTPException(status_code=400, detail="color string too long")
         updates["color"] = col
 
-    from lab_model.state.runtime_manager import MutationKind
+    from lab_model.coordinator.state.runtime_manager import MutationKind
 
     def _mut(state: Dict[str, Any]) -> None:
         ll = state.setdefault("laser_lines", {"snap_line_id": None, "lines": []})
@@ -2946,7 +3093,7 @@ def _runtime_guides() -> List[Dict[str, Any]]:
 
 
 def _mutate_guides(fn, *, source: str) -> None:
-    from lab_model.state.runtime_manager import MutationKind
+    from lab_model.coordinator.state.runtime_manager import MutationKind
 
     def _mut(state: Dict[str, Any]) -> None:
         guides = state.get("alignment_guides")
@@ -3013,7 +3160,7 @@ async def delete_guide(guide_id: str):
 @app.put("/api/guides")
 async def replace_guides(payload: Dict[str, Any] = Body(...)):
     """Replace the full guide set (clear-all, or one-time localStorage import)."""
-    from lab_model.state.projections import normalize_alignment_guides
+    from lab_model.coordinator.state.projections import normalize_alignment_guides
 
     incoming = normalize_alignment_guides(payload.get("guides"))
 
@@ -3031,11 +3178,11 @@ async def replace_overlays(payload: Dict[str, Any] = Body(...)):
     Used as the first visible step when applying a versioned configuration so
     lines match the target node before component reconcile primitives run.
     """
-    from lab_model.state.projections import (
+    from lab_model.coordinator.state.projections import (
         normalize_alignment_guides,
         normalize_laser_lines_doc,
     )
-    from lab_model.state.runtime_manager import MutationKind
+    from lab_model.coordinator.state.runtime_manager import MutationKind
 
     guides = normalize_alignment_guides(payload.get("alignment_guides"))
     laser = normalize_laser_lines_doc(payload.get("laser_lines") or {})
@@ -3081,7 +3228,7 @@ def _enforce_holding_rules(cmd, state: Dict[str, Any]) -> None:
     """
     Reject commands that would be unsafe given the current HOLDING state.
 
-    See ``new_primitives.md`` §6. BUSY/OPTIMIZING are already rejected upstream.
+    See ``new_primitives.md`` Â§6. BUSY/OPTIMIZING are already rejected upstream.
     """
     status = state.get("system_status") or "IDLE"
     holding = state.get("holding") or {}
@@ -3207,11 +3354,11 @@ async def list_edge_kernels(request: Request, backend: Optional[str] = Query(Non
     backend_id = _active_backend_id()
     lease_id = _extract_lease_id({}, request)
     if lease_id:
-        from lab_model.optimization.kernels import session_store
+        from lab_model.execution.optimization.kernels import session_store
 
         session_store.activate_lease_roots(backend_id, lease_id)
     try:
-        from lab_communicator.shared.lab_view_config import get_lab_view_paths_optional
+        from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths_optional
 
         paths = get_lab_view_paths_optional()
         lv = str(paths.root_dir) if paths is not None else None
@@ -3229,7 +3376,7 @@ async def register_session_kernel(request: Request, body: Dict[str, Any] = Body(
     """Register a TorchScript package under the active lease (session-scoped)."""
     import base64
 
-    from lab_model.optimization.kernels import session_store
+    from lab_model.execution.optimization.kernels import session_store
 
     backend_id = str(body.get("backend_id") or _active_backend_id()).strip()
     lease_id = _extract_lease_id(body, request)
@@ -3283,7 +3430,7 @@ async def register_session_kernel(request: Request, body: Dict[str, Any] = Body(
 @app.get("/api/kernels/session")
 async def list_session_kernels(request: Request, backend_id: Optional[str] = Query(None)):
     """List session packages for the active lease."""
-    from lab_model.optimization.kernels import session_store
+    from lab_model.execution.optimization.kernels import session_store
 
     bid = str(backend_id or _active_backend_id()).strip()
     lease_id = _extract_lease_id({}, request)
@@ -3300,7 +3447,7 @@ async def delete_session_kernel(
     backend_id: Optional[str] = Query(None),
 ):
     """Delete one session package from the active lease."""
-    from lab_model.optimization.kernels import session_store
+    from lab_model.execution.optimization.kernels import session_store
 
     bid = str(backend_id or _active_backend_id()).strip()
     lease_id = _extract_lease_id({}, request)
@@ -3321,7 +3468,7 @@ async def download_session_kernel_artifact(
     """Download session kernel ``.pt`` bytes (base64) for local authoring-time eval."""
     import base64
 
-    from lab_model.optimization.kernels import session_store
+    from lab_model.execution.optimization.kernels import session_store
 
     bid = str(backend_id or _active_backend_id()).strip()
     lease_id = _extract_lease_id({}, request)
@@ -3382,45 +3529,65 @@ async def eval_kernel_on_edge(request: Request, body: Dict[str, Any] = Body(...)
         "lease_id": lease_id,
     }
 
-    if edge_agent_registry.is_attached(backend_id):
+    try:
+        parse_command_payload(command)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=validation_error_detail(e))
+
+    # Phase 3: always EVAL_KERNEL via EdgeClient (poll / HTTP / in-process).
+    # No southbound ``/kernel/probe`` â€” execute-only.
+    client = resolve_edge_client(
+        backend_id,
+        lab=None,
+        edge_config=edge_config_for_backend(backend_registry, backend_id),
+    )
+    if client.transport == EdgeTransport.IN_PROCESS:
+        rt = require_backend(backend_registry, backend_id, init=True)
+        if rt.lab is None:
+            raise HTTPException(status_code=503, detail="lab not initialized")
+        client = resolve_edge_client(
+            backend_id,
+            lab=rt.lab,
+            edge_config=edge_config_for_backend(backend_registry, backend_id),
+        )
         try:
-            parse_command_payload(command)
-        except ValidationError as e:
-            raise HTTPException(status_code=400, detail=validation_error_detail(e))
-        return await _proxy_to_edge(
-            backend_id=backend_id,
-            kind="primitive",
-            payload={"command": command},
-            timeout_s=60.0,
+            with BackendSession(rt):
+                lab_inst = rt.lab
+                lab_inst._command_lease_id = lease_id
+                lab_inst._command_backend_id = backend_id
+                edge_result = await client.execute_command(
+                    command, timeout_s=60.0, lease_id=lease_id
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        edge_result = await client.execute_command(
+            command, timeout_s=60.0, lease_id=lease_id
         )
 
-    rt = require_backend(backend_registry, backend_id, init=True)
-    if rt.lab is None:
-        raise HTTPException(status_code=503, detail="lab not initialized")
-
-    try:
-        cmd = parse_command_payload(command)
-        with BackendSession(rt):
-            lab_inst = rt.lab
-            lab_inst._command_lease_id = lease_id
-            lab_inst._command_backend_id = backend_id
-            result = await execute_validated_command(lab_inst, cmd)
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    if not isinstance(result, dict):
+    if not edge_result.ok:
+        raise HTTPException(
+            status_code=400 if client.transport == EdgeTransport.IN_PROCESS else 502,
+            detail=edge_result.error or "EVAL_KERNEL failed",
+        )
+    result = edge_result.result if isinstance(edge_result.result, dict) else {}
+    if not result and edge_result.epoch_ms is None:
         raise HTTPException(status_code=500, detail="EVAL_KERNEL returned no result")
-    # Drop internal status wrapper fields if present.
     out = {k: v for k, v in result.items() if k != "status"}
+    if edge_result.epoch_ms is not None:
+        out.setdefault("epoch_ms", edge_result.epoch_ms)
+    if edge_result.latch_quality:
+        out.setdefault("latch_quality", edge_result.latch_quality)
+    out["edge_transport"] = edge_result.transport.value
     return out
 
 
 @app.post("/api/optimization/compile")
 async def optimization_compile(body: Dict[str, Any] = Body(...)):
     """
-    Compile declarative objective graph → runtime ``ObjectiveSpec`` JSON.
+    Compile declarative objective graph â†’ runtime ``ObjectiveSpec`` JSON.
 
     Optional ``preflight: true`` validates compiled sources against live bench state.
     Optional ``parameters`` merges compiled objective into an ensemble payload and
@@ -3499,7 +3666,7 @@ async def optimization_capabilities():
         "legacy_redirect_enabled": redirect,
         "legacy_redirect_env": "CLOUDLABS_LEGACY_OPTIMIZE_REDIRECT",
         "sdk_entrypoints": ["run_optimize", "run_cobyla"],
-        "ui_entrypoints": ["Twin Optimization → Alignment session", "Operations job monitor"],
+        "ui_entrypoints": ["Twin Optimization â†’ Alignment session", "Operations job monitor"],
         "notes": (
             "Legacy NEWTON/COBYLA via component panel or command console remain for "
             "real-bench MJPEG/place-UI parity; new work should use ensemble jobs."
@@ -3568,7 +3735,7 @@ async def submit_job(request: Request, body: Dict[str, Any] = Body(...)):
                 if kid.startswith("session."):
                     known_session.add(kid)
     if lease_id:
-        from lab_model.optimization.kernels import session_store
+        from lab_model.execution.optimization.kernels import session_store
 
         session_store.activate_lease_roots(backend_id, lease_id)
         for row in session_store.list_lease_packages(backend_id, lease_id):
@@ -3603,7 +3770,7 @@ async def submit_job(request: Request, body: Dict[str, Any] = Body(...)):
             k for k in (spec.get("kernels") or []) if str(k).startswith("session.")
         ]
     if inline_packages or session_ids:
-        from lab_model.optimization.kernels import session_store
+        from lab_model.execution.optimization.kernels import session_store
 
         try:
             if isinstance(inline_packages, list) and inline_packages:
@@ -3954,7 +4121,7 @@ async def release_session_lease(body: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=404, detail=f"lease {lease_id!r} not found")
 
     try:
-        from lab_model.optimization.kernels import session_store
+        from lab_model.execution.optimization.kernels import session_store
 
         session_store.delete_lease_scratch(released.backend_id, released.lease_id)
     except Exception as exc:  # noqa: BLE001
@@ -4005,7 +4172,7 @@ async def receive_command(
         raise HTTPException(
             status_code=400,
             detail=(
-                "X-CloudLabs-Lease required — acquire via Twin Take control "
+                "X-CloudLabs-Lease required â€” acquire via Twin Take control "
                 "or SDK connect()/acquire_lease()"
             ),
         )
@@ -4022,8 +4189,9 @@ async def receive_command(
     except LeaseExpiredError as exc:
         raise HTTPException(status_code=410, detail=str(exc)) from exc
 
-    # Step B.1: imperative path goes to the attached edge agent (not coordinator lab).
-    if edge_agent_registry.is_attached(backend_id):
+    # Phase 3: poll-attached or HTTP edge.base_url â€” same EdgeClient southbound.
+    _edge_client = _edge_client_for(backend_id)
+    if _edge_client.transport != EdgeTransport.IN_PROCESS:
         try:
             cmd = parse_command_payload(payload)
         except ValidationError as e:
@@ -4033,12 +4201,15 @@ async def receive_command(
                 status_code=409,
                 detail=f"{cmd.action} is unavailable in {runtime_manager.mode} mode",
             )
-        return await _proxy_to_edge(
+        edge_result = await _southbound_execute(
+            payload if isinstance(payload, dict) else {"action": cmd.action},
             backend_id=backend_id,
-            kind="primitive",
-            payload={"command": payload},
             timeout_s=180.0,
+            lease_id=lease_id,
         )
+        out = edge_result.as_api_dict()
+        out["edge_transport"] = edge_result.transport.value
+        return out
 
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab Communicator not initialized")
@@ -4143,28 +4314,28 @@ async def receive_command(
 # --------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------
-# Cobyla reference image — HTTP surface removed in Phase 9a.
+# Cobyla reference image â€” HTTP surface removed in Phase 9a.
 #
 # The four ``/api/cobyla-reference-image*`` routes (GET, POST, GET /status,
 # DELETE) were the legacy side-channel for the COBYLA strategy's reference
-# ndarray. They were deleted per :doc:`universal_component_architecture` §9a.
+# ndarray. They were deleted per :doc:`universal_component_architecture` Â§9a.
 #
 # Resolution of open question Q3: under the universal-component model, the
 # reference image is "the latest recorded ``measurables.camera_image`` on
-# the relevant camera component" (see §13.2). The operator workflow is now:
+# the relevant camera component" (see Â§13.2). The operator workflow is now:
 #
 #   1. ``RECORD_MEASURABLES`` on the camera component (shipped in Phase 4).
 #   2. The optimizer reads the freshest ``measurables.camera_image`` from
 #      that camera at OPTIMIZE time.
 #
-# Step (2) — the optimizer-side migration — completed in Phase 9d:
+# Step (2) â€” the optimizer-side migration â€” completed in Phase 9d:
 # ``load_cobyla_reference_bgr_from_state`` reads ``measurables.camera_image``
 # on the catalog camera tag at OPTIMIZE time.
 # --------------------------------------------------------------------------
 
 
 # --------------------------------------------------------------------------
-# Video feed — HTTP surface removed in Phase 9c.
+# Video feed â€” HTTP surface removed in Phase 9c.
 #
 # The legacy ``GET /api/video-feed/{status,stream}`` lab-wide routes
 # backed the deprecated top-row LIVE FEED pane. That UI was removed;
@@ -4398,13 +4569,13 @@ async def list_golden_states():
 
 @app.get("/snapshots")
 async def read_snapshots_redirect():
-    """Snapshots live under Wiki → Backends."""
+    """Snapshots live under Wiki â†’ Backends."""
     return RedirectResponse(url="/wiki#backends", status_code=307)
 
 
 @app.get("/catalog")
 async def read_catalog_redirect():
-    """Legacy Catalog URL → Wiki Backends hub."""
+    """Legacy Catalog URL â†’ Wiki Backends hub."""
     return RedirectResponse(url="/wiki#backends", status_code=307)
 
 

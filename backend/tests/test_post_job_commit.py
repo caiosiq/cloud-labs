@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock
 
-from lab_model.jobs.job_manager import validate_submit_spec
-from lab_model.jobs.post_job_commit import _normalize_on_success
-from lab_model.state.control_manager import ControlManager
+from lab_model.coordinator.jobs.job_manager import validate_submit_spec
+from lab_model.coordinator.jobs.post_job_commit import _normalize_on_success
+from lab_model.coordinator.state.control_manager import ControlManager
 
 
 class OnSuccessSpecTests(unittest.TestCase):
@@ -45,7 +45,7 @@ class OnSuccessSpecTests(unittest.TestCase):
 
 class PostJobCommitTests(unittest.IsolatedAsyncioTestCase):
     async def test_apply_post_job_commit_writes_commit(self) -> None:
-        from lab_model.jobs.post_job_commit import apply_post_job_commit_if_needed
+        from lab_model.coordinator.jobs.post_job_commit import apply_post_job_commit_if_needed
 
         with tempfile.TemporaryDirectory() as tmp:
             repo = "test-repo"

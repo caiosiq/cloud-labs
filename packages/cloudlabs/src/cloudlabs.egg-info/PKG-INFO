@@ -43,4 +43,4 @@ Author-defined TorchScript kernels + feature objectives::
 
     python scripts/example_session_kernel_author.py
 
-See ``docs/SESSION_KERNELS.md`` and ``docs/Run_CloudLab_Scripts.md``.
+See ``docs/SESSION_KERNELS.md`` and ``packages/cloudlabs/README.md``.

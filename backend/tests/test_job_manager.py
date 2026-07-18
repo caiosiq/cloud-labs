@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import unittest
 
-from lab_model.jobs.job_manager import JobManager, validate_submit_spec
-from lab_model.jobs.models import JobRecord
+from lab_model.coordinator.jobs.job_manager import JobManager, validate_submit_spec
+from lab_model.coordinator.jobs.models import JobRecord
 
 
 class JobManagerTests(unittest.TestCase):

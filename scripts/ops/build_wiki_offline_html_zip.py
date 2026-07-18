@@ -212,7 +212,7 @@ def render_markdown(md: str, *, figure_prefix: str = "figures/") -> str:
 MOCK_BACKEND = "mock.default"
 SKIP_MEAS = frozenset({"pose", "motor_rotations", "last_optimized_pose"})
 SKIP_TUN = frozenset({"reported_pose"})
-MOCK_LAB_VIEW = ROOT / "backend" / "lab_communicator" / "mock" / "lab_view"
+MOCK_LAB_VIEW = ROOT / "mock_edge" / "lab_view"
 BACKENDS_SCHEMA = ROOT / "schemas" / "backends.json"
 
 TENSOR_SPEC = {
@@ -273,7 +273,7 @@ def _tensor_text(field: str, decl: dict) -> str:
     layout = decl.get("layout") or base.get("layout") or "-"
     shape = decl.get("shape") or decl.get("tensor_shape") or base.get("shape") or "-"
     axes = decl.get("axes") if isinstance(decl.get("axes"), dict) else base.get("axes") or {}
-    lines = [f"{dtype} · {layout} · {shape}"]
+    lines = [f"{dtype} Â· {layout} Â· {shape}"]
     if decl.get("unit") or base.get("unit"):
         lines.append(f"unit: {decl.get('unit') or base.get('unit')}")
     if axes:
@@ -333,8 +333,8 @@ def load_mock_snapshot() -> dict:
     if backend_root not in sys.path:
         sys.path.insert(0, backend_root)
 
-    from lab_model.catalog.schema import load_component_library_rows
-    from lab_model.optimization.kernels.registry import list_kernels
+    from lab_model.coordinator.catalog.schema import load_component_library_rows
+    from lab_model.execution.optimization.kernels.registry import list_kernels
 
     lib_path = MOCK_LAB_VIEW / "component_library.json"
     rows = load_component_library_rows(str(lib_path))
@@ -406,7 +406,7 @@ def write_backends_review(out_path: Path, payload: dict) -> str:
     klist = payload["kernels"]
 
     lines: list[str] = []
-    lines.append(f"# Backends hub snapshot — `{MOCK_BACKEND}`")
+    lines.append(f"# Backends hub snapshot â€” `{MOCK_BACKEND}`")
     lines.append("")
     lines.append(
         "Static dump of the live Wiki **Backends** hub for the teaching simulator "
@@ -423,7 +423,7 @@ def write_backends_review(out_path: Path, payload: dict) -> str:
     lines.append(f"- **Communicator / mode:** `{mock.get('communicator') or mock.get('lab_mode') or 'mock'}`")
     lines.append(f"- **Component count:** {mock.get('component_count', len(active))}")
     repos = mock.get("control_repos") or []
-    lines.append(f"- **Control repos:** {', '.join(repos) if repos else '—'}")
+    lines.append(f"- **Control repos:** {', '.join(repos) if repos else 'â€”'}")
     lines.append("")
     lines.append("```python")
     lines.append("from cloudlabs import connect")
@@ -439,7 +439,7 @@ def write_backends_review(out_path: Path, payload: dict) -> str:
     for row in rows:
         tag = str(row.get("tag_id") or "")
         lines.append(
-            f"| `{tag}` | {row.get('name') or tag} | `{row.get('type') or '—'}` | "
+            f"| `{tag}` | {row.get('name') or tag} | `{row.get('type') or 'â€”'}` | "
             f"{'on bench' if tag in active else 'library'} |"
         )
     lines.append("")
@@ -447,7 +447,7 @@ def write_backends_review(out_path: Path, payload: dict) -> str:
     for row in rows:
         tag = str(row.get("tag_id") or "")
         name = str(row.get("name") or tag)
-        typ = str(row.get("type") or "—")
+        typ = str(row.get("type") or "â€”")
         on = "on bench" if tag in active else "library only"
         caps = _normalize_caps(row.get("capabilities"))
         tun = (caps["statecontrol"].get("tunables") or {}) if isinstance(caps["statecontrol"], dict) else {}
@@ -476,11 +476,11 @@ def write_backends_review(out_path: Path, payload: dict) -> str:
                 continue
             decl = decl if isinstance(decl, dict) else {}
             shown_t += 1
-            widget = decl.get("widget") or "—"
-            unit = decl.get("unit") or ("deg" if "motor" in field or field.endswith("rotation") else "—")
+            widget = decl.get("widget") or "â€”"
+            unit = decl.get("unit") or ("deg" if "motor" in field or field.endswith("rotation") else "â€”")
             lines.append(f"#### `tunables.{field}`")
             lines.append("")
-            lines.append(f"- **Widget:** `{widget}` · **Unit:** {unit}")
+            lines.append(f"- **Widget:** `{widget}` Â· **Unit:** {unit}")
             if field == "nominal_pose":
                 for axis, u in (("x", "mm"), ("y", "mm"), ("rotation", "deg")):
                     tpath = f"tunables.nominal_pose.{axis}"
@@ -575,7 +575,7 @@ def _comp_detail_html(row: dict, active: set, backend_id: str) -> str:
         if field in SKIP_TUN:
             continue
         decl = decl if isinstance(decl, dict) else {}
-        widget = decl.get("widget") or "—"
+        widget = decl.get("widget") or "â€”"
         if field == "nominal_pose":
             for axis, unit in (("x", "mm"), ("y", "mm"), ("rotation", "deg")):
                 tpath = f"tunables.nominal_pose.{axis}"
@@ -595,7 +595,7 @@ def _comp_detail_html(row: dict, active: set, backend_id: str) -> str:
                 (
                     tpath,
                     widget,
-                    str(decl.get("unit") or "—"),
+                    str(decl.get("unit") or "â€”"),
                     f"# {tpath}",
                     str(decl.get("physical_interpretation") or ""),
                 )
@@ -611,7 +611,7 @@ def _comp_detail_html(row: dict, active: set, backend_id: str) -> str:
                 f"measurables.{field}",
                 _meas_interp(field, decl),
                 _tensor_text(field, decl),
-                str(decl.get("domain") or TENSOR_SPEC.get(field, {}).get("domain") or "—"),
+                str(decl.get("domain") or TENSOR_SPEC.get(field, {}).get("domain") or "â€”"),
                 f'lab.measurable("{tag}", "{field}").resolve(record=True)',
             )
         )
@@ -729,7 +729,7 @@ def render_backends_hub_html(payload: dict, *, img_src: str) -> str:
             f'<button type="button" class="comp-item" data-hub-tag="{html.escape(tag)}">'
             f'<span class="name">{html.escape(name)} '
             f'<span class="badge {badge}">{badge_t}</span></span>'
-            f'<span class="meta">{html.escape(tag)} · {html.escape(typ)}</span></button>'
+            f'<span class="meta">{html.escape(tag)} Â· {html.escape(typ)}</span></button>'
         )
         comp_details.append(_comp_detail_html(row, active, bid))
 
@@ -742,9 +742,9 @@ def render_backends_hub_html(payload: dict, *, img_src: str) -> str:
         kern_btns.append(
             f'<button type="button" class="comp-item" data-hub-kernel="{html.escape(kid)}">'
             f'<span class="name">{html.escape(klabel)}</span>'
-            f'<span class="meta">{html.escape(kid)} · {html.escape(runtime)}</span></button>'
+            f'<span class="meta">{html.escape(kid)} Â· {html.escape(runtime)}</span></button>'
         )
-        kdesc = k.get("physical_interpretation") or k.get("description") or "—"
+        kdesc = k.get("physical_interpretation") or k.get("description") or "â€”"
         kern_details.append(
             f'<div class="hub-kern-detail" id="hub-kern-{html.escape(kid)}" hidden>'
             f'<div class="detail-header"><h2>{html.escape(klabel)}</h2>'
@@ -759,10 +759,10 @@ def render_backends_hub_html(payload: dict, *, img_src: str) -> str:
     overview_dl = f"""
             <dl class="backend-overview-dl">
                 <div><dt>Communicator</dt><dd>{html.escape(str(mock.get('communicator') or 'mock'))} ({html.escape(str(mock.get('lab_mode') or 'MOCK'))})</dd></div>
-                <div><dt>Health</dt><dd>{html.escape(str(mock.get('health') or mock.get('availability') or '—'))}</dd></div>
-                <div><dt>System</dt><dd>{html.escape(str(mock.get('system_status') or '—'))}</dd></div>
+                <div><dt>Health</dt><dd>{html.escape(str(mock.get('health') or mock.get('availability') or 'â€”'))}</dd></div>
+                <div><dt>System</dt><dd>{html.escape(str(mock.get('system_status') or 'â€”'))}</dd></div>
                 <div><dt>Components</dt><dd>{html.escape(str(mock.get('component_count', len(active))))}</dd></div>
-                <div><dt>Control repos</dt><dd>{html.escape(', '.join(mock.get('control_repos') or []) or '—')}</dd></div>
+                <div><dt>Control repos</dt><dd>{html.escape(', '.join(mock.get('control_repos') or []) or 'â€”')}</dd></div>
                 <div><dt>Edge</dt><dd>{'Attached' if mock.get('edge_attached') else 'Not attached'}</dd></div>
                 <div><dt>Session lease</dt><dd>None</dd></div>
                 <div><dt>Queued jobs</dt><dd>{html.escape(str(mock.get('queued_jobs') if mock.get('queued_jobs') is not None else 0))}</dd></div>
@@ -777,9 +777,9 @@ def render_backends_hub_html(payload: dict, *, img_src: str) -> str:
   <div class="backends-hub-inner">
     <div id="backends-gallery">
       <div class="backends-gallery-intro">
-        <p class="eyebrow">Offline pack · mock.default</p>
+        <p class="eyebrow">Offline pack Â· mock.default</p>
         <h2>Backends</h2>
-        <p class="lede">Pick the mock lab to explore components and kernels — same layout as the live Wiki Backends hub. All catalog data is baked into this zip.</p>
+        <p class="lede">Pick the mock lab to explore components and kernels â€” same layout as the live Wiki Backends hub. All catalog data is baked into this zip.</p>
       </div>
       <div class="backend-card-grid">
         <button type="button" class="backend-card" data-open-mock style="animation-delay:0ms">
@@ -794,14 +794,14 @@ def render_backends_hub_html(payload: dict, *, img_src: str) -> str:
             </div>
             <code class="backend-id">{html.escape(bid)}</code>
             <p class="backend-desc">{html.escape(desc)}</p>
-            <p class="backend-meta">Idle — available (offline snapshot)</p>
+            <p class="backend-meta">Idle â€” available (offline snapshot)</p>
           </div>
         </button>
       </div>
     </div>
 
     <div id="backends-detail" hidden>
-      <button type="button" class="backend-back" data-hub-back>← All backends</button>
+      <button type="button" class="backend-back" data-hub-back>â† All backends</button>
       <header class="backend-hero">
         <div class="backend-hero-media hero-mock">
           <img src="{html.escape(img)}" alt="" data-hero="mock" />
@@ -845,7 +845,7 @@ def render_backends_hub_html(payload: dict, *, img_src: str) -> str:
           </div>
         </div>
         <div id="backend-panel-snapshots" class="backend-panel" hidden>
-          <p class="empty">Snapshots are live coordinator state — not included in this offline pack.</p>
+          <p class="empty">Snapshots are live coordinator state â€” not included in this offline pack.</p>
         </div>
       </div>
     </div>
@@ -860,7 +860,7 @@ def extract_wiki_css() -> str:
     if not m:
         raise SystemExit("Could not extract <style> from wiki.html")
     css = m.group(1)
-    # drop backends-hub-only bulk if huge — keep guide + chrome styles
+    # drop backends-hub-only bulk if huge â€” keep guide + chrome styles
     return css
 
 
@@ -917,14 +917,14 @@ header nav a {{ pointer-events: none; opacity: 0.7; }}
 <body>
 <div class="wiki-atmosphere" aria-hidden="true"></div>
 <div class="offline-banner">
-  <strong>Cloud Labs Wiki — offline pack</strong>
-  · Open <code>index.html</code> from this folder (no server)
-  · Learn + static <strong>Backends</strong> hub for <code>mock.default</code>
+  <strong>Cloud Labs Wiki â€” offline pack</strong>
+  Â· Open <code>index.html</code> from this folder (no server)
+  Â· Learn + static <strong>Backends</strong> hub for <code>mock.default</code>
 </div>
 <header>
   <div>
-    <h1>Cloud Labs · Wiki</h1>
-    <p class="sub">Learn the lab language — then open Backends for the mock bench catalog.</p>
+    <h1>Cloud Labs Â· Wiki</h1>
+    <p class="sub">Learn the lab language â€” then open Backends for the mock bench catalog.</p>
   </div>
   <nav>
     <a href="#">Twin UI</a>
@@ -1126,7 +1126,7 @@ def main() -> int:
     )
 
     (OUT / "README.txt").write_text(
-        """Cloud Labs Wiki — offline HTML pack
+        """Cloud Labs Wiki â€” offline HTML pack
 ====================================
 
 Open index.html from this folder (double-click is fine).
@@ -1145,7 +1145,7 @@ Contents
 Backends section
 ----------------
 Matches the live Wiki Backends page layout:
-  gallery card (hero image) → mock.default → Overview / Components / Kernels
+  gallery card (hero image) â†’ mock.default â†’ Overview / Components / Kernels
 All mock catalog detail is pre-rendered in the HTML. No API fetch.
 The mock hero is both a file under backends-images/ and embedded in the HTML
 so it shows even when browsing file:// with broken relative paths.
@@ -1154,7 +1154,7 @@ Regenerate
 ----------
   python scripts/ops/build_wiki_offline_html_zip.py
 
-(Server optional — builder reads mock lab_view from disk.)
+(Server optional â€” builder reads mock lab_view from disk.)
 """,
         encoding="utf-8",
     )

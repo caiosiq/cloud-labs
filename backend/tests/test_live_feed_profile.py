@@ -1,4 +1,4 @@
-"""Phase 7 — TeleOp live-feed preview profile selection."""
+"""Phase 7 â€” TeleOp live-feed preview profile selection."""
 from __future__ import annotations
 
 import asyncio
@@ -8,17 +8,17 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict
 
-from lab_communicator.mock.communicator import MockLabCommunicator
-from lab_communicator.shared.lab_view_config import (
+from mock_edge.host.communicator import MockLabCommunicator
+from lab_model.coordinator.backends.lab_view_config import (
     TableCamPreviewConfig,
     bootstrap_lab_view,
     load_table_cam_preview_config,
 )
-from lab_model.domain.component import new_component_entry
-from lab_model.orchestration.live_feed import _resolve_live_feed_profile, run_end_live_feed
+from lab_model.language.domain.component import new_component_entry
+from lab_model.execution.orchestration.live_feed import _resolve_live_feed_profile, run_end_live_feed
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "backend" / "lab_communicator" / "mock" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
 
 
 class _FakeHost:

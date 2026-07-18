@@ -7,17 +7,17 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict
 
-from lab_communicator.shared.lab_view_config import bootstrap_lab_view
-from lab_model.optimization.compiler import compile_objective_graph, compile_objective_payload
-from lab_model.optimization.errors import EnsemblePreflightError
-from lab_model.optimization.graph import ObjectiveGraphSpec
-from lab_model.optimization.metrics import weighted_sum as _metrics  # noqa: F401 — register
-from lab_model.optimization.preflight import preflight_ensemble, preflight_objective_sources
+from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view
+from lab_model.execution.optimization.compiler import compile_objective_graph, compile_objective_payload
+from lab_model.execution.optimization.errors import EnsemblePreflightError
+from lab_model.execution.optimization.graph import ObjectiveGraphSpec
+from lab_model.execution.optimization.metrics import weighted_sum as _metrics  # noqa: F401 â€” register
+from lab_model.execution.optimization.preflight import preflight_ensemble, preflight_objective_sources
 from cloudlabs.objective import ObjectiveGraphBuilder, objective_term
-from lab_model.optimization.spec import ObjectiveSpec
+from lab_model.execution.optimization.spec import ObjectiveSpec
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "backend" / "lab_communicator" / "mock" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
 _LAB_STATE = _MOCK_LAB_VIEW / "lab_state.json"
 _GRAPH_EXAMPLE = (
     _PROJECT_ROOT
@@ -130,7 +130,7 @@ class ObjectiveCompilerTests(unittest.TestCase):
     def test_graph_example_matches_ensemble_objective_shape(self) -> None:
         compiled = compile_objective_payload(self.graph_example)
         expected = self.ensemble_example["parameters"]["objective"]
-        # Power term in ensemble example uses last_optimization_score — graph uses output_power.
+        # Power term in ensemble example uses last_optimization_score â€” graph uses output_power.
         self.assertEqual(compiled["type"], expected["type"])
         centroid = compiled["terms"][0]
         self.assertEqual(centroid["metric"], "rms_distance_px")

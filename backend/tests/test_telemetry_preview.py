@@ -5,7 +5,7 @@ import json
 import unittest
 from pathlib import Path
 
-from lab_model.catalog.schema import live_feed_channel, resolve_telemetry_stream_backend
+from lab_model.coordinator.catalog.schema import live_feed_channel, resolve_telemetry_stream_backend
 
 
 def _load_mock_catalog_row(tag_id: str) -> dict:

@@ -2,7 +2,7 @@
 
 **Status:** Implemented (MVP)  
 **Last updated:** 2026-07-10  
-**Related:** [`ENSEMBLE_OPTIMIZATION.md`](./ENSEMBLE_OPTIMIZATION.md) §8, [`PROGRAMMABLE_LAB_VISION.md`](./PROGRAMMABLE_LAB_VISION.md) §7 Phase E, [`EXECUTION_MODES.md`](./EXECUTION_MODES.md) §3.3
+**Related:** [`ENSEMBLE_OPTIMIZATION.md`](./ENSEMBLE_OPTIMIZATION.md) §8, [`EXECUTION_MODES.md`](./EXECUTION_MODES.md) §3.3
 
 ---
 
@@ -61,7 +61,7 @@ Examples: `schemas/objective_graph_examples/`.
 | `field: camera_image` | `derived_centroid` (`from: measurables.camera_image`) | `rms_distance_px` |
 | `field: <scalar>` | `measurable_scalar` (`path: measurables.<field>`) | explicit or `one_minus_normalized` default for known fields |
 
-Implementation: `backend/lab_model/optimization/compiler.py`.
+Implementation: `backend/lab_model/execution/optimization/compiler.py`.
 
 The frontend `buildAuthoringObjectiveGraph()` mirrors the same field → source mapping as `buildObjectiveTermPayload()` in `optimization-builder.js`.
 
@@ -117,7 +117,7 @@ Twin UI optimization **Run** calls this with `preflight: true` before submitting
 ## 6. Python SDK
 
 ```python
-from lab_model.optimization.sdk import ObjectiveGraphBuilder, compile_objective
+from lab_model.execution.optimization.sdk import ObjectiveGraphBuilder, compile_objective
 
 graph = (
     ObjectiveGraphBuilder()
@@ -135,7 +135,7 @@ graph = (
 # builder.compile_and_preflight(lab_state_dict)
 ```
 
-Module: `backend/lab_model/optimization/sdk/objective.py`.
+Module: `backend/lab_model/execution/optimization/sdk/objective.py`.
 
 ---
 
@@ -149,7 +149,7 @@ On **real** backends (`real.*`), preflight runs with `strict_real_objectives=Tru
 | `measurable_scalar` | `output_power_readback_mw` | Must reference a **LASER_SOURCE** tag (`tag_50`); read via `_hardware_read_laser_output_power_mw` |
 | `measurable_scalar` | `last_optimization_score` | State read only; optional image fallback for mock-style proxies |
 
-Implementation: `lab_model/optimization/objective_measurements.py` (planner) + `lab_communicator/real/ensemble.py`.
+Implementation: `lab_model/execution/optimization/objective_measurements.py` (planner) + `lab_communicator/real/ensemble.py`.
 
 Example payload: `schemas/ensemble_optimization_examples/real_bench_centroid_laser.json`.
 

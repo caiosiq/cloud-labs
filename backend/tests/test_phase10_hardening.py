@@ -6,8 +6,8 @@ import unittest
 
 class TestLaserTunablePlugin(unittest.TestCase):
     def test_output_power_mw_registered(self) -> None:
-        from lab_model import tunables  # noqa: F401
-        from lab_model.tunables.registry import get_tunable
+        from lab_model.language import tunables  # noqa: F401
+        from lab_model.language.tunables.registry import get_tunable
 
         spec = get_tunable("output_power_mw")
         self.assertIsNotNone(spec)
@@ -15,8 +15,8 @@ class TestLaserTunablePlugin(unittest.TestCase):
         self.assertEqual(spec.write_primitive.value, "SET_LASER_OUTPUT")
 
     def test_measurable_registered(self) -> None:
-        from lab_model import measurables  # noqa: F401
-        from lab_model.measurables.registry import get_measurable
+        from lab_model.language import measurables  # noqa: F401
+        from lab_model.language.measurables.registry import get_measurable
 
         spec = get_measurable("output_power_readback_mw")
         self.assertIsNotNone(spec)

@@ -4,9 +4,9 @@ from __future__ import annotations
 import time
 import unittest
 
-from lab_model.edge.registry import DEFAULT_STALE_AFTER_S, EdgeAgentRegistry
-from lab_model.jobs.job_manager import JobManager
-from lab_model.jobs.lease_manager import SessionLeaseManager
+from lab_model.execution.edge.registry import DEFAULT_STALE_AFTER_S, EdgeAgentRegistry
+from lab_model.coordinator.jobs.job_manager import JobManager
+from lab_model.coordinator.jobs.lease_manager import SessionLeaseManager
 
 
 class EdgeStaleEvictionTests(unittest.TestCase):

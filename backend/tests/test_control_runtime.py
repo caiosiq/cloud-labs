@@ -10,21 +10,21 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lab_communicator.shared.lab_view_config import bootstrap_lab_view
-from lab_model.primitives.ids import PrimitiveId
-from lab_model.state.control_manager import ControlManager
-from lab_model.state.diff import configuration_diff
-from lab_model.state.projections import (
+from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view
+from lab_model.language.primitives.ids import PrimitiveId
+from lab_model.coordinator.state.control_manager import ControlManager
+from lab_model.coordinator.state.diff import configuration_diff
+from lab_model.coordinator.state.projections import (
     extract_configuration,
     extract_configuration_metadata,
     extract_observations,
 )
-from lab_model.state.reconcile import plan_reconcile
-from lab_model.state.reconcile_executor import validate_reconcile_plan
-from lab_model.state.runtime_manager import MutationKind, RuntimeManager
+from lab_model.coordinator.state.reconcile import plan_reconcile
+from lab_model.coordinator.state.reconcile_executor import validate_reconcile_plan
+from lab_model.coordinator.state.runtime_manager import MutationKind, RuntimeManager
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "backend" / "lab_communicator" / "mock" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
 _LAB_STATE = _MOCK_LAB_VIEW / "lab_state.json"
 
 
@@ -33,8 +33,8 @@ class ControlRuntimeTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         os.environ["LAB_VIEW_PATH"] = str(_MOCK_LAB_VIEW)
         bootstrap_lab_view(str(_PROJECT_ROOT))
-        from lab_communicator.shared.lab_view_config import get_lab_view_paths
-        from lab_model import motor_rotation_store as motor_rot
+        from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
+        from lab_model.language.domain import motor_rotation_store as motor_rot
 
         motor_rot.configure(get_lab_view_paths().motor_rotations_json)
         with open(_LAB_STATE, "r", encoding="utf-8") as handle:
@@ -239,7 +239,7 @@ class ControlRuntimeTests(unittest.TestCase):
             self.assertEqual(plan_noop, [])
 
     def test_list_and_create_control_repos(self) -> None:
-        from lab_model.state.control_manager import (
+        from lab_model.coordinator.state.control_manager import (
             create_control_repo,
             list_control_repos,
             validate_repo_id,
@@ -321,7 +321,7 @@ class ControlRuntimeTests(unittest.TestCase):
             self.assertTrue(mgr.runtime_is_dirty(edited))
 
             # Preview is now a read-only frontend overlay: it never mutates the
-            # live runtime, so the `viewing` pointer no longer affects dirty —
+            # live runtime, so the `viewing` pointer no longer affects dirty â€”
             # dirty is purely bench-vs-applied.
             mgr.set_viewing("some-other-commit")
             self.assertTrue(mgr.runtime_is_dirty(edited))
@@ -430,8 +430,8 @@ class ControlRuntimeTests(unittest.TestCase):
     def test_execute_reconcile_plan_moves_mock_component(self) -> None:
         import copy
 
-        from lab_communicator.mock.communicator import MockLabCommunicator
-        from lab_model.state.reconcile_executor import execute_reconcile_plan
+        from mock_edge.host.communicator import MockLabCommunicator
+        from lab_model.coordinator.state.reconcile_executor import execute_reconcile_plan
 
         lab = MockLabCommunicator()
         state = copy.deepcopy(self.fixture_runtime)
@@ -439,7 +439,7 @@ class ControlRuntimeTests(unittest.TestCase):
 
         current = extract_configuration(state)
         target = json.loads(json.dumps(current))
-        # Pick a component that is on the breadboard (movable) — a STORED part
+        # Pick a component that is on the breadboard (movable) â€” a STORED part
         # would be (correctly) refused by MOVE_COMPONENT, so blindly taking the
         # first component is fragile as the lab_state fixture evolves.
         tag = next(
@@ -553,7 +553,7 @@ class ControlRuntimeTests(unittest.TestCase):
         self.assertNotIn("placement", tun)
 
     def test_commit_optimization_complete_syncs_nominal_pose(self) -> None:
-        from lab_model.state.commits import commit_optimization_complete
+        from lab_model.coordinator.state.commits import commit_optimization_complete
 
         runtime = json.loads(json.dumps(self.fixture_runtime))
         tag = next(
@@ -580,8 +580,8 @@ class ControlRuntimeTests(unittest.TestCase):
         )
 
     def test_backfill_optimization_metadata_from_legacy_commit(self) -> None:
-        from lab_model.state.control_documents import configuration_document
-        from lab_model.state.projections import infer_configuration_metadata_from_document
+        from lab_model.coordinator.state.control_documents import configuration_document
+        from lab_model.coordinator.state.projections import infer_configuration_metadata_from_document
 
         legacy_cfg = {
             "holding": {"tag_id": None, "nominal_pose": None},

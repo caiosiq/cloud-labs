@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from lab_model.catalog.bundle import filter_v1_catalog_to_active_tags
+from lab_model.coordinator.catalog.bundle import filter_v1_catalog_to_active_tags
 
 
 class TestActiveCatalogFilter(unittest.TestCase):

@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/capabilities.schema.json",
+  "title": "EdgeContractCapabilitiesV1",
+  "description": "GET /capabilities — what this edge can do (not static table geometry).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "backend_id", "supported_primitives", "features"],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "backend_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Matches coordinator backend registry id (e.g. mock.default)."
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "torchscript_execution": { "type": "boolean" },
+        "hardware_reconciliation": { "type": "boolean" },
+        "hardware_triggered_latch": { "type": "boolean" },
+        "lan_direct_streams": {
+          "type": "boolean",
+          "description": "If true, clients on same LAN may attach to stream URLs directly; coordinator still proxies by default."
+        }
+      }
+    },
+    "supported_primitives": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Primitive ids from the Cloud Labs inventory (e.g. MOVE_MOTOR, START_TELEOP)."
+    },
+    "measurables": {
+      "type": "object",
+      "description": "Map of measurable_id (e.g. tag_22.camera_image) → analysis/wire/live binding.",
+      "additionalProperties": {
+        "$ref": "measurable_live_decl.schema.json"
+      }
+    },
+    "telemetry_channels": {
+      "type": "object",
+      "description": "Armed live channels; each binds to a measurable or tunable live samples.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["transport", "path", "requires_primitive"],
+        "properties": {
+          "transport": {
+            "type": "string",
+            "enum": ["mjpeg_http", "jpeg_poll", "websocket"]
+          },
+          "path": {
+            "type": "string",
+            "description": "Path on the edge (e.g. /stream/tag_22/camera_image)."
+          },
+          "requires_primitive": {
+            "type": "string",
+            "description": "Arming primitive, typically START_LIVE_FEED or START_TELEOP."
+          },
+          "binds_measurable": {
+            "type": "string",
+            "description": "Measurable id when this channel is wire form of a measurable."
+          },
+          "binds_tunables_live": {
+            "type": "boolean",
+            "description": "True when channel pushes flat live samples of active tunables (TeleOp pose)."
+          },
+          "default_fps": { "type": "number", "minimum": 1, "maximum": 120 },
+          "default_profile": { "type": "string" }
+        }
+      }
+    },
+    "wire_profiles": {
+      "type": "object",
+      "description": "Named JPEG/MJPEG encode profiles (replaces ad-hoc table_cam_preview knobs).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scale": { "type": "number", "minimum": 0.05, "maximum": 1 },
+          "jpeg_quality": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "fps": { "type": "number", "minimum": 1, "maximum": 120 }
+        }
+      }
+    }
+  }
+}

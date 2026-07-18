@@ -148,3 +148,34 @@ Index: [`scripts/language/README.md`](../../scripts/language/README.md).
    closed-loop when the edge must own the inner optimization.
 
 That is the scripting language of the Optical Processing Unit.
+
+---
+
+## Live plane (Twin ≡ SDK)
+
+Same primitive names in Twin (`frontend/js/cloudlabs`) and this package:
+
+```python
+with connect(resolve_backend_id(), base_url="http://127.0.0.1:8000") as lab:
+    lab.start_live_feed("tag_22")          # START_LIVE_FEED
+    frame = lab.capture_measurable("tag_22", "camera_image")
+    lab.end_live_feed("tag_22")            # END_LIVE_FEED
+    lab.start_teleop("tag_20")             # START_TELEOP
+    lab.teleop_goto("tag_20", target_pose={"x": 10.0, "y": 5.0, "rotation": 0.0})
+    lab.end_teleop("tag_20")
+```
+
+`get_lab_state()` is **Tier C overview** (layout / leases) — not live science.
+See `scripts/language/07_live_plane.py`.
+
+## Edge Contract (lab backends)
+
+Lab repos implement the southbound **Edge Contract v1** (not by importing
+cloud-labs communicators). Scaffold + conformance live in
+[`packages/cloudlabs_edge_dev`](../cloudlabs_edge_dev/):
+
+```bash
+pip install -e ./packages/cloudlabs_edge_dev
+cloudlabs-edge serve-stub --port 8100
+cloudlabs-edge check http://127.0.0.1:8100 --profile stub
+```

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Print primitive handler coverage (Phase 0 audit). Run from repo root:
+"""Print primitive handler coverage. Run from repo root:
 
+    $env:PYTHONPATH="backend;mock_edge/src"
     python scripts/ops/audit_primitives.py
 """
 from __future__ import annotations
@@ -8,18 +9,18 @@ from __future__ import annotations
 import os
 import sys
 
-_BACKEND = os.path.join(os.path.dirname(__file__), "..", "..", "backend")
-if _BACKEND not in sys.path:
-    sys.path.insert(0, os.path.abspath(_BACKEND))
+_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_BACKEND = os.path.join(_REPO, "backend")
+_MOCK_SRC = os.path.join(_REPO, "mock_edge", "src")
+for p in (_BACKEND, _MOCK_SRC):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-from lab_communicator.base import LabCommunicator  # noqa: E402
-from lab_communicator.real.communicator import RealLabCommunicator  # noqa: E402
-from lab_model import measurables as _measurables  # noqa: F401, E402
-from lab_model import tunables as _tunables  # noqa: F401, E402
-from lab_model.platform import (  # noqa: E402
-    audit_primitive_handlers,
-    audit_real_hardware_hooks,
-)
+from mock_edge.host.base import LabCommunicator  # noqa: E402
+from mock_edge.host.communicator import MockLabCommunicator  # noqa: E402
+from lab_model.language import measurables as _measurables  # noqa: F401, E402
+from lab_model.language import tunables as _tunables  # noqa: F401, E402
+from lab_model.platform import audit_primitive_handlers  # noqa: E402
 
 
 def _print_table(title: str, rows: list[dict]) -> None:
@@ -38,8 +39,10 @@ def _print_table(title: str, rows: list[dict]) -> None:
 
 def main() -> int:
     _print_table("LabCommunicator handlers", audit_primitive_handlers(LabCommunicator))
-    _print_table("RealLabCommunicator handlers", audit_primitive_handlers(RealLabCommunicator))
-    _print_table("Real hardware _primitive_* hooks", audit_real_hardware_hooks(RealLabCommunicator))
+    _print_table(
+        "MockLabCommunicator handlers",
+        audit_primitive_handlers(MockLabCommunicator, label="MockLabCommunicator"),
+    )
     return 0
 
 

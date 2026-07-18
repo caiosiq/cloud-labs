@@ -7,14 +7,14 @@ import os
 import unittest
 from pathlib import Path
 
-from lab_communicator.mock.communicator import MockLabCommunicator
-from lab_communicator.shared.lab_view_config import bootstrap_lab_view, get_lab_view_paths
-from lab_model.jobs.job_manager import JobManager
-from lab_model.jobs.lease_manager import SessionLeaseManager
-from lab_model.jobs.runner import run_job
+from mock_edge.host.communicator import MockLabCommunicator
+from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view, get_lab_view_paths
+from lab_model.coordinator.jobs.job_manager import JobManager
+from lab_model.coordinator.jobs.lease_manager import SessionLeaseManager
+from lab_model.coordinator.jobs.runner import run_job
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "backend" / "lab_communicator" / "mock" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
 _EXAMPLE = _PROJECT_ROOT / "schemas" / "ensemble_optimization_examples" / "two_mirror_mock.json"
 
 
@@ -23,7 +23,7 @@ class JobRunnerMockTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         os.environ["LAB_VIEW_PATH"] = str(_MOCK_LAB_VIEW)
         bootstrap_lab_view(str(_PROJECT_ROOT))
-        from lab_model import motor_rotation_store as motor_rot
+        from lab_model.language.domain import motor_rotation_store as motor_rot
 
         motor_rot.configure(get_lab_view_paths().motor_rotations_json)
 

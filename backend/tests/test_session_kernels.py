@@ -8,20 +8,20 @@ from pathlib import Path
 
 import numpy as np
 
-from lab_model.optimization.kernels import session_store
-from lab_model.optimization.kernels.torchscript_runtime import (
+from lab_model.execution.optimization.kernels import session_store
+from lab_model.execution.optimization.kernels.torchscript_runtime import (
     clear_torchscript_caches,
     run_torchscript_features,
     run_torchscript_output,
     run_torchscript_scalar,
     torch_available,
 )
-from lab_model.optimization.metrics.feature_metrics import (
+from lab_model.execution.optimization.metrics.feature_metrics import (
     metric_minimize_value,
     metric_rms_distance,
 )
-from lab_model.optimization.metrics.squared_error import metric_squared_error
-from lab_model.optimization.spec import ObjectiveTermSpec
+from lab_model.execution.optimization.metrics.squared_error import metric_squared_error
+from lab_model.execution.optimization.spec import ObjectiveTermSpec
 
 
 @unittest.skipUnless(torch_available(), "PyTorch not installed")
@@ -202,7 +202,7 @@ class CatalogCuratedKernels(unittest.TestCase):
         clear_torchscript_caches()
 
     def test_roi_and_peak_present(self) -> None:
-        from lab_model.optimization.kernels import get_kernel
+        from lab_model.execution.optimization.kernels import get_kernel
 
         for kid in ("demo.roi_mean_score", "demo.peak_intensity"):
             desc = get_kernel(kid)
@@ -215,7 +215,7 @@ class CatalogCuratedKernels(unittest.TestCase):
             self.assertLessEqual(score, 1.0)
 
     def test_builtin_physics_feature_kernels(self) -> None:
-        from lab_model.optimization.kernels import get_kernel
+        from lab_model.execution.optimization.kernels import get_kernel
 
         for kid, nfeat in (
             ("builtin.roi_centroid", 2),

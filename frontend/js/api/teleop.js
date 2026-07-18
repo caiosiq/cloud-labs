@@ -1,13 +1,11 @@
 /**
- * TeleOp v2 HTTP client.
+ * TeleOp v2 HTTP client — Twin wrapper over {@link labClient}.
  *
- *   POST /api/components/{tag_id}/teleop/start
- *   POST /api/components/{tag_id}/teleop/end
- *   POST /api/components/{tag_id}/telemetry/goto
+ * Primitive names match the Python SDK:
+ *   lab.start_teleop / lab.end_teleop / lab.teleop_goto
  *
- * These routes are separate from ``/api/command`` so the goto path can be
- * optimized without touching recipe / dispatch machinery. Helpers return
- * parsed JSON; UI feedback (toasts, LIVE/TARGET layers, etc.) stays in callers.
+ * Hot path: when a Tier A WS session is open, ``teleopGoto`` prefers WS;
+ * otherwise it uses the TELEOP_GOTO HTTP alias.
  *
  * Error semantics: every function resolves with ``{ok: bool, ...}``
  * instead of throwing, so rate-limited canvas loops stay simple.
@@ -15,15 +13,8 @@
 import { log } from '../ui/log.js';
 import { applyComponentTelemetryFromServer } from '../component-state.js';
 import { syncTeleopTargetFromCurrent } from '../teleop-target.js';
+import { labClient } from '../cloudlabs/client.js';
 import { isTeleopWsConnected, teleopGotoViaWs } from './teleop-session-ws.js';
-
-async function _parseBody(response) {
-    try {
-        return await response.json();
-    } catch (_e) {
-        return null;
-    }
-}
 
 /**
  * Acquire the per-component TELEOP lease.
@@ -34,16 +25,7 @@ async function _parseBody(response) {
 export async function startTeleop(tagId) {
     if (!tagId) return { ok: false, error: 'tagId required' };
     try {
-        const r = await fetch(`/api/components/${encodeURIComponent(tagId)}/teleop/start`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-        });
-        const body = await _parseBody(r);
-        if (!r.ok) {
-            const detail = (body && body.detail) ? String(body.detail) : `HTTP ${r.status}`;
-            log(`START_TELEOP ${tagId} refused: ${detail}`, 'warn');
-            return { ok: false, error: detail };
-        }
+        const body = await labClient.startTeleop(tagId);
         if (body && body.telemetry) {
             applyComponentTelemetryFromServer(tagId, body.telemetry);
         }
@@ -52,7 +34,7 @@ export async function startTeleop(tagId) {
         return { ok: true, tunables: body && body.tunables, telemetry: body && body.telemetry };
     } catch (e) {
         const msg = (e && e.message) ? e.message : String(e);
-        log(`START_TELEOP ${tagId} failed: ${msg}`, 'error');
+        log(`START_TELEOP ${tagId} refused: ${msg}`, 'warn');
         return { ok: false, error: msg };
     }
 }
@@ -66,16 +48,7 @@ export async function startTeleop(tagId) {
 export async function endTeleop(tagId) {
     if (!tagId) return { ok: false, error: 'tagId required' };
     try {
-        const r = await fetch(`/api/components/${encodeURIComponent(tagId)}/teleop/end`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-        });
-        const body = await _parseBody(r);
-        if (!r.ok) {
-            const detail = (body && body.detail) ? String(body.detail) : `HTTP ${r.status}`;
-            log(`END_TELEOP ${tagId} refused: ${detail}`, 'warn');
-            return { ok: false, error: detail };
-        }
+        const body = await labClient.endTeleop(tagId);
         if (body && body.telemetry) {
             applyComponentTelemetryFromServer(tagId, body.telemetry);
         }
@@ -83,16 +56,13 @@ export async function endTeleop(tagId) {
         return { ok: true, tunables: body && body.tunables, telemetry: body && body.telemetry };
     } catch (e) {
         const msg = (e && e.message) ? e.message : String(e);
-        log(`END_TELEOP ${tagId} failed: ${msg}`, 'error');
+        log(`END_TELEOP ${tagId} refused: ${msg}`, 'warn');
         return { ok: false, error: msg };
     }
 }
 
 /**
  * Plan + execute one absolute TeleOp goto frame.
- *
- * Body must include ``target_pose`` and/or ``target_motor_positions``.
- * Verbose logging is off by default (``opts.silent``); canvas drag sets silent.
  *
  * @param {string} tagId
  * @param {{target_pose?: object, target_motor_positions?: object, speed?: object, frame_id?: number}} body
@@ -110,22 +80,12 @@ export async function teleopGoto(tagId, body, opts) {
         }
     }
     try {
-        const r = await fetch(`/api/components/${encodeURIComponent(tagId)}/telemetry/goto`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body || {}),
-        });
-        const parsed = await _parseBody(r);
-        if (!r.ok) {
-            const detail = (parsed && parsed.detail) ? String(parsed.detail) : `HTTP ${r.status}`;
-            if (!silent) log(`TELEOP_GOTO ${tagId} refused: ${detail}`, 'warn');
-            return { ok: false, error: detail };
-        }
+        const parsed = await labClient.teleopGoto(tagId, body || {});
         if (!silent) log(`TELEOP_GOTO ${tagId}`, 'info');
         return { ok: true, telemetry: parsed && parsed.telemetry };
     } catch (e) {
         const msg = (e && e.message) ? e.message : String(e);
-        if (!silent) log(`TELEOP_GOTO ${tagId} failed: ${msg}`, 'error');
+        if (!silent) log(`TELEOP_GOTO ${tagId} refused: ${msg}`, 'warn');
         return { ok: false, error: msg };
     }
 }

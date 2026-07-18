@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/epoch_packet.schema.json",
+  "title": "EdgeContractEpochPacketV1",
+  "description": "Latched multi-signal observation bundle (RECORD_MEASURABLES / EVAL_KERNEL science path).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["epoch_ms", "values"],
+  "properties": {
+    "epoch_ms": {
+      "type": "integer",
+      "description": "Bench monotonic timestamp for the physical scene time of this latch."
+    },
+    "latch_quality": {
+      "type": "string",
+      "enum": ["hardware_triggered", "software_approx", "unknown"]
+    },
+    "values": {
+      "type": "object",
+      "description": "Keyed by measurable_id or flat tunable sample keys. Nested OK here (Tier C).",
+      "additionalProperties": true
+    },
+    "kernel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kernel_id": { "type": "string" },
+        "output_kind": { "type": "string", "enum": ["scalar", "vector", "features"] },
+        "value": {}
+      }
+    }
+  }
+}

@@ -137,7 +137,7 @@ export const store = {
 
     /**
      * Configuration version control (ControlManager UI).
-     * @see docs/CONTROL_RUNTIME_AND_VERSIONING.md
+     * @see docs/LAB_SURFACES_VC_AND_INITIALIZATION.md
      */
     control: {
         // null = version control not started yet (opt-in). The user picks a repo

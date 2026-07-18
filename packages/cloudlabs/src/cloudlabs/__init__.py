@@ -37,6 +37,7 @@ from .jobs import (
     submit_job,
     wait_for_job,
 )
+from .language import PrimitiveId, measurable_field_schema, primitive_action
 from .measurable import MeasurableHandle
 from .components import ComponentProxy, ComponentsNamespace
 from .objective import (
@@ -66,10 +67,13 @@ __all__ = [
     "MeasurableHandle",
     "MeasurableTensor",
     "ObjectiveGraphBuilder",
+    "PrimitiveId",
     "ReconcileResult",
     "ReconcileStep",
     "SessionLease",
     "VariableSpec",
+    "measurable_field_schema",
+    "primitive_action",
     "cancel_job",
     "compile_objective",
     "configure_logging",

@@ -1,10 +1,10 @@
 """Session checkpoint merge must read statecontrol-shaped component entries."""
 
-from lab_communicator.shared.session_checkpoint import (
+from mock_edge.shared.session_checkpoint import (
     ReconciliationThresholds,
     merge_offers_with_debug,
 )
-from lab_model.domain.component import new_component_entry
+from lab_model.language.domain.component import new_component_entry
 
 
 def _entry(tag_id: str, x: float, y: float, rot: float, *, motor: float | None = None):

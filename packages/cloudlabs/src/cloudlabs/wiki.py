@@ -187,14 +187,9 @@ def describe_component_row(
         )
     ]
 
-    parameters: Dict[str, Any] = {}
-    props = row.get("properties")
-    if isinstance(props, Mapping):
-        for key, value in props.items():
-            parameters[f"properties.{key}"] = value
-    for key in ("motor_ids", "motor_controller", "height_mm", "size", "id", "type"):
-        if row.get(key) is not None and key not in (props or {}):
-            parameters[key] = row.get(key)
+    from lab_model.language.parameters import parameters_from_catalog_row
+
+    parameters = parameters_from_catalog_row(row if isinstance(row, Mapping) else {})
 
     tel = caps.get("telemetry") or {}
     return {

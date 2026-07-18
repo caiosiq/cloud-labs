@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from lab_model.state.saved_workspace import (
+from lab_model.coordinator.state.saved_workspace import (
     WORKSPACE_STATE_KIND,
     build_workspace_state,
     unpack_workspace_state,

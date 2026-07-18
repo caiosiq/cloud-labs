@@ -4,7 +4,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
-from lab_model.orchestration.teleop_session_ws import (
+from lab_model.execution.orchestration.teleop_session_ws import (
     _handle_client_message,
     _session_phase,
 )

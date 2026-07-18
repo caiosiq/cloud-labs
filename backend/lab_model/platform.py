@@ -1,17 +1,17 @@
-"""Platform integrity checks — registries, primitives, and catalog alignment."""
+"""Platform integrity checks â€” registries, primitives, and catalog alignment."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from lab_model.catalog.schema import (
+from lab_model.coordinator.catalog.schema import (
     KNOWN_WIDGETS_MEASURABLE,
     KNOWN_WIDGETS_TUNABLE,
     SOFT_FALLBACK_WIDGET,
 )
-from lab_model.measurables.registry import MEASURABLE_REGISTRY
-from lab_model.primitives.ids import PrimitiveId
-from lab_model.primitives.registry import PRIMITIVE_REGISTRY
-from lab_model.tunables.registry import TUNABLE_REGISTRY
+from lab_model.language.measurables.registry import MEASURABLE_REGISTRY
+from lab_model.language.primitives.ids import PrimitiveId
+from lab_model.language.primitives.registry import PRIMITIVE_REGISTRY
+from lab_model.language.tunables.registry import TUNABLE_REGISTRY
 
 
 class PlatformIntegrityError(RuntimeError):
@@ -27,7 +27,7 @@ def validate_platform_integrity(
     Verify tunable/measurable plugins match primitive registry.
 
     Returns non-fatal warnings. Raises :class:`PlatformIntegrityError` on hard failures.
-    Import ``lab_model.tunables`` and ``lab_model.measurables`` before calling so
+    Import ``lab_model.language.tunables`` and ``lab_model.language.measurables`` before calling so
     decorators have run.
     """
     warnings: List[str] = []
@@ -51,6 +51,10 @@ def validate_platform_integrity(
     for field_id, spec in MEASURABLE_REGISTRY.items():
         if spec.widget not in KNOWN_WIDGETS_MEASURABLE and spec.widget != SOFT_FALLBACK_WIDGET:
             warnings.append(f"Measurable {field_id!r}: unknown widget {spec.widget!r}")
+        if not getattr(spec, "tensor", None) or not spec.tensor.dtype:
+            raise PlatformIntegrityError(
+                f"Measurable {field_id!r} missing tensor schema (dtype/domain required)"
+            )
 
     if catalog_rows:
         for row in catalog_rows:
@@ -82,7 +86,7 @@ def validate_platform_integrity(
 
 def validate_communicator_backend(communicator_id: str) -> None:
     """Ensure ``lab_manifest.communicator`` maps to a registered backend."""
-    from lab_communicator.shared.communicator_factory import known_communicator_ids
+    from lab_model.coordinator.backends.manifest_kinds import known_communicator_ids
 
     key = (communicator_id or "").strip().lower()
     known = known_communicator_ids()
@@ -98,7 +102,7 @@ def audit_primitive_handlers(
     label: str = "LabCommunicator",
 ) -> List[Dict[str, Any]]:
     """Return a per-primitive report: registry handler vs class method."""
-    from lab_model.primitives.ids import PrimitiveKind
+    from lab_model.language.primitives.ids import PrimitiveKind
 
     rows: List[Dict[str, Any]] = []
     for pid, meta in PRIMITIVE_REGISTRY.items():
@@ -130,7 +134,7 @@ def audit_primitive_handlers(
 
 def audit_real_hardware_hooks(real_cls: type) -> List[Dict[str, Any]]:
     """Report ``_primitive_*`` hooks on ``RealLabCommunicator``."""
-    from lab_communicator.base import LabCommunicator
+    from mock_edge.host.base import LabCommunicator
 
     expected = (
         "_primitive_move_component",
@@ -170,14 +174,14 @@ def assert_primitive_handlers_wired(communicator_cls: type, *, label: str = "Lab
         if r["status"] == "missing"
     ]
     if missing:
-        lines = ", ".join(f"{r['primitive']}→{r['handler']}" for r in missing)
+        lines = ", ".join(f"{r['primitive']}â†’{r['handler']}" for r in missing)
         raise PlatformIntegrityError(f"Missing primitive handlers on {label}: {lines}")
 
 
 def export_platform_registries() -> Dict[str, Any]:
     """JSON-serializable snapshot of tunable/measurable/primitive registries."""
-    from lab_model import measurables as _measurables  # noqa: F401
-    from lab_model import tunables as _tunables  # noqa: F401
+    from lab_model.language import measurables as _measurables  # noqa: F401
+    from lab_model.language import tunables as _tunables  # noqa: F401
 
     tunables_out: Dict[str, Dict[str, str]] = {}
     for field_id, spec in TUNABLE_REGISTRY.items():
@@ -186,9 +190,20 @@ def export_platform_registries() -> Dict[str, Any]:
             "write_primitive": spec.write_primitive.value,
         }
 
-    measurables_out: Dict[str, Dict[str, str]] = {}
+    measurables_out: Dict[str, Dict[str, Any]] = {}
     for field_id, spec in MEASURABLE_REGISTRY.items():
-        measurables_out[field_id] = {"widget": spec.widget}
+        t = spec.tensor
+        measurables_out[field_id] = {
+            "widget": spec.widget,
+            "tensor": {
+                "dtype": t.dtype,
+                "domain": t.domain,
+                "axes": dict(t.axes),
+                "units": dict(t.units),
+                "shape": list(t.shape),
+                "layout": t.layout,
+            },
+        }
 
     primitives_out: Dict[str, Dict[str, Any]] = {}
     for pid, meta in PRIMITIVE_REGISTRY.items():

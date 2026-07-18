@@ -1,7 +1,11 @@
 /**
  * Live feed session controls (START_LIVE_FEED / END_LIVE_FEED).
+ *
+ * Thin Twin wrapper over {@link labClient} — same verbs as Python
+ * ``lab.start_live_feed`` / ``lab.end_live_feed``.
  */
 import { applyComponentTelemetryFromServer } from '../component-state.js';
+import { labClient } from '../cloudlabs/client.js';
 import { stopJpegPollForTag } from '../widgets/jpeg-poll-registry.js';
 
 function _applyTelemetryResponse(tagId, body) {
@@ -11,28 +15,14 @@ function _applyTelemetryResponse(tagId, body) {
 }
 
 export async function startLiveFeed(tagId, channel = 'stream') {
-    const r = await fetch(
-        `/api/components/${encodeURIComponent(tagId)}/telemetry/live-feed/start?channel=${encodeURIComponent(channel)}`,
-        { method: 'POST' },
-    );
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) {
-        throw new Error(body.detail || `Live feed start failed (${r.status})`);
-    }
+    const body = await labClient.startLiveFeed(tagId, channel);
     _applyTelemetryResponse(tagId, body);
     return body;
 }
 
 export async function endLiveFeed(tagId, channel = 'all') {
     stopJpegPollForTag(tagId);
-    const r = await fetch(
-        `/api/components/${encodeURIComponent(tagId)}/telemetry/live-feed/end?channel=${encodeURIComponent(channel)}`,
-        { method: 'POST' },
-    );
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) {
-        throw new Error(body.detail || `Live feed end failed (${r.status})`);
-    }
+    const body = await labClient.endLiveFeed(tagId, channel);
     _applyTelemetryResponse(tagId, body);
     return body;
 }

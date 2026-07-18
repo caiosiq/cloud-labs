@@ -6,11 +6,11 @@
 
 **Related docs:**
 
-- [`CONTROL_RUNTIME_AND_VERSIONING.md`](./CONTROL_RUNTIME_AND_VERSIONING.md) — Runtime vs Configuration; optimization metadata on commits
-- [`universal_component_architecture.md`](./universal_component_architecture.md) — tunables / measurables / primitives
-- [`LAB_AUTOMATION_AND_TELEOP_ANALYSIS.md`](./LAB_AUTOMATION_AND_TELEOP_ANALYSIS.md) — `lab_automation` boundary
-- [`REAL_BENCH_ROADMAP.md`](./REAL_BENCH_ROADMAP.md) — real-hardware concerns (latency, Phase 4 pointer)
-- [`../backend/lab_model/orchestration/optimize.py`](../backend/lab_model/orchestration/optimize.py) — **today’s** single-tag orchestrator
+- [`LAB_SURFACES_VC_AND_INITIALIZATION.md`](./LAB_SURFACES_VC_AND_INITIALIZATION.md) — Runtime vs Configuration; commits
+- [`EDGE_CONTRACT_AND_UC_LIVE_PLANE.md`](./EDGE_CONTRACT_AND_UC_LIVE_PLANE.md) — edge / UC boundary
+- [`EDGE_UC_MIGRATION_ROADMAP.md`](./EDGE_UC_MIGRATION_ROADMAP.md) — hardware edge phases
+- [`../backend/lab_model/README.md`](../backend/lab_model/README.md) — tunables / measurables
+- [`../backend/lab_model/execution/orchestration/optimize.py`](../backend/lab_model/execution/orchestration/optimize.py) — **today’s** single-tag orchestrator
 - [`../schemas/strategies.json`](../schemas/strategies.json) — legacy strategy presets (NEWTON, COBYLA, …)
 
 > **Naming:** **`ControlManager`** (cloud-labs) owns configuration history.  
@@ -47,7 +47,7 @@ Three **physical** constraints are first-class in the design (not afterthoughts)
 POST /api/command  { action: OPTIMIZE, target_id, parameters: { strategy: NEWTON|COBYLA, ... } }
        │
        ▼
-run_optimize_component()          # lab_model/orchestration/optimize.py
+run_optimize_component()          # lab_model/execution/orchestration/optimize.py
        │  null measurables (one tag)
        │  system_status = OPTIMIZING
        │  optimization_target_id = tag
@@ -85,14 +85,14 @@ Legacy `strategy: NEWTON` remains supported as a **preset** that compiles to `(v
 │  validate spec · dry-run resolve all variable paths · layout @ x₀    │
 │  null_measurables(scope ∪ objective.sources)                         │
 │  system_status = OPTIMIZING · optimization_session = { id, … }     │
-│  await lab_model.optimization.run_ensemble_optimization(spec, x₀)    │
+│  await lab_model.execution.optimization.run_ensemble_optimization(spec, x₀)    │
 │  commit_optimization_ensemble_complete(best_x, loss, metadata)       │
 │  system_status = IDLE                                                │
 └───────────────────────────────┬────────────────────────────────────┘
                                 │
 ┌─ bench edge (inner macro, many evals) ─────────────────────────────┐
-│  lab_model.optimization.session — block COBYLA loop                  │
-│  lab_model.optimization.metrics — shared loss registry (pure math)   │
+│  lab_model.execution.optimization.session — block COBYLA loop                  │
+│  lab_model.execution.optimization.metrics — shared loss registry (pure math)   │
 │  lab_communicator backend — capture + apply tunables (I/O)         │
 └───────────────────────────────┬────────────────────────────────────┘
 ```
@@ -104,14 +104,14 @@ Legacy `strategy: NEWTON` remains supported as a **preset** that compiles to `(v
 | Git / configuration commits | **ControlManager** — only final tunables after operator saves |
 | Runtime JSON (tunables + measurables) | **RuntimeManager** — one commit at session end |
 | Optimization metadata (`metadata.optimization`) | Extracted on **Save configuration**; not a diff driver |
-| Loss math (metric registry) | **`lab_model/optimization/metrics`** — shared pure functions |
+| Loss math (metric registry) | **`lab_model/execution/optimization/metrics`** — shared pure functions |
 | COBYLA loop, normalization | **`lab_model/optimization`** (`session`, `solvers`, `normalize`) |
 | Measurement capture (NumPy, scalars) | **`lab_communicator`** backend (`evaluate_loss` impl) |
 | Session entry/exit, primitive API | **`lab_model/orchestration`** |
 | Hardware actuation | **`lab_communicator`** (`mock/` then `real/`) |
 
 > **Naming:** External **`lab_automation`** (sibling repo) = legacy strategies + `OpticalExperiment`.  
-> Do **not** confuse with the removed `backend/lab_automation/` folder — ensemble code now lives under **`lab_model/optimization/`**.
+> Do **not** confuse with the removed `backend/lab_automation/` folder — ensemble code now lives under **`lab_model/execution/optimization/`**.
 
 ---
 
@@ -123,7 +123,7 @@ Legacy `strategy: NEWTON` remains supported as a **preset** that compiles to `(v
 |------|----------|
 | Granularity | One `OPTIMIZE` command = one `OPTIMIZING` session |
 | Pre-flight | All variable/objective paths **resolved on live state** before session lock (§5.1) |
-| Inner loop location | `lab_model.optimization.run_ensemble_optimization` (worker thread on bench edge) |
+| Inner loop location | `lab_model.execution.optimization.run_ensemble_optimization` (worker thread on bench edge) |
 | Per-eval primitives | **No** `POST /api/command` per COBYLA step |
 | Measurables during loop | Staging / fast updates for UI; formal receipts at measure points |
 | VC / dirty | **No** configuration diff until operator commits bench |
@@ -200,7 +200,7 @@ Dynamic path strings (`"tunables.nominal_motor_positions.1"`) are easy to typo i
 | Resolve | Pre-flight on live state | For each tag, `get` current value; prove path exists and type is numeric |
 | Bind | After pre-flight only | Build typed getter/setter handles; no string splitting during eval loop |
 
-Implementation: `VariablePathResolver` in `lab_model/optimization/paths.py` (Phase 1). Failures return **400 at the API boundary** with `{ path, tag_id, reason }`—never enter `OPTIMIZING`.
+Implementation: `VariablePathResolver` in `lab_model/execution/optimization/paths.py` (Phase 1). Failures return **400 at the API boundary** with `{ path, tag_id, reason }`—never enter `OPTIMIZING`.
 
 **Unit tests (Deliverable 1.10):** typo paths (`tunable.nominal_pose`), wrong motor index, missing tag, non-numeric leaf—all must fail pre-flight without mutating `system_status`.
 
@@ -228,7 +228,7 @@ Before each hardware step:
 u  →  denormalize  →  x_physical  →  ActuatorRouter
 ```
 
-Implementation lives in `NormalizedSearchSpace` (`lab_automation` or shared `lab_model/optimization/` module — see Phase 1).
+Implementation lives in `NormalizedSearchSpace` (`lab_automation` or shared `lab_model/execution/optimization/` module — see Phase 1).
 
 ### 6.3 Solver knobs in normalized space
 
@@ -372,7 +372,7 @@ L = w_c · RMS_px(centroid, target) + w_p · (1 - norm_power)
 
 Lower is better.
 
-### 8.2 Objective metrics (plugin registry in `lab_model/optimization/metrics`)
+### 8.2 Objective metrics (plugin registry in `lab_model/execution/optimization/metrics`)
 
 | `metric` | Description |
 |----------|-------------|
@@ -390,17 +390,17 @@ Implementation: `metrics/registry.py` + one module per metric. Mock and real bac
 Cloud-labs JSON  →  metric: "rms_distance_px"  (intent only)
 Bench backend    →  capture → NumPy / scalar dict  (lab-specific I/O)
 Shared metrics   →  evaluate_weighted_sum(measurements, objective)  (identical math everywhere)
-Session loop     →  COBYLA proposes next u  (lab_model.optimization.session)
+Session loop     →  COBYLA proposes next u  (lab_model.execution.optimization.session)
 ```
 
 | Layer | Package | Sends/stores raw frames? |
 |-------|---------|---------------------------|
 | UI / HTTP poll | frontend, `main.py` | No — scalars only |
 | Orchestration | `lab_model/orchestration` | No — session bookkeeping |
-| Metrics | `lab_model/optimization/metrics` | No — receives small dicts |
+| Metrics | `lab_model/execution/optimization/metrics` | No — receives small dicts |
 | Backend | `lab_communicator/mock|real/ensemble` | Yes — local RAM only |
 
-Future **`cloudlabs-optimization-core`** pip package (optional): extract `lab_model/optimization/metrics` + `session` + `solvers` for external `lab_automation` installs without full cloud-labs checkout.
+Future **`cloudlabs-optimization-core`** pip package (optional): extract `lab_model/execution/optimization/metrics` + `session` + `solvers` for external `lab_automation` installs without full cloud-labs checkout.
 
 ---
 
@@ -648,16 +648,16 @@ Phase 4 ── Real bench: latency, hardware adapters, production hardening
 
 | # | Deliverable | Location (proposed) |
 |---|-------------|---------------------|
-| 1.1 | Pydantic models: `VariableRef`, `TouchAndGoSpec`, `ObjectiveSpec`, `SolverSpec`, `OptimizeEnsembleParameters` | `lab_model/primitives/schemas.py` or `lab_model/optimization/spec.py` |
-| 1.2 | `VariablePathResolver` — allowlist parse, dry-run get/set bind against live state | `lab_model/optimization/paths.py` |
-| 1.3 | `NormalizedSearchSpace` (hypercube map) | `lab_model/optimization/normalize.py` |
-| 1.4 | `run_optimize_ensemble` orchestrator — **pre-flight path resolve before `OPTIMIZING`** | `lab_model/orchestration/optimize_ensemble.py` |
-| 1.5 | `commit_optimization_ensemble_complete` | `lab_model/state/commits.py` |
-| 1.6 | Dispatch branch: `parameters.mode == "ensemble"` | `lab_model/primitives/dispatch.py` |
-| 1.7 | `OptimizeHost` protocol extensions | `lab_model/orchestration/protocol.py` |
-| 1.8 | `ActuatorRouter` interface + stub | `lab_model/optimization/router.py` |
-| 1.9 | `run_ensemble_optimization` | `lab_model/optimization/session.py` |
-| 1.10 | Legacy preset compiler: NEWTON/COBYLA → ensemble spec (optional parallel) | `lab_model/optimization/presets.py` |
+| 1.1 | Pydantic models: `VariableRef`, `TouchAndGoSpec`, `ObjectiveSpec`, `SolverSpec`, `OptimizeEnsembleParameters` | `lab_model/language/primitives/schemas.py` or `lab_model/execution/optimization/spec.py` |
+| 1.2 | `VariablePathResolver` — allowlist parse, dry-run get/set bind against live state | `lab_model/execution/optimization/paths.py` |
+| 1.3 | `NormalizedSearchSpace` (hypercube map) | `lab_model/execution/optimization/normalize.py` |
+| 1.4 | `run_optimize_ensemble` orchestrator — **pre-flight path resolve before `OPTIMIZING`** | `lab_model/execution/orchestration/optimize_ensemble.py` |
+| 1.5 | `commit_optimization_ensemble_complete` | `lab_model/coordinator/state/commits.py` |
+| 1.6 | Dispatch branch: `parameters.mode == "ensemble"` | `lab_model/language/primitives/dispatch.py` |
+| 1.7 | `OptimizeHost` protocol extensions | `lab_model/execution/orchestration/protocol.py` |
+| 1.8 | `ActuatorRouter` interface + stub | `lab_model/execution/optimization/router.py` |
+| 1.9 | `run_ensemble_optimization` | `lab_model/execution/optimization/session.py` |
+| 1.10 | Legacy preset compiler: NEWTON/COBYLA → ensemble spec (optional parallel) | `lab_model/execution/optimization/presets.py` |
 | 1.11 | Unit tests: normalization round-trip, schema validation, invasive requires touch_and_go, **path resolver pre-flight failures** | `backend/tests/test_ensemble_optimization_spec.py` |
 
 **Pre-flight gate (locked):** `run_optimize_ensemble` order is validate JSON → **resolve all paths** → layout check at \(x_0\) → null measurables → `OPTIMIZING`. Invalid path → HTTP 400, `system_status` unchanged.
@@ -715,7 +715,7 @@ Phase 4 ── Real bench: latency, hardware adapters, production hardening
 | 4.5 | **Partial failure:** comm drop mid-session; abort vs keep_best |
 | 4.6 | **Real mock parity:** same JSON spec on mock and real (contract tests) |
 
-See also [`REAL_BENCH_ROADMAP.md`](./REAL_BENCH_ROADMAP.md).
+See also [`EDGE_UC_MIGRATION_ROADMAP.md`](./EDGE_UC_MIGRATION_ROADMAP.md).
 
 **Exit criteria:** One real two-mirror + power alignment session documented with timings and failure modes.
 
@@ -818,8 +818,8 @@ Paste the `parameters` object from [`two_mirror_mock.json`](../schemas/ensemble_
 
 | Legacy `parameters` | Ensemble equivalent |
 |---------------------|---------------------|
-| `{ "strategy": "NEWTON", "camera_number": 1, "axis": "x", … }` | Single-tag motors in one `block_cobyla` block; objective term `rms_distance_px` on camera centroid (real) or mock weighted_sum — see [`presets.py`](../backend/lab_model/optimization/presets.py) `compile_legacy_strategy()` |
-| `{ "strategy": "COBYLA", "motor_ids": [1, 3], … }` | [`single_mirror_cobyla_legacy.json`](../schemas/ensemble_optimization_examples/single_mirror_cobyla_legacy.json) |
+| `{ "strategy": "NEWTON", "camera_number": 1, "axis": "x", … }` | Single-tag motors in one `block_cobyla` block; objective term `rms_distance_px` on camera centroid (real) or mock weighted_sum — see [`presets.py`](../backend/lab_model/execution/optimization/presets.py) `compile_legacy_strategy()` |
+| `{ "strategy": "COBYLA", "motor_ids": [1, 3], … }` | Single-tag motors via `compile_legacy_strategy()` / one `block_cobyla` block |
 | Multi-mirror bench alignment | [`two_mirror_mock.json`](../schemas/ensemble_optimization_examples/two_mirror_mock.json) |
 | Robot-held lens after mirrors | Add `invasive_discrete` variable in stage 2 (pose Y on **tag_11**) and a second solver block in advanced JSON |
 
@@ -848,4 +848,4 @@ Legacy mode remains available for real-bench telemetry parity: `"mode": "legacy_
 |------|--------|
 | 2026-07-03 | Initial design doc: ensemble model, normalization, touch-and-go, Scenario B payload, roadmap Phases 1–4 |
 | 2026-07-03 | Phase 2 mock: synthetic landscape, block COBYLA, MockActuatorRouter, integration tests |
-| 2026-07-03 | Move ensemble loop from `backend/lab_automation/` → `lab_model/optimization/`; metrics registry; edge contract §8.3; UI 5-stage builder |
+| 2026-07-03 | Move ensemble loop from `backend/lab_automation/` → `lab_model/execution/optimization/`; metrics registry; edge contract §8.3; UI 5-stage builder |

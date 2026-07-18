@@ -1,3 +1,4 @@
+import { labClient } from '../cloudlabs/client.js';
 import { primitiveRegion, runButton, afterCommandDispatch } from './shared.js';
 
 export function renderRecordMeasurables(ctx) {
@@ -12,22 +13,19 @@ export function renderRecordMeasurables(ctx) {
         status.textContent = '…';
         btn.disabled = true;
         try {
-            const r = await fetch(
-                `/api/components/${encodeURIComponent(tagId)}/measurables/record`,
-                { method: 'POST' },
-            );
-            const data = await r.json().catch(() => ({}));
-            if (!r.ok) {
-                const det = data.detail !== undefined ? data.detail : r.status;
-                const msg = typeof det === 'string' ? det : JSON.stringify(det);
-                ctx.hooks.log(`Record failed: ${msg}`, 'error');
-                status.textContent = 'Failed';
-                return;
-            }
+            // Same primitive as Python ``lab.capture_measurable`` / ``recordMeasurables``.
+            const data = await labClient.recordMeasurables(tagId);
             status.textContent = 'OK';
             const ci = data.measurables && data.measurables.camera_image;
-            if (ci && typeof ci === 'object' && ci.path) {
-                status.textContent = `OK · ${String(ci.path).replace(/^.*[/\\\\]/, '')}`;
+            // Tensor-native: LazyRef under data.href; legacy wire still has .path.
+            const path =
+                ci && typeof ci === 'object'
+                    ? (ci.path ||
+                          (ci.data && typeof ci.data === 'object' && ci.data.href) ||
+                          '')
+                    : '';
+            if (path) {
+                status.textContent = `OK · ${String(path).replace(/^.*[/\\\\]/, '')}`;
             }
             await afterCommandDispatch(ctx.hooks, tagId);
         } catch (e) {

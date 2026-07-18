@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from lab_model.domain.component import resolve_pick_table_pose
+from lab_model.language.domain.component import resolve_pick_table_pose
 
 
 class TestPickPoseResolution(unittest.TestCase):

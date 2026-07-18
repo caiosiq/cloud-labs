@@ -47,7 +47,7 @@ _BACKEND = os.path.join(_REPO_ROOT, "backend")
 if _BACKEND not in sys.path:
     sys.path.insert(0, _BACKEND)
 
-from lab_model.catalog.schema import (  # noqa: E402
+from lab_model.coordinator.catalog.schema import (  # noqa: E402
     SUPPORTED_SCHEMA_VERSIONS,
     infer_default_capabilities,
     is_legacy_array_shape,

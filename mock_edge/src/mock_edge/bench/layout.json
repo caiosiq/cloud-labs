@@ -1,0 +1,26 @@
+{
+  "backend_id": "mock.default",
+  "layout": {
+    "version": 1,
+    "lab_bounds_mm": {
+      "x_min": -500,
+      "x_max": 500,
+      "y_min": -500,
+      "y_max": 500
+    },
+    "danger_zone": {
+      "radius_mm": 90,
+      "padding_mm": 5
+    },
+    "storage": {
+      "rule": "negative_xy",
+      "grid_nx": 4,
+      "grid_ny": 4
+    },
+    "breadboard": {
+      "grid_spacing_mm": 25,
+      "origin_offset_mm": { "x": -7.4, "y": 0 }
+    }
+  },
+  "laser_lines": []
+}

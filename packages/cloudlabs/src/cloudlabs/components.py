@@ -73,6 +73,10 @@ class ComponentProxy:
     def describe(self, *, refresh: bool = False) -> Dict[str, Any]:
         return self.client.describe_component(self.tag_id, refresh=refresh)
 
+    def parameters(self) -> Dict[str, Any]:
+        """Static UC parameters (``GET_PARAMETERS``)."""
+        return self.client.get_parameters(self.tag_id)
+
     def variable(
         self,
         path: str,

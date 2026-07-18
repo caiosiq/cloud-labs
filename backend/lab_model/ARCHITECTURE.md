@@ -1,8 +1,8 @@
-# Lab platform architecture (`lab_model` + `lab_communicator`)
+# Lab platform architecture (`lab_model`)
 
 This document is the master map for how the optics digital twin backend is organized.
 It describes the **Universal Component** model as implemented today: **StateControl** +
-**Telemetry** on each component, one catalog per bench, and a thin hardware bridge.
+**Telemetry** on each component, one catalog per bench, and Edge Contract southbound.
 
 ## Four domains (two slow, two live)
 
@@ -82,34 +82,37 @@ Live feed uses a single **`stream`** channel (legacy `preview` / `JPEGPoll` remo
 ## Package split
 
 ```text
-lab_model/                 ← HOW THE LAB WORKS (semantics, no mock/real I/O)
-  domain/                  ← component, holding, storage_region, motor_rotation_store
-  orchestration/           ← teleop, live_feed, table_moves, motors, in-air, optimize, record
-  primitives/              ← PrimitiveId, schemas, registry, dispatch, macros
-  catalog/                 ← schema validation, bundle load, normalize_capabilities
-  state/                   ← commits, state_machine, snapshot
-  tunables/                ← @register_tunable plugins
-  measurables/             ← @register_measurable plugins (+ observe_for_tag)
-  telemetry/               ← teleop + live_feed registry plugins
-  platform.py              ← validate_platform_integrity(), export_platform_registries
+lab_model/                      ← HOW THE LAB WORKS (semantics; no hardware I/O)
+  language/                     ← Universal Component vocabulary
+    domain/                     ← component, holding, storage, motor angles
+    primitives/                 ← PrimitiveId, schemas, registry, dispatch
+    tunables/ measurables/ telemetry/  ← plugin registries
+  execution/                    ← how verbs run
+    orchestration/              ← host-protocol templates (teleop, moves, …)
+    edge/                       ← EdgeClient, streams, poll-attach registry
+    optimization/               ← ensemble, kernels, solvers
+  coordinator/                  ← this server’s control plane
+    backends/                   ← registry, lab_view_config
+    catalog/                    ← library, pins, hash
+    jobs/                       ← leases, queue, runners
+    state/                      ← RuntimeManager, ControlManager, reconcile
+  platform.py                   ← integrity / registry export
 
-lab_communicator/          ← BRIDGE TO THIS BENCH
-  base.py                  ← LabCommunicator: thin delegates + _primitive_* hooks
-  mock/ / real/            ← hardware hooks (_primitive_*)
-  shared/                  ← lab view paths, factory, file I/O
+mock_edge/                      ← teaching Edge Contract host (outside lab_model)
+lab cloudlabs_edge/             ← physical bench edge (sibling repo)
 ```
 
-**Import rule:** `lab_model` must **not** import `lab_communicator`.
-`lab_communicator` may import `lab_model`.
+**Import rule:** `lab_model` must **not** import edge host packages (`mock_edge`, lab
+`cloudlabs_edge`). Hosts and `main.py` import `lab_model`. Southbound from the
+coordinator is only via `lab_model.execution.edge` (EdgeClient).
 
 ## Primitive dispatch flow
 
 ```text
-POST /api/command  (or dedicated routes, e.g. teleop/start, measurables/record)
-  → lab_model.primitives.parse_command_payload (commands only)
+POST /api/command  (or Twin aliases → EdgeClient)
+  → lab_model.language.primitives.parse_command_payload
   → schedule_validated_command / execute_validated_command
-  → LabCommunicator.<handler> (atomic) or macro expansion
-  → orchestration/* + mock/real _primitive_* hooks
+  → edge host _primitive_* / orchestration templates
 ```
 
 Dedicated HTTP routes (same semantics as primitives):
@@ -151,7 +154,7 @@ Orchestration: `frontend/js/ui/component-popup.js` (read-only panel + PRIMITIVES
 
 ## Add a new tunable (checklist)
 
-1. `lab_model/tunables/<field>.py` — `@register_tunable`, commit, optional hardware.
+1. `lab_model/language/tunables/<field>.py` — `@register_tunable`, commit, optional hardware.
 2. `lab_model/primitives` — `SET_<FIELD>` id, schema, handler.
 3. `component_library.json` — `statecontrol.tunables` descriptor + primitive in list.
 4. `frontend/js/widgets/` + `frontend/js/primitives/set-<field>.js`.
@@ -168,33 +171,33 @@ Orchestration: `frontend/js/ui/component-popup.js` (read-only panel + PRIMITIVES
 
 Historical one-shot migration scripts live under `scripts/archive/`.
 
-## Planned: RuntimeManager & ControlManager
+## RuntimeManager & ControlManager
 
-**Status:** proposal — full spec in [`../../docs/CONTROL_RUNTIME_AND_VERSIONING.md`](../../docs/CONTROL_RUNTIME_AND_VERSIONING.md).
+**Status:** implemented — see [`../../docs/LAB_SURFACES_VC_AND_INITIALIZATION.md`](../../docs/LAB_SURFACES_VC_AND_INITIALIZATION.md).
 
 | Manager | Role |
 |---------|------|
-| **RuntimeManager** | Single write gate for live runtime JSON; wired in shared `lab_communicator/base.py` (mock/real/mujoco inherit without rewrite). |
-| **ControlManager** | Configuration version history (commits, branches, setups). **Not** `lab_automation`'s `OpticalExperiment`. |
+| **RuntimeManager** | Live runtime JSON mutations (working tree). |
+| **ControlManager** | Configuration version history (commits, branches, setups). **Not** lab-side `OpticalExperiment`. |
 
-Aggregates: **Configuration** (tunables), **Observations** (measurables), **Setup** (both), **Runtime** (working tree). See Universal Component Part IX in [`../../docs/universal_component_architecture.md`](../../docs/universal_component_architecture.md).
+Aggregates: **Configuration** (tunables), **Observations** (measurables), **Setup** (both), **Runtime** (working tree). Teaching edge: [`../../mock_edge/`](../../mock_edge/).
 
 ## Repository layout
 
 | Path | Role |
 |------|------|
-| `lab_model/domain/` | Component shapes, holding, storage geometry, motor angles |
-| `lab_model/orchestration/` | TeleOp, live feed, moves, record, optimize, … |
-| `lab_communicator/` | Bridge: `base.py`, `mock/`, `real/`, `shared/` |
+| `lab_model/language/domain/` | Component shapes, holding, storage geometry, motor angles |
+| `lab_model/execution/orchestration/` | TeleOp, live feed, moves, record, optimize, … |
+| `lab_model/execution/edge/` | EdgeClient southbound |
+| `../../mock_edge/` | Teaching Edge Contract host |
 | `frontend/js/ui/component-viewer.js` | Read-only StateControl + Telemetry |
 | `frontend/js/primitives/` | Primitive forms (write path) |
 
 ## Related docs
 
 - [`README.md`](README.md) — StateControl tunables vs measurables
-- [`primitives/README.md`](primitives/README.md) — HTTP command layer
-- [`../lab_communicator/README.md`](../lab_communicator/README.md) — mock/real bridge
-- [`../../capability_contract.md`](../../capability_contract.md) — catalog JSON spec
-- [`../../docs/primitive_ui_contract.md`](../../docs/primitive_ui_contract.md) — UI rules
-- [`../../docs/CONTROL_RUNTIME_AND_VERSIONING.md`](../../docs/CONTROL_RUNTIME_AND_VERSIONING.md) — RuntimeManager, ControlManager, VC (planned)
-- [`../../docs/universal_component_architecture.md`](../../docs/universal_component_architecture.md) — design rationale (with implementation notes)
+- [`language/primitives/README.md`](language/primitives/README.md) — HTTP command layer
+- [`../../mock_edge/README.md`](../../mock_edge/README.md) — teaching edge
+- [`../../docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md`](../../docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md) — Edge Contract
+- [`../../docs/LAB_SURFACES_VC_AND_INITIALIZATION.md`](../../docs/LAB_SURFACES_VC_AND_INITIALIZATION.md) — surfaces + VC
+- [`../../schemas/edge_contract/v1/`](../../schemas/edge_contract/v1/) — machine-readable edge schemas

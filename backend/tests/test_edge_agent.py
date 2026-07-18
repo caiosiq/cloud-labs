@@ -4,9 +4,9 @@ from __future__ import annotations
 import threading
 import unittest
 
-from lab_model.edge.commands import EdgeCommandQueue
-from lab_model.edge.registry import EdgeAgentRegistry
-from lab_model.jobs.job_manager import JobManager
+from lab_model.execution.edge.commands import EdgeCommandQueue
+from lab_model.execution.edge.registry import EdgeAgentRegistry
+from lab_model.coordinator.jobs.job_manager import JobManager
 
 
 class EdgeAgentRegistryTests(unittest.TestCase):

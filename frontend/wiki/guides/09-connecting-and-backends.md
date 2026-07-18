@@ -78,11 +78,14 @@ You interact with the **coordinator** (the HTTP server). It validates commands,
 tracks leases, and queues jobs. **Instrument execution** happens on the
 **edge**—the process that owns cameras and motors for that backend.
 
-For imperative moves and captures on a mock backend, the coordinator often
-runs the communicator in-process. For frame-rate **OPTIMIZE** on hardware, an
-edge process may need to be attached; if closed-loop jobs fail with “no edge,”
-that is an infrastructure issue for whoever runs the server—not something you
-fix from a script by changing paths or env vars.
+Teaching **`mock.default`** uses the top-level **`mock_edge/`** package: by
+default the coordinator hosts it **in-process**; operators can also run
+`python -m mock_edge` (Edge Contract on `:8100`) and set
+`edge.base_url` in `schemas/backends.json`. Physical **`real.default`** has no
+in-tree communicator—start the lab’s `cloudlabs_edge` and point
+`edge.base_url` at it. If closed-loop jobs fail with “no edge,” that is an
+infrastructure issue for whoever runs the server—not something you fix from a
+script by changing paths or env vars.
 
 ## Practice
 

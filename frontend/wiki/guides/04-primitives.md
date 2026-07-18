@@ -24,6 +24,7 @@ each tag. Below is the **full** platform inventory.
 | Primitive | Meaning |
 |-----------|---------|
 | `GET_TUNABLES` | Read tunable values for one tag |
+| `GET_PARAMETERS` | Read static identity / manufacturer / constants (catalog) |
 | `GET_MEASURABLES` | Read current measurable values (may be stale / null) |
 
 ### Observe / measure
@@ -90,8 +91,53 @@ each tag. Below is the **full** platform inventory.
 - **Registering a kernel** — packaging an artifact (upload), not actuating
   hardware. Kernels are **inputs** to `EVAL_KERNEL` / `OPTIMIZE`.
 - **Listing backends** — coordinator bookkeeping.
-- **Reading whole lab state** — a coordinator query; formal per-tag reads are
-  `GET_TUNABLES` / `GET_MEASURABLES`.
+- **Reading whole lab state** — a coordinator **Tier C** overview (layout,
+  leases, badges). Formal per-tag reads are `GET_TUNABLES` / `GET_MEASURABLES`.
+  Lab-state poll is **not** the live science plane (see below).
+- **Ad-hoc video helpers** (`get_feed`, table-cam shortcuts outside this list) —
+  not part of the Cloud Labs language. Live pictures are the **wire** form of a
+  camera **measurable**, armed only by `START_LIVE_FEED` / closed by
+  `END_LIVE_FEED`.
+
+## Twin ≡ SDK (same verbs)
+
+Twin and the Python SDK speak the same primitives. Browser helpers live in
+`frontend/js/cloudlabs/client.js` (`labClient`); scripts use
+`packages/cloudlabs`:
+
+| Twin / JS | Python SDK | Primitive |
+|-----------|------------|-----------|
+| `labClient.startLiveFeed(tag)` | `lab.start_live_feed(tag)` | `START_LIVE_FEED` |
+| `labClient.endLiveFeed(tag)` | `lab.end_live_feed(tag)` | `END_LIVE_FEED` |
+| `labClient.startTeleop(tag)` | `lab.start_teleop(tag)` | `START_TELEOP` |
+| `labClient.teleopGoto(tag, body)` | `lab.teleop_goto(tag, …)` | `TELEOP_GOTO` |
+| `labClient.recordMeasurables(tag)` | `lab.capture_measurable(tag, field)` | `RECORD_MEASURABLES` |
+| `labClient.getLabState()` | `lab.get_lab_state()` | Tier C overview only |
+
+Widgets bind to catalog stream URLs **only after** `START_*`. See
+`scripts/language/07_live_plane.py`.
+
+## Tier C vs live plane
+
+| Plane | Transport | When |
+|-------|-----------|------|
+| **C — overview** | `GET /api/lab-state` (~poll) | Canvas layout, leases, system_status |
+| **B — live wire** | JPEG / MJPEG capability URLs | After `START_LIVE_FEED` |
+| **A — TeleOp** | WebSocket / goto alias | After `START_TELEOP` |
+| **Latched science** | `RECORD_MEASURABLES` / `EVAL_KERNEL` | When you need `epoch_ms` truth |
+
+## Cameras: analysis vs wire
+
+A camera measurable such as `camera_image` has two representations of the
+**same** quantity:
+
+- **Analysis** — BGR `uint8` H×W×3 (`bgr_hwc_uint8`) on the edge; what
+  `EVAL_KERNEL` and closed-loop scoring consume.
+- **Wire** — lossy JPEG / MJPEG for Twin after `START_LIVE_FEED` (and PNG
+  metadata in recorded lab state). Wire is transport, not a second primitive.
+
+Bench geometry for the Twin canvas (`layout.json` / edge `GET /bench`) is
+static descriptor data, not a primitive and not a live feed.
 
 ## Session lease
 

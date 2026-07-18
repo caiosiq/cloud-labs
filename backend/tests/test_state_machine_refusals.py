@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import unittest
 
-from lab_model.domain.component import PRESENCE_BREADBOARD, new_component_entry
-from lab_model.state.state_machine import refuse_if_not_on_breadboard
+from lab_model.language.domain.component import PRESENCE_BREADBOARD, new_component_entry
+from lab_model.coordinator.state.state_machine import refuse_if_not_on_breadboard
 
 
 class StateMachineRefusalTests(unittest.TestCase):

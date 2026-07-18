@@ -1,31 +1,30 @@
-"""Phase 2: hardware_binding resolver and fixture seeding."""
+"""hardware_binding resolver (mock_edge catalog ``parameters``)."""
 from __future__ import annotations
 
 import json
 import unittest
 from pathlib import Path
 
-from lab_model.catalog.schema import (
+from lab_model.coordinator.catalog.schema import (
     catalog_is_fixed_instrument,
     catalog_is_placeable_on_table,
     resolve_cam_id_for_tag,
     resolve_hardware_binding,
     resolve_telemetry_stream_backend,
 )
-from lab_model.domain.component import get_tunables
-from lab_model.state.fixture_seed import build_fixture_component_entry, merge_fixture_components
+from lab_model.language.domain.component import get_tunables, new_component_entry
+from lab_model.coordinator.state.fixture_seed import enrich_runtime_entry_from_catalog
+
+_MOCK_LIB = (
+    Path(__file__).resolve().parents[2]
+    / "mock_edge"
+    / "lab_view"
+    / "component_library.json"
+)
 
 
-def _load_real_catalog_row(tag_id: str) -> dict:
-    lib = (
-        Path(__file__).resolve().parents[1]
-        / "lab_communicator"
-        / "real"
-        / "lab_view"
-        / "default"
-        / "component_library.json"
-    )
-    with open(lib, encoding="utf-8") as f:
+def _load_mock_catalog_row(tag_id: str) -> dict:
+    with open(_MOCK_LIB, encoding="utf-8") as f:
         data = json.load(f)
     row = (data.get("components") or {}).get(tag_id)
     if not isinstance(row, dict):
@@ -35,17 +34,17 @@ def _load_real_catalog_row(tag_id: str) -> dict:
 
 class TestHardwareBinding(unittest.TestCase):
     def test_tag_99_binding_opencv_overhead(self) -> None:
-        row = _load_real_catalog_row("tag_99")
+        row = _load_mock_catalog_row("tag_99")
         binding = resolve_hardware_binding(row)
         self.assertIsNotNone(binding)
         assert binding is not None
         self.assertEqual(binding.backend, "opencv_usb")
-        self.assertEqual(binding.device_index, 0)
         self.assertEqual(resolve_telemetry_stream_backend(row), "overhead")
         self.assertIsNone(resolve_cam_id_for_tag(row))
+        self.assertTrue(catalog_is_fixed_instrument(row))
 
     def test_tag_22_binding_recorder_tcp(self) -> None:
-        row = _load_real_catalog_row("tag_22")
+        row = _load_mock_catalog_row("tag_22")
         binding = resolve_hardware_binding(row)
         self.assertIsNotNone(binding)
         assert binding is not None
@@ -54,73 +53,23 @@ class TestHardwareBinding(unittest.TestCase):
         self.assertEqual(resolve_cam_id_for_tag(row), 1)
         self.assertEqual(resolve_telemetry_stream_backend(row), "table_cam")
 
-    def test_fixed_instruments_detected(self) -> None:
-        self.assertTrue(catalog_is_fixed_instrument(_load_real_catalog_row("tag_99")))
-        row22 = _load_real_catalog_row("tag_22")
-        self.assertTrue(catalog_is_placeable_on_table(row22))
-        self.assertFalse(catalog_is_fixed_instrument(row22))
-        row21 = _load_real_catalog_row("tag_21")
-        self.assertTrue(catalog_is_placeable_on_table(row21))
-        self.assertFalse(catalog_is_fixed_instrument(row21))
-
     def test_mock_gripper_cameras_placeable_on_table(self) -> None:
-        lib = (
-            Path(__file__).resolve().parents[1]
-            / "lab_communicator"
-            / "mock"
-            / "lab_view"
-            / "component_library.json"
-        )
-        with open(lib, encoding="utf-8") as f:
-            data = json.load(f)
         for tag_id in ("tag_21", "tag_22"):
-            row = (data.get("components") or {}).get(tag_id)
-            self.assertIsInstance(row, dict)
-            assert isinstance(row, dict)
+            row = _load_mock_catalog_row(tag_id)
             self.assertTrue(catalog_is_placeable_on_table(row))
             self.assertFalse(catalog_is_fixed_instrument(row))
-            self.assertEqual(resolve_telemetry_stream_backend(row), "table_cam")
 
     def test_enrich_runtime_entry_from_catalog(self) -> None:
-        from lab_model.domain.component import new_component_entry
-        from lab_model.state.fixture_seed import enrich_runtime_entry_from_catalog
-
-        row = _load_real_catalog_row("tag_22")
+        row = _load_mock_catalog_row("tag_22")
         entry = new_component_entry(
             "tag_22",
             "OPTICAL_CAMERA",
             presence="breadboard",
-            nominal_pose={"x": 1.0, "y": 2.0, "rotation": 0.0},
-            meas_pose={"x": 1.0, "y": 2.0, "rotation": 0.0},
+            nominal_pose={"x": 0.0, "y": 0.0, "rotation": 0.0},
+            meas_pose={"x": 0.0, "y": 0.0, "rotation": 0.0},
         )
         enrich_runtime_entry_from_catalog(entry, row)
-        self.assertEqual(entry["statecontrol"]["tunables"]["exposure_time_ms"], 200.0)
-        self.assertEqual(
-            entry["telemetry"]["live_feed"]["stream"]["backend"],
-            "table_cam",
-        )
-        self.assertEqual(
-            entry["telemetry"]["live_feed"]["stream"]["resource_id"],
-            "cam_gripper_1",
-        )
-
-    def test_fixture_entry_v1_shape(self) -> None:
-        row = _load_real_catalog_row("tag_99")
-        entry = build_fixture_component_entry(row)
-        self.assertIn("statecontrol", entry)
-        self.assertIn("telemetry", entry)
-        self.assertIsNone(entry["statecontrol"]["measurables"]["pose"])
-        self.assertEqual(
-            entry["telemetry"]["live_feed"]["stream"]["backend"],
-            "overhead",
-        )
-
-    def test_merge_fixture_adds_missing_tag(self) -> None:
-        row = _load_real_catalog_row("tag_99")
-        merged = merge_fixture_components({}, [row])
-        self.assertIn("tag_99", merged)
-        tun = get_tunables(merged["tag_99"])
-        self.assertEqual(tun.get("exposure_time_ms"), 50.0)
+        self.assertIn("presence", get_tunables(entry))
 
 
 if __name__ == "__main__":

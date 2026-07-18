@@ -1,6 +1,6 @@
 /**
  * Phase 7 widget registry — single source of truth for the closed widget
- * vocabulary listed in universal_component_architecture.md §14.
+ * vocabulary for catalog widgets / tunables (see lab_model + Wiki Learn).
  *
  * Every catalog entry's ``capabilities.{tunables,measurables,telemetry}.<field>``
  * declares a ``widget`` string. The symmetric component viewer

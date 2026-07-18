@@ -1,0 +1,2 @@
+[console_scripts]
+cloudlabs-edge = cloudlabs_edge_dev.cli:main

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mock edge agent — second process that owns the lab for the coordinator.
+"""Mock edge agent â€” second process that owns the lab for the coordinator.
 
 Step B / B.1: FastAPI stays the control plane (leases, queue, catalog); this
 process owns MockLabCommunicator and executes:
@@ -11,7 +11,7 @@ Terminal 1 (coordinator)::
 
     $env:PYTHONPATH="backend"; python backend/main.py
 
-Terminal 2 (edge — start BEFORE submitting work)::
+Terminal 2 (edge â€” start BEFORE submitting work)::
 
     $env:PYTHONPATH="backend"; python scripts/ops/mock_edge_agent.py
 
@@ -37,8 +37,10 @@ import requests
 
 _REPO = Path(__file__).resolve().parents[2]
 _BACKEND = _REPO / "backend"
-if str(_BACKEND) not in sys.path:
-    sys.path.insert(0, str(_BACKEND))
+_MOCK_SRC = _REPO / "mock_edge" / "src"
+for _p in (_BACKEND, _MOCK_SRC):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 _LOG = logging.getLogger("mock_edge_agent")
 
@@ -56,16 +58,17 @@ def _get(base: str, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[
 
 
 def _bootstrap_mock_lab() -> Any:
-    from lab_communicator.shared.communicator_factory import create_communicator
-    from lab_communicator.shared.lab_view_config import bootstrap_lab_view, get_lab_view_paths
+    """Prefer ``python -m mock_edge``; this agent remains for poll-attach jobs."""
+    from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view, get_lab_view_paths
+    from mock_edge.host.communicator import MockLabCommunicator
 
-    mock_view = _BACKEND / "lab_communicator" / "mock" / "lab_view"
+    mock_view = _REPO / "mock_edge" / "lab_view"
     os.environ.setdefault("LAB_VIEW_PATH", str(mock_view))
     bootstrap_lab_view(str(_REPO))
-    from lab_model import motor_rotation_store as motor_rot
+    from lab_model.language.domain import motor_rotation_store as motor_rot
 
     motor_rot.configure(get_lab_view_paths().motor_rotations_json)
-    return create_communicator("mock")
+    return MockLabCommunicator()
 
 
 def _complete_command(
@@ -89,7 +92,7 @@ async def _handle_edge_command(
     command: Dict[str, Any],
     lab: Any,
 ) -> None:
-    from lab_model.primitives import (
+    from lab_model.language.primitives import (
         EvalKernelBody,
         PrimitiveId,
         RecordMeasurablesBody,
@@ -103,7 +106,7 @@ async def _handle_edge_command(
     payload = command.get("payload") if isinstance(command.get("payload"), dict) else {}
 
     try:
-        # Compat: rewrite legacy kernel_eval queue kind → EVAL_KERNEL primitive.
+        # Compat: rewrite legacy kernel_eval queue kind â†’ EVAL_KERNEL primitive.
         if kind == "kernel_eval":
             kernel_id = str(payload.get("kernel_id") or "").strip()
             tag_id = str(payload.get("tag_id") or "").strip()
@@ -214,8 +217,8 @@ async def _run_closed_loop_job(
     job: Dict[str, Any],
     lab: Any,
 ) -> None:
-    from lab_model.jobs.runner import _collect_result, _run_closed_loop
-    from lab_model.optimization.kernels import session_store
+    from lab_model.coordinator.jobs.runner import _collect_result, _run_closed_loop
+    from lab_model.execution.optimization.kernels import session_store
 
     job_id = str(job["job_id"])
     spec = dict(job.get("spec") or {})
@@ -278,8 +281,8 @@ async def _run_compiled_dag_job(
     job: Dict[str, Any],
     lab: Any,
 ) -> None:
-    from lab_model.jobs.runner import _collect_result, _run_compiled_dag
-    from lab_model.optimization.kernels import session_store
+    from lab_model.coordinator.jobs.runner import _collect_result, _run_compiled_dag
+    from lab_model.execution.optimization.kernels import session_store
 
     job_id = str(job["job_id"])
     spec = dict(job.get("spec") or {})

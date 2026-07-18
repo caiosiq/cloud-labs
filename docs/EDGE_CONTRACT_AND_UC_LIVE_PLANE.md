@@ -1,10 +1,11 @@
 # Edge contract, UC language, and the live plane
 
-**Status:** design discussion (no implementation yet)  
+**Status:** design + **Phase 0 schemas landed** on `develop/caio-edge-contract`  
 **Audience:** maintainers deciding how cloud-labs, Twin/SDK, and lab repos (e.g. robot-deathray / lab_automation) meet under one language  
 **Last updated:** 2026-07-16  
 
-**Related:** [`backend/lab_communicator/README.md`](../backend/lab_communicator/README.md), Wiki Learn → Primitives / Kernels / OPU, [`PROGRESS_REPORT_JUN_JUL_2026.md`](./PROGRESS_REPORT_JUN_JUL_2026.md)
+**Machine-readable contract:** [`schemas/edge_contract/v1/`](../schemas/edge_contract/v1/README.md)  
+**Related:** [`mock_edge/README.md`](../mock_edge/README.md), Wiki Learn → Primitives / Kernels / OPU, [`EDGE_UC_MIGRATION_ROADMAP.md`](./EDGE_UC_MIGRATION_ROADMAP.md)
 
 ---
 
@@ -14,7 +15,7 @@
 
 | Concept | Role |
 |---------|------|
-| **Primitives** | The only verbs (see Wiki inventory / `lab_model.primitives`) |
+| **Primitives** | The only verbs (see Wiki inventory / `lab_model.language.primitives`) |
 | **Tunables** | Commanded DOFs |
 | **Measurables** | Observations (analysis tensors / scalars); wire formats are *of* a measurable |
 | **Telemetry capabilities** | Catalog-declared live channels for a tag (teleop widgets, live_feed) — **armed by primitives**, not free-form APIs |

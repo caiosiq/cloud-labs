@@ -409,22 +409,30 @@ function renderSidebar() {
 }
 
 function parameterRows(row) {
+    /** UC parameters: catalog ``parameters`` (legacy ``properties`` accepted). */
     const out = [];
-    const props = row.properties && typeof row.properties === 'object' ? row.properties : {};
-    for (const [key, value] of Object.entries(props)) {
-        out.push({ key: `properties.${key}`, value });
-    }
+    const bag =
+        (row.parameters && typeof row.parameters === 'object' && row.parameters) ||
+        (row.properties && typeof row.properties === 'object' && row.properties) ||
+        {};
     const extras = [
+        ['id', row.id],
+        ['type', row.type],
+        ['name', row.name],
+        ['tag_id', row.tag_id],
         ['motor_ids', row.motor_ids],
         ['motor_controller', row.motor_controller],
         ['height_mm', row.height_mm],
         ['size', row.size],
-        ['id', row.id],
-        ['type', row.type],
     ];
     for (const [key, value] of extras) {
         if (value == null || value === '') continue;
-        if (key in props) continue;
+        out.push({ key, value });
+    }
+    for (const [key, value] of Object.entries(bag)) {
+        // Bag wins on collision — drop earlier structural duplicate.
+        const idx = out.findIndex((p) => p.key === key);
+        if (idx >= 0) out.splice(idx, 1);
         out.push({ key, value });
     }
     return out;

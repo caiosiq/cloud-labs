@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import unittest
 
-from lab_model.primitives import EvalKernelBody, PrimitiveId, parse_command_payload
-from lab_model.primitives.registry import PRIMITIVE_REGISTRY
+from lab_model.language.primitives import EvalKernelBody, PrimitiveId, parse_command_payload
+from lab_model.language.primitives.registry import PRIMITIVE_REGISTRY
 
 
 class EvalKernelPrimitiveTests(unittest.TestCase):

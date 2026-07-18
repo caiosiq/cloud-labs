@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/execute_request.schema.json",
+  "title": "EdgeContractExecuteRequestV1",
+  "description": "POST /execute — exactly one Cloud Labs primitive.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["primitive"],
+  "properties": {
+    "primitive": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Primitive id (e.g. START_TELEOP, EVAL_KERNEL, MOVE_MOTOR)."
+    },
+    "args": {
+      "type": "object",
+      "description": "Primitive arguments (tag_id, paths, kernel_id, …). Nested OK on Tier C."
+    },
+    "idempotency_key": {
+      "type": "string",
+      "description": "Optional client key for safe retries."
+    },
+    "lease_token": {
+      "type": "string",
+      "description": "Optional session lease proof from coordinator (transport-specific)."
+    }
+  }
+}

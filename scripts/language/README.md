@@ -14,6 +14,7 @@ Prerequisites: FastAPI on `:8000` and `pip install -e ./packages/cloudlabs`.
 | `04_session_kernels.py` | Author artifact → register → probe → feature OPTIMIZE |
 | `05_jobs_and_modes.py` | Objective compile, `submit_compiled_dag`, closed-loop job |
 | `06_client_side_measurable_loop.py` | Author-in-the-loop: resolve `camera_image` locally, `for` loop on laptop (no kernel / no OPTIMIZE) |
+| `07_live_plane.py` | Twin ≡ SDK: `start_live_feed` → latch `capture_measurable` → `end_live_feed` (Tier C lab-state ≠ live science) |
 
 ```powershell
 python scripts/language/01_hello_lab.py
@@ -22,4 +23,5 @@ python scripts/language/03_closed_loop_catalog.py
 python scripts/language/04_session_kernels.py
 python scripts/language/05_jobs_and_modes.py
 python scripts/language/06_client_side_measurable_loop.py
+python scripts/language/07_live_plane.py
 ```

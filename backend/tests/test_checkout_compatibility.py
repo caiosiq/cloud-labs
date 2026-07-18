@@ -9,14 +9,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lab_communicator.shared.lab_view_config import bootstrap_lab_view
-from lab_model.catalog.catalog_hash import compute_active_catalog_hash
-from lab_model.state.checkout_compatibility import build_checkout_compatibility_report
-from lab_model.state.control_manager import ControlManager
-from lab_model.state.projections import extract_configuration
+from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view
+from lab_model.coordinator.catalog.catalog_hash import compute_active_catalog_hash
+from lab_model.coordinator.state.checkout_compatibility import build_checkout_compatibility_report
+from lab_model.coordinator.state.control_manager import ControlManager
+from lab_model.coordinator.state.projections import extract_configuration
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "backend" / "lab_communicator" / "mock" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
 _LAB_STATE = _MOCK_LAB_VIEW / "lab_state.json"
 
 

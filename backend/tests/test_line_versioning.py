@@ -7,15 +7,15 @@ import shutil
 import tempfile
 import unittest
 
-from lab_model.state.control_manager import ControlManager
-from lab_model.state.diff import configuration_diff
-from lab_model.state.projections import (
+from lab_model.coordinator.state.control_manager import ControlManager
+from lab_model.coordinator.state.diff import configuration_diff
+from lab_model.coordinator.state.projections import (
     apply_configuration_to_components,
     extract_configuration,
     normalize_alignment_guides,
     normalize_laser_lines_doc,
 )
-from lab_model.state.reconcile import plan_reconcile
+from lab_model.coordinator.state.reconcile import plan_reconcile
 
 
 def _runtime_with_lines():

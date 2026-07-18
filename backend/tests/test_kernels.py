@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import unittest
 
-from lab_model.jobs.job_manager import validate_submit_spec
-from lab_model.optimization.kernels import get_kernel, list_kernels, validate_kernel_ids
+from lab_model.coordinator.jobs.job_manager import validate_submit_spec
+from lab_model.execution.optimization.kernels import get_kernel, list_kernels, validate_kernel_ids
 
 
 class KernelRegistryTests(unittest.TestCase):

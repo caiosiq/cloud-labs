@@ -6,9 +6,9 @@ import unittest
 import warnings
 from unittest.mock import MagicMock
 
-from lab_model.jobs.job_manager import validate_submit_spec
-from lab_model.optimization.presets import compile_legacy_strategy
-from lab_model.orchestration.optimize import (
+from lab_model.coordinator.jobs.job_manager import validate_submit_spec
+from lab_model.execution.optimization.presets import compile_legacy_strategy
+from lab_model.execution.orchestration.optimize import (
     _legacy_redirect_enabled,
     _try_redirect_legacy_to_ensemble,
     run_optimize_component,

@@ -1,22 +1,24 @@
 /**
- * Lab-state polling.
+ * Lab-state polling — **Tier C overview only** (Edge Contract live plane).
  *
- * `fetchLabState` is the single source of truth for "the world according to the backend": it
- * pulls `/api/lab-state`, mirrors it into `store.labState`, and reconciles three things that the
- * raw payload does not carry:
- *   1. **Ghost state** (`store.ghostState[tag]`) — the user-editable target pose that the canvas
- *      draws. We rebuild it from `tunables.nominal_pose` (canvas-truth model — see
- *      `universal_component_architecture.md` §7-8) whenever the system status implies a
- *      "fresh start" (e.g. command just finished, OPTIMIZING tick, HOLDING transition).
- *      `drawPose()` falls back to `measurables.pose` defensively for legacy state files.
- *   2. **Context panel state snapshots** — re-render the side panel on placement / holding edges
- *      but ignore the transient BUSY phase so the panel doesn't flicker mid-command.
- *   3. **Auxiliary cross-feature side effects** — optimization preview overlay,
- *      session reconciliation, layout conflict refresh.
+ * ``GET /api/lab-state`` is the layout / lease / badge overview for Twin:
+ * component presence, nominal poses for the canvas, system_status, session lease.
+ * It is **not** the live science plane:
+ *   - Tier A TeleOp samples → WS after ``START_TELEOP``
+ *   - Tier B camera wire → JPEG/MJPEG after ``START_LIVE_FEED``
+ *   - Latched observations → ``RECORD_MEASURABLES`` / ``EVAL_KERNEL`` (``epoch_ms``)
  *
- * The function is intentionally long because it encodes a tricky finite-state-machine over the
- * sequence (IDLE → BUSY → HOLDING/IDLE → OPTIMIZING …). Splitting it further risks breaking the
- * subtle invariants around `previousSystemStatus` and `contextPanelStatusSnapshot`.
+ * Do not hunt lasers or sync closed-loop science from this poll. Prefer armed
+ * capability channels or latched primitives (see ``docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md``).
+ *
+ * `fetchLabState` still mirrors the overview into `store.labState` and reconciles:
+ *   1. **Ghost state** (`store.ghostState[tag]`) — user-editable target pose from
+ *      `tunables.nominal_pose` on status edges (canvas-truth model).
+ *   2. **Context panel state snapshots** — placement / holding edges; skip BUSY flicker.
+ *   3. **Auxiliary side effects** — optimization overlay, session reconciliation,
+ *      layout conflict refresh, teleop poll sync.
+ *
+ * The function is intentionally long (IDLE → BUSY → HOLDING/IDLE → OPTIMIZING FSM).
  */
 import { store } from './store.js';
 import { log } from '../ui/log.js';

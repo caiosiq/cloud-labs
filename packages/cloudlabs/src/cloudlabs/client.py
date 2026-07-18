@@ -1,7 +1,8 @@
 """Imperative HTTP client for cloud-labs (Phase B SDK).
 
 Acquire an exclusive backend lease via the context manager, then issue
-primitives with ``move_component`` and ``capture_measurable``.
+primitives with ``move_component``, ``capture_measurable``, and the live-plane
+verbs Twin uses (``start_live_feed``, ``start_teleop``, …).
 
 Example::
 
@@ -27,6 +28,7 @@ from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequen
 import requests
 
 from .paths import parse_variable_path
+from .language import PrimitiveId, primitive_action
 
 from .exceptions import (
     CloudLabsCommandError,
@@ -913,7 +915,7 @@ class CloudLabsClient:
             assert parsed.motor_id is not None
             return self._post_command(
                 {
-                    "action": "SET_MOTOR_SETPOINT",
+                    "action": primitive_action(PrimitiveId.SET_MOTOR_SETPOINT),
                     "target_id": tag_id,
                     "parameters": {
                         "motor_id": int(parsed.motor_id),
@@ -928,7 +930,7 @@ class CloudLabsClient:
         pose[parsed.axis] = numeric
         return self._post_command(
             {
-                "action": "MOVE_COMPONENT",
+                "action": primitive_action(PrimitiveId.MOVE_COMPONENT),
                 "target_id": tag_id,
                 "parameters": {
                     "target_x": float(pose["x"]),
@@ -937,6 +939,86 @@ class CloudLabsClient:
                 },
             }
         )
+
+    def start_live_feed(self, tag_id: str, channel: str = "stream") -> Dict[str, Any]:
+        """Arm Tier B live wire for a camera tag (``START_LIVE_FEED``).
+
+        Same alias route Twin uses. Stream bytes come from catalog/capability
+        URLs only after this returns successfully — not from lab-state poll.
+        """
+        self._require_lease()
+        tag_id = tag_id.strip()
+        channel = (channel or "stream").strip() or "stream"
+        self._vlog("START_LIVE_FEED tag=%s channel=%s", tag_id, channel)
+        path = (
+            f"/api/components/{tag_id}/telemetry/live-feed/start"
+            f"?channel={channel}"
+        )
+        return self._post_json(path, {})
+
+    def end_live_feed(self, tag_id: str, channel: str = "all") -> Dict[str, Any]:
+        """Disarm live feed (``END_LIVE_FEED``). Idempotent."""
+        self._require_lease()
+        tag_id = tag_id.strip()
+        channel = (channel or "all").strip() or "all"
+        self._vlog("END_LIVE_FEED tag=%s channel=%s", tag_id, channel)
+        path = (
+            f"/api/components/{tag_id}/telemetry/live-feed/end"
+            f"?channel={channel}"
+        )
+        return self._post_json(path, {})
+
+    def start_teleop(self, tag_id: str) -> Dict[str, Any]:
+        """Acquire per-component TeleOp lease (``START_TELEOP``).
+
+        Same alias route Twin uses. Tier A samples require an active session
+        (Twin WS or HTTP goto); this only arms the lease.
+        """
+        self._require_lease()
+        tag_id = tag_id.strip()
+        self._vlog("START_TELEOP tag=%s", tag_id)
+        return self._post_json(f"/api/components/{tag_id}/teleop/start", {})
+
+    def end_teleop(self, tag_id: str) -> Dict[str, Any]:
+        """Release TeleOp lease (``END_TELEOP``). Idempotent."""
+        self._require_lease()
+        tag_id = tag_id.strip()
+        self._vlog("END_TELEOP tag=%s", tag_id)
+        return self._post_json(f"/api/components/{tag_id}/teleop/end", {})
+
+    def teleop_goto(
+        self,
+        tag_id: str,
+        *,
+        target_pose: Optional[Dict[str, Any]] = None,
+        target_motor_positions: Optional[Dict[str, Any]] = None,
+        speed: Optional[Dict[str, Any]] = None,
+        frame_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """One absolute TeleOp goto frame (``TELEOP_GOTO``).
+
+        Same alias route Twin uses after ``start_teleop``. At least one of
+        ``target_pose`` / ``target_motor_positions`` is required.
+        """
+        self._require_lease()
+        tag_id = tag_id.strip()
+        body: Dict[str, Any] = {}
+        if target_pose is not None:
+            body["target_pose"] = target_pose
+        if target_motor_positions is not None:
+            body["target_motor_positions"] = target_motor_positions
+        if speed is not None:
+            body["speed"] = speed
+        if frame_id is not None:
+            body["frame_id"] = int(frame_id)
+        if not body:
+            raise CloudLabsCommandError(
+                "teleop_goto requires target_pose and/or target_motor_positions",
+                action="TELEOP_GOTO",
+                target_id=tag_id,
+            )
+        self._vlog("TELEOP_GOTO tag=%s keys=%s", tag_id, sorted(body))
+        return self._post_json(f"/api/components/{tag_id}/telemetry/goto", body)
 
     def capture_measurable(
         self,
@@ -959,7 +1041,7 @@ class CloudLabsClient:
         )
         result = self._post_command(
             {
-                "action": "RECORD_MEASURABLES",
+                "action": primitive_action(PrimitiveId.RECORD_MEASURABLES),
                 "target_id": tag_id,
                 "parameters": {},
             }
@@ -968,7 +1050,7 @@ class CloudLabsClient:
         if not isinstance(measurables, dict):
             raise CloudLabsCommandError(
                 "RECORD_MEASURABLES did not return measurables",
-                action="RECORD_MEASURABLES",
+                action=primitive_action(PrimitiveId.RECORD_MEASURABLES),
                 target_id=tag_id,
             )
         if field not in measurables:
@@ -1132,6 +1214,18 @@ class CloudLabsClient:
             registries=self._wiki_registries,
         )
 
+    def get_parameters(self, tag_id: str) -> Dict[str, Any]:
+        """Static UC parameters for one tag (``GET_PARAMETERS``)."""
+        tag_id = tag_id.strip()
+        data = self._get_json(f"/api/components/{tag_id}/parameters")
+        if not isinstance(data, dict):
+            raise CloudLabsCommandError(
+                "GET_PARAMETERS did not return an object",
+                action="GET_PARAMETERS",
+                target_id=tag_id,
+            )
+        return data
+
     def script_handle(
         self,
         tag_id: str,
@@ -1187,7 +1281,7 @@ class CloudLabsClient:
             "mode": "closed_loop",
             "backend_id": self.backend_id,
             "command": {
-                "action": "OPTIMIZE",
+                "action": primitive_action(PrimitiveId.OPTIMIZE),
                 "target_id": target_id.strip(),
                 "parameters": params,
             },
@@ -1377,7 +1471,7 @@ class CloudLabsClient:
         )
         resp = self._post_command(
             {
-                "action": "EVAL_KERNEL",
+                "action": primitive_action(PrimitiveId.EVAL_KERNEL),
                 "target_id": tag_id.strip(),
                 "parameters": {
                     "kernel_id": kid,

@@ -7,21 +7,21 @@ from typing import Any, Dict
 
 import numpy as np
 
-from lab_model.optimization.errors import EnsemblePreflightError
-from lab_model.optimization.kernels import get_kernel, list_kernels, validate_kernel_ids
-from lab_model.optimization.kernels.torchscript_runtime import (
+from lab_model.execution.optimization.errors import EnsemblePreflightError
+from lab_model.execution.optimization.kernels import get_kernel, list_kernels, validate_kernel_ids
+from lab_model.execution.optimization.kernels.torchscript_runtime import (
     clear_torchscript_caches,
     preflight_torchscript_kernel,
     resolve_artifact_path,
     run_torchscript_scalar,
     torch_available,
 )
-from lab_model.optimization.objective_measurements import (
+from lab_model.execution.optimization.objective_measurements import (
     collect_objective_measurements,
     plan_objective_term,
 )
-from lab_model.optimization.preflight import preflight_objective_term
-from lab_model.optimization.spec import ObjectiveTermSpec, OptimizeEnsembleParameters
+from lab_model.execution.optimization.preflight import preflight_objective_term
+from lab_model.execution.optimization.spec import ObjectiveTermSpec, OptimizeEnsembleParameters
 
 
 _KERNEL_ID = "demo.image_mean_score"
@@ -47,7 +47,7 @@ class TorchScriptRuntimeTests(unittest.TestCase):
         self.assertEqual(out[0], _KERNEL_ID)
 
     def test_path_escape_rejected(self) -> None:
-        from lab_model.optimization.kernels.torchscript_runtime import get_manifest_entry
+        from lab_model.execution.optimization.kernels.torchscript_runtime import get_manifest_entry
 
         entry = dict(get_manifest_entry(_KERNEL_ID) or {})
         entry["artifact"] = "../secrets.pt"
@@ -81,7 +81,7 @@ class TorchScriptRuntimeTests(unittest.TestCase):
         self.assertEqual(plan.kind, "torchscript_scalar")
         self.assertEqual(plan.kernel_id, _KERNEL_ID)
 
-        from lab_model.optimization.spec import ObjectiveSpec
+        from lab_model.execution.optimization.spec import ObjectiveSpec
 
         objective = ObjectiveSpec(terms=[term])
         captured: list[str] = []
@@ -126,8 +126,8 @@ class TorchScriptRuntimeTests(unittest.TestCase):
 @unittest.skipUnless(torch_available(), "PyTorch not installed")
 class TorchScriptMockEnsembleSmoke(unittest.TestCase):
     def test_mock_landscape_runs_torchscript_term(self) -> None:
-        from lab_communicator.mock.ensemble import MockEnsembleLandscape
-        from lab_model.optimization.spec import ObjectiveSpec, VariableRef
+        from mock_edge.host.ensemble import MockEnsembleLandscape
+        from lab_model.execution.optimization.spec import ObjectiveSpec, VariableRef
 
         variables = [
             VariableRef.model_validate(

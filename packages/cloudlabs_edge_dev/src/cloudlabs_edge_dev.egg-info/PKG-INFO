@@ -1,0 +1,80 @@
+Metadata-Version: 2.4
+Name: cloudlabs-edge-dev
+Version: 0.1.0
+Summary: Scaffold and conformance tools for Cloud Labs Edge Contract v1
+Author: Cloud Labs
+License: Proprietary
+Project-URL: Homepage, https://github.com/cloud-labs
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: requests>=2.28.0
+Requires-Dist: jsonschema>=4.18.0
+Requires-Dist: referencing>=0.30.0
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn[standard]>=0.27.0
+Requires-Dist: websockets>=12.0
+Requires-Dist: httpx>=0.27.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+
+# cloudlabs-edge-dev
+
+Developer kit for **Cloud Labs Edge Contract v1**.
+
+- Scaffold a `cloudlabs_edge/` folder for a lab repo
+- Run **conformance** against a live edge URL (stub / mock / hardware profiles)
+
+Schemas: `schemas/edge_contract/v1/` in the cloud-labs monorepo.
+
+## Install
+
+From the cloud-labs repo root:
+
+```powershell
+pip install -e ./packages/cloudlabs_edge_dev
+```
+
+## Scaffold (Phase 5 — lab repo language skeleton)
+
+From the **lab** repo root (e.g. `robot-deathray`), using this kit:
+
+```powershell
+pip install -e <path-to-cloud-labs>/packages/cloudlabs_edge_dev
+cloudlabs-edge init ./cloudlabs_edge --backend-id real.default
+```
+
+That creates `cloudlabs_edge/` with:
+- `main.py` → `cloudlabs_edge_dev.stub_server.create_app` (**no OpticalExperiment imports**)
+- `adapters/` → `NotImplementedError` placeholders for Phase 6
+- `capabilities.json`, `bench/layout.json`, `contract_version.txt`
+
+```powershell
+cd cloudlabs_edge
+uvicorn main:app --host 0.0.0.0 --port 8100
+cloudlabs-edge check http://127.0.0.1:8100 --profile skeleton
+```
+
+## Conformance
+
+```powershell
+# Terminal A — reference stub (passes stub profile)
+cloudlabs-edge serve-stub --port 8100
+
+# Terminal B
+cloudlabs-edge check http://127.0.0.1:8100 --profile stub
+# or:
+python scripts/ops/edge_conformance.py http://127.0.0.1:8100 --profile stub
+```
+
+Profiles:
+
+| Profile | Meaning |
+|---------|---------|
+| `stub` | Schema + refuse unknown; safe START/END live+teleop; RECORD/EVAL return `epoch_ms`; flat WS only |
+| `skeleton` | Capabilities + bench + refuse unknown (motion may refuse) |
+| `hardware` | Stub checks plus expects real motion primitives not to no-op (Phase 6+) |
+
+## Design docs
+
+- `docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md`
+- `docs/EDGE_UC_MIGRATION_ROADMAP.md`

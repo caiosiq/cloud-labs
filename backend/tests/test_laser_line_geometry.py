@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from lab_communicator.shared.lab_view_config import (
+from lab_model.coordinator.backends.lab_view_config import (
     two_points_define_line,
     two_points_to_ab,
 )

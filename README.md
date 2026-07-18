@@ -83,17 +83,17 @@ components, kernels, and frozen snapshots per lab.
 Point **`LAB_VIEW_PATH`** in `.env` at a lab deployment bundle when **running
 the server** (catalog, layout, lasers, recipes). That is operator setup, not
 something script authors configure. Bundles and scaffolding are explained in
-[`backend/lab_communicator/README.md`](backend/lab_communicator/README.md).
+[`mock_edge/README.md`](mock_edge/README.md) (teaching edge).
 
 ---
 
 ## How intent reaches hardware
 
 1. You issue a **primitive** (move a mirror, record a camera, run OPTIMIZE).
-2. The coordinator validates the command, checks the **lease**, and either
-   runs it in-process (simple mock) or **proxies** it to an attached edge agent.
-3. The edge’s **LabCommunicator** turns that intent into instrument calls
-   (or a faithful simulation) and updates **lab state**.
+2. The coordinator validates the command, checks the **lease**, and sends it
+   southbound via **EdgeClient** (in-process mock, poll-attach, or HTTP edge).
+3. The edge host (`mock_edge` or lab `cloudlabs_edge`) turns that intent into
+   instrument calls (or a faithful simulation) and updates **lab state**.
 4. The Twin polls lab state so solids (measured poses) and ghosts (intent)
    stay honest.
 
@@ -108,13 +108,15 @@ not a second programming language.
 
 | Topic | Document |
 |-------|----------|
-| Communicator / lab bundles | [`backend/lab_communicator/README.md`](backend/lab_communicator/README.md) |
+| Teaching mock edge / lab bundles | [`mock_edge/README.md`](mock_edge/README.md) |
 | Scripting language & modes | [`packages/cloudlabs/README.md`](packages/cloudlabs/README.md) |
 | Platform architecture | [`backend/lab_model/ARCHITECTURE.md`](backend/lab_model/ARCHITECTURE.md) |
+| Edge Contract + live plane | [`docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md`](docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md) |
+| Edge migration roadmap | [`docs/EDGE_UC_MIGRATION_ROADMAP.md`](docs/EDGE_UC_MIGRATION_ROADMAP.md) |
 | Execution modes (imperative / DAG / closed-loop) | [`docs/EXECUTION_MODES.md`](docs/EXECUTION_MODES.md) |
-| Session & catalog kernels | [`docs/SESSION_KERNELS.md`](docs/SESSION_KERNELS.md) |
-| Loss-kernel design (planned) | [`docs/LOSS_KERNELS.md`](docs/LOSS_KERNELS.md) |
 | Surfaces & VC | [`docs/LAB_SURFACES_VC_AND_INITIALIZATION.md`](docs/LAB_SURFACES_VC_AND_INITIALIZATION.md) |
+| Session & catalog kernels | [`docs/SESSION_KERNELS.md`](docs/SESSION_KERNELS.md) |
+| Ensemble OPTIMIZE | [`docs/ENSEMBLE_OPTIMIZATION.md`](docs/ENSEMBLE_OPTIMIZATION.md) |
 | Ops scripts | [`scripts/ops/README.md`](scripts/ops/README.md) |
 | Language demos | [`scripts/language/README.md`](scripts/language/README.md) |
 
@@ -123,10 +125,11 @@ not a second programming language.
 ## Repository map (short)
 
 ```text
-backend/          Coordinator API, lab_model (semantics), lab_communicator (hardware bridge)
+backend/          Coordinator API, lab_model (semantics, EdgeClient)
+mock_edge/        Teaching Edge Contract edge + lab_view bundle
 frontend/         Twin, Operations, Wiki (static ES modules)
 packages/cloudlabs/   Author-facing Python SDK
-scripts/language/ Language demos    scripts/ops/    Edge agent, scaffolds, builders
+scripts/language/ Language demos    scripts/ops/    Edge agent, builders
 schemas/          Reference JSON, approved kernel manifests
 docs/             Design narratives and roadmaps
 ```

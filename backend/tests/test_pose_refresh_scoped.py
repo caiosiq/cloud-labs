@@ -10,12 +10,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lab_communicator.shared.lab_view_config import bootstrap_lab_view
-from lab_communicator.shared.mock_scan_preview import build_mock_scan_proposed_poses
-from lab_model.state.pose_refresh_selection import resolve_pose_refresh_plan
+from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view
+from mock_edge.shared.mock_scan_preview import build_mock_scan_proposed_poses
+from lab_model.coordinator.state.pose_refresh_selection import resolve_pose_refresh_plan
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "backend" / "lab_communicator" / "mock" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
 
 
 class PoseRefreshSelectionTests(unittest.TestCase):
@@ -47,10 +47,10 @@ class PoseRefreshSelectionTests(unittest.TestCase):
         self.assertIn("tag_a", plan.preserve_tag_ids)
 
     def test_mock_scoped_refresh_updates_single_tag(self) -> None:
-        from lab_communicator.mock.communicator import MockLabCommunicator
-        from lab_communicator.shared.lab_view_config import get_lab_view_paths
-        from lab_model import motor_rotation_store as motor_rot
-        from lab_model.domain.component import get_measurables
+        from mock_edge.host.communicator import MockLabCommunicator
+        from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
+        from lab_model.language.domain import motor_rotation_store as motor_rot
+        from lab_model.language.domain.component import get_measurables
 
         with tempfile.TemporaryDirectory() as tmp:
             lab_view = Path(tmp) / "lab_view"

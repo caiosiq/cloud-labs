@@ -7,10 +7,10 @@ import unittest
 from typing import Any, Dict
 from unittest.mock import MagicMock
 
-from lab_model.measurables.capture import capture_png_for_tag, camera_image_meta_from_png
-from lab_model.optimization.eval_sync import sync_measurables_from_objective_eval
-from lab_model.optimization.kernels import apply_kernel_hooks, get_kernel, validate_kernel_ids
-from lab_model.optimization.spec import ObjectiveSpec
+from lab_model.language.measurables.capture import capture_png_for_tag, camera_image_meta_from_png
+from lab_model.execution.optimization.eval_sync import sync_measurables_from_objective_eval
+from lab_model.execution.optimization.kernels import apply_kernel_hooks, get_kernel, validate_kernel_ids
+from lab_model.execution.optimization.spec import ObjectiveSpec
 
 
 class EvalSyncTests(unittest.TestCase):
@@ -76,18 +76,17 @@ class EvalSyncTests(unittest.TestCase):
             state["components"]["tag_22"]["statecontrol"]["measurables"]["centroid_x_px"],
             70.0,
         )
-        self.assertEqual(
-            state["components"]["tag_50"]["statecontrol"]["measurables"][
-                "output_power_readback_mw"
-            ],
-            42.0,
-        )
-        self.assertEqual(
-            state["components"]["tag_22"]["statecontrol"]["measurables"]["camera_image"][
-                "path"
-            ],
-            "/tmp/frame.png",
-        )
+        power = state["components"]["tag_50"]["statecontrol"]["measurables"][
+            "output_power_readback_mw"
+        ]
+        self.assertIsInstance(power, dict)
+        self.assertEqual(power.get("domain"), "scalar")
+        self.assertEqual(power.get("data"), 42.0)
+        cam = state["components"]["tag_22"]["statecontrol"]["measurables"]["camera_image"]
+        self.assertIsInstance(cam, dict)
+        self.assertEqual(cam.get("domain"), "spatial")
+        self.assertEqual(cam.get("data", {}).get("kind"), "file")
+        self.assertEqual(cam.get("data", {}).get("href"), "/tmp/frame.png")
 
 
 class CaptureHelperTests(unittest.TestCase):

@@ -1,0 +1,79 @@
+{
+  "contract_version": "1.0.0",
+  "backend_id": "mock.default",
+  "features": {
+    "torchscript_execution": true,
+    "hardware_reconciliation": false,
+    "hardware_triggered_latch": false,
+    "lan_direct_streams": true
+  },
+  "supported_primitives": [
+    "START_LIVE_FEED",
+    "END_LIVE_FEED",
+    "START_TELEOP",
+    "END_TELEOP",
+    "TELEOP_JOG",
+    "TELEOP_GOTO",
+    "RECORD_MEASURABLES",
+    "EVAL_KERNEL",
+    "MOVE_COMPONENT",
+    "MOVE_MOTOR",
+    "SET_MOTOR_SETPOINT",
+    "MOTOR_SET_ZERO",
+    "MOTOR_SEND_HOME",
+    "SET_EXPOSURE",
+    "SET_LASER_OUTPUT",
+    "OPTIMIZE",
+    "PICK_COMPONENT",
+    "HOVER",
+    "PLACE_FROM_HOVER",
+    "SCAN_ROTATE_IN_PLACE",
+    "CONFIRM_HOLDING_TAG",
+    "STORE_COMPONENT",
+    "PLACE_FROM_STORAGE",
+    "AFFIRM_PLACED_AT_CURRENT",
+    "REPACK_STORAGE",
+    "RECENTER_IN_STORAGE",
+    "REMOVE"
+  ],
+  "measurables": {
+    "tag_22.camera_image": {
+      "analysis": {
+        "layout": "bgr_hwc_uint8",
+        "dtype": "uint8",
+        "shape": ["H", "W", 3],
+        "domain": "spatial"
+      },
+      "wire": { "encoding": "jpeg", "profiles": ["default"] },
+      "live_channel": "tag_22.camera_image",
+      "capture_latency_ms": 0
+    }
+  },
+  "telemetry_channels": {
+    "tag_22.camera_image": {
+      "transport": "jpeg_poll",
+      "path": "/stream/tag_22/camera_image.jpg",
+      "requires_primitive": "START_LIVE_FEED",
+      "binds_measurable": "tag_22.camera_image",
+      "default_fps": 10,
+      "default_profile": "default"
+    },
+    "tag_22.camera_image.mjpeg": {
+      "transport": "mjpeg_http",
+      "path": "/stream/tag_22/camera_image.mjpg",
+      "requires_primitive": "START_LIVE_FEED",
+      "binds_measurable": "tag_22.camera_image",
+      "default_fps": 10,
+      "default_profile": "default"
+    },
+    "teleop": {
+      "transport": "websocket",
+      "path": "/ws/teleop",
+      "requires_primitive": "START_TELEOP",
+      "binds_tunables_live": true
+    }
+  },
+  "wire_profiles": {
+    "default": { "scale": 1.0, "jpeg_quality": 80, "fps": 10 }
+  }
+}

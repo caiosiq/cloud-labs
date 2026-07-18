@@ -10,20 +10,20 @@ from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock
 
-from lab_communicator.shared.lab_view_config import bootstrap_lab_view
-from lab_communicator.mock.ensemble import (
+from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view
+from mock_edge.host.ensemble import (
     MockActuatorRouter,
     MockEnsembleHardwareBridge,
     MockEnsembleLandscape,
     build_mock_ensemble_backend,
     run_mock_ensemble_session,
 )
-from lab_model.domain.holding import SYSTEM_STATUS_IDLE
-from lab_model.optimization.preflight import preflight_ensemble
-from lab_model.orchestration.optimize_ensemble import run_optimize_ensemble
+from lab_model.language.domain.holding import SYSTEM_STATUS_IDLE
+from lab_model.execution.optimization.preflight import preflight_ensemble
+from lab_model.execution.orchestration.optimize_ensemble import run_optimize_ensemble
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "backend" / "lab_communicator" / "mock" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
 _LAB_STATE = _MOCK_LAB_VIEW / "lab_state.json"
 
 
@@ -146,7 +146,7 @@ class EnsembleOptimizationMockTests(unittest.TestCase):
         payload = _four_mirror_payload()
         spec, _, x0 = preflight_ensemble(state, payload)
         landscape = MockEnsembleLandscape(variables=spec.variables, x0=x0)
-        from lab_model.optimization.metrics import evaluate_weighted_sum
+        from lab_model.execution.optimization.metrics import evaluate_weighted_sum
 
         start_at_x0_meas = landscape.measurements_for_objective(
             x0, spec.objective, held=False
@@ -180,7 +180,7 @@ class EnsembleOptimizationMockTests(unittest.TestCase):
         held_loss_meas = landscape.measurements_for_objective(
             physical, spec.objective, held=True
         )
-        from lab_model.optimization.metrics import evaluate_weighted_sum
+        from lab_model.execution.optimization.metrics import evaluate_weighted_sum
 
         held_loss, _ = evaluate_weighted_sum(spec.objective, held_loss_meas)
         self.assertGreater(held_loss, released + 5.0)
@@ -222,7 +222,7 @@ class EnsembleOptimizationMockTests(unittest.TestCase):
         host._primitive_finalize_optimization_run = MagicMock()
 
         async def _mock_ensemble(**kwargs: Any) -> Dict[str, Any]:
-            from lab_communicator.mock.ensemble import run_mock_ensemble_session
+            from mock_edge.host.ensemble import run_mock_ensemble_session
 
             spec_obj = kwargs["spec"]
             x0_map = kwargs["x0"]

@@ -9,27 +9,27 @@ import copy
 import tempfile
 import unittest
 
-from lab_model.domain.component import (
+from lab_model.language.domain.component import (
     PRESENCE_BREADBOARD,
     PRESENCE_OFF_TABLE,
     PRESENCE_STORAGE,
 )
-from lab_model.primitives.ids import PrimitiveId
-from lab_model.state.control_manager import (
+from lab_model.language.primitives.ids import PrimitiveId
+from lab_model.coordinator.state.control_manager import (
     ControlManager,
     _control_capabilities,
     read_bench_origin,
     repo_owns_bench,
     write_bench_origin,
 )
-from lab_model.state.diff import configuration_diff
-from lab_model.state.projections import (
+from lab_model.coordinator.state.diff import configuration_diff
+from lab_model.coordinator.state.projections import (
     EMPTY_CONFIGURATION,
     apply_configuration_to_components,
     extract_configuration,
     table_configuration,
 )
-from lab_model.state.reconcile import plan_reconcile
+from lab_model.coordinator.state.reconcile import plan_reconcile
 
 
 def _runtime_entry(tag, presence=PRESENCE_BREADBOARD, *, x=0.0, y=0.0, in_storage=False):

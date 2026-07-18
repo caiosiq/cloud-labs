@@ -11,14 +11,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lab_communicator.shared.lab_view_config import bootstrap_lab_view, get_lab_view_paths
-from lab_model.catalog.active_catalog_store import ensure_tag_in_active_catalog
-from lab_model.catalog.bundle import library_by_tag, merged_catalog_rows
-from lab_model.domain.component import is_off_table, presence_of
-from lab_model.state.runtime_manager import MutationKind
+from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view, get_lab_view_paths
+from lab_model.coordinator.catalog.active_catalog_store import ensure_tag_in_active_catalog
+from lab_model.coordinator.catalog.bundle import library_by_tag, merged_catalog_rows
+from lab_model.language.domain.component import is_off_table, presence_of
+from lab_model.coordinator.state.runtime_manager import MutationKind
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "backend" / "lab_communicator" / "mock" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
 
 
 class InventoryAddTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class InventoryAddTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         os.environ["LAB_VIEW_PATH"] = str(_MOCK_LAB_VIEW)
         bootstrap_lab_view(str(_PROJECT_ROOT))
-        from lab_model import motor_rotation_store as motor_rot
+        from lab_model.language.domain import motor_rotation_store as motor_rot
 
         motor_rot.configure(get_lab_view_paths().motor_rotations_json)
         with open(_MOCK_LAB_VIEW / "lab_state.json", "r", encoding="utf-8") as handle:
@@ -80,8 +80,8 @@ class InventoryAddTests(unittest.TestCase):
             shutil.copytree(_MOCK_LAB_VIEW, lab_view)
             os.environ["LAB_VIEW_PATH"] = str(lab_view)
             bootstrap_lab_view(str(_PROJECT_ROOT))
-            from lab_communicator.shared.lab_view_config import get_lab_view_paths
-            from lab_model.catalog.active_catalog_store import (
+            from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
+            from lab_model.coordinator.catalog.active_catalog_store import (
                 ensure_tag_in_active_catalog,
                 list_active_catalog_tags,
                 remove_tag_from_active_catalog,
@@ -96,14 +96,14 @@ class InventoryAddTests(unittest.TestCase):
     def test_track_component_places_off_table_on_breadboard(self) -> None:
         import asyncio
 
-        from lab_communicator.mock.communicator import MockLabCommunicator
-        from lab_communicator.shared.lab_view_config import get_lab_view_paths
-        from lab_model import motor_rotation_store as motor_rot
-        from lab_model.catalog.active_catalog_store import (
+        from mock_edge.host.communicator import MockLabCommunicator
+        from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
+        from lab_model.language.domain import motor_rotation_store as motor_rot
+        from lab_model.coordinator.catalog.active_catalog_store import (
             list_active_catalog_tags,
             remove_tag_from_active_catalog,
         )
-        from lab_model.domain.component import is_off_table, is_on_table, presence_of
+        from lab_model.language.domain.component import is_off_table, is_on_table, presence_of
 
         with tempfile.TemporaryDirectory() as tmp:
             lab_view = Path(tmp) / "lab_view"
@@ -140,10 +140,10 @@ class InventoryAddTests(unittest.TestCase):
     def test_track_component_places_library_part_on_breadboard(self) -> None:
         import asyncio
 
-        from lab_communicator.mock.communicator import MockLabCommunicator
-        from lab_communicator.shared.lab_view_config import get_lab_view_paths
-        from lab_model import motor_rotation_store as motor_rot
-        from lab_model.domain.component import is_on_table, presence_of
+        from mock_edge.host.communicator import MockLabCommunicator
+        from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
+        from lab_model.language.domain import motor_rotation_store as motor_rot
+        from lab_model.language.domain.component import is_on_table, presence_of
 
         with tempfile.TemporaryDirectory() as tmp:
             lab_view = Path(tmp) / "lab_view"
@@ -182,10 +182,10 @@ class InventoryAddTests(unittest.TestCase):
     def test_untrack_component_removes_runtime_row(self) -> None:
         import asyncio
 
-        from lab_communicator.mock.communicator import MockLabCommunicator
-        from lab_communicator.shared.lab_view_config import get_lab_view_paths
-        from lab_model import motor_rotation_store as motor_rot
-        from lab_model.catalog.active_catalog_store import list_active_catalog_tags
+        from mock_edge.host.communicator import MockLabCommunicator
+        from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
+        from lab_model.language.domain import motor_rotation_store as motor_rot
+        from lab_model.coordinator.catalog.active_catalog_store import list_active_catalog_tags
 
         with tempfile.TemporaryDirectory() as tmp:
             lab_view = Path(tmp) / "lab_view"
@@ -237,7 +237,7 @@ class InventoryAddTests(unittest.TestCase):
         return lab_view
 
     def test_add_component_from_inventory_reactivates_off_table(self) -> None:
-        from lab_communicator.mock.communicator import MockLabCommunicator
+        from mock_edge.host.communicator import MockLabCommunicator
 
         with tempfile.TemporaryDirectory() as tmp:
             state = copy.deepcopy(self.fixture_runtime)
@@ -264,7 +264,7 @@ class InventoryAddTests(unittest.TestCase):
             self.assertTrue(any(r.kind == MutationKind.ADMINISTRATIVE_LOAD for r in log))
 
     def test_add_component_from_inventory_inserts_library_tag(self) -> None:
-        from lab_communicator.mock.communicator import MockLabCommunicator
+        from mock_edge.host.communicator import MockLabCommunicator
 
         with tempfile.TemporaryDirectory() as tmp:
             state = copy.deepcopy(self.fixture_runtime)

@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-from lab_model.jobs.lease_manager import (
+from lab_model.coordinator.jobs.lease_manager import (
     LeaseConflictError,
     LeaseExpiredError,
     LeaseNotFoundError,

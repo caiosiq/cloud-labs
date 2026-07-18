@@ -1,8 +1,0 @@
-{
-  "version": 1,
-  "id": "demo_boxes",
-  "geometry": {
-    "kind": "catalog_box",
-    "mass_kg": 0.12
-  }
-}

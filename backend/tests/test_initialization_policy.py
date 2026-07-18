@@ -5,9 +5,9 @@ import os
 import tempfile
 import unittest
 
-from lab_model.catalog.pins_store import CatalogPinsStore
-from lab_model.jobs.initialization_policy import normalize_initialization_policy
-from lab_model.jobs.job_manager import validate_submit_spec
+from lab_model.coordinator.catalog.pins_store import CatalogPinsStore
+from lab_model.coordinator.jobs.initialization_policy import normalize_initialization_policy
+from lab_model.coordinator.jobs.job_manager import validate_submit_spec
 
 
 class InitializationPolicyTests(unittest.TestCase):
