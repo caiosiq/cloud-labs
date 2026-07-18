@@ -18,6 +18,8 @@ import logging
 import functools
 import inspect
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
 
@@ -942,8 +944,70 @@ def _locked_runtime_mode_info() -> Dict[str, Any]:
     }
 
 
+async def _edge_runtime_mode_info(rt: BackendRuntime) -> Dict[str, Any]:
+    simulator: Dict[str, Any] = {
+        "running": False,
+        "pid": None,
+        "viewer": False,
+        "realtime": False,
+        "last_error": None,
+    }
+    last_error = None
+    client = _edge_client_for(rt.backend_id)
+    base_url = getattr(client, "base_url", None)
+    if base_url:
+        try:
+            async with httpx.AsyncClient(base_url=base_url, timeout=5.0) as edge:
+                resp = await edge.get("/lab-state")
+                resp.raise_for_status()
+                state = resp.json()
+            if isinstance(state, dict) and isinstance(state.get("simulator"), dict):
+                simulator = {**simulator, **state["simulator"]}
+        except Exception as exc:  # noqa: BLE001
+            last_error = str(exc)
+            simulator["last_error"] = last_error
+
+    sim_backend = str(simulator.get("backend") or "").lower()
+    active_mode = (
+        "mujoco"
+        if sim_backend.startswith("mujoco") or bool(simulator.get("mujoco_running"))
+        else "mock"
+    )
+    reason = "runtime mode is fixed by the selected edge backend"
+    return {
+        "active_mode": active_mode,
+        "physical_armed": False,
+        "locked": True,
+        "available_modes": [
+            {
+                "id": "mock",
+                "label": "Mock UI",
+                "enabled": active_mode == "mock",
+                "reason": None if active_mode == "mock" else reason,
+            },
+            {
+                "id": "mujoco",
+                "label": "Simulator: MuJoCo",
+                "enabled": active_mode == "mujoco",
+                "reason": None if active_mode == "mujoco" else reason,
+            },
+            {
+                "id": "physical",
+                "label": "Physical Experiment",
+                "enabled": False,
+                "reason": reason,
+            },
+        ],
+        "simulator": simulator,
+        "last_simulator_error": last_error or simulator.get("last_error"),
+    }
+
+
 @app.get("/api/runtime-mode")
 async def get_runtime_mode():
+    rt = _runtime_for_active(init=False)
+    if rt.spec.edge.configured:
+        return await _edge_runtime_mode_info(rt)
     if runtime_manager is None:
         return _locked_runtime_mode_info()
     return runtime_manager.mode_info()
@@ -970,6 +1034,33 @@ async def set_runtime_mode(payload: RuntimeModeBody):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         logger.exception("Runtime mode switch failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/runtime-mode/refresh-mujoco")
+async def refresh_mujoco_runtime():
+    rt = _runtime_for_active(init=False)
+    client = _edge_client_for(rt.backend_id)
+    base_url = getattr(client, "base_url", None)
+    if not base_url:
+        raise HTTPException(
+            status_code=409,
+            detail="Refresh MuJoCo requires a configured HTTP simulation edge",
+        )
+    try:
+        async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as edge:
+            resp = await edge.post("/simulator/restart")
+            body = resp.json()
+        if resp.status_code >= 400:
+            detail = body.get("error") or body.get("detail") or body
+            raise HTTPException(status_code=resp.status_code, detail=detail)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Refresh MuJoCo failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    mode_info = await _edge_runtime_mode_info(rt)
+    mode_info["restart"] = body if isinstance(body, dict) else {"status": "ok"}
+    return mode_info
 
 
 @app.post("/api/components")
@@ -1856,11 +1947,33 @@ async def get_lab_state():
                     ) from exc
 
         if state is None:
-            state = lab.get_lab_state()
+            _edge_client = _edge_client_for(bid)
+            if _edge_client.transport == EdgeTransport.HTTP:
+                try:
+                    async with httpx.AsyncClient(
+                        base_url=_edge_client.base_url,
+                        timeout=10.0,
+                    ) as client:
+                        resp = await client.get("/lab-state")
+                        resp.raise_for_status()
+                        edge_state = resp.json()
+                    if isinstance(edge_state, dict):
+                        state = edge_state
+                        edge_source = True
+                except Exception as exc:  # noqa: BLE001
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "message": "edge lab_state unavailable",
+                            "reason": str(exc),
+                        },
+                    ) from exc
+            else:
+                state = lab.get_lab_state()
 
         logger.debug("GET /api/lab-state: ok edge_source=%s", edge_source)
         if isinstance(state, dict):
-            active_runtime = runtime_manager.mode.upper()
+            active_runtime = _runtime_for_active(init=False).lab_mode.upper()
             disconnect = edge_agent_registry.last_disconnect(bid)
             edge_rec = edge_agent_registry.get_for_backend(bid)
             state = {
@@ -4196,11 +4309,6 @@ async def receive_command(
             cmd = parse_command_payload(payload)
         except ValidationError as e:
             raise HTTPException(status_code=400, detail=validation_error_detail(e))
-        if runtime_manager is not None and not runtime_manager.supports_primitive(cmd.action):
-            raise HTTPException(
-                status_code=409,
-                detail=f"{cmd.action} is unavailable in {runtime_manager.mode} mode",
-            )
         edge_result = await _southbound_execute(
             payload if isinstance(payload, dict) else {"action": cmd.action},
             backend_id=backend_id,
@@ -4209,6 +4317,7 @@ async def receive_command(
         )
         out = edge_result.as_api_dict()
         out["edge_transport"] = edge_result.transport.value
+        out.setdefault("message", f"{cmd.action} completed")
         return out
 
     if lab is None:

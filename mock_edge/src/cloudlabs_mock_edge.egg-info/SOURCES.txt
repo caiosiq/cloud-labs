@@ -16,8 +16,6 @@ src/mock_edge/host/ensemble.py
 src/mock_edge/host/persistence.py
 src/mock_edge/host/primitives.py
 src/mock_edge/host/runtime_mode.py
-src/mock_edge/server/__init__.py
-src/mock_edge/server/app.py
 src/mock_edge/shared/__init__.py
 src/mock_edge/shared/mock_scan_preview.py
 src/mock_edge/shared/session_checkpoint.py

@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
 Name: cloudlabs-mock-edge
 Version: 0.1.0
-Summary: Cloud Labs mock edge — Edge Contract v1 teaching implementation
+Summary: Cloud Labs mock teaching lab — host physics + cloudlabs_edge contract face
 Requires-Python: >=3.10
 Requires-Dist: fastapi>=0.110.0
 Requires-Dist: uvicorn[standard]>=0.27.0

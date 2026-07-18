@@ -272,20 +272,36 @@
             width: 100%;
         }
 
-        .runtime-mode-select {
+        .runtime-mode-refresh-btn {
             flex: 1 1 auto;
             min-width: 0;
             width: 100%;
-            padding: 7px 24px 7px 9px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 7px 9px;
             border: 1px solid var(--border-color);
             border-radius: 5px;
             background: #11141a;
-            color: var(--text-main);
+            color: var(--text-primary);
             font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
         }
 
-        .runtime-mode-select:disabled {
-            opacity: 0.7;
+        .runtime-mode-refresh-btn:hover:not(:disabled) {
+            border-color: #64748b;
+            background: #151a22;
+        }
+
+        .runtime-mode-refresh-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.65;
+        }
+
+        .runtime-mode-refresh-btn .material-icons-round {
+            font-size: 15px;
         }
 
         .runtime-mode-status {
@@ -1820,9 +1836,10 @@
             </div>
             <div class="runtime-mode-control">
                 <span id="runtime-mode-status" class="runtime-mode-status" title="Loading runtime mode"></span>
-                <select id="runtime-mode-select" class="runtime-mode-select" aria-label="Runtime mode" disabled>
-                    <option>Loading...</option>
-                </select>
+                <button type="button" id="runtime-mode-refresh-btn" class="runtime-mode-refresh-btn" disabled title="Restart the MuJoCo viewer from the current lab state">
+                    <span class="material-icons-round">refresh</span>
+                    <span>Refresh MuJoCo</span>
+                </button>
             </div>
             <div class="backend-session-bar" id="backend-session-bar" title="Lab backend chosen at login">
                 <span class="backend-session-id" id="backend-session-label">—</span>

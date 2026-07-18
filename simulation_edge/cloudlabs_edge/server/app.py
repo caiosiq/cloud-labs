@@ -88,6 +88,27 @@ def create_app(*, lab: Any = None, backend_id: str = "sim.default") -> FastAPI:
     async def get_lab_state() -> Dict[str, Any]:
         return context.get_lab().get_lab_state()
 
+    @app.post("/simulator/restart")
+    async def restart_simulator() -> JSONResponse:
+        lab_host = context.get_lab()
+        restart = getattr(lab_host, "restart_mujoco", None)
+        if not callable(restart):
+            return JSONResponse(
+                status_code=409,
+                content=contract.refused(
+                    "SIMULATOR_UNAVAILABLE",
+                    "MuJoCo restart is not available for this simulation host",
+                ),
+            )
+        try:
+            status = await asyncio.to_thread(restart)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                status_code=500,
+                content=contract.failed("SIMULATOR_RESTART_FAILED", str(exc)),
+            )
+        return JSONResponse({"status": "ok", "simulator": status})
+
     @app.post("/execute")
     async def execute(body: Dict[str, Any]) -> JSONResponse:
         if "op" in body and "primitive" not in body:
@@ -257,10 +278,9 @@ def create_app(*, lab: Any = None, backend_id: str = "sim.default") -> FastAPI:
 
 
 def build_default_app() -> FastAPI:
-    from simulation_edge.bootstrap import bootstrap_host
-
-    host, _ = bootstrap_host()
-    return create_app(lab=host, backend_id="sim.default")
+    # Bind the HTTP socket quickly; adapters lazily bootstrap MuJoCo/MoveIt on
+    # the first lab-facing request via adapters.context.get_lab().
+    return create_app(lab=None, backend_id="sim.default")
 
 
 app = None

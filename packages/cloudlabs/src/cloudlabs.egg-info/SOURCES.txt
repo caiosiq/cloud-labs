@@ -9,6 +9,7 @@ src/cloudlabs/exceptions.py
 src/cloudlabs/graph.py
 src/cloudlabs/intent.py
 src/cloudlabs/jobs.py
+src/cloudlabs/language.py
 src/cloudlabs/logging_config.py
 src/cloudlabs/measurable.py
 src/cloudlabs/objective.py

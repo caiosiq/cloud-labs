@@ -22,13 +22,29 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _planner_backend_from_env() -> str:
+    return (
+        os.getenv("SIMULATION_EDGE_PLANNER")
+        or os.getenv("SIMULATION_EDGE_MUJOCO_PLANNER")
+        or os.getenv("CLOUDLAB_MUJOCO_PLANNER")
+        or "custom_ik"
+    ).strip().lower()
+
+
 def _pose_from_component(comp: Mapping[str, Any]) -> Dict[str, float]:
-    tun = {}
-    caps = comp.get("capabilities") if isinstance(comp.get("capabilities"), dict) else {}
-    sc = caps.get("statecontrol") if isinstance(caps, dict) else {}
-    if isinstance(sc, dict):
-        tun = sc.get("tunables") if isinstance(sc.get("tunables"), dict) else {}
-    pose = tun.get("nominal_pose") if isinstance(tun, dict) else None
+    pose = None
+    for parent_key in ("statecontrol", "capabilities"):
+        parent = comp.get(parent_key) if isinstance(comp.get(parent_key), dict) else {}
+        sc = parent.get("statecontrol") if parent_key == "capabilities" else parent
+        if isinstance(sc, dict):
+            tun = sc.get("tunables") if isinstance(sc.get("tunables"), dict) else {}
+            candidate = tun.get("nominal_pose") if isinstance(tun, dict) else None
+            if isinstance(candidate, dict):
+                pose = candidate
+                break
+    if not isinstance(pose, dict):
+        tun = comp.get("tunables") if isinstance(comp.get("tunables"), dict) else {}
+        pose = tun.get("nominal_pose") if isinstance(tun, dict) else None
     if not isinstance(pose, dict):
         pose = comp.get("pose") if isinstance(comp.get("pose"), dict) else {}
     return {
@@ -88,13 +104,25 @@ class SimulationHost:
         realtime: Optional[bool],
     ) -> None:
         from simulation_edge.host.client import MuJoCoProcessClient
+        from simulation_edge.host.runtime import (
+            MUJOCO_PLANNER_CUSTOM_IK,
+            MUJOCO_PLANNER_MOVEIT,
+        )
         from simulation_edge.host.scene import build_scene_spec
 
+        planner_backend = _planner_backend_from_env()
+        if planner_backend in {"moveit", "mujoco_moveit"}:
+            planner_backend = MUJOCO_PLANNER_MOVEIT
+        elif planner_backend in {"custom", "custom_ik", "ik"}:
+            planner_backend = MUJOCO_PLANNER_CUSTOM_IK
+
         self.scene = build_scene_spec(self.layout, self.catalog, self.current_state)
+        self._apply_scene_spawn_adjustments()
         client = MuJoCoProcessClient(
             self.scene,
             show_viewer=show_viewer,
             realtime=realtime,
+            planner_backend=planner_backend,
         )
         try:
             client.start()
@@ -102,6 +130,22 @@ class SimulationHost:
             client.stop()
             raise
         self._client = client
+
+    def restart_mujoco(
+        self,
+        *,
+        show_viewer: Optional[bool] = None,
+        realtime: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        client = self._client
+        if client is not None:
+            client.stop()
+        self._client = None
+        self.scene = None
+        with self._lock:
+            self._last_runtime_error = None
+        self._start_mujoco(show_viewer=show_viewer, realtime=realtime)
+        return self.simulator_status()
 
     @property
     def mujoco_enabled(self) -> bool:
@@ -114,12 +158,27 @@ class SimulationHost:
         with self._lock:
             state = copy.deepcopy(self.current_state)
             state["last_runtime_error"] = copy.deepcopy(self._last_runtime_error)
-            state["simulator"] = {
-                "backend": "mujoco" if self._client is not None else "soft",
+            sim_status = self._client.status() if self._client is not None else {}
+            planner = str(sim_status.get("planner") or "")
+            simulator = {
+                "backend": (
+                    "mujoco_moveit"
+                    if planner == "moveit"
+                    else "mujoco"
+                    if self._client is not None
+                    else "soft"
+                ),
                 "mujoco_running": bool(
                     self._client is not None and getattr(self._client, "running", False)
                 ),
+                **sim_status,
             }
+            spawn_adjustments = (
+                getattr(self.scene, "spawn_adjustments_mm", {}) if self.scene else {}
+            )
+            if spawn_adjustments:
+                simulator["spawn_adjustments"] = copy.deepcopy(spawn_adjustments)
+            state["simulator"] = simulator
             return state
 
     def supports_primitive(self, action: str) -> bool:
@@ -129,6 +188,17 @@ class SimulationHost:
         if self._client is None:
             return {"mode": "soft", "running": False}
         return {"mode": "mujoco", **self._client.status()}
+
+    def _apply_scene_spawn_adjustments(self) -> None:
+        if self.scene is None:
+            return
+        for tag_id, pose in self.scene.spawn_adjustments_mm.items():
+            self._set_pose(
+                str(tag_id),
+                float(pose["x"]),
+                float(pose["y"]),
+                float(pose.get("rotation", 0.0)),
+            )
 
     def return_tunables_for_tag(self, tag_id: str) -> Dict[str, Any]:
         tag = str(tag_id or "")
@@ -147,19 +217,18 @@ class SimulationHost:
             if not isinstance(entry, dict):
                 entry = {}
                 components[tag_id] = entry
-            caps = entry.setdefault("capabilities", {})
-            if not isinstance(caps, dict):
-                caps = {}
-                entry["capabilities"] = caps
-            sc = caps.setdefault("statecontrol", {})
+            sc = entry.setdefault("statecontrol", {})
             if not isinstance(sc, dict):
                 sc = {}
-                caps["statecontrol"] = sc
+                entry["statecontrol"] = sc
             tun = sc.setdefault("tunables", {})
             if not isinstance(tun, dict):
                 tun = {}
                 sc["tunables"] = tun
             tun["nominal_pose"] = {"x": x, "y": y, "rotation": rotation}
+            reported = tun.setdefault("reported_pose", {})
+            if isinstance(reported, dict):
+                reported.update({"x": x, "y": y, "rotation": rotation})
 
     async def move_component(
         self,

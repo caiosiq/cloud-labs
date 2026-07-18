@@ -1,4 +1,4 @@
-﻿"""Damped-least-squares inverse kinematics for the MuJoCo xArm7."""
+"""Damped-least-squares inverse kinematics for the MuJoCo xArm7."""
 
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ class DampedLeastSquaresIK:
             model,
             np.asarray(target_position, dtype=float),
             np.asarray(seed, dtype=float),
+            np.asarray(posture_reference, dtype=float),
         ):
             try:
                 return self._solve_once(
@@ -125,29 +126,34 @@ class DampedLeastSquaresIK:
         model: mujoco.MjModel,
         target_position: np.ndarray,
         seed: np.ndarray,
+        posture_reference: np.ndarray,
     ) -> list[np.ndarray]:
         """Try the previous posture first, then base-aligned elbow postures.
 
         A single home seed traps DLS in local minima for valid poses in other
         table quadrants. The target bearing gives joint 1 a deterministic,
         physically meaningful starting point while retaining the previous
-        solution as the preferred continuous branch.
+        solution as the preferred continuous branch. MoveIt can leave the arm
+        in a different branch before a local contact move, so also try the
+        nominal posture family as a fallback.
         """
-        candidates = [np.asarray(seed, dtype=float).copy()]
+        candidates: list[np.ndarray] = []
         bearing = float(np.arctan2(target_position[1], target_position[0]))
-        shoulder_values = (
-            float(seed[1]),
-            -0.8,
-            0.3,
-            0.8,
-        )
-        for shoulder in shoulder_values:
-            candidate = np.asarray(seed, dtype=float).copy()
-            candidate[0] = bearing
-            candidate[1] = shoulder
-            DampedLeastSquaresIK._clip_joint_limits(model, candidate)
-            if not any(np.allclose(candidate, existing, atol=1e-9) for existing in candidates):
-                candidates.append(candidate)
+        for base in (
+            np.asarray(seed, dtype=float),
+            np.asarray(posture_reference, dtype=float),
+        ):
+            for shoulder in (None, float(base[1]), -0.8, 0.3, 0.8):
+                candidate = base.copy()
+                if shoulder is not None:
+                    candidate[0] = bearing
+                    candidate[1] = shoulder
+                DampedLeastSquaresIK._clip_joint_limits(model, candidate)
+                if not any(
+                    np.allclose(candidate, existing, atol=1e-9)
+                    for existing in candidates
+                ):
+                    candidates.append(candidate)
         return candidates
 
     @staticmethod

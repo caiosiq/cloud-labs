@@ -175,7 +175,8 @@ export async function executeSendCommand(command) {
             return { ok: false, error: detail };
         }
 
-        log(`Server: ${result.message}`, 'info');
+        const serverMessage = result.message || result.status || 'Command accepted';
+        log(`Server: ${serverMessage}`, 'info');
 
         if (command.action === 'OPTIMIZE') {
             store.isOptimizing = true;
@@ -193,9 +194,17 @@ export async function executeSendCommand(command) {
                 }
                 void fetchLabState();
             }
+        } else {
+            try {
+                store.forceGhostSync = true;
+                await fetchLabState();
+                _render();
+            } catch (syncError) {
+                log(`Command completed, but refresh failed: ${syncError.message || syncError}`, 'warn');
+            }
         }
 
-        return { ok: true, message: result.message || 'Accepted' };
+        return { ok: true, message: serverMessage };
     } catch (error) {
         log(`Command failed: ${error.message}`, 'error');
         if (command.target_id) {
