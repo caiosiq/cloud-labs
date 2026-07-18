@@ -1,4 +1,4 @@
-"""``python -m mock_edge`` — serve ``mock_edge/cloudlabs_edge`` on :8100."""
+"""``python -m simulation_edge`` — serve ``simulation_edge/cloudlabs_edge``."""
 
 from __future__ import annotations
 
@@ -8,9 +8,8 @@ from pathlib import Path
 
 
 def _ensure_edge_on_path() -> Path:
-    """Put ``mock_edge/cloudlabs_edge`` first so ``main`` / ``adapters`` resolve."""
-    mock_root = Path(__file__).resolve().parents[2]
-    edge = mock_root / "cloudlabs_edge"
+    sim_root = Path(__file__).resolve().parents[2]
+    edge = sim_root / "cloudlabs_edge"
     edge_s = str(edge)
     if edge_s not in sys.path:
         sys.path.insert(0, edge_s)
@@ -19,10 +18,10 @@ def _ensure_edge_on_path() -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Cloud Labs mock edge — Edge Contract via cloudlabs_edge/"
+        description="Cloud Labs simulation edge — Edge Contract via cloudlabs_edge/"
     )
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8100)
+    parser.add_argument("--port", type=int, default=8120)
     args = parser.parse_args(argv)
 
     edge = _ensure_edge_on_path()

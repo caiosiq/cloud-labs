@@ -114,7 +114,9 @@ Distributable **`cloudlabs-edge-dev`** (`packages/cloudlabs_edge_dev/`):
 
 ## Phase 2 — Mock edge becomes the gold-standard contract implementation
 
-**Status:** **done** for teaching cutover — top-level [`mock_edge/`](../mock_edge/) is a **filled** `cloudlabs-edge init` skeleton (`adapters/`, `dispatch.py`, …) over teaching physics in `host/`; in-tree `lab_communicator/mock` deleted. Default coordinator path remains **in-process** `MockLabCommunicator` via `EdgeClient`; optional `python -m mock_edge` on `:8100`.
+**Status:** **done** for teaching cutover — [`mock_edge/cloudlabs_edge/`](../mock_edge/cloudlabs_edge/) is the Edge Contract face (filled `init` skeleton); teaching physics stays in `mock_edge/src/mock_edge/host/`. In-tree `lab_communicator/mock` deleted. Default coordinator path remains **in-process** `MockLabCommunicator` via `EdgeClient`; optional `python -m mock_edge` serves `cloudlabs_edge` on `:8100`.
+
+**Simulation:** [`simulation_edge/cloudlabs_edge/`](../simulation_edge/cloudlabs_edge/) (`sim.default`) ports Josh’s MuJoCo process host into the same bookkeeping layout; soft pose mode by default, `SIMULATION_EDGE_MUJOCO=1` for the viewer. Serve with `python -m simulation_edge` on `:8120`.
 
 ### Goal
 
@@ -130,7 +132,7 @@ Teaching/CI path runs **as an edge process** implementing v1, not as “fat in-p
 
 | Action | Path |
 |--------|------|
-| Add | [`mock_edge/`](../mock_edge/) — package + `lab_view/` + Edge Contract app |
+| Add | [`mock_edge/`](../mock_edge/) — `cloudlabs_edge/` contract face + `src/mock_edge/host/` + `lab_view/` |
 | Edit | [`scripts/ops/mock_edge_agent.py`](../scripts/ops/mock_edge_agent.py) — poll-attach jobs; prefer `python -m mock_edge` |
 | Edit | [`schemas/backends.json`](../schemas/backends.json) — `mock.default` → `mock_edge/lab_view` |
 | Delete | `backend/lab_communicator/{mock,real,mujoco}/`, `base.py`, factory |

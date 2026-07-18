@@ -1,19 +1,22 @@
 # mock_edge
 
-Teaching **Edge Contract v1** implementation for Cloud Labs. Same skeleton as
-`cloudlabs-edge init`, with every adapter **filled** against the mock teaching
-host (`host/`). Physical benches use `robot-deathray/cloudlabs_edge/` instead.
+Teaching lab for Cloud Labs. Cloud-labs talks **only** to
+[`cloudlabs_edge/`](./cloudlabs_edge/) (Edge Contract v1). Teaching physics
+lives in [`src/mock_edge/host/`](./src/mock_edge/host/); catalog/state in
+[`lab_view/`](./lab_view/).
+
+Same door shape as a physical lab (`robot-deathray/cloudlabs_edge/`) and the
+[`simulation_edge/cloudlabs_edge/`](../simulation_edge/) (`sim.default`).
 
 ## Layout
 
 ```text
-src/mock_edge/
-  capabilities.json    # full supported_primitives
-  contract.py, latch.py, kernel_host.py, dispatch.py
-  adapters/            # filled (motion, motors, vision, live_feed, …)
-  server/app.py        # thin HTTP → dispatch
-  host/                # teaching physics (MockLabCommunicator)
-lab_view/              # catalog / state / control VC
+mock_edge/
+  cloudlabs_edge/          # Edge Contract face (certify / EdgeClient URL)
+    main.py, dispatch.py, adapters/, …
+  src/mock_edge/           # Python package: host physics + bootstrap
+    host/, shared/, __main__.py
+  lab_view/                # catalog / state / control VC
 ```
 
 ## Run
@@ -26,9 +29,19 @@ pip install -e ./mock_edge
 python -m mock_edge --port 8100
 ```
 
-## Prove the skeleton
+Or from the edge folder (with the same `PYTHONPATH`):
 
 ```powershell
-cloudlabs-edge doctor --path mock_edge/src/mock_edge
-cloudlabs-edge certify http://127.0.0.1:8100 --path mock_edge/src/mock_edge --profile stub
+cd mock_edge/cloudlabs_edge
+uvicorn main:app --host 127.0.0.1 --port 8100
 ```
+
+## Certify
+
+```powershell
+cloudlabs-edge doctor --path mock_edge/cloudlabs_edge
+cloudlabs-edge certify http://127.0.0.1:8100 --path mock_edge/cloudlabs_edge --profile stub
+```
+
+In-process coordinator teaching still uses `MockLabCommunicator` from
+`mock_edge.host` via `EdgeClient`; the HTTP edge above is the process face.
