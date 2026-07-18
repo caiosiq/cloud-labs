@@ -108,7 +108,7 @@ class MoveItPlannerClient:
         raise MoveItPlannerError(
             (
                 "MoveIt sidecar is stale or incompatible. Restart the WSL "
-                "sidecar with the current cloud-labs file before using "
+                "sidecar from lab_automation/tools/moveit_sidecar before using "
                 f"MuJoCo: MoveIt. Required protocol "
                 f"{REQUIRED_SIDECAR_PROTOCOL_VERSION}, got {version!r} "
                 f"during {context}."
