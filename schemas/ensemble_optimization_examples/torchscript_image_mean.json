@@ -1,0 +1,54 @@
+{
+  "action": "OPTIMIZE",
+  "target_id": "tag_22",
+  "parameters": {
+    "mode": "ensemble",
+    "session_label": "TorchScript demo — image mean score",
+    "kernels": ["demo.image_mean_score"],
+    "variables": [
+      {
+        "id": "v_m20_m1",
+        "tag_id": "tag_20",
+        "path": "tunables.nominal_motor_positions.1",
+        "physical_type": "continuous",
+        "unit": "deg",
+        "bounds": { "min": -3.0, "max": 3.0 },
+        "delta": true
+      }
+    ],
+    "objective": {
+      "type": "weighted_sum",
+      "minimize": true,
+      "terms": [
+        {
+          "id": "ts_mean",
+          "weight": 1.0,
+          "source": {
+            "tag_id": "tag_22",
+            "kind": "torchscript_scalar",
+            "kernel_id": "demo.image_mean_score",
+            "from": "measurables.camera_image",
+            "normalize": { "min": 0.0, "max": 1.0 }
+          },
+          "metric": "one_minus_normalized"
+        }
+      ]
+    },
+    "solver": {
+      "type": "block_cobyla",
+      "max_total_evals": 20,
+      "settle_ms": 50,
+      "blocks": [
+        {
+          "id": "block_main",
+          "variable_ids": ["v_m20_m1"],
+          "max_evals": 15,
+          "trust_region_u": 0.25,
+          "rhobeg_u": 0.08,
+          "rhoend_u": 0.002,
+          "passes": 1
+        }
+      ]
+    }
+  }
+}

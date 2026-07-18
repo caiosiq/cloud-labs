@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "kernels": [
+    {
+      "id": "session.mock_default.smoke_mean.e37ee24b",
+      "label": "smoke_mean",
+      "description": "smoke",
+      "artifact": "model.pt",
+      "runtime": "torchscript",
+      "backend": "any",
+      "phase": "session",
+      "hooks": [
+        "evaluate",
+        "capture",
+        "tensor"
+      ],
+      "output_kind": "scalar",
+      "feature_names": [],
+      "digest": "sha256:fc19bd2d6d0be62a48f2c5686c6525343261f415c6659b75539d3863764dd70c",
+      "scope": "session",
+      "inputs": [
+        {
+          "name": "image",
+          "from": "measurables.camera_image",
+          "layout": "bgr_hwc_uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "score",
+          "role": "scalar"
+        }
+      ]
+    }
+  ]
+}

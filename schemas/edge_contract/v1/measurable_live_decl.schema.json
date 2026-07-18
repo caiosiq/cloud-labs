@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/measurable_live_decl.schema.json",
+  "title": "MeasurableLiveDeclV1",
+  "description": "How a measurable is analyzed on the edge vs transported on the wire, and optional live channel binding.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["analysis"],
+  "properties": {
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layout", "dtype"],
+      "properties": {
+        "layout": {
+          "type": "string",
+          "description": "e.g. bgr_hwc_uint8 or scalar",
+          "examples": ["bgr_hwc_uint8", "scalar"]
+        },
+        "dtype": { "type": "string", "examples": ["uint8", "float64"] },
+        "shape": {
+          "description": "Optional shape hint; H/W may be symbolic strings.",
+          "type": "array",
+          "items": { "type": ["integer", "string"] }
+        },
+        "domain": { "type": "string", "examples": ["spatial", "scalar"] }
+      }
+    },
+    "wire": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "encoding": {
+          "type": "string",
+          "enum": ["jpeg", "png", "none"],
+          "description": "Network/storage encoding. Analysis remains analysis.layout (e.g. BGR)."
+        },
+        "profiles": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Names referencing capabilities.wire_profiles (e.g. default, teleop)."
+        }
+      }
+    },
+    "live_channel": {
+      "type": "string",
+      "description": "Key into capabilities.telemetry_channels for START_LIVE_FEED wire transport."
+    },
+    "capture_latency_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Documented software compensation when hardware trigger is unavailable."
+    }
+  }
+}

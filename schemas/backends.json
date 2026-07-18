@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "description": "Backends registered on this cloud-labs server. Users/scripts pick one at connect time; the server does not choose a default communicator from .env.",
+  "backends": [
+    {
+      "backend_id": "mock.default",
+      "label": "Mock bench (default)",
+      "description": "Teaching edge via top-level mock_edge/ (in-process by default). Set edge.base_url to http://127.0.0.1:8100 when running `python -m mock_edge`.",
+      "image": "/static/wiki/backends/mock-default.png",
+      "lab_view_path": "mock_edge/lab_view",
+      "enabled": true,
+      "edge": {
+        "base_url": null,
+        "contract_version": "1.0.0",
+        "lan_direct_ok": false
+      }
+    },
+    {
+      "backend_id": "real.default",
+      "label": "Real bench (external edge)",
+      "description": "Physical bench via robot-deathray/cloudlabs_edge (Edge Contract). In-tree RealLabCommunicator removed.",
+      "image": "/static/wiki/backends/real-default.png",
+      "lab_view_path": "mock_edge/lab_view",
+      "enabled": true,
+      "notes": "Set edge.base_url to the lab cloudlabs_edge URL (e.g. http://127.0.0.1:8100). lab_view_path is unused for physics; catalogs/VC may still use a local bundle later.",
+      "edge": {
+        "base_url": null,
+        "contract_version": "1.0.0",
+        "lan_direct_ok": false
+      }
+    },
+    {
+      "backend_id": "sim.default",
+      "label": "Simulation edge (MuJoCo)",
+      "description": "MuJoCo / soft-pose simulation via simulation_edge/cloudlabs_edge. Default soft mode; set SIMULATION_EDGE_MUJOCO=1 for the viewer process. Point edge.base_url at http://127.0.0.1:8120 when serving `python -m simulation_edge`.",
+      "image": "/static/wiki/backends/mock-default.png",
+      "lab_view_path": "simulation_edge/lab_view",
+      "enabled": true,
+      "edge": {
+        "base_url": null,
+        "contract_version": "1.0.0",
+        "lan_direct_ok": false
+      }
+    }
+  ]
+}

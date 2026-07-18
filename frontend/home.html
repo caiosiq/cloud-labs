@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Labs</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #07090d;
+            --text: #e8eef7;
+            --muted: #8b9bb0;
+            --accent: #4f8cff;
+        }
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0;
+            min-height: 100%;
+            background: var(--bg);
+            color: var(--text);
+        }
+        body {
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+            overflow-x: hidden;
+        }
+
+        .hero {
+            position: relative;
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .hero-atmosphere {
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+        }
+
+        .hero-sheen {
+            position: absolute;
+            inset: -20%;
+            z-index: 1;
+            pointer-events: none;
+            background:
+                radial-gradient(ellipse 55% 40% at 18% 30%, rgba(79, 140, 255, 0.22), transparent 55%),
+                radial-gradient(ellipse 45% 35% at 82% 70%, rgba(56, 189, 248, 0.12), transparent 50%),
+                linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.04) 48%, transparent 62%);
+            background-size: 100% 100%, 100% 100%, 220% 220%;
+            animation: sheenDrift 14s ease-in-out infinite alternate;
+        }
+
+        @keyframes sheenDrift {
+            from { background-position: 0% 0%, 100% 100%, 0% 40%; }
+            to { background-position: 10% 20%, 80% 60%, 80% 60%; }
+        }
+
+        .hero-vignette {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
+            pointer-events: none;
+            background:
+                radial-gradient(ellipse 70% 60% at 50% 48%, transparent 20%, rgba(7, 9, 13, 0.55) 55%, rgba(7, 9, 13, 0.92) 100%),
+                linear-gradient(180deg, rgba(7, 9, 13, 0.35) 0%, transparent 28%, transparent 72%, rgba(7, 9, 13, 0.75) 100%);
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 3;
+            text-align: center;
+            padding: 32px 24px 48px;
+            max-width: 720px;
+        }
+
+        .brand {
+            margin: 0;
+            font-family: Syne, sans-serif;
+            font-weight: 800;
+            font-size: clamp(3.2rem, 9vw, 5.6rem);
+            letter-spacing: -0.04em;
+            line-height: 0.95;
+            color: #f4f7fb;
+            text-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+            opacity: 0;
+            transform: translateY(18px);
+            animation: riseIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.12s forwards;
+        }
+
+        .tagline {
+            margin: 18px auto 0;
+            max-width: 34em;
+            font-family: "Instrument Serif", Georgia, serif;
+            font-size: clamp(1.15rem, 2.4vw, 1.55rem);
+            font-weight: 400;
+            font-style: italic;
+            line-height: 1.35;
+            color: #c5d0e0;
+            opacity: 0;
+            transform: translateY(14px);
+            animation: riseIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.28s forwards;
+        }
+
+        .cta-row {
+            margin-top: 34px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 18px;
+            opacity: 0;
+            transform: translateY(12px);
+            animation: riseIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.44s forwards;
+        }
+
+        .cta-primary {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 200px;
+            padding: 14px 28px;
+            border-radius: 999px;
+            border: 1px solid rgba(79, 140, 255, 0.55);
+            background: linear-gradient(180deg, rgba(79, 140, 255, 0.95), rgba(37, 99, 235, 0.92));
+            color: #fff;
+            text-decoration: none;
+            font-family: Syne, sans-serif;
+            font-weight: 700;
+            font-size: 15px;
+            letter-spacing: 0.02em;
+            box-shadow: 0 12px 40px rgba(37, 99, 235, 0.35);
+            transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+        }
+
+        .cta-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 16px 48px rgba(37, 99, 235, 0.45);
+            filter: brightness(1.05);
+        }
+
+        .quiet-links {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px 4px;
+            font-size: 12px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .quiet-links a {
+            color: var(--muted);
+            text-decoration: none;
+            padding: 4px 10px;
+            transition: color 0.2s ease;
+        }
+
+        .quiet-links a:hover { color: var(--accent); }
+
+        .quiet-links .dot {
+            color: rgba(139, 155, 176, 0.35);
+            pointer-events: none;
+            user-select: none;
+        }
+
+        @keyframes riseIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .below {
+            position: relative;
+            z-index: 4;
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 0 24px 72px;
+            text-align: center;
+        }
+
+        .below p {
+            margin: 0;
+            font-family: "Instrument Serif", Georgia, serif;
+            font-size: 1.15rem;
+            line-height: 1.5;
+            color: #a8b6c9;
+        }
+
+        .below-links {
+            margin-top: 20px;
+            font-size: 13px;
+        }
+
+        .below-links a {
+            color: var(--accent);
+            text-decoration: none;
+            margin: 0 10px;
+        }
+
+        .below-links a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <section class="hero" aria-label="Cloud Labs">
+        <div class="hero-atmosphere" aria-hidden="true">
+            <div class="hero-sheen"></div>
+            <div class="hero-vignette"></div>
+        </div>
+
+        <div class="hero-content">
+            <h1 class="brand">Cloud Labs</h1>
+            <p class="tagline">A programmable optical bench — direct control, snapshot pins, and closed-loop jobs on the edge.</p>
+            <div class="cta-row">
+                <a class="cta-primary" href="/twin">Enter Twin</a>
+                <nav class="quiet-links" aria-label="Surfaces">
+                    <a href="/operations">Operations</a>
+                    <span class="dot">·</span>
+                    <a href="/wiki#backends">Backends</a>
+                    <span class="dot">·</span>
+                    <a href="/wiki">Wiki</a>
+                </nav>
+            </div>
+        </div>
+    </section>
+
+    <section class="below">
+        <p>
+            Cloud Labs connects a digital twin of the optical table to versioned configurations
+            and scripted jobs — so you can align by hand, pin a golden layout, and hand the loop to the edge.
+        </p>
+        <div class="below-links">
+            <a href="/twin">Twin UI</a>
+            <a href="/operations">Operations</a>
+            <a href="/wiki#backends">Backends</a>
+            <a href="/wiki">Wiki</a>
+        </div>
+    </section>
+</body>
+</html>

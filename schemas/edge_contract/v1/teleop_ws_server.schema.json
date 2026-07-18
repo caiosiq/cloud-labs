@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/teleop_ws_server.schema.json",
+  "title": "TeleopWsServerMessageV1",
+  "description": "Edge → client TeleOp hot path. FLAT ONLY — motor/pose samples as top-level numeric keys, not nested maps.",
+  "type": "object",
+  "additionalProperties": {
+    "type": "number",
+    "description": "Extra flat sample keys (e.g. m1, m2, x, y, rotation) must be numbers only."
+  },
+  "required": ["epoch_ms", "tag_id"],
+  "properties": {
+    "epoch_ms": { "type": "integer" },
+    "tag_id": { "type": "string", "minLength": 1 },
+    "kind": {
+      "type": "string",
+      "enum": ["pose_sample", "pong", "error"],
+      "default": "pose_sample"
+    },
+    "error_code": { "type": "string" },
+    "x": { "type": "number" },
+    "y": { "type": "number" },
+    "rotation": { "type": "number" },
+    "m1": { "type": "number" },
+    "m2": { "type": "number" },
+    "m3": { "type": "number" },
+    "m4": { "type": "number" }
+  }
+}

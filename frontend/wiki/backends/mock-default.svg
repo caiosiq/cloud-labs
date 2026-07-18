@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Mock bench">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="55%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="35%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#67e8f9" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#67e8f9" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#sky)"/>
+  <rect width="640" height="360" fill="url(#glow)"/>
+  <rect x="72" y="88" width="496" height="196" rx="14" fill="#0f172a" stroke="#38bdf8" stroke-opacity="0.45" stroke-width="2"/>
+  <circle cx="180" cy="170" r="28" fill="#22d3ee" fill-opacity="0.35" stroke="#67e8f9" stroke-width="2"/>
+  <circle cx="320" cy="200" r="36" fill="#38bdf8" fill-opacity="0.25" stroke="#7dd3fc" stroke-width="2"/>
+  <circle cx="460" cy="155" r="22" fill="#a5f3fc" fill-opacity="0.3" stroke="#e0f2fe" stroke-width="2"/>
+  <path d="M180 170 L320 200 L460 155" fill="none" stroke="#f87171" stroke-width="3" stroke-opacity="0.85"/>
+  <text x="88" y="320" fill="#94a3b8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="600">MOCK · simulator</text>
+</svg>

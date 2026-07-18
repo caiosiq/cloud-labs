@@ -1,92 +1,147 @@
-# Optical Digital Twin: Robotic Experimentation Interface
+# Cloud Labs — an Optical Processing Unit for the physical world
 
-## 🔭 Project Overview
+Imagine a computer that does not only add numbers, but **steers light**.
+Mirrors tilt, stages creep by fractions of a millimetre, cameras watch the beam,
+and somewhere a loop decides the next move. That machine is not science fiction —
+it is an optics bench. What has been missing is a **shared language** for asking
+it to work: something a student can script, a researcher can trust, and IT can
+operate without living inside the robot driver’s manuals.
 
-This project is a **Digital Twin** user interface for an autonomous robotic laboratory. It allows researchers to design optical experiments (lasers, lenses, mirrors) via a drag-and-drop web interface and execute those designs on a physical **xArm6 Robot**.
-
-The system bridges the gap between **High-Level Scientific Intent** (e.g., "Build a cavity") and **Low-Level Robotic Execution** (e.g., "Move TCP to x=300, y=100, open gripper").
-
----
-
-## 🏗 Architecture
-
-The system is built on a modular **4-Tier Data Architecture** to handle the complexity of robotic alignment:
-
-### The 4 Tiers of Truth
-1.  **Tier 1: Lab State (Physical Reality)**
-    *   **Source:** Real-time sensor data / Robot telemetry.
-    *   **Purpose:** The ground truth. "Where is the mirror *actually*?"
-    *   **Format:** `lab_state.json` (Polling).
-2.  **Tier 2: Ghost State (User Intent)**
-    *   **Source:** User UI interactions.
-    *   **Purpose:** The plan. "Where *should* the mirror be?"
-    *   **Key Feature:** "Smart Ghost" stores both the nominal target and the *last optimized position*, allowing the system to distinguish between "Drift" and "Optimization Offset".
-3.  **Tier 3: Recipe (Procedure)**
-    *   **Source:** Recorded sequence of actions.
-    *   **Purpose:** Replayability. An experiment is not a static snapshot; it is a sequence of steps (Place -> Optimize -> Remove).
-    *   **Format:** `recipe_id.json`.
-4.  **Tier 4: Golden State (Reference)**
-    *   **Source:** Snapshot taken after a successful Recipe run.
-    *   **Purpose:** Drift Detection. "Is the lab in the same state as when it last worked?"
-    *   **Format:** `recipe_id_golden.json`.
-
-### Tech Stack
-*   **Frontend:** Vanilla JS + HTML5 Canvas (No heavy frameworks).
-*   **Backend:** FastAPI (Python).
-*   **Communication:** REST API + Polling (for simplicity and robustness).
-*   **Simulation:** `MockLabCommunicator` simulates robot delays, noise, and optimization processes.
+**Cloud Labs** treats the autonomous optics lab as an **Optical Processing Unit
+(OPU)**: a remote-facing control plane that matches *intent* (what you want to
+happen) with *instrumentation* (what the bench can actually do). You do not log
+into the robot PC to “drive hardware.” You speak a small vocabulary of **lab
+actions** — move, measure, optimize — and a coordinator decides *which* lab
+and *which* edge process will carry them out.
 
 ---
 
-## 📂 Project Structure
+## The three faces of the system
 
-```
-optics-digital-twin/
-├── backend/                # FastAPI Application
-│   ├── main.py             # Entry point & API Routes
-│   ├── lab_communicator.py # Hardware Abstraction Layer (Mock/Real)
-│   └── ...
-├── frontend/               # Static Web Assets
-│   ├── index.html          # Main Interface
-│   ├── debug.html          # Debugger & Data Visualizer
-│   ├── app.js              # Core UI Logic
-│   └── ...
-├── schemas/                # JSON Data Stores
-│   ├── lab_state.json      # Current Physical State
-│   └── recipes/            # Saved Recipes & Golden States
-├── README.md               # This file
-└── ROADMAP.md              # Development Plan
+Everything in this repository is easiest to understand as three cooperating roles:
+
+```text
+  Author laptop                         Cloud / lab network              Bench PC
+ ┌──────────────────┐                 ┌─────────────────────┐         ┌──────────────────┐
+ │  Client SDK & UI │ ── HTTP/API ──► │ Central Coordinator │ ◄────── │   Edge Agent     │
+ │  (scripts, Twin) │                 │ (matchmaking, lease,│         │ (owns hardware / │
+ │                  │ ◄── state ───── │  jobs, catalog)     │ ──────► │  mock lab)       │
+ └──────────────────┘                 └─────────────────────┘         └──────────────────┘
 ```
 
+| Face | Where it runs | What it is for |
+|------|----------------|----------------|
+| **Client SDK (author laptop)** | Your notebook or the browser Twin | Write experiments in Python or click them in the UI. Acquire a **lease** so only one author owns the bench at a time. |
+| **Central coordinator (cloud server)** | FastAPI in this repo (`backend/main.py`) | Matchmaking: which backend is active, who holds the lease, which jobs are queued. Serves Twin, Operations, and Wiki. |
+| **Edge agent (bench PC)** | Process next to the instruments (or a mock) | Owns the **LabCommunicator** — the bridge to cameras, motors, and the robot. Runs closed-loop optimization where latency matters. |
+
+A useful metaphor: the coordinator is **air-traffic control**; the edge is the
+**aircraft**; your script is the **flight plan**. The plan never hands the
+throttle cable directly to the passenger — it goes through the tower.
+
 ---
 
-## 🚀 Quick Start (Simulation Mode)
+## What you can do here
 
-The system currently runs in **Mock Mode**, simulating a physical lab with delays and sensor noise.
+| Surface | URL | Audience |
+|---------|-----|----------|
+| **Landing** | `/` | Orient yourself; pick a lab |
+| **Twin** | `/twin` | Direct control + digital twin of the table |
+| **Operations** | `/operations` | Watch jobs and edge health |
+| **Wiki** | `/wiki` | **Learn** curriculum + **Backends** hub (components, kernels, snapshots) |
 
-### 1. Start the Backend
-```bash
-cd backend
-# Install dependencies (fastapi, uvicorn)
-pip install fastapi uvicorn
-# Run the server
-uvicorn main:app --reload
+**Python scripting** lives in the `cloudlabs` package — see
+[`packages/cloudlabs/README.md`](packages/cloudlabs/README.md) and the
+[`scripts/language/`](scripts/language/) ladder.
+
+---
+
+## Quick start (mock lab on one machine)
+
+```powershell
+# Terminal 1 — coordinator (serves UI + API)
+$env:PYTHONPATH="backend"
+python backend/main.py
+
+# Optional Terminal 2 — mock edge (distributed path)
+$env:PYTHONPATH="backend"
+python scripts/ops/mock_edge_agent.py
+
+# Terminal 3 — author script
+pip install -e ./packages/cloudlabs
+python scripts/language/01_hello_lab.py
 ```
-*Server will start at `http://localhost:8000`*
 
-### 2. Access the Interface
-Open your browser to:
-*   **Main UI:** [http://localhost:8000/](http://localhost:8000/)
-*   **Debugger:** [http://localhost:8000/debug](http://localhost:8000/debug)
+Open **http://127.0.0.1:8000/** — Twin, Operations, and Wiki are linked
+from the landing page.
 
-### 3. Usage Flow
-1.  **Drag & Drop:** Move components from the inventory to the table.
-2.  **Interact:** Click a component to open the context popup. Move it precisely or run an **Optimization Strategy** (e.g., Newton).
-3.  **Record Recipe:** Open the "Recipe Editor" (Sidebar), click "Record", perform actions, and "Save".
-4.  **Run Recipe:** Click the "Play" button on a saved recipe to re-execute the sequence.
-5.  **Check Drift:** Go to the **Debugger**, view "Golden States", and compare with the current Lab State.
+**New here?** Start in the in-app Wiki → **Learn**
+(http://127.0.0.1:8000/wiki#learn/why) — architecture, primitives, backends,
+and how to call the lab from Python. Wiki → **Backends** is the live hub for
+components, kernels, and frozen snapshots per lab.
+
+Point **`LAB_VIEW_PATH`** in `.env` at a lab deployment bundle when **running
+the server** (catalog, layout, lasers, recipes). That is operator setup, not
+something script authors configure. Bundles and scaffolding are explained in
+[`mock_edge/README.md`](mock_edge/README.md) (teaching edge).
 
 ---
 
-## 🛠 Development
-To switch to a real robot, implement a `RealLabCommunicator` class in `backend/lab_communicator.py` inheriting from `LabCommunicator`, and update `main.py` to use it.
+## How intent reaches hardware
+
+1. You issue a **primitive** (move a mirror, record a camera, run OPTIMIZE).
+2. The coordinator validates the command, checks the **lease**, and sends it
+   southbound via **EdgeClient** (in-process mock, poll-attach, or HTTP edge).
+3. The edge host (`mock_edge` or lab `cloudlabs_edge`) turns that intent into
+   instrument calls (or a faithful simulation) and updates **lab state**.
+4. The Twin polls lab state so solids (measured poses) and ghosts (intent)
+   stay honest.
+
+**Kernels** (TorchScript scores and feature extractors) are not separate verbs.
+They are **measurement functions** you attach as *inputs* to actions such as
+OPTIMIZE — the same way a spectrometer is an instrument the optimizer may use,
+not a second programming language.
+
+---
+
+## Deeper reading
+
+| Topic | Document |
+|-------|----------|
+| Teaching mock edge / lab bundles | [`mock_edge/README.md`](mock_edge/README.md) |
+| Scripting language & modes | [`packages/cloudlabs/README.md`](packages/cloudlabs/README.md) |
+| Platform architecture | [`backend/lab_model/ARCHITECTURE.md`](backend/lab_model/ARCHITECTURE.md) |
+| Edge Contract + live plane | [`docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md`](docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md) |
+| Edge migration roadmap | [`docs/EDGE_UC_MIGRATION_ROADMAP.md`](docs/EDGE_UC_MIGRATION_ROADMAP.md) |
+| Execution modes (imperative / DAG / closed-loop) | [`docs/EXECUTION_MODES.md`](docs/EXECUTION_MODES.md) |
+| Surfaces & VC | [`docs/LAB_SURFACES_VC_AND_INITIALIZATION.md`](docs/LAB_SURFACES_VC_AND_INITIALIZATION.md) |
+| Session & catalog kernels | [`docs/SESSION_KERNELS.md`](docs/SESSION_KERNELS.md) |
+| Ensemble OPTIMIZE | [`docs/ENSEMBLE_OPTIMIZATION.md`](docs/ENSEMBLE_OPTIMIZATION.md) |
+| Ops scripts | [`scripts/ops/README.md`](scripts/ops/README.md) |
+| Language demos | [`scripts/language/README.md`](scripts/language/README.md) |
+
+---
+
+## Repository map (short)
+
+```text
+backend/          Coordinator API, lab_model (semantics, EdgeClient)
+mock_edge/        Teaching Edge Contract edge + lab_view bundle
+frontend/         Twin, Operations, Wiki (static ES modules)
+packages/cloudlabs/   Author-facing Python SDK
+scripts/language/ Language demos    scripts/ops/    Edge agent, builders
+schemas/          Reference JSON, approved kernel manifests
+docs/             Design narratives and roadmaps
+```
+
+---
+
+## For lab IT
+
+- One process owns HTTP (**coordinator**). Optional second process owns hardware (**edge**).
+- Swap benches by changing **`LAB_VIEW_PATH`**, not by rewriting the UI.
+- Real benches need a reachable `lab_automation` tree (path in `lab_manifest.json`).
+- Mock mode is the default teaching and CI path — no robot required.
+
+Welcome. The OPU is ready when the coordinator is listening and a lab (mock or
+real) is attached.

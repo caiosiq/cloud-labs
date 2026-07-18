@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "kernels": [
+    {
+      "id": "demo.image_mean_score",
+      "label": "Demo image mean score",
+      "artifact": "demo_image_mean_score.pt",
+      "runtime": "torchscript",
+      "backend": "any",
+      "phase": "production",
+      "output_kind": "scalar",
+      "hooks": ["evaluate", "capture", "tensor"],
+      "inputs": [
+        {
+          "name": "image",
+          "from": "measurables.camera_image",
+          "layout": "bgr_hwc_uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "score",
+          "role": "scalar"
+        }
+      ],
+      "description": "Fixture scalar for CI/mock and Wiki demos. Converts the camera frame to float RGB in [0,1] (NCHW) and returns the mean intensity of all pixels. Bright images score near 1.0; dark images near 0.0. Not a physical beam metric — use curated feature kernels or a session kernel for centroid/radius work."
+    },
+    {
+      "id": "demo.roi_mean_score",
+      "label": "Demo center ROI mean",
+      "artifact": "demo_roi_mean_score.pt",
+      "runtime": "torchscript",
+      "backend": "any",
+      "phase": "production",
+      "output_kind": "scalar",
+      "hooks": ["evaluate", "capture", "tensor"],
+      "inputs": [
+        {
+          "name": "image",
+          "from": "measurables.camera_image",
+          "layout": "bgr_hwc_uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "score",
+          "role": "scalar"
+        }
+      ],
+      "description": "Mean intensity over the center half of the frame (crop H/4..3H/4, W/4..3W/4) after RGB float normalization. Useful when you care about the middle of the camera FOV rather than the full sensor."
+    },
+    {
+      "id": "demo.peak_intensity",
+      "label": "Demo peak intensity",
+      "artifact": "demo_peak_intensity.pt",
+      "runtime": "torchscript",
+      "backend": "any",
+      "phase": "production",
+      "output_kind": "scalar",
+      "hooks": ["evaluate", "capture", "tensor"],
+      "inputs": [
+        {
+          "name": "image",
+          "from": "measurables.camera_image",
+          "layout": "bgr_hwc_uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "score",
+          "role": "scalar"
+        }
+      ],
+      "description": "Maximum channel intensity in the normalized RGB frame (max over C,H,W). Tracks the brightest pixel — a crude peak-power proxy for mock demos."
+    },
+    {
+      "id": "builtin.roi_centroid",
+      "label": "ROI centroid (center half)",
+      "artifact": "builtin_roi_centroid.pt",
+      "runtime": "torchscript",
+      "backend": "any",
+      "phase": "production",
+      "output_kind": "features",
+      "feature_names": ["cx", "cy"],
+      "hooks": ["evaluate", "capture", "tensor"],
+      "inputs": [
+        {
+          "name": "image",
+          "from": "measurables.camera_image",
+          "layout": "bgr_hwc_uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "features",
+          "role": "features",
+          "shape": [2],
+          "feature_names": ["cx", "cy"]
+        }
+      ],
+      "description": "Sub-pixel intensity-weighted centroid inside the center-half ROI (H/4..3H/4, W/4..3W/4), returned in full-frame pixel coordinates as features [cx, cy]. Threshold is 50% of the ROI peak. Pair with metric rms_distance and target_px for alignment. Arbitrary bbox parameters are not yet in the catalog schema — use a session kernel for custom ROIs."
+    },
+    {
+      "id": "builtin.gaussian_beam_fit",
+      "label": "Gaussian beam moments",
+      "artifact": "builtin_gaussian_beam_fit.pt",
+      "runtime": "torchscript",
+      "backend": "any",
+      "phase": "production",
+      "output_kind": "features",
+      "feature_names": ["amplitude", "cx", "cy", "sigma_x", "sigma_y"],
+      "hooks": ["evaluate", "capture", "tensor"],
+      "inputs": [
+        {
+          "name": "image",
+          "from": "measurables.camera_image",
+          "layout": "bgr_hwc_uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "features",
+          "role": "features",
+          "shape": [5],
+          "feature_names": ["amplitude", "cx", "cy", "sigma_x", "sigma_y"]
+        }
+      ],
+      "description": "Moment-based Gaussian beam estimate on the full frame after a 10%-of-peak intensity mask: [amplitude, cx, cy, sigma_x, sigma_y]. Amplitude is peak normalized intensity; cx/cy are weighted first moments (px); sigma_* are sqrt of second central moments (px). Not a nonlinear least-squares fit — prefer for closed-loop defaults; author a session kernel for custom models."
+    }
+  ]
+}

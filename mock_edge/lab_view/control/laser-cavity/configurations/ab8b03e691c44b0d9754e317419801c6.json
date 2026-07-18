@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "kind": "cloud_labs_configuration",
+  "id": "ab8b03e691c44b0d9754e317419801c6",
+  "repo_id": "laser-cavity",
+  "branch": "main",
+  "parent_id": "d56e8bdb1ef64cfc9acb77044ded5d27",
+  "message": "ic-alligned",
+  "created_at": "2026-06-27T20:26:47.530716+00:00",
+  "configuration": {
+    "holding": {
+      "tag_id": null,
+      "nominal_pose": null
+    },
+    "components": {
+      "tag_20": {
+        "id": "tag_20",
+        "type": "OPTICAL_MIRROR",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": -241.90482003348217,
+              "y": 200.0,
+              "rotation": 0.0
+            },
+            "nominal_motor_positions": {
+              "1": 0.0,
+              "3": 0.0
+            },
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            },
+            "placement": {
+              "mode": "MANUAL"
+            }
+          }
+        }
+      },
+      "tag_22": {
+        "id": "tag_22",
+        "type": "OPTICAL_CAMERA",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": -241.90482003348217,
+              "y": 54.64285714285717,
+              "rotation": 0.0
+            },
+            "nominal_motor_positions": {},
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            },
+            "placement": {
+              "mode": "MANUAL"
+            },
+            "exposure_time_ms": 200.0
+          }
+        }
+      },
+      "tag_21": {
+        "id": "tag_21",
+        "type": "OPTICAL_CAMERA",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": 454.24285714285725,
+              "y": 200.0,
+              "rotation": -90.0
+            },
+            "nominal_motor_positions": {},
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            },
+            "placement": {
+              "mode": "MANUAL"
+            },
+            "exposure_time_ms": 200.0
+          }
+        }
+      },
+      "tag_11": {
+        "id": "tag_11",
+        "type": "OPTICAL_LENS",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": -366.0538678841965,
+              "y": 200.0,
+              "rotation": 0.0
+            },
+            "nominal_motor_positions": {
+              "1": 15.0,
+              "3": 0.0
+            },
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            },
+            "placement": {
+              "mode": "MANUAL"
+            }
+          }
+        }
+      },
+      "tag_18": {
+        "id": "tag_18",
+        "type": "OPTICAL_MIRROR",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": 103.49882542451815,
+              "y": 200.0,
+              "rotation": 180.0
+            },
+            "nominal_motor_positions": {
+              "1": 0.0,
+              "3": 0.0
+            },
+            "storage": {
+              "in_storage": false,
+              "slot": null
+            },
+            "placement": {
+              "mode": "MANUAL"
+            }
+          }
+        }
+      }
+    },
+    "alignment_guides": [
+      {
+        "id": "g_83fa666c00f3",
+        "p1": {
+          "x": -241.90482003348217,
+          "y": 432.63889857700894
+        },
+        "p2": {
+          "x": -241.90482003348217,
+          "y": -60.21824428013393
+        }
+      }
+    ],
+    "laser_lines": {
+      "snap_line_id": "demo_beam",
+      "lines": [
+        {
+          "id": "demo_beam",
+          "name": "Mock table beam",
+          "color": "#ff3b3b",
+          "enabled": true,
+          "p1": {
+            "x": 0.0,
+            "y": -450.0
+          },
+          "p2": {
+            "x": 0.0,
+            "y": 450.0
+          }
+        },
+        {
+          "id": "demo_secondary",
+          "name": "Mock secondary (angled)",
+          "color": "#ff8c42",
+          "enabled": true,
+          "p1": {
+            "x": -200.0,
+            "y": 200.0
+          },
+          "p2": {
+            "x": 200.0,
+            "y": 200.0
+          }
+        }
+      ]
+    }
+  },
+  "catalog_hash": "3f03b41373769c21a2eaf6a3a0a5459e53d341ec167eab0d9af301525e55128a"
+}

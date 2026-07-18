@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/teleop_ws_client.schema.json",
+  "title": "TeleopWsClientMessageV1",
+  "description": "Client → edge TeleOp hot path. FLAT ONLY — no nested objects/arrays-of-objects.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cmd", "tag_id"],
+  "properties": {
+    "epoch_ms": { "type": "integer" },
+    "tag_id": { "type": "string", "minLength": 1 },
+    "cmd": {
+      "type": "string",
+      "enum": ["JOG", "GOTO", "PING"]
+    },
+    "motor_id": {
+      "type": "string",
+      "description": "For JOG/GOTO on a motor axis; flat string id."
+    },
+    "axis": {
+      "type": "string",
+      "enum": ["x", "y", "rotation"],
+      "description": "For pose JOG/GOTO; mutually exclusive with motor_id in practice."
+    },
+    "val": {
+      "type": "number",
+      "description": "Delta (JOG) or absolute (GOTO) scalar."
+    }
+  }
+}

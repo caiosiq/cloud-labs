@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/bench.schema.json",
+  "title": "EdgeContractBenchV1",
+  "description": "GET /bench — static table geometry for Twin/SDK. Not capabilities.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["backend_id", "layout"],
+  "properties": {
+    "backend_id": { "type": "string", "minLength": 1 },
+    "layout": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["version", "lab_bounds_mm"],
+      "properties": {
+        "version": { "type": "integer", "minimum": 1 },
+        "lab_bounds_mm": {
+          "type": "object",
+          "required": ["x_min", "x_max", "y_min", "y_max"],
+          "properties": {
+            "x_min": { "type": "number" },
+            "x_max": { "type": "number" },
+            "y_min": { "type": "number" },
+            "y_max": { "type": "number" }
+          }
+        },
+        "danger_zone": {
+          "type": "object",
+          "properties": {
+            "radius_mm": { "type": "number", "minimum": 0 },
+            "padding_mm": { "type": "number", "minimum": 0 }
+          }
+        },
+        "storage": {
+          "type": "object",
+          "properties": {
+            "rule": { "type": "string" },
+            "grid_nx": { "type": "integer", "minimum": 1 },
+            "grid_ny": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "breadboard": {
+          "type": "object",
+          "properties": {
+            "grid_spacing_mm": { "type": "number", "minimum": 0 },
+            "origin_offset_mm": {
+              "type": "object",
+              "properties": {
+                "x": { "type": "number" },
+                "y": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "laser_lines": {
+      "type": "array",
+      "description": "Optional Twin overlay guides.",
+      "items": { "type": "object" }
+    }
+  }
+}
