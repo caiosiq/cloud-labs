@@ -1,0 +1,61 @@
+{
+  "contract_version": "1.0.0",
+  "backend_id": "sim.default",
+  "features": {
+    "torchscript_execution": true,
+    "hardware_reconciliation": false,
+    "hardware_triggered_latch": false,
+    "lan_direct_streams": true
+  },
+  "supported_primitives": [
+    "START_LIVE_FEED",
+    "END_LIVE_FEED",
+    "START_TELEOP",
+    "END_TELEOP",
+    "TELEOP_JOG",
+    "TELEOP_GOTO",
+    "RECORD_MEASURABLES",
+    "EVAL_KERNEL",
+    "MOVE_COMPONENT"
+  ],
+  "measurables": {
+    "tag_22.camera_image": {
+      "analysis": {
+        "layout": "bgr_hwc_uint8",
+        "dtype": "uint8",
+        "shape": ["H", "W", 3],
+        "domain": "spatial"
+      },
+      "wire": { "encoding": "jpeg", "profiles": ["default"] },
+      "live_channel": "tag_22.camera_image",
+      "capture_latency_ms": 0
+    }
+  },
+  "telemetry_channels": {
+    "tag_22.camera_image": {
+      "transport": "jpeg_poll",
+      "path": "/stream/tag_22/camera_image.jpg",
+      "requires_primitive": "START_LIVE_FEED",
+      "binds_measurable": "tag_22.camera_image",
+      "default_fps": 10,
+      "default_profile": "default"
+    },
+    "tag_22.camera_image.mjpeg": {
+      "transport": "mjpeg_http",
+      "path": "/stream/tag_22/camera_image.mjpg",
+      "requires_primitive": "START_LIVE_FEED",
+      "binds_measurable": "tag_22.camera_image",
+      "default_fps": 10,
+      "default_profile": "default"
+    },
+    "teleop": {
+      "transport": "websocket",
+      "path": "/ws/teleop",
+      "requires_primitive": "START_TELEOP",
+      "binds_tunables_live": true
+    }
+  },
+  "wire_profiles": {
+    "default": { "scale": 1.0, "jpeg_quality": 80, "fps": 10 }
+  }
+}

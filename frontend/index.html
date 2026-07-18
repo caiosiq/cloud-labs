@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Optical Digital Twin | Lab Interface</title>
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Cloud Labs | Twin UI</title>
     <!-- Google Fonts for Modern Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -47,26 +50,77 @@
             background-color: var(--bg-dark);
             color: var(--text-primary);
             display: flex;
+            flex-direction: column;
             height: 100vh;
             overflow: hidden;
             font-size: 14px;
         }
 
+        .app-top-nav {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-panel);
+            z-index: 40;
+        }
+
+        .app-top-nav__brand {
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 16px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .app-top-nav__brand:hover {
+            color: var(--primary-accent);
+        }
+
+        .app-top-nav nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            margin-left: 16px;
+            font-size: 13px;
+        }
+
+        .app-top-nav nav a:hover,
+        .app-top-nav nav a.active {
+            color: var(--primary-accent);
+        }
+
+        .app-shell {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
+
         /* --- Sidebar (Left) --- */
         #sidebar {
-            width: 280px;
+            width: 260px;
+            min-width: 240px;
+            height: auto;
+            align-self: stretch;
+            min-height: 0;
             background-color: var(--bg-panel);
             border-right: 1px solid var(--border-color);
             display: flex;
             flex-direction: column;
             z-index: 10;
             box-shadow: 4px 0 24px rgba(0,0,0,0.2);
-            position: relative; /* Ensure it stays in flow */
+            position: relative;
         }
 
         /* --- Sidebar (Right) --- */
         #sidebar-right {
             width: 320px;
+            height: auto;
+            align-self: stretch;
+            min-height: 0;
             background-color: var(--bg-panel);
             border-left: 1px solid var(--border-color);
             display: flex;
@@ -75,12 +129,127 @@
             box-shadow: -4px 0 24px rgba(0,0,0,0.2);
         }
 
+        #sidebar-right-pinned {
+            flex-shrink: 0;
+        }
+
+        #sidebar-right-scroll {
+            flex: 1;
+            min-height: 0;
+            overflow-y: hidden;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .workspace-tabs {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .workspace-tab-list {
+            flex-shrink: 0;
+            display: flex;
+            align-items: stretch;
+            gap: 2px;
+            padding: 8px 8px 0;
+            border-bottom: 1px solid var(--border-color);
+            background: #15181e;
+        }
+
+        .workspace-tab {
+            min-width: 0;
+            flex: 1 1 0;
+            padding: 9px 6px 8px;
+            border: 0;
+            border-bottom: 2px solid transparent;
+            background: transparent;
+            color: var(--text-muted);
+            font: inherit;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .workspace-tab:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .workspace-tab[aria-selected="true"] {
+            color: #93c5fd;
+            border-bottom-color: var(--primary-accent);
+            background: rgba(59, 130, 246, 0.08);
+        }
+
+        .workspace-tab[hidden] {
+            display: none;
+        }
+
+        .workspace-tab-panels {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+        }
+
+        .workspace-tab-panel {
+            display: none;
+            position: absolute;
+            inset: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .workspace-tab-panel.is-active {
+            display: block;
+        }
+
+        /* Override global .btn { width:100% } for compact multi-button rows in right sidebar */
+        #sidebar-right .btn--sidebar-inline {
+            width: auto;
+            margin-top: 0;
+            flex: 1 1 0;
+            min-width: 0;
+            justify-content: center;
+            white-space: nowrap;
+        }
+
+        #sidebar-right .sidebar-right-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            padding: 0 12px 8px;
+        }
+
+        /* Global .btn-secondary margin-top stacks rows; reset in right sidebar scroll area */
+        #sidebar-right-scroll .btn {
+            margin-top: 0;
+        }
+
         .logo-area {
-            padding: 24px;
+            padding: 18px 16px;
             border-bottom: 1px solid var(--border-color);
             display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 8px;
+        }
+
+        .logo-title-row {
+            display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
+        }
+
+        .logo-debug-link {
+            margin-left: auto;
+            color: var(--text-muted);
         }
 
         .logo-icon {
@@ -92,6 +261,933 @@
             font-weight: 600;
             font-size: 16px;
             letter-spacing: -0.5px;
+            white-space: nowrap;
+        }
+
+        .runtime-mode-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            width: 100%;
+        }
+
+        .runtime-mode-select {
+            flex: 1 1 auto;
+            min-width: 0;
+            width: 100%;
+            padding: 7px 24px 7px 9px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background: #11141a;
+            color: var(--text-main);
+            font-size: 11px;
+        }
+
+        .runtime-mode-select:disabled {
+            opacity: 0.7;
+        }
+
+        .runtime-mode-status {
+            width: 7px;
+            height: 7px;
+            flex: 0 0 auto;
+            border-radius: 50%;
+            background: #64748b;
+        }
+
+        .runtime-mode-status--ready {
+            background: #22c55e;
+            box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12);
+        }
+
+        .runtime-mode-status--error {
+            background: #ef4444;
+        }
+
+        .runtime-mode-status--physical {
+            background: #f59e0b;
+        }
+
+        .backend-session-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            min-width: 0;
+            margin-top: 2px;
+        }
+
+        .backend-session-id {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .backend-switch-btn {
+            flex: 0 0 auto;
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 10px;
+            cursor: pointer;
+        }
+
+        .backend-switch-btn:hover {
+            color: var(--text-main);
+            border-color: #64748b;
+        }
+
+        .control-panel {
+            padding: 0 16px 12px;
+            border-top: 1px solid var(--border-color);
+            background: rgba(0, 0, 0, 0.08);
+        }
+
+        .control-panel-head {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin: 8px 0 6px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .control-branch-select {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background: #11141a;
+            color: var(--text-primary);
+            font-size: 11px;
+            margin-bottom: 8px;
+        }
+
+        .control-timeline {
+            max-height: 180px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 8px;
+            padding-right: 2px;
+        }
+
+        .control-timeline-empty {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+            padding: 8px 4px;
+        }
+
+        .control-timeline-node {
+            text-align: left;
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+        }
+
+        .control-timeline-node:hover {
+            border-color: var(--primary-accent);
+            background: rgba(59, 130, 246, 0.08);
+        }
+
+        .control-timeline-node.is-head {
+            border-left: 3px solid var(--status-success);
+        }
+
+        .control-timeline-node.is-selected {
+            box-shadow: inset 0 0 0 1px var(--primary-accent);
+        }
+
+        .control-timeline-node.is-viewing:not(.is-head) {
+            border-color: var(--status-warning);
+            background: rgba(245, 158, 11, 0.08);
+        }
+
+        .control-timeline-node-title {
+            font-size: 11px;
+            font-weight: 500;
+            line-height: 1.3;
+            margin-bottom: 2px;
+        }
+
+        .control-timeline-node-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .canvas-stage {
+            align-self: center;
+            width: min(1000px, calc(100% - 24px));
+            max-width: 100%;
+            flex-shrink: 0;
+        }
+
+        .canvas-stage__row {
+            position: relative;
+            width: 100%;
+        }
+
+        .canvas-stage.is-config-view #bench-tools-strip {
+            opacity: 0.45;
+            pointer-events: none;
+        }
+
+        .control-graph-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        #canvas-wrapper.is-config-view {
+            border-color: #f59e0b;
+            box-shadow:
+                0 0 0 2px rgba(245, 158, 11, 0.85),
+                0 0 28px rgba(245, 158, 11, 0.18),
+                0 0 50px rgba(0, 0, 0, 0.5);
+        }
+
+        .canvas-view-shield {
+            position: absolute;
+            inset: 0;
+            z-index: 4;
+            cursor: not-allowed;
+            border-radius: inherit;
+            background: rgba(245, 158, 11, 0.05);
+        }
+
+        .canvas-view-shield[hidden] {
+            display: none !important;
+        }
+
+        .config-view-badge {
+            position: absolute;
+            top: 8px;
+            left: calc(100% + 10px);
+            width: max-content;
+            max-width: 240px;
+            min-width: 168px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(245, 158, 11, 0.45);
+            background: rgba(15, 18, 24, 0.94);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+            font-size: 10px;
+            line-height: 1.35;
+            color: #fcd34d;
+        }
+
+        .config-view-badge.is-applying {
+            border-color: rgba(245, 158, 11, 0.65);
+        }
+
+        .config-view-badge[hidden] {
+            display: none !important;
+        }
+
+        .config-view-badge__label {
+            display: block;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #fbbf24;
+            margin-bottom: 2px;
+        }
+
+        .config-view-badge__id {
+            display: block;
+            font-family: ui-monospace, monospace;
+            font-size: 11px;
+            color: #fde68a;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+
+        .config-view-badge__actions {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .config-view-badge__btn {
+            width: 100%;
+            margin: 0;
+            padding: 4px 8px;
+            font-size: 10px;
+            border-radius: 4px;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            background: transparent;
+            color: #fcd34d;
+            cursor: pointer;
+        }
+
+        .config-view-badge__btn:hover {
+            background: rgba(245, 158, 11, 0.12);
+        }
+
+        .config-view-badge__btn--primary {
+            border-color: rgba(245, 158, 11, 0.65);
+            background: rgba(245, 158, 11, 0.15);
+            font-weight: 600;
+        }
+
+        .config-view-reconcile__progress {
+            display: block;
+            margin: 6px 0 4px;
+            font-size: 10px;
+            font-weight: 600;
+            color: #93c5fd;
+        }
+
+        .config-view-reconcile__steps {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        .config-view-reconcile__step {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            padding: 3px 0;
+            font-size: 10px;
+            line-height: 1.35;
+            color: #64748b;
+        }
+
+        .config-view-reconcile__step.is-active {
+            color: #fde68a;
+            font-weight: 600;
+        }
+
+        .config-view-reconcile__step.is-done {
+            color: #86efac;
+        }
+
+        .config-view-reconcile__step.is-error {
+            color: #fca5a5;
+        }
+
+        .config-view-reconcile__marker {
+            flex-shrink: 0;
+            width: 14px;
+            text-align: center;
+            font-size: 9px;
+            line-height: 1.5;
+        }
+
+        .config-view-reconcile__label {
+            word-break: break-word;
+        }
+
+        @media (max-width: 1120px) {
+            .config-view-badge {
+                left: auto;
+                right: 0;
+                top: -2px;
+                transform: translateY(-100%);
+            }
+        }
+
+        .btn-control {
+            margin-top: 6px;
+            font-size: 11px;
+            padding: 7px 8px;
+        }
+
+        .control-plan-preview {
+            margin-top: 8px;
+            padding: 8px;
+            font-size: 10px;
+            line-height: 1.4;
+            color: var(--text-muted);
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 6px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .control-plan-preview ol {
+            margin: 4px 0 0;
+            padding-left: 18px;
+        }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        .control-graph-panel {
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-self: center;
+            width: min(1000px, calc(100% - 24px));
+            max-width: 100%;
+            margin: 8px auto 0;
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 8px;
+            background: rgba(20, 24, 32, 0.92);
+            overflow: hidden;
+        }
+
+        .control-graph-toolbar {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+        }
+
+        /* Opt-in version control: when inactive, only the start screen shows. */
+        .control-graph-panel.vc-inactive .control-graph-toolbar,
+        .control-graph-panel.vc-inactive #control-plan-preview {
+            display: none;
+        }
+
+        .control-vc-start {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+        }
+
+        .control-graph-panel:not(.vc-inactive) .control-vc-start {
+            display: none;
+        }
+
+        .control-vc-start-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-graph-toolbar-start {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            flex-shrink: 0;
+        }
+
+        .control-graph-toolbar-select,
+        .control-graph-branch-select,
+        .control-graph-repo-select {
+            box-sizing: border-box;
+            height: 32px;
+            padding: 0 28px 0 10px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 6px;
+            background: rgba(15, 20, 28, 0.95);
+            color: #f1f5f9;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 1;
+            min-width: 0;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+        }
+
+        .control-graph-repo-select {
+            min-width: 128px;
+            max-width: 168px;
+        }
+
+        .control-graph-branch-select {
+            min-width: 84px;
+            max-width: 132px;
+        }
+
+        .control-graph-toolbar-select:focus,
+        .control-graph-branch-select:focus,
+        .control-graph-repo-select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.22);
+        }
+
+        .control-new-repo-btn {
+            box-sizing: border-box;
+            width: 32px;
+            min-width: 32px;
+            height: 32px;
+            padding: 0;
+            margin: 0;
+            border-radius: 6px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            background: rgba(15, 20, 28, 0.95);
+            color: #94a3b8;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .control-new-repo-btn:hover {
+            color: #e2e8f0;
+            border-color: #64748b;
+            background: rgba(30, 41, 59, 0.95);
+        }
+
+        .control-new-repo-btn .material-icons-round {
+            font-size: 18px;
+        }
+
+        .control-graph-head-pill {
+            box-sizing: border-box;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            height: 32px;
+            padding: 0 12px;
+            margin-left: 4px;
+            border-radius: 6px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            background: rgba(15, 20, 28, 0.95);
+            border: 1px solid rgba(34, 197, 94, 0.35);
+            border-left: 1px solid rgba(148, 163, 184, 0.12);
+        }
+
+        .control-graph-head-pill__tag {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #64748b;
+        }
+
+        .control-graph-head-pill__id {
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 12px;
+            font-weight: 500;
+            color: #4ade80;
+            letter-spacing: 0.02em;
+        }
+
+        .control-graph-head-pill.is-uncommitted {
+            border-color: rgba(148, 163, 184, 0.28);
+        }
+
+        .control-graph-head-pill.is-uncommitted .control-graph-head-pill__tag {
+            color: #94a3b8;
+        }
+
+        .control-graph-head-pill.is-uncommitted .control-graph-head-pill__id {
+            color: #e2e8f0;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0;
+        }
+
+        /* Commit button — muted until there is something to commit, then it
+           lights up blue. (Orange is reserved exclusively for an active stash.) */
+        .control-graph-panel .control-commit-btn {
+            background: rgba(15, 20, 28, 0.95);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            color: #94a3b8;
+        }
+
+        .control-graph-panel .control-commit-btn:hover:not(:disabled) {
+            color: #e2e8f0;
+            border-color: #64748b;
+        }
+
+        .control-graph-panel .control-commit-btn.is-active {
+            background: #2563eb;
+            border-color: #3b82f6;
+            color: #fff;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+
+        .control-graph-panel .control-commit-btn.is-active:hover:not(:disabled) {
+            background: #1d4ed8;
+            color: #fff;
+        }
+
+        .control-graph-panel .control-commit-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Fork / branch — kept prominent (violet) so branching is discoverable. */
+        .control-graph-panel .control-fork-btn {
+            background: rgba(139, 92, 246, 0.16);
+            border: 1px solid rgba(139, 92, 246, 0.6);
+            color: #c4b5fd;
+        }
+
+        .control-graph-panel .control-fork-btn:hover:not(:disabled) {
+            background: rgba(139, 92, 246, 0.30);
+            color: #ede9fe;
+        }
+
+        .control-graph-panel .control-publish-btn {
+            border-color: rgba(16, 185, 129, 0.35);
+            color: #6ee7b7;
+        }
+
+        .control-graph-panel .control-publish-btn:hover:not(:disabled) {
+            background: rgba(16, 185, 129, 0.18);
+            color: #10b981;
+        }
+
+        .control-graph-panel .control-catalog-pin-btn {
+            border-color: rgba(59, 130, 246, 0.4);
+            color: #93c5fd;
+        }
+
+        .control-graph-panel .control-catalog-pin-btn:hover:not(:disabled) {
+            background: rgba(59, 130, 246, 0.18);
+            color: #bfdbfe;
+        }
+
+        .config-view-badge__source {
+            display: block;
+            font-size: 10px;
+            font-weight: 600;
+            color: #93c5fd;
+            margin-bottom: 4px;
+            line-height: 1.3;
+        }
+
+        .config-view-badge__source.is-local {
+            color: #a7f3d0;
+        }
+
+        /* Detached: forking is the escape hatch — make it solid. */
+        .control-graph-panel.is-detached .control-fork-btn {
+            background: #7c3aed;
+            border-color: #8b5cf6;
+            color: #fff;
+            box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.3);
+        }
+
+        /* Detached HEAD (on an older commit) — dashed neutral pill. */
+        .control-graph-panel.is-detached .control-graph-head-pill {
+            border-color: rgba(148, 163, 184, 0.45);
+            border-style: dashed;
+        }
+
+        .control-graph-panel.is-detached .control-graph-head-pill__id {
+            color: #cbd5e1;
+        }
+
+        /* Combined stash box: neutral while it only offers "Stash"; turns amber
+           once a stash actually exists (so orange == there is a stash). */
+        .control-stash-box {
+            box-sizing: border-box;
+            display: inline-flex;
+            align-items: center;
+            height: 32px;
+            border-radius: 6px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            background: rgba(15, 20, 28, 0.95);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+        }
+
+        .control-stash-box.has-stash {
+            background: rgba(245, 158, 11, 0.12);
+            border-color: rgba(245, 158, 11, 0.5);
+        }
+
+        /* The explicit display values below override the `hidden` attribute, so
+           re-assert display:none for the hidden state (otherwise the "Stash"
+           create button shows next to the pop/drop box). */
+        .control-stash-box[hidden],
+        .control-stash-create[hidden],
+        .control-stash-present[hidden] {
+            display: none;
+        }
+
+        .control-stash-create {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            height: 100%;
+            padding: 0 10px;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: #94a3b8;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+
+        .control-stash-create:hover:not(:disabled) {
+            color: #e2e8f0;
+        }
+
+        .control-stash-create__label {
+            line-height: 1;
+        }
+
+        .control-stash-present {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            height: 100%;
+            padding: 0 6px 0 10px;
+        }
+
+        .control-stash-present__icon {
+            font-size: 16px;
+            color: #fbbf24;
+        }
+
+        .control-stash-present__label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #fbbf24;
+        }
+
+        .control-stash-action {
+            box-sizing: border-box;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: none;
+            border-radius: 4px;
+            background: transparent;
+            color: #fcd34d;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .control-stash-action .material-icons-round {
+            font-size: 16px;
+        }
+
+        .control-stash-action:hover:not(:disabled) {
+            background: rgba(245, 158, 11, 0.25);
+            color: #fff7ed;
+        }
+
+        .control-stash-action--danger:hover:not(:disabled) {
+            background: rgba(239, 68, 68, 0.22);
+            color: #fca5a5;
+        }
+
+        .control-stash-action:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .control-graph-panel.is-uncommitted-runtime {
+            border-color: rgba(148, 163, 184, 0.22);
+        }
+
+        .canvas-stage.is-uncommitted-runtime:not(.is-config-view) #canvas-wrapper {
+            box-shadow:
+                0 0 0 1px rgba(148, 163, 184, 0.2),
+                0 0 50px rgba(0, 0, 0, 0.5);
+        }
+
+        body.is-config-view #sidebar .controls-area,
+        body.is-config-view #sidebar .sidebar-component-list,
+        body.is-config-view #sidebar-right-scroll,
+        body.is-config-view #panel-dock {
+            pointer-events: none;
+            opacity: 0.55;
+        }
+
+        body.is-config-view .config-view-badge,
+        body.is-config-view .config-view-badge button {
+            pointer-events: auto;
+            opacity: 1;
+        }
+
+        .control-graph-wrap {
+            position: relative;
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            overflow-x: auto;
+            overflow-y: hidden;
+            min-height: 56px;
+            max-height: 160px;
+            padding: 6px 8px;
+            scrollbar-width: thin;
+            scrollbar-color: #475569 transparent;
+            border-left: 1px solid rgba(148, 163, 184, 0.08);
+        }
+
+        .control-graph-actions {
+            display: flex;
+            flex-wrap: nowrap;
+            flex-shrink: 0;
+            align-items: center;
+            gap: 8px;
+            margin-left: 8px;
+            padding-left: 10px;
+            border-left: 1px solid rgba(148, 163, 184, 0.08);
+        }
+
+        .control-graph-panel .btn,
+        .control-graph-panel .control-graph-btn {
+            width: auto;
+            margin-top: 0;
+            min-height: 32px;
+            padding: 0 8px;
+            font-size: 11px;
+            gap: 0;
+            border-radius: 6px;
+            box-shadow: none;
+        }
+
+        .control-graph-btn .material-icons-round {
+            font-size: 18px;
+        }
+
+        .control-graph-btn--icon {
+            width: 32px;
+            min-width: 32px;
+            height: 32px;
+            padding: 0;
+            justify-content: center;
+        }
+
+        .control-graph-panel .btn-primary {
+            background: rgba(59, 130, 246, 0.85);
+        }
+
+        .control-graph-panel .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .control-graph-panel .btn-secondary {
+            border-color: rgba(148, 163, 184, 0.25);
+        }
+
+        .control-graph-panel .btn-accent {
+            background: rgba(245, 158, 11, 0.9);
+            border: 1px solid rgba(180, 83, 9, 0.6);
+            color: #1c1917;
+            font-weight: 600;
+        }
+
+        .control-graph-panel .btn-accent:hover {
+            background: #f59e0b;
+        }
+
+        .control-graph-wrap::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .control-graph-wrap::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+
+        .control-graph-svg {
+            display: block;
+            height: auto;
+            max-height: 152px;
+            vertical-align: middle;
+        }
+
+        .control-graph-empty {
+            padding: 6px 2px;
+            font-size: 10px;
+            color: #64748b;
+            line-height: 1.3;
+            white-space: nowrap;
+        }
+
+        .control-graph-tooltip {
+            position: absolute;
+            z-index: 30;
+            max-width: 240px;
+            padding: 8px 10px;
+            font-size: 11px;
+            line-height: 1.45;
+            color: #e2e8f0;
+            background: #0f172a;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+        }
+
+        .control-graph-tooltip[hidden] {
+            display: none !important;
+        }
+
+        #control-plan-preview {
+            margin: 0 8px 6px;
+            padding: 6px 8px;
+            font-size: 10px;
+            border-radius: 4px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        #control-plan-preview[hidden] {
+            display: none !important;
+        }
+
+        .control-adopt-notice {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0 8px 6px;
+            padding: 7px 10px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #fbbf24;
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            border-radius: 6px;
+        }
+
+        .control-adopt-notice .material-icons-round {
+            font-size: 16px;
+        }
+
+        .control-adopt-notice[hidden] {
+            display: none !important;
+        }
+
+        .control-graph-panel.vc-inactive .control-adopt-notice {
+            display: none !important;
         }
 
         .section-header {
@@ -107,6 +1203,13 @@
             flex-grow: 1;
             overflow-y: auto;
             padding: 0 16px;
+        }
+
+        .sidebar-component-list {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 0 16px 8px;
         }
 
         .component-card {
@@ -145,6 +1248,77 @@
         .comp-name { font-weight: 500; display: block; margin-bottom: 2px; }
         .comp-meta { font-size: 11px; color: var(--text-muted); display: block; }
 
+        .inventory-section-label {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            padding: 12px 4px 6px;
+            margin-top: 4px;
+        }
+
+        .component-card .inventory-add-btn,
+        .component-card .track-toggle-btn {
+            flex-shrink: 0;
+            width: 22px;
+            height: 22px;
+            border: 1px solid rgba(100, 116, 139, 0.45);
+            border-radius: 5px;
+            background: rgba(15, 17, 21, 0.6);
+            color: #94a3b8;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+            transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+        }
+
+        .component-card .track-toggle-btn:hover {
+            border-color: rgba(59, 130, 246, 0.55);
+            color: #93c5fd;
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .component-card .track-toggle-btn.is-tracked {
+            border-color: rgba(248, 113, 113, 0.45);
+            color: #fca5a5;
+        }
+
+        .component-card .track-toggle-btn.is-tracked:hover {
+            border-color: rgba(248, 113, 113, 0.7);
+            background: rgba(248, 113, 113, 0.12);
+        }
+
+        .component-card .track-toggle-btn .material-icons-round {
+            font-size: 14px;
+        }
+
+        .inv-badge {
+            font-size: 9px;
+            margin-right: 4px;
+            letter-spacing: 0.02em;
+        }
+
+        .inv-badge--tracked { color: #34d399; }
+        .inv-badge--idle { color: #64748b; }
+        .inv-badge--mount { color: #94a3b8; }
+        .inv-badge--optimized { color: #fbbf24; font-variant-numeric: tabular-nums; }
+
+        body.is-config-view .track-toggle-btn,
+        body.is-config-view .inventory-add-btn {
+            opacity: 0.35;
+            pointer-events: none;
+        }
+
+        .component-card.library-only:hover {
+            transform: none;
+            border-color: var(--border-color);
+            box-shadow: none;
+        }
+
         .status-dot {
             width: 8px;
             height: 8px;
@@ -153,6 +1327,26 @@
         }
         .status-dot.placed { background-color: var(--status-success); box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
         .status-dot.inventory { background-color: var(--primary-accent); }
+        /* Optimized: emerald core with a gold highlight + halo so it reads as
+           "placed, but specifically by an optimization strategy" (not the same
+           as plain green "placed"). See isOptimizedPlacement() in
+           frontend/js/component-model.js for the gating logic. */
+        .status-dot.optimized {
+            background: radial-gradient(circle at 30% 30%, #fde68a 0%, #facc15 35%, #10b981 75%);
+            box-shadow: 0 0 10px rgba(250, 204, 21, 0.85), 0 0 4px rgba(16, 185, 129, 0.9);
+        }
+        /* Stored in Q3 storage region. */
+        .status-dot.stored {
+            background-color: #6366f1;
+            box-shadow: 0 0 6px rgba(99, 102, 241, 0.5);
+        }
+        /* Currently in the robot gripper (system_status = HOLDING + this tag).
+           Matches the top-right HOLDING status badge and the canvas ghost
+           overlay color, so the three UI surfaces stay consistent. */
+        .status-dot.holding {
+            background-color: #a855f7;
+            box-shadow: 0 0 8px rgba(168, 85, 247, 0.55);
+        }
 
         .controls-area {
             padding: 20px;
@@ -190,6 +1384,64 @@
         }
         .btn-secondary:hover { border-color: var(--text-secondary); color: var(--text-primary); }
 
+        /* Telemetry session controls in component popup */
+        .btn-teleop {
+            background-color: #7c3aed;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+        }
+        .btn-teleop:hover { background-color: #6d28d9; }
+
+        .btn-live-feed {
+            background-color: #059669;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.35);
+        }
+        .btn-live-feed:hover { background-color: #047857; }
+
+        .btn-teleop-end {
+            border-color: #7c3aed;
+            color: #c4b5fd;
+        }
+        .btn-teleop-end:hover {
+            border-color: #a78bfa;
+            color: #ede9fe;
+            background: rgba(124, 58, 237, 0.12);
+        }
+
+        .btn-live-feed-end {
+            border-color: #059669;
+            color: #6ee7b7;
+        }
+        .btn-live-feed-end:hover {
+            border-color: #34d399;
+            color: #d1fae5;
+            background: rgba(5, 150, 105, 0.12);
+        }
+
+        .prim-region--teleop .prim-region__title { color: #c4b5fd; }
+        .prim-region--live-feed .prim-region__title { color: #6ee7b7; }
+
+        .prim-region--session-active {
+            margin-left: -4px;
+            padding-left: 8px;
+            border-left: 3px solid transparent;
+        }
+        .prim-region--teleop.prim-region--session-active {
+            border-left-color: #7c3aed;
+        }
+        .prim-region--live-feed.prim-region--session-active {
+            border-left-color: #059669;
+        }
+
+        .prim-session-hint {
+            font-size: 10px;
+            font-style: italic;
+            color: #64748b;
+            padding: 2px 0 6px;
+            line-height: 1.35;
+        }
+
         /* --- Main Content (Center) --- */
         #main-content {
             flex-grow: 1;
@@ -197,9 +1449,113 @@
             background-image: 
                 radial-gradient(circle at 50% 50%, #1a1d24 0%, var(--bg-dark) 100%);
             display: flex;
-            align-items: center;
-            justify-content: center;
+            flex-direction: column;
+            align-items: stretch;
+            justify-content: flex-start;
             overflow: hidden;
+            gap: 0;
+        }
+
+        .bench-header {
+            width: 100%;
+            max-width: 100%;
+            margin: 8px 0 0;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 8px;
+            overflow: hidden;
+            background: rgba(20, 24, 32, 0.95);
+            box-shadow: 0 2px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .bench-header:has(#bench-chrome-bar[hidden]):has(#bench-tools-strip:empty) {
+            display: none;
+        }
+
+        #bench-chrome-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 8px 12px;
+            box-sizing: border-box;
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            margin: 0;
+            flex-shrink: 0;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        #bench-chrome-bar[hidden] {
+            display: none !important;
+        }
+
+        #bench-tools-strip {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 8px 12px;
+            box-sizing: border-box;
+            background: rgba(15, 18, 24, 0.6);
+        }
+
+        #bench-tools-strip:empty {
+            display: none;
+        }
+
+        .bench-tools-strip__label {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-right: 2px;
+            white-space: nowrap;
+        }
+        .bench-chrome-bar__label {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-right: 4px;
+        }
+        .bench-chrome-bar__btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            padding: 5px 10px;
+            border-radius: 5px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: border-color 0.12s ease, background 0.12s ease;
+        }
+        .bench-chrome-bar__btn:hover {
+            border-color: #64748b;
+            color: var(--text-primary);
+        }
+        .bench-chrome-bar__btn--active {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.12);
+            color: #93c5fd;
+        }
+        .bench-chrome-bar__icon {
+            font-size: 16px !important;
+        }
+        .bench-chrome-bar__name {
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         #canvas-wrapper {
@@ -207,16 +1563,105 @@
             border: 1px solid var(--border-color);
             border-radius: 4px;
             position: relative;
-            background-color: #13151a; 
+            background-color: #13151a;
+            width: 100%;
+            margin: 8px 0 16px;
+            flex-shrink: 0;
         }
 
-        /* --- Context Panel (Left) --- */
-        #context-panel {
-            flex-grow: 1;
-            overflow-y: auto;
-            padding: 16px;
-            border-top: 1px solid var(--border-color);
-            display: none; /* Hidden by default until selection */
+        /* --- Component controls (floating multi-panel dock over canvas) ---
+           Holds one or more ``.component-panel`` children. row-reverse makes
+           additional panels (Ctrl/Cmd+click) stack to the LEFT of the first
+           one opened, matching the operator request "add another window to
+           the left". When more panels than fit are open, the dock scrolls
+           horizontally. ``pointer-events: none`` on the dock itself lets
+           canvas drags pass through the gaps between panels; each panel
+           re-enables pointer events on itself. */
+        #panel-dock {
+            min-height: 0;
+        }
+        /* When no panels are open we render nothing — `.component-panel`
+           children are mounted dynamically by ui/context-panel.js. */
+        #panel-dock:empty { display: none; }
+
+        .component-panel {
+            padding: 14px 16px 16px;
+            background: var(--bg-panel);
+        }
+        .component-panel--focused {
+            opacity: 1;
+        }
+        /* Live camera feeds keep streaming on every open panel regardless of
+           focus, but interactive controls (buttons, inputs, selects, textareas,
+           the Move/Position fields) only respond on the focused panel. The
+           panel root remains clickable so one click focuses it; on the next
+           click the underlying control activates. */
+        /* The close-this-panel "X" is allowed even on unfocused panels — being
+           able to dismiss a non-focused panel without first focusing it is
+           less surprising. */
+
+        .component-panel .coord-input {
+            background: #0f1115;
+            border: 1px solid var(--border-color);
+            color: white;
+            padding: 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            width: 100%;
+        }
+
+        /* Context panel buttons: scoped overrides so secondary buttons stop
+           blending with labels like "POSITION (mm)" / "IN-AIR MANIPULATION".
+           Brighter text, a subtle filled background, a stronger border, and
+           accent-colored icons give them a clear "this is clickable" read
+           while still looking quieter than the primary blue CTA buttons. */
+        .component-panel .btn-secondary {
+            background-color: rgba(148, 163, 184, 0.08);
+            border-color: rgba(148, 163, 184, 0.28);
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        .component-panel .btn-secondary:hover {
+            background-color: rgba(148, 163, 184, 0.16);
+            border-color: rgba(148, 163, 184, 0.55);
+            color: var(--text-primary);
+        }
+        .component-panel .btn-secondary:disabled,
+        .component-panel .btn-secondary[disabled] {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+        .component-panel .btn-secondary .material-icons-round {
+            color: var(--primary-accent);
+        }
+        /* Primary buttons (Move, Place from hover, Confirm held tag) already
+           sit on a bright blue fill, so just make sure the icon contrasts. */
+        .component-panel .btn-primary .material-icons-round {
+            color: #ffffff;
+        }
+
+        .component-panel__close {
+            flex-shrink: 0;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            margin: -4px -4px 0 0;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+        .component-panel__close:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.07);
+        }
+        .component-panel__close .material-icons-round {
+            font-size: 20px;
         }
 
         .panel-header {
@@ -261,103 +1706,314 @@
         ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+        /* Command Console (scoped; Phases 1–2: shell only — see coding_on_the_ui.md) */
+        .command-console {
+            position: fixed;
+            bottom: 0;
+            left: 260px;
+            right: 320px;
+            z-index: 100;
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-panel);
+            box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
+        }
+        .command-console__toggle {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--bg-panel-hover);
+            border: none;
+            border-bottom: 1px solid transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            text-align: left;
+        }
+        .command-console__toggle:hover {
+            background: var(--border-color);
+        }
+        .command-console--expanded .command-console__toggle {
+            border-bottom-color: var(--border-color);
+        }
+        .command-console__panel {
+            display: none;
+            flex-direction: column;
+            max-height: 220px;
+        }
+        .command-console--expanded .command-console__panel {
+            display: flex;
+        }
+        .command-console__output {
+            flex: 1;
+            min-height: 100px;
+            max-height: 160px;
+            overflow-y: auto;
+            overflow-x: auto;
+            padding: 8px 12px;
+            background: #0f1115;
+            font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+        }
+        .command-console__line { margin-bottom: 4px; white-space: pre-wrap; word-break: break-word; }
+        .command-console__line--info { color: var(--text-secondary); }
+        .command-console__line--cmd { color: var(--primary-accent); }
+        .command-console__line--warn { color: var(--status-warning); }
+        .command-console__line--error { color: var(--status-error); }
+        .command-console__input {
+            border: none;
+            border-top: 1px solid var(--border-color);
+            padding: 8px 12px;
+            background: #0f1115;
+            color: var(--text-primary);
+            font-size: 12px;
+            font-family: inherit;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .command-console__input::placeholder {
+            color: var(--text-muted);
+        }
+        .command-console__input:focus {
+            outline: none;
+            box-shadow: inset 0 0 0 1px var(--primary-accent);
+        }
+        .command-console__hint {
+            border-top: 1px solid var(--border-color);
+            padding: 4px 12px 6px;
+            min-height: 1.25em;
+            font-size: 11px;
+            color: var(--text-muted);
+            background: rgba(0, 0, 0, 0.25);
+            font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+        }
+        .command-console__hint:empty {
+            display: none;
+        }
+
     </style>
 </head>
 <body>
-
+    <header class="app-top-nav">
+        <a class="app-top-nav__brand" href="/">Cloud Labs</a>
+        <nav>
+            <a href="/twin" class="active">Twin UI</a>
+            <a href="/operations">Operations</a>
+            <a href="/wiki#backends">Backends</a>
+            <a href="/wiki">Wiki</a>
+            <a href="/debug" target="_blank">Debugger</a>
+        </nav>
+    </header>
+    <div class="app-shell">
     <div id="sidebar">
         <div class="logo-area">
-            <span class="material-icons-round logo-icon">science</span>
-            <div class="logo-text">AI Optics Twin</div>
-            <a href="/debug" target="_blank" title="Open Debugger" style="color: var(--text-muted); margin-left: auto;">
-                <span class="material-icons-round" style="font-size: 16px;">bug_report</span>
-            </a>
+            <div class="logo-title-row">
+                <span class="material-icons-round logo-icon">science</span>
+                <div class="logo-text">Twin control</div>
+            </div>
+            <div class="runtime-mode-control">
+                <span id="runtime-mode-status" class="runtime-mode-status" title="Loading runtime mode"></span>
+                <select id="runtime-mode-select" class="runtime-mode-select" aria-label="Runtime mode" disabled>
+                    <option>Loading...</option>
+                </select>
+            </div>
+            <div class="backend-session-bar" id="backend-session-bar" title="Lab backend chosen at login">
+                <span class="backend-session-id" id="backend-session-label">—</span>
+                <button type="button" class="backend-switch-btn" id="backend-switch-btn" title="Leave this lab and choose another backend">Switch</button>
+            </div>
         </div>
 
-        <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>Optical Components</span>
-            <span id="add-component-btn" class="material-icons-round" style="cursor: pointer; font-size: 16px; color: var(--primary-accent);" title="Open Inventory">add_circle</span>
+        <div id="layout-warnings" style="display: none; margin: 0 16px 10px; padding: 8px 10px; font-size: 11px; color: #fcd34d; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; line-height: 1.35;"></div>
+
+        <div id="session-lease-banner" style="display: none; margin: 0 16px 10px; padding: 8px 10px; font-size: 11px; color: #93c5fd; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 6px; line-height: 1.35;"></div>
+
+        <div class="section-header">
+            <span>Lab components</span>
         </div>
-        <div id="component-list" style="flex-grow: 0; height: 35%; overflow-y: auto;">
+        <div id="component-list" class="sidebar-component-list">
             <!-- Placed components will appear here -->
             <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px;">
                 No components placed.
             </div>
         </div>
 
-        <!-- Inventory Library Popup (Hidden by default) -->
-        <div id="library-popup" style="display: none; position: absolute; top: 80px; left: 290px; width: 260px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 2000; padding: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
-                <span style="font-weight: 600; font-size: 12px; color: var(--text-primary);">Component Library</span>
-                <span id="library-close" class="material-icons-round" style="font-size: 16px; cursor: pointer; color: var(--text-muted);">close</span>
-            </div>
-            <div id="library-list" style="max-height: 300px; overflow-y: auto;">
-                <!-- Inventory items injected here -->
-            </div>
-        </div>
-
         <div class="controls-area">
-            <button id="refresh-btn" class="btn btn-secondary">
-                <span class="material-icons-round">sync</span> Refresh State
+            <button id="refresh-btn" class="btn btn-secondary" title="Re-localize component poses from the overhead / table camera (recalculates tunables.reported_pose).">
+                <span class="material-icons-round">sync</span> Refresh Pose
             </button>
         </div>
-        
-        <!-- Contextual Controls (Shows when component selected) -->
-        <div id="context-panel">
-            <div class="section-header" style="padding: 0 0 12px 0; border-bottom: 1px solid var(--border-color);">
-                <span id="selected-comp-name" style="color: var(--primary-accent);">Component</span> Controls
-            </div>
-            
-            <div style="margin-top: 12px;">
-                <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 4px;">POSITION (mm)</label>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
-                    <input type="number" id="ctx-x" placeholder="X" class="coord-input">
-                    <input type="number" id="ctx-y" placeholder="Y" class="coord-input">
-                </div>
-                <div style="margin-bottom: 12px;">
-                     <input type="number" id="ctx-rot" placeholder="Rotation (°)" class="coord-input" style="width: 100%;">
-                </div>
-                <button id="ctx-move-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px;">Move to Coordinates</button>
-            </div>
 
-            <div style="margin-top: 20px;">
-                <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 8px;">OPTIMIZATION STRATEGIES</label>
-                <div id="ctx-strategies"></div>
-            </div>
+        <div class="section-header">
+            <span>Configuration</span>
         </div>
-
-        <style>
-            .coord-input {
-                background: #0f1115;
-                border: 1px solid var(--border-color);
-                color: white;
-                padding: 6px;
-                border-radius: 4px;
-                font-size: 11px;
-                width: 100%;
-            }
-        </style>
+        <p style="padding: 0 16px 12px; margin: 0; font-size: 11px; line-height: 1.45; color: var(--text-muted);">
+            Branch graph and commits are above the optical table. Save, fork, and travel history there.
+        </p>
     </div>
 
     <!-- MAIN CANVAS AREA -->
     <div id="main-content">
-        <div id="canvas-wrapper">
-            <canvas id="optical-table" width="1000" height="700"></canvas>
+        <div id="control-graph-panel" class="control-graph-panel vc-inactive" aria-label="Configuration branch graph">
+            <div id="control-vc-start" class="control-vc-start">
+                <button id="control-vc-start-btn" type="button" class="btn btn-primary control-vc-start-btn">
+                    <span class="material-icons-round" aria-hidden="true">account_tree</span>
+                    Start version control
+                </button>
+            </div>
+            <div class="control-graph-toolbar">
+                <div class="control-graph-toolbar-start">
+                    <select id="control-repo-select" class="control-graph-repo-select control-graph-toolbar-select" aria-label="Configuration repo">
+                        <option value="default">optical-cavity</option>
+                    </select>
+                    <button id="control-new-repo-btn" type="button" class="control-new-repo-btn" title="New configuration repo">
+                        <span class="material-icons-round" aria-hidden="true">add</span>
+                        <span class="sr-only">New repo</span>
+                    </button>
+                    <button id="control-stop-vc-btn" type="button" class="control-new-repo-btn" title="Stop version control">
+                        <span class="material-icons-round" aria-hidden="true">power_settings_new</span>
+                        <span class="sr-only">Stop version control</span>
+                    </button>
+                </div>
+                <div class="control-graph-wrap">
+                    <div id="control-graph-empty" class="control-graph-empty">Loading…</div>
+                </div>
+                <button id="control-save-config-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-commit-btn" title="Commit layout">
+                    <span class="material-icons-round" aria-hidden="true">save</span>
+                    <span class="sr-only">Commit</span>
+                </button>
+                <button id="control-publish-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-publish-btn" title="Request publish to Snapshots">
+                    <span class="material-icons-round" aria-hidden="true">publish</span>
+                    <span class="sr-only">Publish</span>
+                </button>
+                <button id="control-catalog-pin-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-catalog-pin-btn" title="Start from snapshot pin (frozen)">
+                    <span class="material-icons-round" aria-hidden="true">push_pin</span>
+                    <span class="sr-only">Snapshot pin</span>
+                </button>
+                <span id="control-head-label" class="control-graph-head-pill" title="Branch HEAD">
+                    <span class="control-graph-head-pill__tag">HEAD</span>
+                    <code class="control-graph-head-pill__id">—</code>
+                </span>
+                <div class="control-graph-actions">
+                    <span id="control-stash-box" class="control-stash-box" title="Stash" hidden>
+                        <button id="control-stash-btn" type="button" class="control-stash-create" title="Stash uncommitted changes">
+                            <span class="material-icons-round" aria-hidden="true">inventory_2</span>
+                            <span class="control-stash-create__label">Stash</span>
+                        </button>
+                        <span id="control-stash-present" class="control-stash-present" hidden>
+                            <span class="material-icons-round control-stash-present__icon" aria-hidden="true">inventory_2</span>
+                            <span class="control-stash-present__label">Stash</span>
+                            <button id="control-stash-pop-btn" type="button" class="control-stash-action" title="Pop stash">
+                                <span class="material-icons-round" aria-hidden="true">unarchive</span>
+                                <span class="sr-only">Pop stash</span>
+                            </button>
+                            <button id="control-stash-drop-btn" type="button" class="control-stash-action control-stash-action--danger" title="Drop stash">
+                                <span class="material-icons-round" aria-hidden="true">delete</span>
+                                <span class="sr-only">Drop stash</span>
+                            </button>
+                        </span>
+                    </span>
+                    <button id="control-fork-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-fork-btn" title="Fork branch">
+                        <span class="material-icons-round" aria-hidden="true">call_split</span>
+                        <span class="sr-only">Fork</span>
+                    </button>
+                    <select id="control-branch-select" class="control-graph-branch-select control-graph-toolbar-select" aria-label="Configuration branch">
+                        <option value="main">main</option>
+                    </select>
+                </div>
+            </div>
+            <div id="control-adopt-notice" class="control-adopt-notice" hidden>
+                <span class="material-icons-round" aria-hidden="true">touch_app</span>
+                <span>No current node yet — click a node above to set where your bench is.</span>
+            </div>
+            <div id="control-plan-preview" class="control-plan-preview" hidden></div>
+        </div>
+        <div id="canvas-stage" class="canvas-stage">
+            <div id="bench-header" class="bench-header">
+                <div id="bench-chrome-bar" role="toolbar" aria-label="Fixed bench components" hidden></div>
+                <div id="bench-tools-strip" class="bench-tools-strip">
+                    <span class="bench-tools-strip__label">Lines</span>
+                    <div id="laser-lines-dock" role="toolbar" aria-label="Alignment and laser lines">
+                        <div id="alignment-dock-tools" class="alignment-dock-tools">
+                            <button type="button" id="pencil-tool-btn" class="laser-dock-tool-btn" title="Pencil: draw alignment guides on the table. Drag on empty canvas. Hold Shift for horizontal or vertical. Snapping applies to laser lines and guides." aria-pressed="false">
+                                <span class="material-icons-round" aria-hidden="true">edit</span>
+                            </button>
+                            <button type="button" id="clear-guides-btn" class="laser-dock-tool-btn" title="Clear all drawn guides">
+                                <span class="material-icons-round" aria-hidden="true">delete_sweep</span>
+                            </button>
+                        </div>
+                        <div id="laser-lines-list"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="canvas-stage__row">
+                <div id="canvas-wrapper">
+                    <canvas id="optical-table" width="1000" height="700"></canvas>
+                    <div id="canvas-view-shield" class="canvas-view-shield" hidden aria-hidden="true" title="Read-only configuration preview"></div>
+                </div>
+                <aside id="config-view-badge" class="config-view-badge" hidden aria-live="polite">
+                    <div id="config-view-viewing" class="config-view-badge__viewing">
+                        <span class="config-view-badge__label">Viewing</span>
+                        <span id="config-view-source" class="config-view-badge__source" hidden></span>
+                        <code id="config-view-commit-id" class="config-view-badge__id">—</code>
+                        <div class="config-view-badge__actions">
+                            <button id="config-view-apply-btn" type="button" class="config-view-badge__btn config-view-badge__btn--primary">Apply on bench</button>
+                            <button id="config-view-return-btn" type="button" class="config-view-badge__btn">Return to bench</button>
+                        </div>
+                    </div>
+                    <div id="config-view-applying" class="config-view-badge__applying" hidden>
+                        <span class="config-view-badge__label">Applying</span>
+                        <code id="config-view-applying-id" class="config-view-badge__id">—</code>
+                        <span id="config-view-reconcile-progress" class="config-view-reconcile__progress">Step 1 of 1</span>
+                        <ol id="config-view-reconcile-steps" class="config-view-reconcile__steps"></ol>
+                    </div>
+                </aside>
+            </div>
+        </div>
+
+        <!--
+            Component controls: floating multi-panel dock over the table.
+            Each open component gets its own ``.component-panel`` child
+            mounted dynamically by ``ui/context-panel.js`` (the panel-dock
+            manager). Plain click on a component (canvas / sidebar /
+            chrome bar) replaces the open panels with just that one;
+            Ctrl/Cmd+click adds a new panel to the left of the existing
+            ones. Clicking a panel focuses it (only the focused panel
+            captures interactive clicks; others stay visible so live
+            camera feeds keep streaming).
+        -->
+    </div>
+
+    <!-- Command Console (collapsed by default; js/command-console.js + command-parse.js + command-api.js) -->
+    <div id="command-console-root" class="command-console" aria-label="Command Console">
+        <button type="button" class="command-console__toggle" id="command-console-toggle" aria-expanded="false" title="Show or hide Command Console">
+            <span style="display: flex; align-items: center; gap: 8px;">
+                <span class="material-icons-round command-console__chevron" style="font-size: 18px;">keyboard_arrow_up</span>
+                Command Console
+            </span>
+            <span style="font-size: 10px; font-weight: 500; color: var(--text-muted);">shorthand</span>
+        </button>
+        <div class="command-console__panel" id="command-console-panel">
+            <div class="command-console__output" id="command-console-output" role="log" aria-live="polite"></div>
+            <input type="text" class="command-console__input" id="command-console-input" autocomplete="off" spellcheck="false"
+                placeholder="help | refresh | move tag_22 0 0 0 | motor … | motorhome … | motorset0 … | optimize …" />
         </div>
     </div>
 
     <!-- RIGHT SIDEBAR (Recipes & Monitor) -->
     <div id="sidebar-right">
-        <!-- Live Feed Section -->
-        <div style="height: 200px; background: black; position: relative; border-bottom: 1px solid var(--border-color);">
-             <img id="live-video-img" src="/api/video-feed/stream" style="width: 100%; height: 100%; object-fit: cover; display: none;" onerror="this.style.display='none'; document.getElementById('video-placeholder').style.display='flex';">
-             <div id="video-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #64748b;">
-                <span class="material-icons-round" style="font-size: 32px; margin-bottom: 8px;">videocam_off</span>
-                <span style="font-size: 12px;">No Camera Connection</span>
-                <span id="video-status" style="font-size: 10px; margin-top: 4px; color: #ef4444;">● OFFLINE</span>
-            </div>
-            <div style="position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 4px; font-size: 10px; color: white;">LIVE FEED</div>
-        </div>
+        <div id="sidebar-right-pinned">
+        <!--
+            Phase 9c: lab-wide LIVE FEED pane removed. Ceiling / gripper
+            MJPEG is available via each camera component's telemetry
+            widgets in the symmetric component panel (Phase 7).
+        -->
 
         <!-- System Monitor -->
         <div style="height: 150px; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column;">
@@ -369,9 +2025,891 @@
                 <div class="log-entry info">System initialized.</div>
             </div>
         </div>
+        </div>
+
+        <div id="sidebar-right-scroll">
+        <div id="workspace-tabs" class="workspace-tabs">
+            <div class="workspace-tab-list" role="tablist" aria-label="Workspace tools">
+                <button id="workspace-tab-optimization" class="workspace-tab" type="button"
+                    role="tab" aria-selected="true" aria-controls="workspace-panel-optimization"
+                    data-workspace-tab="optimization">Optimization</button>
+                <button id="workspace-tab-recipes" class="workspace-tab" type="button"
+                    role="tab" aria-selected="false" aria-controls="workspace-panel-recipes"
+                    data-workspace-tab="recipes">Recipes</button>
+                <button id="workspace-tab-component" class="workspace-tab" type="button"
+                    role="tab" aria-selected="false" aria-controls="workspace-panel-component"
+                    data-workspace-tab="component" hidden>Selected Part</button>
+            </div>
+            <div class="workspace-tab-panels">
+            <section id="workspace-panel-optimization" class="workspace-tab-panel is-active"
+                role="tabpanel" aria-labelledby="workspace-tab-optimization">
+        <!-- Optimization preview (Phase 9d — replaces deprecated table-cam dock) -->
+        <style>
+            /* Hidden until legacy (non-ensemble) OPTIMIZE is running */
+            #optimization-feed-section {
+                display: none !important;
+                flex-direction: column;
+                border-bottom: 1px solid var(--border-color);
+            }
+            body.is-optimizing #optimization-feed-section {
+                display: flex !important;
+            }
+            /* Ensemble / staged optimization mode uses opt-mode-live-panel instead */
+            body.optimization-mode-active #optimization-feed-section,
+            body.is-ensemble-optimize #optimization-feed-section {
+                display: none !important;
+            }
+            #opt-mode-loss-chart,
+            #opt-mode-run-status,
+            #opt-mode-telemetry,
+            #opt-mode-live-panel {
+                display: none !important;
+            }
+            body.optimization-mode-active.is-optimizing #opt-mode-live-panel,
+            body.optimization-mode-active.opt-results-ready #opt-mode-live-panel {
+                display: block !important;
+            }
+            body.optimization-mode-active.is-optimizing #opt-mode-loss-chart,
+            body.optimization-mode-active.is-optimizing #opt-mode-run-status,
+            body.optimization-mode-active.is-optimizing #opt-mode-telemetry,
+            body.optimization-mode-active.opt-results-ready #opt-mode-loss-chart,
+            body.optimization-mode-active.opt-results-ready #opt-mode-telemetry {
+                display: block !important;
+            }
+            body.optimization-mode-active.is-optimizing #opt-mode-run-status,
+            body.optimization-mode-active.opt-results-ready #opt-mode-run-status {
+                display: block !important;
+            }
+            body.optimization-mode-active .canvas-stage #canvas-wrapper {
+                box-shadow:
+                    0 0 0 2px rgba(167, 139, 250, 0.45),
+                    0 0 40px rgba(88, 28, 135, 0.25);
+            }
+            body.optimization-mode-active .component-panel__block,
+            body.optimization-mode-active .component-popup__primitives {
+                pointer-events: none;
+                opacity: 0.5;
+                filter: grayscale(0.15);
+            }
+            body.optimization-mode-active .component-popup__optimization-vars,
+            body.optimization-mode-active .component-popup__optimization-vars * {
+                pointer-events: auto;
+                opacity: 1;
+                filter: none;
+            }
+            body.optimization-mode-active .component-panel__close {
+                pointer-events: auto;
+                opacity: 1;
+            }
+            .opt-plan-legend {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px 12px;
+                font-size: 9px;
+                color: #94a3b8;
+                margin: 0 12px 8px;
+                padding: 6px 8px;
+                border-radius: 6px;
+                background: rgba(88, 28, 135, 0.12);
+                border: 1px solid rgba(167, 139, 250, 0.25);
+            }
+            .opt-plan-legend span { display: inline-flex; align-items: center; gap: 4px; }
+            .opt-plan-legend i {
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+            }
+            #opt-mode-telemetry {
+                margin: 0;
+                padding: 0;
+                border: none;
+                background: transparent;
+                font-size: 10px;
+                color: #cbd5e1;
+                max-height: none;
+                overflow: visible;
+            }
+            .opt-telemetry-head {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 6px;
+            }
+            .opt-telemetry-head strong {
+                font-size: 10px;
+                color: #e9d5ff;
+            }
+            .opt-telemetry-head span {
+                font-size: 9px;
+                color: #94a3b8;
+            }
+            .opt-telemetry-sub {
+                font-size: 9px;
+                color: #64748b;
+                margin-bottom: 6px;
+            }
+            .opt-telemetry-progress {
+                height: 6px;
+                background: #27272a;
+                border-radius: 3px;
+                overflow: hidden;
+                margin: 6px 0 8px;
+            }
+            .opt-telemetry-progress > span {
+                display: block;
+                height: 100%;
+                background: linear-gradient(90deg, #7c3aed, #22d3ee);
+                transition: width 200ms ease;
+            }
+            .opt-telemetry-terms { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+            .opt-telemetry-term {
+                padding: 2px 6px;
+                border-radius: 4px;
+                background: rgba(34, 211, 238, 0.12);
+                border: 1px solid rgba(34, 211, 238, 0.35);
+                font-size: 9px;
+            }
+            .opt-telemetry-table { width: 100%; border-collapse: collapse; font-size: 9px; margin-top: 6px; }
+            .opt-telemetry-table-wrap {
+                max-height: 120px;
+                overflow-y: auto;
+                border-radius: 6px;
+                border: 1px solid #1f2937;
+            }
+            .opt-telemetry-table th, .opt-telemetry-table td {
+                padding: 3px 4px;
+                border-bottom: 1px solid #27272a;
+                text-align: left;
+            }
+            .opt-telemetry-table th { color: #94a3b8; font-weight: 600; }
+            .opt-results-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+                margin-top: 8px;
+            }
+            .opt-results-card {
+                background: #0f1115;
+                border: 1px solid #2a2e36;
+                border-radius: 6px;
+                padding: 8px;
+                font-size: 10px;
+            }
+            .opt-results-card h4 {
+                margin: 0 0 6px;
+                font-size: 10px;
+                color: #94a3b8;
+                font-weight: 600;
+            }
+            #optimization-feed-section {
+                --optimization-preview-height: 200px;
+            }
+            #optimization-feed-section .optimization-feed-slot {
+                height: var(--optimization-preview-height);
+                margin: 0 12px 10px;
+                border-radius: 6px;
+                box-sizing: border-box;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: hidden;
+                position: relative;
+                background: #0f1115;
+                border: 1px solid var(--border-color);
+                transition: border-color 160ms ease, box-shadow 160ms ease;
+            }
+            #optimization-feed-preview .optimization-feed-stage {
+                position: absolute;
+                inset: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 4px;
+                box-sizing: border-box;
+            }
+            #optimization-feed-preview .optimization-feed-stage img {
+                max-width: 100%;
+                max-height: 100%;
+                object-fit: contain;
+            }
+            #optimization-feed-placeholder {
+                max-width: 100%;
+                padding: 8px 12px;
+                line-height: 1.45;
+                color: var(--text-muted);
+                font-size: 12px;
+                text-align: center;
+            }
+        </style>
+        <div id="optimization-feed-section">
+            <div class="section-header">
+                <span>Optimization preview</span>
+            </div>
+            <p style="padding: 0 12px 6px; margin: 0; font-size: 10px; color: var(--text-muted); line-height: 1.35;">
+                Camera live view, capture, and COBYLA reference: use each camera tag in the component panel
+                (<code>RECORD_MEASURABLES</code>, telemetry widgets).
+            </p>
+            <div id="optimization-feed-preview" class="optimization-feed-slot">
+                <div class="optimization-feed-stage">
+                    <img id="optimization-feed-img" src="" alt="Optimization stream" style="display: none;">
+                    <div id="optimization-feed-placeholder">Runs during OPTIMIZE — per-component optimization stream.</div>
+                </div>
+                <div id="optimization-overlay" style="display: none; position: absolute; bottom: 8px; left: 8px; background: rgba(0, 255, 0, 0.15); border: 1px solid #22c55e; padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #22c55e; font-weight: bold; align-items: center; gap: 4px; backdrop-filter: blur(4px);">
+                    <span class="material-icons-round" style="font-size: 14px;">auto_awesome</span>
+                    <span id="optimization-step-text">OPTIMIZING (Step 0)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Staged optimization mode (Phase 3) -->
+        <style>
+            body.optimization-mode-active #workspace-tab-optimization {
+                color: #c4b5fd;
+            }
+            .optimization-mode-panel {
+                background: linear-gradient(180deg, rgba(88, 28, 135, 0.1) 0%, transparent 55%);
+            }
+            #optimization-mode-section {
+                padding-bottom: 8px;
+                border-bottom: 1px solid var(--border-color);
+            }
+            #opt-mode-idle,
+            #opt-mode-active {
+                padding: 0 12px;
+            }
+            #opt-mode-stage-body {
+                padding: 0 12px 4px;
+                min-height: 72px;
+            }
+            #opt-mode-stage-hint {
+                margin: 0 12px 10px;
+                padding: 8px 10px;
+                font-size: 10px;
+                line-height: 1.45;
+                color: #94a3b8;
+                background: rgba(15, 17, 21, 0.65);
+                border: 1px solid #27272a;
+                border-radius: 8px;
+            }
+
+            /* —— Typography & hints —— */
+            #optimization-mode-section .opt-hint {
+                font-size: 10px;
+                color: var(--text-muted);
+                margin: 0 0 10px;
+                line-height: 1.45;
+            }
+            #optimization-mode-section .opt-field-label {
+                display: block;
+                font-size: 9px;
+                font-weight: 600;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                color: #64748b;
+                margin: 0 0 6px;
+            }
+
+            /* —— Inputs & selects —— */
+            #optimization-mode-section .opt-input,
+            #optimization-mode-section .opt-select {
+                width: 100%;
+                padding: 7px 9px;
+                background: rgba(15, 17, 21, 0.95);
+                border: 1px solid #3f3f46;
+                border-radius: 6px;
+                color: #f1f5f9;
+                font-size: 11px;
+                box-sizing: border-box;
+                transition: border-color 0.15s, box-shadow 0.15s;
+            }
+            #optimization-mode-section .opt-input:focus,
+            #optimization-mode-section .opt-select:focus {
+                outline: none;
+                border-color: #a78bfa;
+                box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.18);
+            }
+            #optimization-mode-section .opt-select {
+                cursor: pointer;
+                appearance: none;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: right 8px center;
+                padding-right: 26px;
+            }
+            .opt-form-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+            }
+            .opt-form-grid .opt-field--full { grid-column: 1 / -1; }
+            .opt-field label {
+                display: block;
+                font-size: 9px;
+                color: #94a3b8;
+                margin-bottom: 4px;
+            }
+
+            /* —— Cards & lists —— */
+            .opt-card {
+                background: rgba(15, 17, 21, 0.85);
+                border: 1px solid #27272a;
+                border-radius: 8px;
+                padding: 10px;
+                margin-bottom: 8px;
+            }
+            .opt-card__title {
+                font-size: 11px;
+                font-weight: 600;
+                color: #e2e8f0;
+                margin: 0 0 8px;
+                line-height: 1.35;
+            }
+            .opt-card__meta {
+                font-size: 9px;
+                color: #64748b;
+                margin-top: 6px;
+            }
+            .opt-list-item {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                padding: 8px 0;
+                border-bottom: 1px solid #1f2937;
+            }
+            .opt-list-item:last-child { border-bottom: none; padding-bottom: 0; }
+            .opt-list-item__text {
+                font-size: 11px;
+                color: #e2e8f0;
+                line-height: 1.35;
+                min-width: 0;
+            }
+            .opt-list-item__actions {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                flex-shrink: 0;
+            }
+            .opt-icon-btn {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 26px;
+                height: 26px;
+                padding: 0;
+                border-radius: 6px;
+                border: 1px solid #3f3f46;
+                background: #18181b;
+                color: #94a3b8;
+                cursor: pointer;
+                font-size: 14px;
+                line-height: 1;
+            }
+            .opt-icon-btn:hover { border-color: #71717a; color: #e2e8f0; }
+            .opt-icon-btn--danger { color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
+            .opt-icon-btn--danger:hover { background: rgba(248, 113, 113, 0.1); }
+
+            /* —— Stepper —— */
+            #opt-mode-stage-nav {
+                display: flex;
+                gap: 2px;
+                padding: 0 12px 10px;
+                overflow-x: auto;
+                scrollbar-width: none;
+            }
+            #opt-mode-stage-nav::-webkit-scrollbar { display: none; }
+            .opt-stage-tab {
+                flex: 1 0 auto;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 2px;
+                padding: 6px 4px;
+                border-radius: 8px;
+                border: 1px solid transparent;
+                background: transparent;
+                color: #71717a;
+                cursor: pointer;
+                transition: background 0.15s, border-color 0.15s, color 0.15s;
+            }
+            .opt-stage-tab:hover:not(:disabled) {
+                background: rgba(39, 39, 42, 0.6);
+                color: #a1a1aa;
+            }
+            .opt-stage-tab:disabled { opacity: 0.45; cursor: default; }
+            .opt-stage-tab .opt-step-num {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                font-size: 10px;
+                font-weight: 700;
+                border: 1px solid #3f3f46;
+                background: #18181b;
+            }
+            .opt-stage-tab .opt-step-label {
+                font-size: 8px;
+                letter-spacing: 0.02em;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 52px;
+            }
+            .opt-stage-tab.is-active {
+                border-color: rgba(167, 139, 250, 0.45);
+                background: rgba(46, 16, 101, 0.55);
+                color: #e9d5ff;
+            }
+            .opt-stage-tab.is-active .opt-step-num {
+                border-color: #a78bfa;
+                background: #5b21b6;
+                color: #faf5ff;
+            }
+            .opt-stage-tab.is-done .opt-step-num {
+                border-color: rgba(52, 211, 153, 0.45);
+                color: #34d399;
+            }
+
+            /* —— Chips (variables) —— */
+            .opt-chip-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            .opt-chip {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                padding: 4px 8px;
+                border-radius: 999px;
+                font-size: 10px;
+                border: 1px solid #3f3f46;
+                background: #18181b;
+                color: #cbd5e1;
+                cursor: pointer;
+                transition: border-color 0.15s, background 0.15s;
+            }
+            .opt-chip:hover:not(:disabled) {
+                border-color: #a78bfa;
+                background: rgba(88, 28, 135, 0.2);
+                color: #e9d5ff;
+            }
+            .opt-chip:disabled,
+            .opt-chip.is-selected {
+                cursor: default;
+                border-color: rgba(52, 211, 153, 0.45);
+                background: rgba(6, 78, 59, 0.25);
+                color: #6ee7b7;
+            }
+            .opt-chip-remove {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 14px;
+                height: 14px;
+                padding: 0;
+                margin-left: 2px;
+                border: none;
+                border-radius: 50%;
+                background: rgba(248, 113, 113, 0.15);
+                color: #f87171;
+                font-size: 11px;
+                line-height: 1;
+                cursor: pointer;
+            }
+            .opt-chip-remove:hover { background: rgba(248, 113, 113, 0.3); }
+            .opt-selected-bar {
+                margin-bottom: 10px;
+                padding: 8px 10px;
+                border-radius: 8px;
+                border: 1px solid rgba(52, 211, 153, 0.25);
+                background: rgba(6, 78, 59, 0.08);
+            }
+            .opt-selected-bar--variables {
+                border-color: rgba(167, 139, 250, 0.3);
+                background: rgba(46, 16, 101, 0.2);
+            }
+            .opt-selected-groups {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .opt-selected-group {
+                padding: 6px 8px;
+                border-radius: 6px;
+                background: rgba(15, 17, 21, 0.55);
+                border: 1px solid #27272a;
+            }
+            .opt-selected-group__name {
+                font-size: 10px;
+                font-weight: 600;
+                color: #cbd5e1;
+                margin-bottom: 6px;
+                line-height: 1.3;
+            }
+            .opt-chip--compact {
+                padding: 3px 6px;
+                font-size: 9px;
+            }
+            .opt-chip--compact .opt-chip-text {
+                max-width: none;
+            }
+            .opt-selected-bar__head {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                margin-bottom: 6px;
+                flex-wrap: wrap;
+            }
+            .opt-selected-bar__head .opt-field-label {
+                flex: 1;
+                min-width: 0;
+            }
+            .opt-selected-bar__actions {
+                display: flex;
+                gap: 4px;
+                flex-shrink: 0;
+            }
+            .opt-bar-action {
+                padding: 2px 8px;
+                border-radius: 999px;
+                border: 1px solid rgba(34, 211, 238, 0.35);
+                background: rgba(34, 211, 238, 0.08);
+                color: #67e8f9;
+                font-size: 9px;
+                font-weight: 600;
+                cursor: pointer;
+            }
+            .opt-bar-action:hover {
+                background: rgba(34, 211, 238, 0.16);
+                border-color: rgba(34, 211, 238, 0.55);
+            }
+            .opt-chip--rich {
+                padding-right: 4px;
+                max-width: 100%;
+            }
+            .opt-chip-text {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                max-width: 140px;
+            }
+            .opt-chip-action {
+                padding: 1px 5px;
+                margin-left: 2px;
+                border-radius: 999px;
+                border: 1px solid rgba(34, 211, 238, 0.35);
+                background: rgba(34, 211, 238, 0.1);
+                color: #67e8f9;
+                font-size: 8px;
+                font-weight: 700;
+                letter-spacing: 0.03em;
+                cursor: pointer;
+                line-height: 1.4;
+            }
+            .opt-chip-action:hover {
+                background: rgba(34, 211, 238, 0.2);
+            }
+            .opt-chip-action--record {
+                text-transform: uppercase;
+            }
+            .opt-search-wrap {
+                position: relative;
+                margin-bottom: 8px;
+            }
+            .opt-search-icon {
+                position: absolute;
+                left: 8px;
+                top: 50%;
+                transform: translateY(-50%);
+                font-size: 14px !important;
+                color: #64748b;
+                pointer-events: none;
+            }
+            .opt-search {
+                padding-left: 30px !important;
+            }
+            .opt-search::-webkit-search-cancel-button {
+                -webkit-appearance: none;
+                height: 12px;
+                width: 12px;
+                background: linear-gradient(45deg, transparent 45%, #64748b 45%, #64748b 55%, transparent 55%),
+                    linear-gradient(-45deg, transparent 45%, #64748b 45%, #64748b 55%, transparent 55%);
+                cursor: pointer;
+            }
+            .opt-filter-empty {
+                text-align: center;
+                padding: 12px 8px;
+                margin: 0;
+            }
+            .opt-comp-accordion[hidden] { display: none; }
+            .opt-chip[hidden] { display: none !important; }
+            .opt-badge {
+                font-size: 9px;
+                font-weight: 700;
+                padding: 2px 6px;
+                border-radius: 999px;
+                background: rgba(167, 139, 250, 0.2);
+                color: #c4b5fd;
+            }
+
+            /* —— Component accordion (variables stage) —— */
+            .opt-comp-list {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                max-height: 240px;
+                overflow-y: auto;
+                padding-right: 2px;
+            }
+            .opt-comp-accordion {
+                border: 1px solid #27272a;
+                border-radius: 8px;
+                background: rgba(15, 17, 21, 0.5);
+                overflow: hidden;
+            }
+            .opt-comp-accordion summary {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                padding: 8px 10px;
+                font-size: 11px;
+                font-weight: 600;
+                color: #cbd5e1;
+                cursor: pointer;
+                list-style: none;
+                user-select: none;
+            }
+            .opt-comp-accordion summary::-webkit-details-marker { display: none; }
+            .opt-comp-accordion summary::after {
+                content: '▾';
+                font-size: 10px;
+                color: #64748b;
+                transition: transform 0.15s;
+            }
+            .opt-comp-accordion[open] summary::after { transform: rotate(180deg); }
+            .opt-comp-accordion__body {
+                padding: 0 10px 10px;
+                border-top: 1px solid #1f2937;
+            }
+            .opt-comp-accordion__body .opt-chip-row { padding-top: 8px; }
+
+            /* —— Run summary stats —— */
+            .opt-run-stats {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+                margin-bottom: 10px;
+            }
+            .opt-stat {
+                padding: 10px;
+                border-radius: 8px;
+                border: 1px solid #27272a;
+                background: rgba(15, 17, 21, 0.85);
+                text-align: center;
+            }
+            .opt-stat-val {
+                display: block;
+                font-size: 18px;
+                font-weight: 700;
+                color: #e9d5ff;
+                line-height: 1.2;
+            }
+            .opt-stat-label {
+                display: block;
+                font-size: 9px;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                color: #64748b;
+                margin-top: 2px;
+            }
+            .opt-stat-val--success { color: #34d399; }
+
+            /* —— Run job options (VC reconcile / commit) —— */
+            .opt-job-options {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                margin-bottom: 12px;
+                padding: 10px;
+                border-radius: 8px;
+                border: 1px solid #27272a;
+                background: rgba(15, 17, 21, 0.6);
+            }
+            .opt-job-option {
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                font-size: 11px;
+                color: #cbd5e1;
+                line-height: 1.35;
+                cursor: pointer;
+            }
+            .opt-job-option input[type="checkbox"] {
+                margin-top: 2px;
+                flex-shrink: 0;
+            }
+            .opt-job-option input:disabled + span,
+            .opt-job-option:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+            .opt-job-commit-msg { padding-left: 22px; }
+            .opt-job-commit-input {
+                width: 100%;
+                box-sizing: border-box;
+                padding: 6px 8px;
+                border-radius: 6px;
+                border: 1px solid #3f3f46;
+                background: #18181b;
+                color: #e2e8f0;
+                font-size: 11px;
+            }
+            .opt-commit-id {
+                font-size: 10px;
+                color: #93c5fd;
+            }
+            .opt-hint--warn { color: #fca5a5; }
+
+            /* —— Footer nav —— */
+            .opt-nav-row {
+                display: flex;
+                gap: 8px;
+                margin-top: 14px;
+                padding-top: 12px;
+                border-top: 1px solid #27272a;
+            }
+            .opt-nav-row .btn--sidebar-inline { flex: 1; min-width: 0; }
+            .opt-nav-row .btn-primary { flex: 1.2; }
+
+            /* —— Live panel (chart + telemetry) —— */
+            .opt-live-panel {
+                margin: 0 12px 10px;
+                padding: 10px;
+                border-radius: 10px;
+                border: 1px solid #27272a;
+                background: rgba(15, 17, 21, 0.75);
+            }
+            body.optimization-mode-active.is-optimizing .opt-live-panel {
+                border-color: rgba(167, 139, 250, 0.45);
+                box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.15);
+            }
+            .opt-telemetry-values {
+                font-size: 8px;
+                color: #94a3b8;
+                max-width: 110px;
+                line-height: 1.3;
+            }
+            #opt-mode-loss-chart {
+                width: 100%;
+                height: 88px;
+                display: block;
+                border-radius: 6px;
+                margin-bottom: 8px;
+            }
+            #opt-mode-run-status {
+                font-size: 10px;
+                padding-top: 8px;
+                color: #64748b;
+                text-align: center;
+            }
+            #opt-mode-run-status.opt-run-status--running { color: #c4b5fd; }
+            #opt-mode-run-status.opt-run-status--done { color: #34d399; }
+
+            /* —— Panel picker (component popup) —— */
+            .opt-panel-picker {
+                margin: 8px 0;
+                padding: 10px;
+                border: 1px dashed rgba(124, 58, 237, 0.45);
+                border-radius: 8px;
+                background: rgba(88, 28, 135, 0.06);
+            }
+            .opt-panel-picker-title {
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                color: #c4b5fd;
+                margin-bottom: 8px;
+            }
+
+            /* —— Results —— */
+            .opt-results-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+            }
+            .opt-results-card {
+                background: rgba(15, 17, 21, 0.85);
+                border: 1px solid #27272a;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 10px;
+            }
+            .opt-results-card h4 {
+                margin: 0 0 6px;
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                color: #64748b;
+            }
+            .opt-results-card + .opt-results-card,
+            .opt-results-grid + .opt-results-card { margin-top: 8px; }
+            .opt-mode-exit-btn {
+                display: inline-flex !important;
+                align-items: center;
+                gap: 4px;
+                font-size: 10px !important;
+                padding: 4px 8px !important;
+            }
+            .opt-mode-exit-btn[hidden] { display: none !important; }
+            .opt-last-run-card { margin: 0 12px 10px; }
+        </style>
+        <div id="optimization-mode-section">
+            <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span>Optimization</span>
+                <button id="opt-mode-exit-btn" type="button" class="btn btn-secondary btn--sidebar-inline opt-mode-exit-btn" hidden>
+                    <span class="material-icons-round" style="font-size:14px;">close</span>
+                    Exit
+                </button>
+            </div>
+            <div id="opt-mode-idle">
+                <p class="opt-hint" style="padding:0 12px;">
+                    Build a session step by step: objective terms → variables → tune → solver → run.
+                </p>
+                <div class="opt-idle-actions" style="padding:0 12px 12px;">
+                    <button id="opt-mode-enter-btn" type="button" class="btn btn-primary btn--sidebar-inline" style="width:100%;">
+                        Enter optimization mode
+                    </button>
+                </div>
+            </div>
+            <div id="opt-mode-active" hidden>
+                <div id="opt-mode-plan-legend" class="opt-plan-legend" hidden>
+                    <span><i style="background:#a78bfa"></i> On table</span>
+                    <span><i style="background:#22d3ee"></i> Objective</span>
+                    <span><i style="background:#fbbf24"></i> Variable</span>
+                    <span><i style="background:#34d399"></i> Both</span>
+                </div>
+                <div id="opt-mode-stage-nav"></div>
+                <div id="opt-mode-stage-hint"></div>
+                <div id="opt-mode-live-panel" class="opt-live-panel">
+                    <canvas id="opt-mode-loss-chart" width="320" height="88" aria-label="Optimization loss"></canvas>
+                    <div id="opt-mode-telemetry" hidden aria-live="polite"></div>
+                    <div id="opt-mode-run-status"></div>
+                </div>
+                <div id="opt-mode-stage-body"></div>
+            </div>
+        </div>
+            </section>
 
         <!-- Recipe Editor -->
-        <div style="flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <section id="workspace-panel-recipes" class="workspace-tab-panel"
+            role="tabpanel" aria-labelledby="workspace-tab-recipes">
+        <div style="flex-shrink: 0; display: flex; flex-direction: column;">
              <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <span>Recipe Editor</span>
                 <div id="rec-indicator" style="display: none; color: #ef4444; font-weight: bold; font-size: 10px; align-items: center; gap: 4px;">
@@ -383,25 +2921,35 @@
                  <input type="text" id="recipe-editor-name" placeholder="Recipe Name..." style="width: 100%; padding: 8px; background: #0f1115; border: 1px solid #2a2e36; border-radius: 6px; color: white; font-size: 12px; margin-bottom: 8px;">
                  
                  <div style="display: flex; gap: 8px;">
-                     <button id="record-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px;">
+                     <button id="record-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 6px;">
                         <span class="material-icons-round" style="font-size: 14px;">fiber_manual_record</span> Record
                     </button>
-                    <button id="recipe-editor-save" class="btn btn-primary" style="font-size: 11px; padding: 6px;">
+                    <button id="recipe-editor-save" type="button" class="btn btn-primary btn--sidebar-inline" style="font-size: 11px; padding: 6px;">
                         <span class="material-icons-round" style="font-size: 14px;">save</span> Save
                     </button>
                  </div>
             </div>
 
-            <div id="recipe-steps-container" style="flex-grow: 1; overflow-y: auto; background: rgba(0,0,0,0.2); margin: 0 16px 16px; border: 1px solid #2a2e36; border-radius: 6px;">
+            <div id="recipe-steps-container" style="background: rgba(0,0,0,0.2); margin: 0 16px 16px; border: 1px solid #2a2e36; border-radius: 6px; max-height: 280px; overflow-y: auto;">
                 <div style="padding: 20px; text-align: center; color: #64748b; font-size: 12px;">No steps recorded.</div>
             </div>
             
             <div class="section-header" style="border-top: 1px solid var(--border-color); padding-top: 12px;">Saved Recipes</div>
-            <div id="recipe-list" style="height: 120px; overflow-y: auto; padding: 0 16px 16px;">
+            <div id="recipe-list" style="max-height: 200px; overflow-y: auto; padding: 0 16px 16px;">
                 <!-- List -->
             </div>
         </div>
+        </section>
+
+        <section id="workspace-panel-component" class="workspace-tab-panel"
+            role="tabpanel" aria-labelledby="workspace-tab-component">
+            <div id="panel-dock" role="region" aria-label="Selected component controls"></div>
+        </section>
+            </div>
+        </div>
+        </div>
     </div>
+    </div><!-- /.app-shell -->
 
     <style>
         /* Unified Panel Styles */
@@ -470,7 +3018,170 @@
         .step-desc { flex-grow: 1; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .step-del { color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; font-size: 14px; }
         .step-del:hover { background: rgba(239, 68, 68, 0.1); }
+
+        /* --- Laser-lines dock: horizontal strip below bench chrome bar --- */
+        #laser-lines-dock {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+        .alignment-dock-tools {
+            display: flex;
+            flex-direction: row;
+            gap: 8px;
+            padding-right: 8px;
+            border-right: 1px solid rgba(148, 163, 184, 0.15);
+        }
+        .laser-dock-tool-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 2px solid rgba(148, 163, 184, 0.65);
+            background: rgba(15, 17, 21, 0.92);
+            color: var(--text-secondary);
+            padding: 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition:
+                background-color 140ms ease,
+                border-color 140ms ease,
+                box-shadow 140ms ease,
+                transform 80ms ease,
+                color 140ms ease;
+        }
+        .laser-dock-tool-btn:hover {
+            transform: scale(1.06);
+            border-color: rgba(226, 232, 240, 0.55);
+            color: var(--text-primary);
+        }
+        .laser-dock-tool-btn:focus-visible {
+            outline: 2px solid var(--primary-accent);
+            outline-offset: 2px;
+        }
+        .laser-dock-tool-btn .material-icons-round {
+            font-size: 20px;
+            line-height: 1;
+            pointer-events: none;
+        }
+        #pencil-tool-btn[aria-pressed="true"] {
+            border-color: #38bdf8;
+            color: #38bdf8;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+            background: rgba(56, 189, 248, 0.1);
+        }
+        #laser-lines-list {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+        .laser-line-icon {
+            --laser-line-color: #ff3b3b;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 2px solid var(--laser-line-color);
+            background: transparent;
+            padding: 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--laser-line-color);
+            transition:
+                background-color 140ms ease,
+                box-shadow 140ms ease,
+                transform 80ms ease,
+                color 140ms ease,
+                opacity 140ms ease;
+            position: relative;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .laser-line-icon:hover {
+            transform: scale(1.06);
+            box-shadow: 0 0 12px color-mix(in srgb, var(--laser-line-color) 55%, transparent);
+        }
+        .laser-line-icon:focus-visible {
+            outline: 2px solid var(--primary-accent);
+            outline-offset: 2px;
+        }
+        .laser-line-icon .material-icons-round {
+            font-size: 20px;
+            line-height: 1;
+            pointer-events: none;
+        }
+        /* Enabled = filled / lit; takes the line color as background, white icon */
+        .laser-line-icon.is-enabled {
+            background: var(--laser-line-color);
+            color: #ffffff;
+            box-shadow: 0 0 14px color-mix(in srgb, var(--laser-line-color) 65%, transparent);
+        }
+        .laser-line-icon.is-enabled:hover {
+            box-shadow: 0 0 18px color-mix(in srgb, var(--laser-line-color) 80%, transparent);
+        }
+        /* Disabled = outlined / dim */
+        .laser-line-icon:not(.is-enabled) {
+            opacity: 0.62;
+        }
+        .laser-line-icon:not(.is-enabled):hover {
+            opacity: 0.92;
+        }
+        /* Snap-line indicator: thin contrasting outer ring */
+        .laser-line-icon.is-snap::after {
+            content: '';
+            position: absolute;
+            inset: -5px;
+            border-radius: 50%;
+            border: 1.5px dashed var(--text-secondary);
+            pointer-events: none;
+        }
+        #laser-line-edit-modal .laser-edit-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        #laser-line-edit-modal .laser-edit-grid label {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        #laser-line-edit-modal .laser-edit-grid input {
+            width: 100%;
+            margin-top: 4px;
+            padding: 6px;
+            background: #0f1115;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 12px;
+        }
     </style>
-    <script src="/static/app.js"></script>
+    <div id="laser-line-edit-modal" style="display: none; position: fixed; inset: 0; z-index: 300; background: rgba(0, 0, 0, 0.55); align-items: center; justify-content: center; padding: 16px;" aria-hidden="true" role="dialog" aria-labelledby="laser-line-edit-title">
+        <div style="background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 12px; max-width: 440px; width: 100%; padding: 16px; box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);">
+            <h3 id="laser-line-edit-title" style="margin: 0 0 12px; font-size: 14px;">Edit laser line</h3>
+            <p style="font-size: 11px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.45;">P1 and P2 are two lab-frame points (mm, table center origin) that define the infinite line drawn on the canvas.</p>
+            <div class="laser-edit-grid">
+                <label>P1 x<input id="laser-edit-p1x" type="number" step="0.1"></label>
+                <label>P1 y<input id="laser-edit-p1y" type="number" step="0.1"></label>
+                <label>P2 x<input id="laser-edit-p2x" type="number" step="0.1"></label>
+                <label>P2 y<input id="laser-edit-p2y" type="number" step="0.1"></label>
+            </div>
+            <label style="display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 11px; cursor: pointer;">
+                <input type="checkbox" id="laser-line-edit-confirm"> I confirm updating these reference points
+            </label>
+            <div style="display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end;">
+                <button type="button" id="laser-line-edit-cancel" class="btn btn-secondary" style="width: auto; margin: 0;">Cancel</button>
+                <button type="button" id="laser-line-edit-apply" class="btn btn-primary" style="width: auto; margin: 0;">Apply</button>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="/static/js/main.js?v=10"></script>
+    <script type="module" src="/static/js/command-console.js?v=5"></script>
 </body>
 </html>

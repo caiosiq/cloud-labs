@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloudlabs-simulation-edge"
+version = "0.1.0"
+description = "Cloud Labs simulation edge — MuJoCo host + cloudlabs_edge contract face"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.27.0",
+  "numpy>=1.24.0",
+  "cloudlabs-edge-dev>=0.1.0",
+]
+
+[project.optional-dependencies]
+mujoco = [
+  "mujoco>=3.0.0",
+]
+
+[project.scripts]
+cloudlabs-simulation-edge = "simulation_edge.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+simulation_edge = ["py.typed"]

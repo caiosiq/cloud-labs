@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420" viewBox="0 0 800 420" role="img" aria-labelledby="title desc">
+  <title id="title">Version control layers: runtime, empty baseline, commits, catalog pins</title>
+  <desc id="desc">Live runtime is the working tree. Commits store configuration extracted from runtime. The empty baseline is the shared zeroth floor for dirty detection. Catalog pins are approved remote snapshots.</desc>
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#0a0e14" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1c2129"/>
+      <stop offset="100%" stop-color="#14181f"/>
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrCyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#34d399"/>
+    </marker>
+  </defs>
+  <rect width="800" height="420" fill="#0a0e14"/>
+  <rect width="800" height="420" fill="url(#glow)"/>
+
+  <!-- Empty baseline (left) -->
+  <rect x="28" y="150" width="168" height="120" rx="14" fill="url(#panel)" stroke="#f59e0b" stroke-width="1.75" stroke-dasharray="6 4"/>
+  <text x="112" y="182" text-anchor="middle" fill="#fbbf24" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.1em">EMPTY BASELINE</text>
+  <text x="112" y="212" text-anchor="middle" fill="#f8fafc" font-family="Inter, system-ui, sans-serif" font-size="15" font-weight="650">Zeroth state</text>
+  <text x="112" y="236" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="11">no components</text>
+  <text x="112" y="254" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10">EMPTY_CONFIGURATION</text>
+
+  <!-- Runtime (center top) -->
+  <rect x="260" y="36" width="280" height="112" rx="14" fill="url(#panel)" stroke="#38bdf8" stroke-width="2"/>
+  <text x="400" y="66" text-anchor="middle" fill="#7dd3fc" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.12em">RUNTIME</text>
+  <text x="400" y="94" text-anchor="middle" fill="#f8fafc" font-family="Inter, system-ui, sans-serif" font-size="17" font-weight="650">Live lab state</text>
+  <text x="400" y="118" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">working tree · Twin polls</text>
+  <text x="400" y="136" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">tunables + measurables + telemetry</text>
+
+  <!-- Commits (center bottom) -->
+  <rect x="260" y="250" width="280" height="112" rx="14" fill="url(#panel)" stroke="#a78bfa" stroke-width="2"/>
+  <text x="400" y="280" text-anchor="middle" fill="#c4b5fd" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.12em">CONTROL REPO</text>
+  <text x="400" y="308" text-anchor="middle" fill="#f8fafc" font-family="Inter, system-ui, sans-serif" font-size="17" font-weight="650">Configuration commits</text>
+  <text x="400" y="332" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">branch graph · Twin control panel</text>
+  <text x="400" y="350" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">intent only  not camera noise</text>
+
+  <!-- Catalog pins (right) -->
+  <rect x="604" y="150" width="168" height="120" rx="14" fill="url(#panel)" stroke="#34d399" stroke-width="1.75"/>
+  <text x="688" y="182" text-anchor="middle" fill="#6ee7b7" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.1em">CATALOG</text>
+  <text x="688" y="212" text-anchor="middle" fill="#f8fafc" font-family="Inter, system-ui, sans-serif" font-size="15" font-weight="650">Pins</text>
+  <text x="688" y="236" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="11">owner-approved</text>
+  <text x="688" y="254" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">Wiki Snapshots</text>
+
+  <!-- empty ’ runtime (dirty if no applied) -->
+  <path d="M196 190 C230 190 240 120 260 100" stroke="#f59e0b" stroke-width="1.5" fill="none" marker-end="url(#arrAmber)" opacity="0.9"/>
+  <text x="210" y="128" fill="#fbbf24" font-family="Inter, system-ui, sans-serif" font-size="10">dirty vs</text>
+
+  <!-- runtime ’ commits (commit) -->
+  <line x1="400" y1="148" x2="400" y2="248" stroke="#38bdf8" stroke-width="1.7" marker-end="url(#arrCyan)"/>
+  <text x="418" y="200" fill="#7dd3fc" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11">commit</text>
+  <text x="418" y="216" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="10">extract config</text>
+
+  <!-- commits ’ runtime (hard checkout) -->
+  <path d="M320 250 C300 210 300 180 320 148" stroke="#a78bfa" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arr)" opacity="0.95"/>
+  <text x="228" y="200" fill="#c4b5fd" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10">hard checkout</text>
+  <text x="236" y="216" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="10">reconcile</text>
+
+  <!-- commits ’ pins (publish) -->
+  <path d="M540 300 C580 300 590 240 604 210" stroke="#34d399" stroke-width="1.5" fill="none" marker-end="url(#arrGreen)"/>
+  <text x="560" y="268" fill="#6ee7b7" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10">publish</text>
+
+  <text x="400" y="396" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">History stores commanded layout  runtime is the live working tree</text>
+  <text x="400" y="414" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">Empty baseline makes dirty well-defined before any commit owns the bench</text>
+</svg>

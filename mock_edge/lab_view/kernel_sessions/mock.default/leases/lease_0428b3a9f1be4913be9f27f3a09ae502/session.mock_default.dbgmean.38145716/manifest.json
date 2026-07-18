@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "kernels": [
+    {
+      "id": "session.mock_default.dbgmean.38145716",
+      "label": "dbgmean",
+      "description": "Session kernel dbgmean",
+      "artifact": "model.pt",
+      "runtime": "torchscript",
+      "backend": "any",
+      "phase": "session",
+      "hooks": [
+        "evaluate",
+        "capture",
+        "tensor"
+      ],
+      "output_kind": "scalar",
+      "feature_names": [],
+      "digest": "sha256:dbbf738eebb59f6c0c1e337ca1bf3ca28ec142c7ec06e6b7c345b4d7f31bdc31",
+      "scope": "session",
+      "inputs": [
+        {
+          "name": "image",
+          "from": "measurables.camera_image",
+          "layout": "bgr_hwc_uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "score",
+          "role": "scalar"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="300" viewBox="0 0 800 300" role="img" aria-labelledby="title desc">
+  <title id="title">Soft preview, hard checkout, and adopt</title>
+  <desc id="desc">Soft checkout overlays a saved layout in Twin without moving hardware. Hard checkout diffs configuration and runs a reconcile plan of primitives. Adopt moves the graph pointer without motion.</desc>
+  <defs>
+    <radialGradient id="glow2" cx="50%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#0a0e14" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="panel2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1c2129"/>
+      <stop offset="100%" stop-color="#14181f"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="300" fill="#0a0e14"/>
+  <rect width="800" height="300" fill="url(#glow2)"/>
+
+  <!-- Soft -->
+  <rect x="28" y="48" width="232" height="190" rx="14" fill="url(#panel2)" stroke="#38bdf8" stroke-width="1.75"/>
+  <text x="144" y="80" text-anchor="middle" fill="#7dd3fc" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.12em">SOFT</text>
+  <text x="144" y="112" text-anchor="middle" fill="#f8fafc" font-family="Inter, system-ui, sans-serif" font-size="16" font-weight="650">Preview</text>
+  <text x="144" y="140" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">show target layout</text>
+  <text x="144" y="162" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">in Twin overlay</text>
+  <text x="144" y="196" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">no robot motion yet</text>
+  <text x="144" y="218" text-anchor="middle" fill="#475569" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10">viewing ` applied</text>
+
+  <!-- Hard -->
+  <rect x="284" y="48" width="232" height="190" rx="14" fill="url(#panel2)" stroke="#a78bfa" stroke-width="2"/>
+  <text x="400" y="80" text-anchor="middle" fill="#c4b5fd" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.12em">HARD</text>
+  <text x="400" y="112" text-anchor="middle" fill="#f8fafc" font-family="Inter, system-ui, sans-serif" font-size="16" font-weight="650">Apply on bench</text>
+  <text x="400" y="140" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">diff ’ reconcile plan</text>
+  <text x="400" y="162" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">primitives move parts</text>
+  <text x="400" y="196" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">then mark applied</text>
+  <text x="400" y="218" text-anchor="middle" fill="#475569" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10">MOVE · SET_MOTOR · &</text>
+
+  <!-- Adopt -->
+  <rect x="540" y="48" width="232" height="190" rx="14" fill="url(#panel2)" stroke="#34d399" stroke-width="1.75"/>
+  <text x="656" y="80" text-anchor="middle" fill="#6ee7b7" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="700" letter-spacing="0.12em">ADOPT</text>
+  <text x="656" y="112" text-anchor="middle" fill="#f8fafc" font-family="Inter, system-ui, sans-serif" font-size="16" font-weight="650">Graph only</text>
+  <text x="656" y="140" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">point HEAD at a node</text>
+  <text x="656" y="162" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">without commanding</text>
+  <text x="656" y="196" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui, sans-serif" font-size="11">bench already matches</text>
+  <text x="656" y="218" text-anchor="middle" fill="#475569" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10">no reconcile run</text>
+
+  <text x="400" y="270" text-anchor="middle" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="12">Three ways to travel history  only hard checkout moves the physical bench</text>
+</svg>

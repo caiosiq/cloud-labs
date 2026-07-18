@@ -1,0 +1,100 @@
+{
+  "action": "OPTIMIZE",
+  "target_id": "tag_20",
+  "parameters": {
+    "mode": "ensemble",
+    "session_label": "two-mirror centroid + power (mock)",
+    "variables": [
+      {
+        "id": "v_m20_m1",
+        "tag_id": "tag_20",
+        "path": "tunables.nominal_motor_positions.1",
+        "kind": "continuous",
+        "physical_type": "continuous",
+        "unit": "deg",
+        "bounds": { "min": -3.0, "max": 3.0 },
+        "delta": true
+      },
+      {
+        "id": "v_m20_m3",
+        "tag_id": "tag_20",
+        "path": "tunables.nominal_motor_positions.3",
+        "kind": "continuous",
+        "physical_type": "continuous",
+        "unit": "deg",
+        "bounds": { "min": -3.0, "max": 3.0 },
+        "delta": true
+      },
+      {
+        "id": "v_m18_m1",
+        "tag_id": "tag_18",
+        "path": "tunables.nominal_motor_positions.1",
+        "kind": "continuous",
+        "physical_type": "continuous",
+        "unit": "deg",
+        "bounds": { "min": -3.0, "max": 3.0 },
+        "delta": true
+      },
+      {
+        "id": "v_m18_m3",
+        "tag_id": "tag_18",
+        "path": "tunables.nominal_motor_positions.3",
+        "kind": "continuous",
+        "physical_type": "continuous",
+        "unit": "deg",
+        "bounds": { "min": -3.0, "max": 3.0 },
+        "delta": true
+      }
+    ],
+    "objective": {
+      "type": "weighted_sum",
+      "minimize": true,
+      "terms": [
+        {
+          "id": "centroid_rms_px",
+          "weight": 1.0,
+          "source": {
+            "tag_id": "tag_20",
+            "kind": "derived_centroid",
+            "from": "measurables.camera_image",
+            "target_px": { "x": 512.0, "y": 384.0 }
+          },
+          "metric": "rms_distance_px"
+        },
+        {
+          "id": "power_intensity",
+          "weight": 0.35,
+          "source": {
+            "tag_id": "tag_20",
+            "kind": "measurable_scalar",
+            "path": "measurables.last_optimization_score",
+            "normalize": { "min": 0.0, "max": 1.0 }
+          },
+          "metric": "one_minus_normalized"
+        }
+      ]
+    },
+    "solver": {
+      "type": "block_cobyla",
+      "max_total_evals": 200,
+      "keep_best": true,
+      "settle_ms": 0,
+      "normalization": { "space": "unit_hypercube" },
+      "blocks": [
+        {
+          "id": "block_mirrors",
+          "variable_ids": ["v_m20_m1", "v_m20_m3", "v_m18_m1", "v_m18_m3"],
+          "max_evals": 100,
+          "trust_region_u": 0.3,
+          "rhobeg_u": 0.1,
+          "rhoend_u": 0.001,
+          "passes": 3
+        }
+      ]
+    },
+    "telemetry": {
+      "stream": "optimization-ensemble",
+      "include": ["eval", "loss", "terms", "u", "block_id"]
+    }
+  }
+}

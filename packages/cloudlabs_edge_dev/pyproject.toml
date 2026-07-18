@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloudlabs-edge-dev"
+version = "0.1.0"
+description = "Scaffold, doctor, check, and certify tools for Cloud Labs Edge Contract v1"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Cloud Labs" }]
+dependencies = [
+  "requests>=2.28.0",
+  "jsonschema>=4.18.0",
+  "referencing>=0.30.0",
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.27.0",
+  "websockets>=12.0",
+  "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+cloudlabs-edge = "cloudlabs_edge_dev.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/cloud-labs"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+cloudlabs_edge_dev = ["py.typed", "scaffold/templates/**/*"]

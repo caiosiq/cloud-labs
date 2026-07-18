@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/execute_response.schema.json",
+  "title": "EdgeContractExecuteResponseV1",
+  "description": "POST /execute response.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["queued", "completed", "failed", "refused"]
+    },
+    "result": {
+      "type": "object",
+      "description": "Primitive-specific result. Observe/probe should include epoch fields when applicable."
+    },
+    "error": {
+      "type": ["object", "null"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "epoch_ms": {
+      "type": "integer",
+      "description": "Bench monotonic ms when this result is a latched observation / EVAL_KERNEL."
+    },
+    "latch_quality": {
+      "type": "string",
+      "enum": ["hardware_triggered", "software_approx", "unknown"]
+    }
+  }
+}

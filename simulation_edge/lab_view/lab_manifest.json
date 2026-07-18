@@ -1,0 +1,6 @@
+﻿{
+  "version": 1,
+  "description": "Simulation edge lab view (MuJoCo / soft pose).",
+  "communicator": "simulation",
+  "session_checkpoint": false
+}

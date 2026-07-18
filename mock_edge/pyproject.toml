@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloudlabs-mock-edge"
+version = "0.1.0"
+description = "Cloud Labs mock teaching lab — host physics + cloudlabs_edge contract face"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.27.0",
+  "cloudlabs-edge-dev>=0.1.0",
+]
+
+[project.scripts]
+cloudlabs-mock-edge = "mock_edge.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mock_edge = ["py.typed"]

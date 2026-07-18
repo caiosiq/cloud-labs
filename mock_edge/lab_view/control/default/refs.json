@@ -1,0 +1,11 @@
+{
+  "heads": {
+    "Interferometer": "03b3c7a294084c3294fc860957ba9b6f",
+    "main": "d720029825b846168b2c1f382f4d7b64"
+  },
+  "viewing": "d720029825b846168b2c1f382f4d7b64",
+  "applied": {
+    "configuration_id": null,
+    "branch": null
+  }
+}
