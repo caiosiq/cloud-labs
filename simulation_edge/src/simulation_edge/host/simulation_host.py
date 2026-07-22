@@ -27,7 +27,7 @@ def _planner_backend_from_env() -> str:
         os.getenv("SIMULATION_EDGE_PLANNER")
         or os.getenv("SIMULATION_EDGE_MUJOCO_PLANNER")
         or os.getenv("CLOUDLAB_MUJOCO_PLANNER")
-        or "custom_ik"
+        or "radial"
     ).strip().lower()
 
 
@@ -106,15 +106,12 @@ class SimulationHost:
         from simulation_edge.host.client import MuJoCoProcessClient
         from simulation_edge.host.runtime import (
             MUJOCO_PLANNER_CUSTOM_IK,
-            MUJOCO_PLANNER_MOVEIT,
             MUJOCO_PLANNER_RADIAL,
         )
         from simulation_edge.host.scene import build_scene_spec
 
         planner_backend = _planner_backend_from_env()
-        if planner_backend in {"moveit", "mujoco_moveit"}:
-            planner_backend = MUJOCO_PLANNER_MOVEIT
-        elif planner_backend in {"custom", "custom_ik", "ik"}:
+        if planner_backend in {"custom", "custom_ik", "ik"}:
             planner_backend = MUJOCO_PLANNER_CUSTOM_IK
         elif planner_backend in {"radial", "radial_ik", "base_radial"}:
             planner_backend = MUJOCO_PLANNER_RADIAL
@@ -162,15 +159,8 @@ class SimulationHost:
             state = copy.deepcopy(self.current_state)
             state["last_runtime_error"] = copy.deepcopy(self._last_runtime_error)
             sim_status = self._client.status() if self._client is not None else {}
-            planner = str(sim_status.get("planner") or "")
             simulator = {
-                "backend": (
-                    "mujoco_moveit"
-                    if planner == "moveit"
-                    else "mujoco"
-                    if self._client is not None
-                    else "soft"
-                ),
+                "backend": "mujoco" if self._client is not None else "soft",
                 "mujoco_running": bool(
                     self._client is not None and getattr(self._client, "running", False)
                 ),

@@ -133,9 +133,9 @@ class DampedLeastSquaresIK:
         A single home seed traps DLS in local minima for valid poses in other
         table quadrants. The target bearing gives joint 1 a deterministic,
         physically meaningful starting point while retaining the previous
-        solution as the preferred continuous branch. MoveIt can leave the arm
-        in a different branch before a local contact move, so also try the
-        nominal posture family as a fallback.
+        solution as the preferred continuous branch. A previous motion can
+        leave the arm in another branch, so also try the nominal posture
+        family as a fallback.
         """
         candidates: list[np.ndarray] = []
         bearing = float(np.arctan2(target_position[1], target_position[0]))

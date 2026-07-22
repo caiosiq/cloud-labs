@@ -891,11 +891,17 @@ async def get_platform_registries():
 async def get_component_catalog():
     """
     Tags listed in ``active_catalog.json`` merged with rows from ``component_library.json``
-    under ``LAB_VIEW_PATH``. Always re-read from disk â€” see ``lab.get_catalog()``.
+    under ``LAB_VIEW_PATH``. HTTP edge backends read the request-bound files
+    directly because they intentionally have no in-process communicator.
     """
     if lab is None:
         return []
     try:
+        client = _edge_client_for()
+        if client.transport != EdgeTransport.IN_PROCESS:
+            from lab_model.coordinator.catalog.bundle import merged_catalog_rows
+
+            return merged_catalog_rows()
         return lab.get_catalog()
     except Exception as e:
         logger.exception("GET /api/catalog failed: %s", e)

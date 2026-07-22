@@ -20,7 +20,7 @@ $env:CLOUDLAB_SIM_PROFILE = "optical_housings"
 $env:CLOUDLAB_MUJOCO_VIEWER = if ($Viewer) { "1" } else { "0" }
 $env:CLOUDLAB_MUJOCO_REALTIME = if ($Speed -lt 1.0) { "1" } else { "0" }
 $env:CLOUDLAB_MUJOCO_VIEWER_SYNC_HZ = "60"
-$env:CLOUDLAB_MOVEIT_TRAJECTORY_TIME_SCALE = Format-EnvFloat (0.5 / $Speed)
+$env:CLOUDLAB_MOTION_TIME_SCALE = Format-EnvFloat (0.5 / $Speed)
 
 & "..\.venv\Scripts\python.exe" -m simulation_edge --port 8120
 exit $LASTEXITCODE

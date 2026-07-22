@@ -1,3 +1,0 @@
-{"event": "session_start", "log_path": "C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs-caio-edge-contract\\simulation_edge\\logs\\mujoco_sessions\\mujoco_20260718_043712_29672.jsonl", "pid": 29672, "planner_backend": "moveit", "profile": "optical_housings", "timestamp": "2026-07-18T04:37:12.913"}
-{"event": "runtime_init_start", "realtime": false, "request_id": null, "show_viewer": true, "timestamp": "2026-07-18T04:37:12.913"}
-{"event": "moveit_collision_aware_rest_selected", "keyframe_home_joints": [0.0, -0.247, 0.0, 0.909, 0.0, 1.15644, 0.0], "request_id": null, "rest_joints": [0.0, -0.6, 0.0, 1.2, 0.0, 1.4, 0.0], "timestamp": "2026-07-18T04:37:12.978"}

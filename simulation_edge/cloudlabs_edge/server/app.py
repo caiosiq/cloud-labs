@@ -278,7 +278,7 @@ def create_app(*, lab: Any = None, backend_id: str = "sim.default") -> FastAPI:
 
 
 def build_default_app() -> FastAPI:
-    # Bind the HTTP socket quickly; adapters lazily bootstrap MuJoCo/MoveIt on
+    # Bind the HTTP socket quickly; adapters lazily bootstrap MuJoCo on
     # the first lab-facing request via adapters.context.get_lab().
     return create_app(lab=None, backend_id="sim.default")
 

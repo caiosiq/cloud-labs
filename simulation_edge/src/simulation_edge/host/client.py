@@ -10,7 +10,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from simulation_edge.host.runtime import (
-    MUJOCO_PLANNER_CUSTOM_IK,
+    MUJOCO_PLANNER_RADIAL,
     simulation_process_main,
 )
 from simulation_edge.host.scene import SceneSpec
@@ -36,10 +36,10 @@ class MuJoCoProcessClient:
         *,
         show_viewer: Optional[bool] = None,
         realtime: Optional[bool] = None,
-        planner_backend: str = MUJOCO_PLANNER_CUSTOM_IK,
+        planner_backend: str = MUJOCO_PLANNER_RADIAL,
     ) -> None:
         self.scene = scene
-        self.planner_backend = str(planner_backend or MUJOCO_PLANNER_CUSTOM_IK)
+        self.planner_backend = str(planner_backend or MUJOCO_PLANNER_RADIAL)
         self.show_viewer = (
             _env_bool("CLOUDLAB_MUJOCO_VIEWER", True)
             if show_viewer is None

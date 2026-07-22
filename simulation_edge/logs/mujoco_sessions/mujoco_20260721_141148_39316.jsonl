@@ -1,2 +1,0 @@
-{"event": "session_start", "log_path": "C:\\Users\\joshua\\Documents\\robotic_twin_simulation\\cloud-labs-caio-edge-contract\\simulation_edge\\logs\\mujoco_sessions\\mujoco_20260721_141148_39316.jsonl", "pid": 39316, "planner_backend": "radial", "profile": "demo_boxes", "timestamp": "2026-07-21T14:11:48.229"}
-{"event": "runtime_init_start", "realtime": false, "request_id": null, "show_viewer": false, "timestamp": "2026-07-21T14:11:48.229"}
