@@ -107,6 +107,7 @@ class SimulationHost:
         from simulation_edge.host.runtime import (
             MUJOCO_PLANNER_CUSTOM_IK,
             MUJOCO_PLANNER_MOVEIT,
+            MUJOCO_PLANNER_RADIAL,
         )
         from simulation_edge.host.scene import build_scene_spec
 
@@ -115,6 +116,8 @@ class SimulationHost:
             planner_backend = MUJOCO_PLANNER_MOVEIT
         elif planner_backend in {"custom", "custom_ik", "ik"}:
             planner_backend = MUJOCO_PLANNER_CUSTOM_IK
+        elif planner_backend in {"radial", "radial_ik", "base_radial"}:
+            planner_backend = MUJOCO_PLANNER_RADIAL
 
         self.scene = build_scene_spec(self.layout, self.catalog, self.current_state)
         self._apply_scene_spawn_adjustments()

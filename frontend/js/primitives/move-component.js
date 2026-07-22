@@ -29,7 +29,7 @@ export function renderMoveComponent(ctx) {
             return;
         }
         if (typeof checkCollision === 'function') {
-            const collision = checkCollision(tagId, tx, ty);
+            const collision = checkCollision(tagId, tx, ty, { rotation: trot });
             if (collision.detected) {
                 hooks.log(`Move cancelled: collision with ${collision.other}`, 'error');
                 return;

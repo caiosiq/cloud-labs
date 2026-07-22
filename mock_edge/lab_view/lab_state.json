@@ -343,7 +343,7 @@
         "tunables": {
           "presence": "breadboard",
           "nominal_pose": {
-            "x": 454.24285714285725,
+            "x": 390.0,
             "y": 200.0,
             "rotation": -90.0
           },

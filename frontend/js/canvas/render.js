@@ -20,12 +20,14 @@ import {
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
     DANGER_RADIUS_MM,
+    FRAME_SAFETY_CLEARANCE_MM,
     LAB_CENTER_PX,
     LAB_SCALE,
     LAB_X_MAX,
     LAB_X_MIN,
     LAB_Y_MAX,
     LAB_Y_MIN,
+    MANUAL_MOTION_CORNER_CUTOFF_MM,
     STORAGE_RECT_X_MIN,
     STORAGE_RECT_Y_MIN,
 } from '../config.js';
@@ -49,6 +51,11 @@ import {
 
 let _ctx = null;
 
+// Approximate outward footprint of the arm, wrist camera, and gripper during an edge pickup.
+// This is visual guidance only and does not affect motion validation.
+const APPROX_ROBOT_EDGE_ENVELOPE_MM = 75;
+const APPROX_COMPONENT_RADIUS_MM = 44;
+
 /**
  * Resolve and cache the 2D canvas context. Returns true on success, false if the canvas element
  * isn't in the DOM yet.
@@ -61,6 +68,68 @@ export function initRender() {
     return _ctx != null;
 }
 
+function drawApproximateUsableArea() {
+    if (!store.showUsableAreaOverlay) return;
+
+    // The shaded boundary describes the component's physical footprint, not its center.
+    // Expand the center-safe workspace by one representative component radius.
+    const xMin = LAB_X_MIN + FRAME_SAFETY_CLEARANCE_MM
+        + APPROX_ROBOT_EDGE_ENVELOPE_MM - APPROX_COMPONENT_RADIUS_MM;
+    const xMax = LAB_X_MAX - FRAME_SAFETY_CLEARANCE_MM
+        - APPROX_ROBOT_EDGE_ENVELOPE_MM + APPROX_COMPONENT_RADIUS_MM;
+    const yMin = LAB_Y_MIN + FRAME_SAFETY_CLEARANCE_MM
+        + APPROX_ROBOT_EDGE_ENVELOPE_MM - APPROX_COMPONENT_RADIUS_MM;
+    const yMax = LAB_Y_MAX - FRAME_SAFETY_CLEARANCE_MM
+        - APPROX_ROBOT_EDGE_ENVELOPE_MM + APPROX_COMPONENT_RADIUS_MM;
+    if (xMin >= xMax || yMin >= yMax) return;
+
+    const maxCorner = Math.min(
+        Math.abs(xMin),
+        Math.abs(xMax),
+        Math.abs(yMin),
+        Math.abs(yMax),
+    );
+    const centerCorner = MANUAL_MOTION_CORNER_CUTOFF_MM || maxCorner;
+    const corner = Math.min(centerCorner + APPROX_COMPONENT_RADIUS_MM, maxCorner);
+    const points = [
+        [-corner, yMin], [corner, yMin], [corner, -corner],
+        [xMax, -corner], [xMax, corner], [corner, corner],
+        [corner, yMax], [-corner, yMax], [-corner, corner],
+        [xMin, corner], [xMin, -corner], [-corner, -corner],
+    ];
+
+    const ctx = _ctx;
+    ctx.beginPath();
+    points.forEach(([x, y], index) => {
+        const p = mmToPx(x, y);
+        if (index === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+    });
+    ctx.closePath();
+    ctx.arc(
+        LAB_CENTER_PX.x,
+        LAB_CENTER_PX.y,
+        DANGER_RADIUS_MM * LAB_SCALE,
+        0,
+        Math.PI * 2,
+    );
+    ctx.fillStyle = 'rgba(34, 197, 94, 0.12)';
+    ctx.fill('evenodd');
+
+    ctx.beginPath();
+    points.forEach(([x, y], index) => {
+        const p = mmToPx(x, y);
+        if (index === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+    });
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(34, 197, 94, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
+
 function clearCanvas() {
     const ctx = _ctx;
     const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
@@ -68,6 +137,8 @@ function clearCanvas() {
     gradient.addColorStop(1, '#141619');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    drawApproximateUsableArea();
 
     // Danger zone: R ≈ 63 mm circle around the robot origin, drawn as a reddish disk + dashed
     // outline so the operator instinctively avoids it during manual drags.

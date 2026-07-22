@@ -16,7 +16,18 @@
  *
  * `render` is injected at boot via `initCanvasInteraction`.
  */
-import { DANGER_RADIUS_MM } from '../config.js';
+import {
+    DANGER_RADIUS_MM,
+    FRAME_SAFETY_CLEARANCE_IN,
+    FRAME_SAFETY_CLEARANCE_MM,
+    FRAME_SAFETY_MIN_HEIGHT_MM,
+    FRAME_SAFETY_MIN_WIDTH_MM,
+    LAB_X_MAX,
+    LAB_X_MIN,
+    LAB_Y_MAX,
+    LAB_Y_MIN,
+    MANUAL_MOTION_CORNER_CUTOFF_MM,
+} from '../config.js';
 import { mmToPx, pxToMm } from './coordinates.js';
 import { isConfigViewMode } from '../ui/config-view-mode.js';
 import { isDetached } from '../control/control-state.js';
@@ -112,6 +123,7 @@ export function initCanvasInteraction(deps) {
     if (!canvas) return;
 
     canvas.addEventListener('mousedown', (e) => onMouseDown(canvas, e));
+    canvas.addEventListener('dblclick', (e) => onDoubleClick(canvas, e));
     canvas.addEventListener('mousemove', (e) => onMouseMove(canvas, e));
     canvas.addEventListener('wheel', (e) => onWheel(e), { passive: false });
     canvas.addEventListener('mouseup', (e) => onMouseUp(canvas, e));
@@ -204,6 +216,50 @@ export function checkCollision(targetId, x, y, opts = {}) {
     const PADDING_MM = 5; // Min padding between circumscribed circles of two components.
     const r1 = getComponentRadius(targetId);
 
+    if (FRAME_SAFETY_CLEARANCE_MM > 0) {
+        const size = getComponentSize(targetId);
+        const width = Math.max(Number(size.width) || 0, FRAME_SAFETY_MIN_WIDTH_MM);
+        const height = Math.max(Number(size.height) || 0, FRAME_SAFETY_MIN_HEIGHT_MM);
+        const rotation = Number.isFinite(Number(opts.rotation))
+            ? Number(opts.rotation)
+            : Number(store.ghostState?.[targetId]?.rotation || 0);
+        const angle = rotation * Math.PI / 180;
+        const c = Math.abs(Math.cos(angle));
+        const s = Math.abs(Math.sin(angle));
+        const halfX = c * width / 2 + s * height / 2;
+        const halfY = s * width / 2 + c * height / 2;
+        const safeBounds = {
+            xMin: LAB_X_MIN + FRAME_SAFETY_CLEARANCE_MM,
+            xMax: LAB_X_MAX - FRAME_SAFETY_CLEARANCE_MM,
+            yMin: LAB_Y_MIN + FRAME_SAFETY_CLEARANCE_MM,
+            yMax: LAB_Y_MAX - FRAME_SAFETY_CLEARANCE_MM,
+        };
+        let side = null;
+        if (x - halfX < safeBounds.xMin) side = 'left';
+        else if (x + halfX > safeBounds.xMax) side = 'right';
+        else if (y - halfY < safeBounds.yMin) side = 'bottom';
+        else if (y + halfY > safeBounds.yMax) side = 'top';
+        if (side) {
+            const inches = FRAME_SAFETY_CLEARANCE_IN || FRAME_SAFETY_CLEARANCE_MM / 25.4;
+            return {
+                detected: true,
+                other: `FRAME SAFETY BOUNDARY (${side}): keep the entire component at least ${inches.toFixed(0)} in (${FRAME_SAFETY_CLEARANCE_MM.toFixed(1)} mm) inside the frame`,
+            };
+        }
+    }
+
+    if (
+        (breadboardIntent || forPlaceFromStorageDrag) &&
+        MANUAL_MOTION_CORNER_CUTOFF_MM > 0 &&
+        Math.abs(x) > MANUAL_MOTION_CORNER_CUTOFF_MM &&
+        Math.abs(y) > MANUAL_MOTION_CORNER_CUTOFF_MM
+    ) {
+        return {
+            detected: true,
+            other: `MANUAL MOTION CORNER LIMIT: keep at least one component-center coordinate within +/-${MANUAL_MOTION_CORNER_CUTOFF_MM.toFixed(0)} mm so the camera-guided pickup and placement remain reachable`,
+        };
+    }
+
     for (const [id, pose] of Object.entries(store.ghostState)) {
         if (id === targetId) continue;
         const r2 = getComponentRadius(id);
@@ -269,6 +325,23 @@ function nextWheelRotationDeg(current, directionSign) {
 }
 
 // --- Event handlers ---
+
+function onDoubleClick(canvas, e) {
+    if (isConfigViewMode() || store.pencilToolActive || store.isDragging) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
+    const lab = pxToMm(canvasX, canvasY);
+    const insideTable =
+        lab.x >= LAB_X_MIN && lab.x <= LAB_X_MAX &&
+        lab.y >= LAB_Y_MIN && lab.y <= LAB_Y_MAX;
+    if (!insideTable) return;
+    if (getComponentAtPosition(canvasX, canvasY) || hitTestGuide(canvasX, canvasY)) return;
+
+    store.showUsableAreaOverlay = !store.showUsableAreaOverlay;
+    _render();
+}
 
 function onMouseDown(canvas, e) {
     if (isConfigViewMode()) return;

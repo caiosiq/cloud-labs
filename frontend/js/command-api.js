@@ -153,7 +153,7 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
             return;
         }
         const { target_x: tx, target_y: ty, rotation: trot } = command.parameters;
-        const collision = deps.checkCollision(tag, tx, ty);
+        const collision = deps.checkCollision(tag, tx, ty, { rotation: trot });
         if (collision.detected) {
             appendLine(`Move blocked: collision with ${collision.other}.`, 'error');
             deps.log(`[Command Console] move cancelled (collision with ${collision.other})`, 'error');

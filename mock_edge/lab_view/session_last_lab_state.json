@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "saved_at": "2026-07-18T07:43:54.680110+00:00",
+  "saved_at": "2026-07-22T04:09:05.895163+00:00",
   "lab_mode": "MOCK",
   "lab_state": {
     "system_status": "IDLE",
-    "last_updated": "2026-07-18T03:38:08.762510",
+    "last_updated": "2026-07-21T22:53:18.452725",
     "components": {
       "tag_9": {
         "id": "tag_9",
@@ -347,7 +347,7 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 454.24285714285725,
+              "x": 390.0,
               "y": 200.0,
               "rotation": -90.0
             },

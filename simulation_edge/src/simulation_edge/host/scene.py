@@ -120,6 +120,8 @@ class SceneSpec:
     lab_bounds_mm: Dict[str, float]
     table_bounds_mm: Dict[str, float]
     profile_id: str
+    frame_safety_clearance_mm: float = 0.0
+    manual_motion_corner_cutoff_mm: float = 0.0
     static_collision_objects: tuple["StaticCollisionObjectSpec", ...] = ()
     spawn_adjustments_mm: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
@@ -792,6 +794,42 @@ def build_scene_spec(
     if bounds["x_min"] >= bounds["x_max"] or bounds["y_min"] >= bounds["y_max"]:
         raise SceneValidationError("lab bounds must have positive width and height")
 
+    frame_safety = layout.get("frame_safety")
+    frame_safety_clearance_mm = 0.0
+    if isinstance(frame_safety, Mapping):
+        frame_safety_clearance_mm = _finite_float(
+            frame_safety.get("clearance_mm", 0.0),
+            label="frame_safety.clearance_mm",
+        )
+    if frame_safety_clearance_mm < 0:
+        raise SceneValidationError("frame safety clearance must be non-negative")
+    manual_workspace = layout.get("manual_motion_workspace")
+    manual_motion_corner_cutoff_mm = 0.0
+    if isinstance(manual_workspace, Mapping):
+        corner_cutoff_raw = manual_workspace.get(
+            "corner_cutoff_mm",
+            manual_workspace.get("half_extent_mm", 0.0),
+        )
+        manual_motion_corner_cutoff_mm = _finite_float(
+            corner_cutoff_raw,
+            label="manual_motion_workspace.corner_cutoff_mm",
+        )
+    if manual_motion_corner_cutoff_mm < 0:
+        raise SceneValidationError(
+            "manual motion workspace corner cutoff must be non-negative"
+        )
+    placement_bounds = {
+        "x_min": bounds["x_min"] + frame_safety_clearance_mm,
+        "x_max": bounds["x_max"] - frame_safety_clearance_mm,
+        "y_min": bounds["y_min"] + frame_safety_clearance_mm,
+        "y_max": bounds["y_max"] - frame_safety_clearance_mm,
+    }
+    if (
+        placement_bounds["x_min"] >= placement_bounds["x_max"]
+        or placement_bounds["y_min"] >= placement_bounds["y_max"]
+    ):
+        raise SceneValidationError("frame safety clearance leaves no usable lab area")
+
     catalog_map = {
         str(row.get("tag_id")): dict(row)
         for row in catalog_rows
@@ -834,12 +872,11 @@ def build_scene_spec(
             y_mm,
             half_x_mm,
             half_y_mm,
-            bounds,
+            placement_bounds,
         ):
             invalid.append(
-                f"{tag_id}: ({x_mm:.1f}, {y_mm:.1f}) mm footprint is outside "
-                f"x=[{bounds['x_min']:.1f},{bounds['x_max']:.1f}], "
-                f"y=[{bounds['y_min']:.1f},{bounds['y_max']:.1f}]"
+                f"{tag_id}: ({x_mm:.1f}, {y_mm:.1f}) mm footprint enters the "
+                f"{frame_safety_clearance_mm:.1f} mm frame safety boundary"
             )
             continue
         clear_spawn = _find_clear_spawn_point_mm(
@@ -847,7 +884,7 @@ def build_scene_spec(
             y_mm,
             half_x_mm,
             half_y_mm,
-            bounds,
+            placement_bounds,
             layout,
             placed,
         )
@@ -1038,6 +1075,8 @@ def build_scene_spec(
         lab_bounds_mm=bounds,
         table_bounds_mm=table_bounds,
         profile_id=profile.profile_id,
+        frame_safety_clearance_mm=frame_safety_clearance_mm,
+        manual_motion_corner_cutoff_mm=manual_motion_corner_cutoff_mm,
         static_collision_objects=profile.static_collision_objects,
         spawn_adjustments_mm=spawn_adjustments,
     )

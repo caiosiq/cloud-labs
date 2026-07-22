@@ -1,0 +1,15 @@
+INFO:     127.0.0.1:49969 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49970 - "GET /debug/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49975 - "GET /lab-state HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49977 - "GET /debug/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56569 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56570 - "GET /debug/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56574 - "GET /lab-state HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56576 - "GET /debug/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62971 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62972 - "GET /debug/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62977 - "GET /lab-state HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62979 - "GET /debug/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63917 - "POST /execute HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53027 - "GET /debug/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53029 - "GET /lab-state HTTP/1.1" 200 OK
