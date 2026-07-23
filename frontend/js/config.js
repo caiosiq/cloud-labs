@@ -10,6 +10,13 @@ export let LAB_Y_MAX = 500;
 /** Robot base / keep-out circle radius in lab mm (same frame as component centers). */
 export let DANGER_RADIUS_MM = 90;
 
+/** Clearance reserved inside each visible lab-frame boundary. */
+export let FRAME_SAFETY_CLEARANCE_MM = 0;
+export let FRAME_SAFETY_CLEARANCE_IN = 0;
+export let FRAME_SAFETY_MIN_WIDTH_MM = 0;
+export let FRAME_SAFETY_MIN_HEIGHT_MM = 0;
+export let MANUAL_MOTION_CORNER_CUTOFF_MM = 0;
+
 export let LAB_WIDTH_MM = LAB_X_MAX - LAB_X_MIN;
 export let LAB_HEIGHT_MM = LAB_Y_MAX - LAB_Y_MIN;
 export let LAB_SCALE = Math.min(CANVAS_WIDTH / LAB_WIDTH_MM, CANVAS_HEIGHT / LAB_HEIGHT_MM);
@@ -70,6 +77,40 @@ export function applyLabLayoutFromApiDoc(payload) {
     const dz = payload.danger_zone;
     if (dz && typeof dz === 'object' && Number.isFinite(Number(dz.radius_mm))) {
         DANGER_RADIUS_MM = Number(dz.radius_mm);
+    }
+    FRAME_SAFETY_CLEARANCE_MM = 0;
+    FRAME_SAFETY_CLEARANCE_IN = 0;
+    FRAME_SAFETY_MIN_WIDTH_MM = 0;
+    FRAME_SAFETY_MIN_HEIGHT_MM = 0;
+    MANUAL_MOTION_CORNER_CUTOFF_MM = 0;
+    const frameSafety = payload.frame_safety;
+    if (frameSafety && typeof frameSafety === 'object') {
+        if (Number.isFinite(Number(frameSafety.clearance_mm))) {
+            FRAME_SAFETY_CLEARANCE_MM = Math.max(0, Number(frameSafety.clearance_mm));
+        }
+        if (Number.isFinite(Number(frameSafety.clearance_in))) {
+            FRAME_SAFETY_CLEARANCE_IN = Math.max(0, Number(frameSafety.clearance_in));
+        }
+        const minimum = frameSafety.minimum_component_footprint_mm;
+        if (minimum && typeof minimum === 'object') {
+            if (Number.isFinite(Number(minimum.width))) {
+                FRAME_SAFETY_MIN_WIDTH_MM = Math.max(0, Number(minimum.width));
+            }
+            if (Number.isFinite(Number(minimum.height))) {
+                FRAME_SAFETY_MIN_HEIGHT_MM = Math.max(0, Number(minimum.height));
+            }
+        }
+    }
+    const manualWorkspace = payload.manual_motion_workspace;
+    if (manualWorkspace && typeof manualWorkspace === 'object') {
+        const cornerCutoff = manualWorkspace.corner_cutoff_mm
+            ?? manualWorkspace.half_extent_mm;
+        if (Number.isFinite(Number(cornerCutoff))) {
+            MANUAL_MOTION_CORNER_CUTOFF_MM = Math.max(
+                0,
+                Number(cornerCutoff),
+            );
+        }
     }
     const br = payload.breadboard;
     if (br && typeof br === 'object') {

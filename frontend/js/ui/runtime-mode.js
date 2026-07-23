@@ -15,24 +15,24 @@ function detailFromResponse(data, fallback) {
 }
 
 function renderRuntimeMode(info) {
-    const select = document.getElementById('runtime-mode-select');
+    const button = document.getElementById('runtime-mode-refresh-btn');
     const status = document.getElementById('runtime-mode-status');
-    if (!select) return;
+    if (!button) return;
 
     store.runtimeMode = info;
-    select.innerHTML = '';
-    (info.available_modes || []).forEach((option) => {
-        const element = document.createElement('option');
-        element.value = option.id;
-        element.textContent = option.label;
-        element.disabled = !option.enabled && option.id !== info.active_mode;
-        element.title = option.reason || '';
-        select.appendChild(element);
-    });
-    select.value = info.active_mode;
-    select.disabled = Boolean(info.locked);
 
     const simulator = info.simulator || {};
+    const mujocoMode = (info.available_modes || []).find((option) => option.id === 'mujoco');
+    const canRefresh =
+        info.active_mode === 'mujoco' ||
+        Boolean(simulator.running) ||
+        String(simulator.backend || '').toLowerCase().startsWith('mujoco') ||
+        Boolean(mujocoMode && mujocoMode.enabled);
+    button.disabled = !canRefresh;
+    button.title = canRefresh
+        ? 'Restart the MuJoCo viewer from the current lab state'
+        : (mujocoMode && mujocoMode.reason) || 'MuJoCo is unavailable for this backend';
+
     if (status) {
         status.className = 'runtime-mode-status';
         if (info.active_mode === 'mujoco' && simulator.running) {
@@ -63,14 +63,14 @@ async function fetchRuntimeMode() {
     return data;
 }
 
-export async function switchRuntimeMode(mode) {
-    const select = document.getElementById('runtime-mode-select');
-    if (select) select.disabled = true;
+export async function refreshMujoco() {
+    const button = document.getElementById('runtime-mode-refresh-btn');
+    if (button) button.disabled = true;
     try {
-        const response = await fetch(withBackendQuery('/api/runtime-mode'), {
+        const response = await fetch(withBackendQuery('/api/runtime-mode/refresh-mujoco'), {
             method: 'POST',
             headers: backendHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ mode }),
+            body: JSON.stringify({}),
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -80,35 +80,37 @@ export async function switchRuntimeMode(mode) {
         store.forceGhostSync = true;
         await _deps.fetchCatalogMap();
         await _deps.fetchLabState();
-        _deps.log(`Runtime mode changed to ${data.active_mode}.`, 'info');
+        const simulator = data.simulator || {};
+        _deps.log(
+            `MuJoCo refreshed${simulator.pid ? ` (PID ${simulator.pid})` : ''}.`,
+            'info',
+        );
         return data;
     } catch (error) {
         const latest = await fetchRuntimeMode().catch(() => store.runtimeMode);
         if (latest) renderRuntimeMode(latest);
-        _deps.log(`Runtime mode switch failed: ${error.message || error}`, 'error');
+        _deps.log(`Refresh MuJoCo failed: ${error.message || error}`, 'error');
         _deps.showErrorModal(
-            'Runtime Mode Switch Failed',
+            'Refresh MuJoCo Failed',
             error.message || String(error),
         );
         return null;
     } finally {
-        if (select && store.runtimeMode) {
-            select.disabled = Boolean(store.runtimeMode.locked);
-        }
+        if (store.runtimeMode) renderRuntimeMode(store.runtimeMode);
     }
 }
 
 export async function initRuntimeMode(deps = {}) {
     _deps = { ..._deps, ...deps };
-    const select = document.getElementById('runtime-mode-select');
-    if (!select) return;
-    select.addEventListener('change', () => {
-        void switchRuntimeMode(select.value);
+    const button = document.getElementById('runtime-mode-refresh-btn');
+    if (!button) return;
+    button.addEventListener('click', () => {
+        void refreshMujoco();
     });
     try {
         await fetchRuntimeMode();
     } catch (error) {
-        select.disabled = true;
+        button.disabled = true;
         _deps.log(`Runtime mode unavailable: ${error.message || error}`, 'error');
     }
 }

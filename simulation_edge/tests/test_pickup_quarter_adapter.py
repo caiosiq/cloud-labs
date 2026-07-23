@@ -1,0 +1,206 @@
+import unittest
+from types import SimpleNamespace
+
+import numpy as np
+
+from simulation_edge.host.runtime import (
+    CollisionPlanError,
+    REAL_PICKUP_CAMERA_TO_GRIPPER_OFFSET_M,
+    REAL_PICKUP_CANONICAL_RIGHT_CAMERA_YAW_DEG,
+    MuJoCoRobotRuntime,
+    _canonical_equivalent_angle_rad,
+    _manual_motion_workspace_allows_xy,
+    _pickup_quarter_frame,
+    _quarter_grasp_yaw,
+    _radial_joint_path_sample_count,
+    _radial_joint_path_travel_rad,
+    _rotate_xy_deg,
+)
+
+
+class PickupQuarterAdapterTests(unittest.TestCase):
+    def test_pickup_quarters_are_selected_by_diagonal_triangles(self):
+        self.assertEqual(_pickup_quarter_frame(np.array((2.0, 1.0))).name, "right")
+        self.assertEqual(_pickup_quarter_frame(np.array((-1.0, 2.0))).name, "top")
+        self.assertEqual(_pickup_quarter_frame(np.array((-2.0, -1.0))).name, "left")
+        self.assertEqual(_pickup_quarter_frame(np.array((1.0, -2.0))).name, "bottom")
+
+    def test_pickup_quarter_frames_are_exact_quarter_turns(self):
+        expected = {
+            "right": 0.0,
+            "top": 90.0,
+            "left": 180.0,
+            "bottom": -90.0,
+        }
+        samples = ((2.0, 1.0), (-1.0, 2.0), (-2.0, -1.0), (1.0, -2.0))
+        for sample in samples:
+            frame = _pickup_quarter_frame(np.asarray(sample))
+            self.assertEqual(frame.rotation_deg, expected[frame.name])
+
+    def test_adapter_uses_quarter_frame_inside_old_300_mm_threshold(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.home_tcp_rotation = np.eye(3)
+        samples = ((0.2, 0.1), (-0.1, 0.2), (-0.2, -0.1), (0.1, -0.2))
+        for sample in samples:
+            source_xy = np.asarray(sample)
+            adapter = runtime._real_pickup_adapter_targets(
+                source_xy,
+                runtime._target_rotation(0.0),
+                grasp_z=0.300,
+            )
+            self.assertTrue(adapter.quarter_oriented)
+            self.assertEqual(
+                adapter.workspace_quarter,
+                _pickup_quarter_frame(source_xy).name,
+            )
+            expected = {
+                "right": -25.6,
+                "top": 64.4,
+                "left": 154.4,
+                "bottom": -115.6,
+            }
+            self.assertAlmostEqual(
+                adapter.camera_yaw_deg,
+                expected[adapter.workspace_quarter],
+            )
+
+    def test_gripper_side_of_camera_rotates_with_workspace_quarter(self):
+        expected_gripper_directions = {
+            "right": np.array((-1.0, 0.0)),
+            "top": np.array((0.0, -1.0)),
+            "left": np.array((1.0, 0.0)),
+            "bottom": np.array((0.0, 1.0)),
+        }
+        samples = ((2.0, 1.0), (-1.0, 2.0), (-2.0, -1.0), (1.0, -2.0))
+        for sample in samples:
+            frame = _pickup_quarter_frame(np.asarray(sample))
+            camera_to_gripper = _rotate_xy_deg(
+                REAL_PICKUP_CAMERA_TO_GRIPPER_OFFSET_M,
+                REAL_PICKUP_CANONICAL_RIGHT_CAMERA_YAW_DEG
+                + frame.rotation_deg,
+            )
+            gripper_from_camera = -camera_to_gripper
+            direction = gripper_from_camera / np.linalg.norm(gripper_from_camera)
+            np.testing.assert_allclose(
+                direction,
+                expected_gripper_directions[frame.name],
+                atol=0.015,
+            )
+
+    def test_quarter_grasp_uses_orthogonal_component_symmetry(self):
+        yaw, offset = _quarter_grasp_yaw(-90.0, 0.0)
+        self.assertEqual(yaw, 0.0)
+        self.assertEqual(offset, 90.0)
+
+        yaw, offset = _quarter_grasp_yaw(0.0, 0.0)
+        self.assertEqual(yaw, 0.0)
+        self.assertEqual(offset, 0.0)
+
+        yaw, offset = _quarter_grasp_yaw(0.0, 154.4)
+        self.assertEqual(yaw, 180.0)
+        self.assertEqual(offset, -180.0)
+
+        yaw, offset = _quarter_grasp_yaw(0.0, -115.6)
+        self.assertEqual(yaw, -90.0)
+        self.assertEqual(offset, -90.0)
+
+    def test_manual_workspace_only_trims_two_wall_corners(self):
+        self.assertTrue(
+            _manual_motion_workspace_allows_xy(
+                np.array((-350.0, -190.0)),
+                330.0,
+            )
+        )
+        self.assertTrue(
+            _manual_motion_workspace_allows_xy(
+                np.array((330.0, 330.0)),
+                330.0,
+            )
+        )
+        self.assertFalse(
+            _manual_motion_workspace_allows_xy(
+                np.array((340.0, 340.0)),
+                330.0,
+            )
+        )
+
+    def test_radial_path_sampling_has_three_degree_max_step(self):
+        start = np.zeros(7)
+        self.assertEqual(_radial_joint_path_sample_count(start, start), 3)
+
+        end = start.copy()
+        end[0] = np.deg2rad(12.0)
+        self.assertEqual(_radial_joint_path_sample_count(start, end), 5)
+
+        end[0] = np.deg2rad(180.0)
+        self.assertEqual(_radial_joint_path_sample_count(start, end), 24)
+
+    def test_wrapped_wrist_angle_rebases_to_canonical_equivalent(self):
+        rebased = _canonical_equivalent_angle_rad(
+            np.deg2rad(-330.5),
+            lower=-2.0 * np.pi,
+            upper=2.0 * np.pi,
+        )
+        self.assertAlmostEqual(np.rad2deg(rebased), 29.5)
+
+    def test_radial_wrist_travel_guard_rejects_long_branch(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        start = np.zeros(7)
+        long_end = start.copy()
+        long_end[6] = np.deg2rad(306.9)
+        self.assertAlmostEqual(
+            np.rad2deg(_radial_joint_path_travel_rad((start, long_end), 6)),
+            306.9,
+        )
+        with self.assertRaisesRegex(CollisionPlanError, "306.9 deg"):
+            runtime._validate_radial_wrist_travel(
+                "radial coordinated rotate",
+                (start, long_end),
+            )
+
+        short_end = start.copy()
+        short_end[6] = np.deg2rad(-53.1)
+        runtime._validate_radial_wrist_travel(
+            "radial coordinated rotate",
+            (start, short_end),
+        )
+
+    def test_exact_wrapped_move_uses_short_wrist_branch_after_rebase(self):
+        class FakeModel:
+            jnt_limited = np.ones(7, dtype=bool)
+            jnt_range = np.tile(np.array((-2.0 * np.pi, 2.0 * np.pi)), (7, 1))
+
+            @staticmethod
+            def joint(name):
+                return SimpleNamespace(id=int(name.removeprefix("joint")) - 1)
+
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = FakeModel()
+        runtime.home_tcp_rotation = np.eye(3)
+        runtime._validate_radial_pose_target = lambda *args, **kwargs: None
+        runtime._load_radial_motion_library = lambda: SimpleNamespace(carry_z_m=0.532)
+        runtime._log = lambda *args, **kwargs: None
+
+        current = np.zeros(7)
+        current[0] = np.deg2rad(31.86907858262687)
+        current[6] = _canonical_equivalent_angle_rad(np.deg2rad(-330.5))
+        plan = runtime._plan_radial_coordinated_rotation(
+            name="radial coordinated rotate",
+            tag_id="tag_21",
+            radius_m=0.330,
+            source_theta=np.deg2rad(31.86907858262687),
+            target_theta=np.deg2rad(-22.67134362198085),
+            source_rotation=runtime._target_rotation(2.3795485650758503),
+            target_rotation=runtime._target_rotation(0.0),
+            current=current,
+        )
+        self.assertIsNotNone(plan)
+        wrist_travel_deg = np.rad2deg(
+            _radial_joint_path_travel_rad(plan.waypoints, 6)
+        )
+        self.assertLess(wrist_travel_deg, 60.0)
+        self.assertAlmostEqual(wrist_travel_deg, 52.1609, places=3)
+
+
+if __name__ == "__main__":
+    unittest.main()

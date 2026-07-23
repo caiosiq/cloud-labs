@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "saved_at": "2026-07-18T00:10:51.789282+00:00",
+  "saved_at": "2026-07-22T04:09:05.895163+00:00",
   "lab_mode": "MOCK",
   "lab_state": {
     "system_status": "IDLE",
-    "last_updated": "2026-07-17T21:03:49.360868",
+    "last_updated": "2026-07-21T22:53:18.452725",
     "components": {
       "tag_9": {
         "id": "tag_9",
@@ -347,7 +347,7 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 454.24285714285725,
+              "x": 390.0,
               "y": 200.0,
               "rotation": -90.0
             },
@@ -689,8 +689,8 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": 103.49882542451815,
-              "y": 200.0,
+              "x": 196.3559682816611,
+              "y": 164.2857142857143,
               "rotation": 180.0
             },
             "nominal_motor_positions": {
@@ -702,13 +702,21 @@
               "slot": null
             },
             "placement": {
-              "mode": "ENSEMBLE"
+              "mode": "MANUAL"
             },
-            "reported_pose": null
+            "reported_pose": {
+              "x": 196.8380951133157,
+              "y": 164.2133199295374,
+              "rotation": 180.0
+            }
           },
           "measurables": {
-            "pose": null,
-            "last_optimization_score": 5.385142157745213,
+            "pose": {
+              "x": 196.8380951133157,
+              "y": 164.2133199295374,
+              "rotation": 180.0
+            },
+            "last_optimization_score": null,
             "last_optimized_pose": null,
             "camera_image": null
           }

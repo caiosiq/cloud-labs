@@ -57,11 +57,18 @@ import json
 from pathlib import Path
 
 from cloudlabs_edge_dev.stub_server import create_app
+from kernel_host import torch_available
 
 _HERE = Path(__file__).resolve().parent
 _CAPS = json.loads((_HERE / "capabilities.json").read_text(encoding="utf-8"))
 _BENCH = json.loads((_HERE / "bench" / "layout.json").read_text(encoding="utf-8"))
 _BACKEND_ID = str(_CAPS.get("backend_id") or "stub.default")
+
+# Derive TorchScript capability from what this process can actually import, so
+# the coordinator only routes EVAL_KERNEL / OPTIMIZE here when PyTorch is
+# present. capabilities.json declares the static default (false); this is the
+# honest runtime truth. See kernel_host.py.
+_CAPS.setdefault("features", {})["torchscript_execution"] = torch_available()
 
 app = create_app(
     backend_id=_BACKEND_ID,
@@ -354,14 +361,181 @@ KERNEL_HOST_PY = '''\
 
 Kernels are inputs to the ``EVAL_KERNEL`` primitive (and to closed-loop
 OPTIMIZE), not peer HTTP verbs. They always consume the analysis form of a
-measurable — for cameras, HxWx3 ``uint8`` BGR in process memory — never a
-lossy Twin JPEG stream. Cache loaded modules here so repeated probes do not
-reload weights on every call.
+measurable -- for cameras, HxWx3 ``uint8`` BGR in process memory -- never a
+lossy Twin JPEG stream. Loaded modules are cached here so repeated probes do
+not reload weights.
+
+This module ships working, lab-independent provisioning + execution. The only
+part you may want to customize is how a specific kernel's raw output maps to
+result fields in :func:`eval_on_bgr`; the default handles scalar / feature /
+gate outputs.
+
+Provisioning
+------------
+A local bench keeps ``.pt`` files under ``{CLOUDLABS_EDGE_KERNELS_DIR}`` and
+refers to them by id. A *remote* coordinator cannot share that filesystem, so
+``EVAL_KERNEL`` args may also carry the artifact itself -- inline
+(``artifact_b64``) or by URL (``kernel_uri`` / ``kernel_url``) -- with an
+optional ``digest`` (``sha256:<hex>``) for integrity. :func:`provision_kernel`
+fetches, verifies, and caches it to ``{kernels_dir}/{kernel_id}.pt`` so the
+usual load path then applies. Re-provisioning is skipped when the cached file
+already matches the requested digest.
+
+If PyTorch is not installed, :func:`load_kernel` raises a clear error that
+dispatch maps to a refusal. Derive
+``capabilities.features.torchscript_execution`` from :func:`torch_available`
+so the coordinator only routes kernels when this bench can actually run them.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import base64
+import hashlib
+import os
+import re
+import threading
+import urllib.request
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+_CACHE: Dict[str, Any] = {}
+_lock = threading.Lock()
+
+#: Reject artifacts larger than this (mirrors the coordinator session store).
+MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def torch_available() -> bool:
+    """True when PyTorch can be imported in this process (drives capabilities)."""
+    try:
+        import torch  # type: ignore  # noqa: F401
+    except Exception:  # noqa: BLE001 - any import/runtime error means unusable
+        return False
+    return True
+
+
+def _kernels_dir() -> Path:
+    raw = os.environ.get("CLOUDLABS_EDGE_KERNELS_DIR")
+    if raw:
+        return Path(raw)
+    return Path(__file__).resolve().parent / "kernels"
+
+
+def _resolve_path(kernel_id: str) -> Path:
+    p = Path(kernel_id)
+    if p.suffix == ".pt" and p.is_absolute():
+        return p
+    return _kernels_dir() / f"{kernel_id}.pt"
+
+
+def _normalize_digest(digest: Optional[str]) -> Optional[str]:
+    """Return a bare lowercase hex sha256, accepting an optional ``sha256:`` prefix."""
+    if not digest:
+        return None
+    raw = str(digest).strip().lower()
+    if raw.startswith("sha256:"):
+        raw = raw.split(":", 1)[1]
+    return raw or None
+
+
+def _sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _fetch_artifact_bytes(args: Dict[str, Any]) -> Optional[bytes]:
+    """Pull kernel bytes from ``args`` (inline base64 or a download URL), or None."""
+    b64 = args.get("artifact_b64") or args.get("artifact_base64")
+    if b64:
+        try:
+            return base64.b64decode(str(b64), validate=False)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"invalid artifact_b64: {exc}") from exc
+
+    uri = args.get("kernel_uri") or args.get("kernel_url") or args.get("artifact_uri")
+    if uri:
+        uri = str(uri)
+        scheme = uri.split(":", 1)[0].lower()
+        if scheme not in ("http", "https", "file"):
+            raise ValueError(f"unsupported kernel_uri scheme: {scheme!r}")
+        try:
+            with urllib.request.urlopen(uri, timeout=30.0) as resp:  # noqa: S310 - scheme allowlisted
+                data = resp.read(MAX_ARTIFACT_BYTES + 1)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"failed to download kernel from {uri!r}: {exc}") from exc
+        return data
+    return None
+
+
+def provision_kernel(kernel_id: str, args: Optional[Dict[str, Any]] = None) -> Optional[Path]:
+    """Ensure a ``.pt`` for ``kernel_id`` is on disk, fetching it if args supply one.
+
+    Parameters
+    ----------
+    kernel_id:
+        Registry / session id used as the cache filename (``{id}.pt``).
+    args:
+        Execute args that may carry ``artifact_b64`` or ``kernel_uri`` (+ optional
+        ``digest``). When neither is present this is a no-op and returns ``None``
+        (the caller falls back to a pre-installed local file).
+
+    Returns
+    -------
+    Optional[Path]
+        The cached artifact path when (re)provisioned, else ``None``.
+
+    Raises
+    ------
+    ValueError
+        On unsafe id, oversize artifact, bad base64, or digest mismatch.
+    """
+    args = args or {}
+    data = None
+    digest = _normalize_digest(args.get("digest"))
+
+    # Absolute local .pt ids are pre-installed; never overwrite them.
+    p = Path(kernel_id)
+    if p.suffix == ".pt" and p.is_absolute():
+        return None
+
+    if not _SAFE_ID.match(kernel_id or ""):
+        # Only enforce when we actually need to write a cache file.
+        if _fetch_artifact_bytes(args) is not None:
+            raise ValueError(
+                f"unsafe kernel_id for provisioning: {kernel_id!r}"
+            )
+        return None
+
+    path = _resolve_path(kernel_id)
+
+    # Fast path: cached file already matches the requested digest.
+    if path.is_file() and digest is not None:
+        if _sha256_hex(path.read_bytes()) == digest:
+            return path
+
+    data = _fetch_artifact_bytes(args)
+    if data is None:
+        return None
+    if not data:
+        raise ValueError("kernel artifact is empty")
+    if len(data) > MAX_ARTIFACT_BYTES:
+        raise ValueError(
+            f"kernel artifact exceeds max size ({MAX_ARTIFACT_BYTES} bytes)"
+        )
+    if digest is not None:
+        actual = _sha256_hex(data)
+        if actual != digest:
+            raise ValueError(
+                f"kernel digest mismatch: expected {digest}, got {actual}"
+            )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(path)
+    with _lock:
+        _CACHE.pop(kernel_id, None)  # force reload of freshly written weights
+    return path
 
 
 def load_kernel(kernel_id: str) -> Any:
@@ -370,16 +544,30 @@ def load_kernel(kernel_id: str) -> Any:
     Parameters
     ----------
     kernel_id:
-        Registry id such as ``"ensemble.eval.image_features"`` or a lab-local
-        package name agreed with the coordinator job payload.
+        Registry id such as ``"ensemble.eval.image_features"`` or an absolute
+        ``.pt`` path agreed with the coordinator job payload.
 
     Returns
     -------
     Any
-        A callable module/object the lab can pass to :func:`eval_on_bgr`.
-        Exact type is lab-defined (``torch.jit.ScriptModule``, wrapper, …).
+        A ``torch.jit.ScriptModule`` in eval mode, ready for :func:`eval_on_bgr`.
     """
-    raise NotImplementedError(f"Phase 6: load/cache TorchScript {kernel_id!r}")
+    with _lock:
+        if kernel_id in _CACHE:
+            return _CACHE[kernel_id]
+        try:
+            import torch  # type: ignore
+        except ImportError as exc:  # pragma: no cover - bench without torch
+            raise RuntimeError(
+                "torchscript_execution unavailable: PyTorch is not installed"
+            ) from exc
+        path = _resolve_path(kernel_id)
+        if not path.is_file():
+            raise FileNotFoundError(f"kernel {kernel_id!r} not found at {path}")
+        module = torch.jit.load(str(path), map_location="cpu")
+        module.eval()
+        _CACHE[kernel_id] = module
+        return module
 
 
 def eval_on_bgr(
@@ -396,22 +584,61 @@ def eval_on_bgr(
         Same id passed to :func:`load_kernel`.
     bgr:
         NumPy (or equivalent) array with shape ``(H, W, 3)``, dtype ``uint8``,
-        channel order BGR — the analysis layout declared for
-        ``camera_image`` in capabilities.
+        channel order BGR -- the analysis layout declared for ``camera_image``.
     args:
         Optional kernel parameters from the execute body (ROI, thresholds).
 
     Returns
     -------
     dict
-        JSON-friendly results. Prefer ``{"scalar": float}`` and/or
-        ``{"features": [float, ...]}`` so Twin/SDK and OPTIMIZE can consume
-        them without guessing field names. Include ``"passed": bool`` when
-        the kernel is a gate.
+        JSON-friendly results: ``{"scalar": float}`` and/or
+        ``{"features": [float, ...]}``, plus ``{"passed": bool}`` when the
+        kernel returns a gate (via ``threshold``).
     """
-    raise NotImplementedError(
-        f"Phase 6: eval {kernel_id!r} on local BGR (args={args!r})"
-    )
+    # Provision the artifact first when the caller shipped one (remote edge path),
+    # then load (which raises a clear "torchscript_execution unavailable" error if
+    # PyTorch is missing -> mapped to a contract refusal). Import torch only after,
+    # when it is guaranteed present, so a torch-less bench refuses rather than 500s.
+    provision_kernel(kernel_id, args or {})
+    module = load_kernel(kernel_id)
+
+    import torch  # type: ignore
+
+    tensor = torch.from_numpy(_as_uint8_hwc(bgr)).float()
+    # Provide NCHW float in [0, 1] as the conventional input; kernels that want
+    # HWC can index accordingly. We pass both-friendly NCHW here.
+    nchw = tensor.permute(2, 0, 1).unsqueeze(0) / 255.0
+    with torch.no_grad():
+        try:
+            out = module(nchw)
+        except Exception:
+            out = module(tensor)  # fall back to raw HWC uint8-as-float
+
+    result: Dict[str, Any] = {"kernel_id": kernel_id}
+    if isinstance(out, torch.Tensor):
+        flat = out.reshape(-1)
+        if flat.numel() == 1:
+            result["scalar"] = float(flat.item())
+        else:
+            result["features"] = [float(v) for v in flat.tolist()]
+    elif isinstance(out, (tuple, list)):
+        result["features"] = [float(v) for v in torch.as_tensor(out).reshape(-1).tolist()]
+    else:
+        result["scalar"] = float(out)
+
+    threshold = (args or {}).get("threshold")
+    if threshold is not None and "scalar" in result:
+        result["passed"] = bool(result["scalar"] >= float(threshold))
+    return result
+
+
+def _as_uint8_hwc(bgr: Any) -> Any:
+    import numpy as np  # type: ignore
+
+    arr = np.asarray(bgr)
+    if arr.dtype != np.uint8:
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+    return arr
 
 
 def unload_kernel(kernel_id: str) -> None:
@@ -420,10 +647,10 @@ def unload_kernel(kernel_id: str) -> None:
     Parameters
     ----------
     kernel_id:
-        Id previously passed to :func:`load_kernel`. Missing ids should be a
-        no-op rather than an error.
+        Id previously passed to :func:`load_kernel`. Missing ids are a no-op.
     """
-    raise NotImplementedError(f"Phase 6: drop cached kernel {kernel_id!r}")
+    with _lock:
+        _CACHE.pop(kernel_id, None)
 '''
 
 DISPATCH_PY = '''\
@@ -550,7 +777,7 @@ ADAPTERS_MOTION = '''\
 These functions implement the motion half of the Edge Contract: moving a
 tag on the bench, in-air pick/hover/place, and storage-grid operations.
 Wire each body to the existing OpticalExperiment ``*_cloudlab`` helpers (or
-a future MoveIt backend) without changing the function names Twin and the
+a future motion backend) without changing the function names Twin and the
 SDK already call through ``POST /execute``.
 
 Unless noted, ``args`` is the execute ``args`` object and every function
@@ -1298,7 +1525,7 @@ cloudlabs_edge/
   capabilities.json    # planned supported_primitives + channels
   contract.py          # completed / refused / failed envelopes
   latch.py             # epoch_ms and latch_quality
-  kernel_host.py       # TorchScript on local BGR
+  kernel_host.py       # TorchScript on local BGR (provisioning ships working)
   dispatch.py          # primitive name → adapter callable
   bench/layout.json    # static geometry for GET /bench
   adapters/
@@ -1339,7 +1566,7 @@ Edge Contract v1 agent for backend `{backend_id}`. This folder is a full
 function skeleton: it speaks the contract today through the
 `cloudlabs_edge_dev` reference stub, and it already contains every adapter
 signature Phase 6 must fill from lab-automation. It does not import
-OpticalExperiment, MoveIt, or recorder drivers yet.
+OpticalExperiment or recorder drivers yet.
 
 Generated by::
 
@@ -1360,10 +1587,14 @@ cloudlabs-edge certify http://127.0.0.1:8100 --path . --profile stub
 
 ## Next (Phase 6)
 
-Map each documented function to a deathray callable, implement
-`adapters/`, `latch.py`, and `kernel_host.py`, then point `/execute` at
+Map each documented function to a deathray callable and implement
+`adapters/` and `latch.py`, then point `/execute` at
 `dispatch.dispatch_primitive` while keeping Twin and the SDK on the same
-primitive names.
+primitive names. `kernel_host.py` ships working, lab-independent
+provisioning + TorchScript execution (fetch/verify/cache a `.pt`, then run it
+on local BGR); customize only how a kernel's raw output maps to result fields.
+`main.py` already derives `capabilities.features.torchscript_execution` from
+`kernel_host.torch_available()`.
 """
 
 

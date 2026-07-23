@@ -3,16 +3,34 @@
   "layout": {
     "version": 1,
     "lab_bounds_mm": {
-      "x_min": 0.0,
-      "x_max": 450.0,
-      "y_min": 0.0,
-      "y_max": 300.0
+      "x_min": -500,
+      "x_max": 500,
+      "y_min": -500,
+      "y_max": 500
     },
-    "danger_zone": { "radius_mm": 40.0, "padding_mm": 5.0 },
-    "storage": { "rule": "rect", "grid_nx": 4, "grid_ny": 2 },
+    "danger_zone": {
+      "radius_mm": 90,
+      "padding_mm": 5
+    },
+    "frame_safety": {
+      "clearance_mm": 76.2,
+      "clearance_in": 3.0,
+      "minimum_component_footprint_mm": {
+        "width": 72.0,
+        "height": 64.2883
+      }
+    },
+    "manual_motion_workspace": {
+      "corner_cutoff_mm": 330.0
+    },
+    "storage": {
+      "rule": "negative_xy",
+      "grid_nx": 4,
+      "grid_ny": 4
+    },
     "breadboard": {
-      "grid_spacing_mm": 25.0,
-      "origin_offset_mm": { "x": 0.0, "y": 0.0 }
+      "grid_spacing_mm": 25,
+      "origin_offset_mm": { "x": -7.4, "y": 0 }
     }
   },
   "laser_lines": []

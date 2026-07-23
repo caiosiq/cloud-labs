@@ -37,7 +37,7 @@
       "lab_view_path": "simulation_edge/lab_view",
       "enabled": true,
       "edge": {
-        "base_url": null,
+        "base_url": "http://127.0.0.1:8120",
         "contract_version": "1.0.0",
         "lan_direct_ok": false
       }

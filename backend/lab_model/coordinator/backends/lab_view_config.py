@@ -286,7 +286,7 @@ def _load_lab_manifest(paths: LabViewPaths, project_root: str) -> LabViewManifes
         atomic_write_json(p, doc)
         print(f"[CONFIG] Created default lab_manifest.json ({p})", flush=True)
 
-    with open(p, "r", encoding="utf-8") as f:
+    with open(p, "r", encoding="utf-8-sig") as f:
         raw = json.load(f)
     if not isinstance(raw, dict):
         raise SystemExit(f"[CONFIG] lab_manifest.json must be a JSON object: {p}")

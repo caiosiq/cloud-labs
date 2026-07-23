@@ -49,6 +49,26 @@ def _path_from_lazy(ref: LazyRef) -> Optional[str]:
     return None
 
 
+def resolve_tensor_from_bytes(tensor: MeasurableTensor, data: bytes) -> MeasurableTensor:
+    """Resolve a camera tensor from in-memory image bytes (HTTP edge proxy path).
+
+    Used when the pixels live on a remote edge and were fetched on demand rather
+    than read from a local file. Decodes PNG/JPEG to ``HxWx3 uint8`` BGR and
+    replaces the lazy ref with the array. No-op if ``data`` is empty or the tensor
+    is already materialized.
+    """
+    if not isinstance(tensor.data, LazyRef) or not data:
+        return tensor
+    from lab_model.execution.optimization.metrics.image_features import (
+        decode_png_bytes_to_bgr,
+    )
+
+    arr = decode_png_bytes_to_bgr(data)
+    if arr is None:
+        return tensor
+    return replace(tensor, data=arr, shape=tuple(int(x) for x in arr.shape))
+
+
 def resolve_tensor_with_state_path(
     tensor: MeasurableTensor,
     *,

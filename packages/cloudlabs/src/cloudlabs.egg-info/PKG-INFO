@@ -17,30 +17,184 @@ Requires-Dist: Pillow>=9.0.0; extra == "images"
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0; extra == "dev"
 
-# cloudlabs — imperative SDK for Cloud Labs
+# cloudlabs — the scripting language for the Optical Processing Unit
 
-Install from the monorepo (editable)::
+A lab notebook should read like an experiment, not like a device driver.
+**cloudlabs** is the Python face of Cloud Labs: the **Client SDK** that runs on
+the author laptop and speaks the same **primitives** as the Twin UI — move,
+measure, optimize — while the **Central Coordinator** matchmakes and the
+**Edge Agent** owns the instruments.
 
-    pip install -e ./packages/cloudlabs
+```text
+  Your script (cloudlabs)          Coordinator              Edge + LabCommunicator
+         │                              │                            │
+         │ connect() → lease            │                            │
+         │ prepare / move / probe       │                            │
+         │ run_optimize (job)           │ ── queue / proxy ─────────►│ closed-loop if needed
+         │ wait / print results         │◄── lab_state / job ────────│
+```
 
-Optional extras::
+---
 
-    pip install -e "./packages/cloudlabs[kernels,images]"
+## Where to learn (in the app)
 
-Usage (server must be running)::
+The **Wiki → Learn** track is the teaching surface for experimentalists:
 
-    from cloudlabs import connect, resolve_backend_id
+http://127.0.0.1:8000/wiki#learn/why
 
-    with connect(resolve_backend_id(), base_url="http://127.0.0.1:8000") as lab:
-        lab.prepare(catalog_pin="laser-cavity-main", reconcile=False)
-        lab.components.tag_20.move(x=10.0).wait_until_idle()
+It covers why Cloud Labs exists, the three faces (Client / Coordinator / Edge),
+components, primitives, TeleOp and Optimize, kernels, **how to choose a
+backend and call `connect()`**, and imperative vs closed-loop — then points
+you at Twin and the language scripts.
 
-Fluent + builtins example::
+---
 
-    python scripts/example_fluent_components.py
+## Install
 
-Author-defined TorchScript kernels + feature objectives::
+From the monorepo root (editable):
 
-    python scripts/example_session_kernel_author.py
+```bash
+pip install -e ./packages/cloudlabs
+# optional: pip install -e "./packages/cloudlabs[kernels,images]"
+```
 
-See ``docs/SESSION_KERNELS.md`` and ``packages/cloudlabs/README.md``.
+Start the coordinator first (`python backend/main.py`). Then:
+
+```python
+from cloudlabs import connect, resolve_backend_id
+
+with connect(resolve_backend_id(), base_url="http://127.0.0.1:8000") as lab:
+    lab.prepare(catalog_pin="laser-cavity-main", reconcile=False)
+    lab.components.tag_20.move(x=10.0).wait_until_idle()
+```
+
+---
+
+## Two ways to work: imperative vs closed-loop
+
+### Imperative actions (you are in the loop)
+
+Each call is one **primitive** round-trip: you decide, the edge acts, you
+observe, you decide again.
+
+```python
+lab.components.tag_20.move(x=12.5).wait_until_idle()
+lab.components.tag_20.motor(1, 0.5).wait_until_idle()
+image = lab.capture_measurable("tag_22", "camera_image")
+score = lab.probe_kernel("tag_22", "camera_image", kernel_id="demo.image_mean_score")
+```
+
+| Trait | Meaning |
+|-------|---------|
+| **Latency** | One network RTT per step (fine for setup, teaching, slow sweeps). |
+| **Math** | Lives in *your* Python — branch, plot, call SciPy freely. |
+| **Ownership** | Your lease holds the bench; UI peers wait. |
+
+**`probe_kernel`** is still a primitive (`EVAL_KERNEL`): it asks the edge to
+capture and run a catalog or session TorchScript function once. It is an
+*authoring measurement*, not a different language.
+
+### Closed-loop optimization (the edge is in the loop)
+
+When the loss must be evaluated many times per second, shipping every camera
+frame to your laptop is the wrong geometry. You submit an **OPTIMIZE** job:
+variables, objective graph, and optional **kernels** (measurement functions).
+The edge runs the solver loop locally; you only wait for the job result.
+
+```python
+result = lab.run_cobyla(
+    variables=[lab.variable("tag_20", "tunables.nominal_motor_positions.1",
+                            bounds=(-2.0, 2.0), delta=True)],
+    match_kernel=lab.kernel_match(
+        "tag_22", "camera_image",
+        kernel_id="demo.image_mean_score",
+        target=0.35,
+    ),
+    max_evals=25,
+)
+```
+
+Under the hood this is still the **OPTIMIZE** primitive (ensemble mode). Kernels
+are **inputs** to that action — packaged `.pt` artifacts the edge loads — not
+peer verbs beside `move`.
+
+| Trait | Meaning |
+|-------|---------|
+| **Latency** | Capture → score → actuate stay on the edge; only progress/status cross the network. |
+| **Math** | Loss composition lives in the **objective IR** (weights, metrics) plus TorchScript kernels (features / scores). Your laptop does not get a callback each eval. |
+| **Trade-off** | You bake targets (e.g. \(M_0\)) into the job before submit; you cannot improvise mid-loop with arbitrary Python. |
+
+**`run_optimize`** is the general form (multi-term graphs). **`run_cobyla`** is
+sugar for the common “match this kernel to a frozen target” case.
+
+---
+
+## Kernels in one paragraph
+
+- **Catalog TorchScript** (`demo.*`, `builtin.roi_centroid`, …) — shipped under
+  `schemas/kernels/`, browsable in the Wiki.
+- **Session kernels** — you `register_kernel` an `nn.Module` for this lease;
+  they travel with the job as packages.
+- **Python “builtin” hooks** (`ensemble.eval.*`) — internal ensemble plumbing,
+  not image models.
+
+See [`docs/SESSION_KERNELS.md`](../../docs/SESSION_KERNELS.md) and the Wiki
+**Physical Interpretation** panels for what each score *means* on the bench.
+
+---
+
+## Language ladder
+
+Run with the coordinator up:
+
+```bash
+python scripts/language/01_hello_lab.py          # connect, move, capture
+python scripts/language/02_kernels_and_match.py  # probe + match builtins
+python scripts/language/03_closed_loop_catalog.py
+python scripts/language/04_session_kernels.py    # author + feature OPTIMIZE
+python scripts/language/05_jobs_and_modes.py      # DAG + closed-loop jobs
+```
+
+Index: [`scripts/language/README.md`](../../scripts/language/README.md).
+
+---
+
+## Mental checklist
+
+1. **Speak primitives** — actions on the lab.  
+2. **Attach kernels** — how some actions measure.  
+3. **Choose the mode** — imperative when you need Python between steps;
+   closed-loop when the edge must own the inner optimization.
+
+That is the scripting language of the Optical Processing Unit.
+
+---
+
+## Live plane (Twin ≡ SDK)
+
+Same primitive names in Twin (`frontend/js/cloudlabs`) and this package:
+
+```python
+with connect(resolve_backend_id(), base_url="http://127.0.0.1:8000") as lab:
+    lab.start_live_feed("tag_22")          # START_LIVE_FEED
+    frame = lab.capture_measurable("tag_22", "camera_image")
+    lab.end_live_feed("tag_22")            # END_LIVE_FEED
+    lab.start_teleop("tag_20")             # START_TELEOP
+    lab.teleop_goto("tag_20", target_pose={"x": 10.0, "y": 5.0, "rotation": 0.0})
+    lab.end_teleop("tag_20")
+```
+
+`get_lab_state()` is **Tier C overview** (layout / leases) — not live science.
+See `scripts/language/07_live_plane.py`.
+
+## Edge Contract (lab backends)
+
+Lab repos implement the southbound **Edge Contract v1** (not by importing
+cloud-labs communicators). Scaffold + conformance live in
+[`packages/cloudlabs_edge_dev`](../cloudlabs_edge_dev/):
+
+```bash
+pip install -e ./packages/cloudlabs_edge_dev
+cloudlabs-edge serve-stub --port 8100
+cloudlabs-edge check http://127.0.0.1:8100 --profile stub
+```

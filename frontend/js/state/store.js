@@ -21,6 +21,8 @@ export const store = {
     dragComponentStartLab: null,
     isDragging: false,
     dragOffset: { x: 0, y: 0 },
+    /** Client-only toggle for the approximate robot-usable tabletop overlay. */
+    showUsableAreaOverlay: false,
     /**
      * When true, lab-state polling must not clear ``pendingCommands`` between
      * job steps (operations dashboard tracks running jobs on the twin canvas).

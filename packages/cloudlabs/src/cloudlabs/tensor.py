@@ -53,6 +53,46 @@ class MeasurableTensor:
                 out["data"] = self.data
         return out
 
+    def to_torch(self, *, dtype: Any = None) -> Any:
+        """Return the materialized values as a ``torch.Tensor``.
+
+        Call after the tensor is resolved (see
+        :meth:`cloudlabs.MeasurableHandle.resolve` /
+        :meth:`~cloudlabs.MeasurableHandle.resolve_torch`). For images this
+        wraps the ``HxWx3 uint8`` BGR array; for scalars/vectors it wraps the
+        inline value.
+
+        Parameters
+        ----------
+        dtype:
+            Optional ``torch.dtype`` to cast to (e.g. ``torch.float32``).
+
+        Raises
+        ------
+        ValueError
+            If ``data`` is still a :class:`LazyRef` (not resolved).
+        RuntimeError
+            If PyTorch is not installed.
+        """
+        if isinstance(self.data, LazyRef):
+            raise ValueError(
+                "tensor is not resolved; call resolve()/resolve_torch() before to_torch()"
+            )
+        try:
+            import torch  # type: ignore
+        except ImportError as exc:  # pragma: no cover - environment without torch
+            raise RuntimeError(
+                "to_torch() requires PyTorch (pip install torch)"
+            ) from exc
+        data = self.data
+        if hasattr(data, "__array_interface__") or hasattr(data, "dtype"):
+            tensor = torch.from_numpy(data) if hasattr(data, "dtype") else torch.as_tensor(data)
+        else:
+            tensor = torch.as_tensor(data)
+        if dtype is not None:
+            tensor = tensor.to(dtype)
+        return tensor
+
     @classmethod
     def from_api_dict(cls, payload: Mapping[str, Any]) -> "MeasurableTensor":
         raw_data = payload.get("data")

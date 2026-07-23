@@ -3,7 +3,7 @@
 These functions implement the motion half of the Edge Contract: moving a
 tag on the bench, in-air pick/hover/place, and storage-grid operations.
 Wire each body to the existing OpticalExperiment ``*_cloudlab`` helpers (or
-a future MoveIt backend) without changing the function names Twin and the
+a future motion backend) without changing the function names Twin and the
 SDK already call through ``POST /execute``.
 
 Unless noted, ``args`` is the execute ``args`` object and every function

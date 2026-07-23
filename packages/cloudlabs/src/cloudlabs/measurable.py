@@ -42,6 +42,18 @@ class MeasurableHandle:
         tensor = MeasurableTensor.from_api_dict(tensor_raw)
         return _resolve_lazy_on_client(self.client, tensor)
 
+    def resolve_torch(self, *, record: bool = False, dtype: Any = None) -> Any:
+        """Resolve and return the values directly as a ``torch.Tensor``.
+
+        Convenience for scripting::
+
+            t = lab.measurable("tag_22", "camera_image").resolve_torch(record=True)
+            # t is a torch.Tensor, HxWx3 uint8 BGR (values 0..255)
+
+        Equivalent to ``resolve(record=record).to_torch(dtype=dtype)``.
+        """
+        return self.resolve(record=record).to_torch(dtype=dtype)
+
     def peek(self) -> MeasurableTensor:
         """Return tensor descriptor from current lab state (no capture, no image decode)."""
         field = _normalize_measurable_path(self.field)

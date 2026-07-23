@@ -9,7 +9,7 @@ from typing import FrozenSet
 
 
 def known_communicator_ids() -> FrozenSet[str]:
-    return frozenset({"mock", "real"})
+    return frozenset({"mock", "real", "simulation"})
 
 
 # Prefer this name in new code.

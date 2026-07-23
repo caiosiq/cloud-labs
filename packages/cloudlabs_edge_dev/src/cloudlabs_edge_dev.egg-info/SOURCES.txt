@@ -1,8 +1,10 @@
 README.md
 pyproject.toml
 src/cloudlabs_edge_dev/__init__.py
+src/cloudlabs_edge_dev/certify.py
 src/cloudlabs_edge_dev/cli.py
 src/cloudlabs_edge_dev/conformance.py
+src/cloudlabs_edge_dev/doctor.py
 src/cloudlabs_edge_dev/py.typed
 src/cloudlabs_edge_dev/scaffold.py
 src/cloudlabs_edge_dev/schemas_path.py

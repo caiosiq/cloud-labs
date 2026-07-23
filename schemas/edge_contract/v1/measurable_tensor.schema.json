@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/measurable_tensor.schema.json",
+  "title": "MeasurableTensorV1",
+  "description": "Canonical analysis-boundary envelope for one measurable field. Every backend (mock / sim / real) MUST emit this identical shape so the SDK and UI treat all systems the same. Mirrors lab_model.language.measurables.tensor.MeasurableTensor.to_api_dict and the MEASURABLE_REGISTRY schema. `data` is either an inline scalar/vector or a LazyRef pointer to an edge-resident payload (images).",
+  "type": "object",
+  "required": ["tag_id", "field", "dtype", "shape", "axes", "units", "domain", "data"],
+  "properties": {
+    "tag_id": { "type": "string", "minLength": 1 },
+    "field": { "type": "string", "minLength": 1 },
+    "dtype": { "type": "string", "examples": ["uint8", "float64"] },
+    "shape": {
+      "type": "array",
+      "items": { "type": ["integer", "string"] },
+      "description": "Concrete dims when known; may be empty until resolve for lazy images."
+    },
+    "axes": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Axis label per dimension key (e.g. y/x/c for images)."
+    },
+    "units": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "domain": {
+      "type": "string",
+      "enum": ["spatial", "time", "scalar", "spectrum", "other"]
+    },
+    "provenance": { "type": "object" },
+    "data": {
+      "description": "Inline scalar/vector OR a LazyRef {kind, href, format} for edge-resident payloads.",
+      "oneOf": [
+        { "type": "number" },
+        { "type": "array" },
+        {
+          "type": "object",
+          "required": ["kind", "href"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["url", "file"] },
+            "href": { "type": "string" },
+            "format": { "type": "string" }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "description": "camera_image is a lazy BGR image: pin its analysis contract so every system is identical.",
+      "if": {
+        "required": ["field"],
+        "properties": { "field": { "const": "camera_image" } }
+      },
+      "then": {
+        "properties": {
+          "dtype": { "const": "uint8" },
+          "domain": { "const": "spatial" },
+          "axes": {
+            "required": ["y", "x", "c"],
+            "properties": {
+              "y": { "const": "pixel" },
+              "x": { "const": "pixel" },
+              "c": { "const": "bgr" }
+            }
+          },
+          "units": {
+            "required": ["y", "x", "c"],
+            "properties": {
+              "y": { "const": "px" },
+              "x": { "const": "px" },
+              "c": { "const": "channel" }
+            }
+          },
+          "data": {
+            "type": "object",
+            "required": ["kind", "href"],
+            "properties": { "format": { "const": "jpeg" } }
+          }
+        }
+      }
+    }
+  ]
+}
