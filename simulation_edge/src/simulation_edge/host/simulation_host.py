@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import math
 import os
 import threading
 from datetime import datetime
@@ -58,7 +59,15 @@ class SimulationHost:
     """Process-local sim lab used by ``simulation_edge/cloudlabs_edge`` adapters."""
 
     log_prefix = "[SIM EDGE]"
-    supported_primitives = frozenset({"MOVE_COMPONENT"})
+    supported_primitives = frozenset(
+        {
+            "MOVE_COMPONENT",
+            "STORE_COMPONENT",
+            "PLACE_FROM_STORAGE",
+            "REPACK_STORAGE",
+            "RECENTER_IN_STORAGE",
+        }
+    )
 
     def __init__(
         self,
@@ -223,6 +232,164 @@ class SimulationHost:
             if isinstance(reported, dict):
                 reported.update({"x": x, "y": y, "rotation": rotation})
 
+            measurables = sc.setdefault("measurables", {})
+            if isinstance(measurables, dict):
+                measured_pose = measurables.setdefault("pose", {})
+                if isinstance(measured_pose, dict):
+                    measured_pose.update({"x": x, "y": y, "rotation": rotation})
+
+    def _component_tunables(self, tag_id: str) -> Dict[str, Any]:
+        components = self.current_state.get("components")
+        entry = components.get(tag_id) if isinstance(components, dict) else None
+        if not isinstance(entry, dict):
+            raise ValueError(f"unknown component {tag_id!r}")
+        statecontrol = entry.get("statecontrol")
+        if not isinstance(statecontrol, dict):
+            raise ValueError(f"component {tag_id!r} has no statecontrol")
+        tunables = statecontrol.get("tunables")
+        if not isinstance(tunables, dict):
+            raise ValueError(f"component {tag_id!r} has no tunables")
+        return tunables
+
+    @staticmethod
+    def _presence(tunables: Mapping[str, Any]) -> str:
+        return str(tunables.get("presence") or "").strip().lower()
+
+    def _storage_grid(self) -> tuple[float, float, float, float, int, int]:
+        storage = self.layout.get("storage")
+        if not isinstance(storage, Mapping):
+            raise ValueError("layout.storage is required for storage primitives")
+        bounds = storage.get("bounds_mm")
+        if not isinstance(bounds, Mapping):
+            raise ValueError("layout.storage.bounds_mm is required for storage primitives")
+        x_min = float(bounds["x_min"])
+        x_max = float(bounds["x_max"])
+        y_min = float(bounds["y_min"])
+        y_max = float(bounds["y_max"])
+        nx = int(storage.get("grid_nx") or 0)
+        ny = int(storage.get("grid_ny") or 0)
+        if nx <= 0 or ny <= 0 or x_max <= x_min or y_max <= y_min:
+            raise ValueError("layout storage grid must have positive dimensions")
+        return x_min, x_max, y_min, y_max, nx, ny
+
+    def _component_size_mm(self, tag_id: str) -> tuple[float, float]:
+        row = self.catalog_map.get(tag_id) or {}
+        size = row.get("size") if isinstance(row, Mapping) else None
+        if isinstance(size, Mapping):
+            return float(size.get("width") or 62.0), float(size.get("height") or 62.0)
+        if isinstance(size, (int, float)):
+            return float(size), float(size)
+        return 62.0, 62.0
+
+    def _storage_slot_center(
+        self,
+        slot_i: int,
+        slot_j: int,
+    ) -> tuple[float, float]:
+        x_min, x_max, y_min, y_max, nx, ny = self._storage_grid()
+        i = int(slot_i)
+        j = int(slot_j)
+        if not (0 <= i < nx and 0 <= j < ny):
+            raise ValueError(f"storage slot ({i}, {j}) is outside the grid")
+        cell_width = (x_max - x_min) / nx
+        cell_height = (y_max - y_min) / ny
+        return (
+            x_min + (i + 0.5) * cell_width,
+            y_min + (j + 0.5) * cell_height,
+        )
+
+    def _assigned_storage_slot(
+        self,
+        tag_id: str,
+    ) -> Optional[tuple[int, int]]:
+        tunables = self._component_tunables(tag_id)
+        storage_state = tunables.get("storage")
+        slot = (
+            storage_state.get("slot")
+            if isinstance(storage_state, Mapping)
+            else None
+        )
+        if not isinstance(slot, Mapping):
+            return None
+        try:
+            i = int(slot["i"])
+            j = int(slot["j"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"{tag_id} has invalid storage slot metadata") from exc
+        self._storage_slot_center(i, j)
+        return i, j
+
+    def _allocate_storage_slot(
+        self,
+        tag_id: str,
+        *,
+        excluded_slots: Iterable[tuple[int, int]] = (),
+    ) -> tuple[float, float, int, int]:
+        x_min, x_max, y_min, y_max, nx, ny = self._storage_grid()
+        cell_width = (x_max - x_min) / nx
+        cell_height = (y_max - y_min) / ny
+        occupied: set[tuple[int, int]] = set()
+        occupied.update((int(i), int(j)) for i, j in excluded_slots)
+        components = self.current_state.get("components")
+        if isinstance(components, dict):
+            for other_tag, entry in components.items():
+                if other_tag == tag_id or not isinstance(entry, dict):
+                    continue
+                statecontrol = entry.get("statecontrol")
+                tunables = (
+                    statecontrol.get("tunables")
+                    if isinstance(statecontrol, dict)
+                    else None
+                )
+                if not isinstance(tunables, dict) or self._presence(tunables) != "storage":
+                    continue
+                storage_state = tunables.get("storage")
+                slot = (
+                    storage_state.get("slot")
+                    if isinstance(storage_state, dict)
+                    else None
+                )
+                if isinstance(slot, dict):
+                    occupied.add((int(slot["i"]), int(slot["j"])))
+
+        width_mm, depth_mm = self._component_size_mm(tag_id)
+        danger = self.layout.get("danger_zone")
+        danger_radius = float(danger.get("radius_mm") or 0.0) if isinstance(danger, Mapping) else 0.0
+        danger_padding = float(danger.get("padding_mm") or 0.0) if isinstance(danger, Mapping) else 0.0
+        component_radius = math.hypot(width_mm, depth_mm) / 2.0
+        if max(width_mm, depth_mm) > min(cell_width, cell_height) + 1e-6:
+            raise ValueError(f"{tag_id} does not fit a storage cell")
+
+        for j in range(ny):
+            for i in range(nx):
+                if (i, j) in occupied:
+                    continue
+                center_x = x_min + (i + 0.5) * cell_width
+                center_y = y_min + (j + 0.5) * cell_height
+                if math.hypot(center_x, center_y) < danger_radius + danger_padding + component_radius:
+                    continue
+                return center_x, center_y, i, j
+        raise ValueError("no reachable free storage slot is available")
+
+    def _set_storage_state(
+        self,
+        tag_id: str,
+        *,
+        in_storage: bool,
+        slot: Optional[Dict[str, int]],
+    ) -> None:
+        with self._lock:
+            tunables = self._component_tunables(tag_id)
+            tunables["presence"] = "storage" if in_storage else "breadboard"
+            tunables["storage"] = {
+                "in_storage": bool(in_storage),
+                "slot": copy.deepcopy(slot),
+            }
+            tunables["placement"] = {
+                "mode": "STORAGE" if in_storage else "MANUAL"
+            }
+            self.current_state["last_updated"] = datetime.now().isoformat()
+
     async def move_component(
         self,
         tag_id: str,
@@ -230,6 +397,8 @@ class SimulationHost:
         x: float,
         y: float,
         rotation: float = 0.0,
+        grasp_policy: str = "short_edges",
+        pickup_context: str = "table",
     ) -> Dict[str, Any]:
         tag = str(tag_id or "").strip()
         if not tag:
@@ -244,6 +413,8 @@ class SimulationHost:
                     target_x_mm=float(x),
                     target_y_mm=float(y),
                     target_rotation_deg=float(rotation),
+                    grasp_policy=grasp_policy,
+                    pickup_context=pickup_context,
                 )
             except Exception as exc:
                 with self._lock:
@@ -272,6 +443,113 @@ class SimulationHost:
             "y": float(y),
             "rotation": float(rotation),
             "backend": "soft",
+        }
+
+    async def store_component(self, tag_id: str) -> Dict[str, Any]:
+        tag = str(tag_id or "").strip()
+        with self._lock:
+            tunables = self._component_tunables(tag)
+            if self._presence(tunables) == "storage":
+                raise ValueError(f"{tag} is already in storage")
+            x, y, slot_i, slot_j = self._allocate_storage_slot(tag)
+        result = await self.move_component(
+            tag,
+            x=x,
+            y=y,
+            rotation=0.0,
+            grasp_policy="short_edges",
+        )
+        slot = {"i": slot_i, "j": slot_j}
+        self._set_storage_state(tag, in_storage=True, slot=slot)
+        return {**result, "presence": "storage", "storage": {"in_storage": True, "slot": slot}}
+
+    async def place_from_storage(
+        self,
+        tag_id: str,
+        *,
+        x: float,
+        y: float,
+        rotation: float = 0.0,
+    ) -> Dict[str, Any]:
+        tag = str(tag_id or "").strip()
+        with self._lock:
+            tunables = self._component_tunables(tag)
+            if self._presence(tunables) != "storage":
+                raise ValueError(f"{tag} is not in storage")
+            x_min, x_max, y_min, y_max, _, _ = self._storage_grid()
+            if x_min <= float(x) < x_max and y_min <= float(y) < y_max:
+                raise ValueError("place-from-storage target must be outside storage")
+        result = await self.move_component(
+            tag,
+            x=float(x),
+            y=float(y),
+            rotation=float(rotation),
+            grasp_policy="short_edges",
+            pickup_context="storage",
+        )
+        self._set_storage_state(tag, in_storage=False, slot=None)
+        return {
+            **result,
+            "presence": "breadboard",
+            "storage": {"in_storage": False, "slot": None},
+        }
+
+    async def repack_storage_slot(self, tag_id: str) -> Dict[str, Any]:
+        tag = str(tag_id or "").strip()
+        with self._lock:
+            tunables = self._component_tunables(tag)
+            if self._presence(tunables) != "storage":
+                raise ValueError(f"{tag} is not in storage")
+            current_slot = self._assigned_storage_slot(tag)
+            excluded = (current_slot,) if current_slot is not None else ()
+            x, y, slot_i, slot_j = self._allocate_storage_slot(
+                tag,
+                excluded_slots=excluded,
+            )
+        result = await self.move_component(
+            tag,
+            x=x,
+            y=y,
+            rotation=0.0,
+            grasp_policy="short_edges",
+            pickup_context="storage",
+        )
+        slot = {"i": slot_i, "j": slot_j}
+        self._set_storage_state(tag, in_storage=True, slot=slot)
+        return {
+            **result,
+            "presence": "storage",
+            "storage": {"in_storage": True, "slot": slot},
+        }
+
+    async def recenter_stored_in_inventory(
+        self,
+        tag_id: str,
+    ) -> Dict[str, Any]:
+        tag = str(tag_id or "").strip()
+        with self._lock:
+            tunables = self._component_tunables(tag)
+            if self._presence(tunables) != "storage":
+                raise ValueError(f"{tag} is not in storage")
+            current_slot = self._assigned_storage_slot(tag)
+            if current_slot is None:
+                raise ValueError(f"{tag} has no assigned storage slot")
+            slot_i, slot_j = current_slot
+            x, y = self._storage_slot_center(slot_i, slot_j)
+        result = await self.move_component(
+            tag,
+            x=x,
+            y=y,
+            rotation=0.0,
+            grasp_policy="short_edges",
+            pickup_context="storage",
+        )
+        slot = {"i": slot_i, "j": slot_j}
+        self._set_storage_state(tag, in_storage=True, slot=slot)
+        return {
+            **result,
+            "presence": "storage",
+            "storage": {"in_storage": True, "slot": slot},
         }
 
     def shutdown_lab_processes(self) -> None:

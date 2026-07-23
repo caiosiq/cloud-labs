@@ -29,7 +29,9 @@ import {
     LAB_Y_MIN,
     MANUAL_MOTION_CORNER_CUTOFF_MM,
     STORAGE_RECT_X_MIN,
+    STORAGE_RECT_X_MAX,
     STORAGE_RECT_Y_MIN,
+    STORAGE_RECT_Y_MAX,
 } from '../config.js';
 import { mmToPx } from './coordinates.js';
 import { store } from '../state/store.js';
@@ -54,7 +56,7 @@ let _ctx = null;
 // Approximate outward footprint of the arm, wrist camera, and gripper during an edge pickup.
 // This is visual guidance only and does not affect motion validation.
 const APPROX_ROBOT_EDGE_ENVELOPE_MM = 75;
-const APPROX_COMPONENT_RADIUS_MM = 44;
+const APPROX_COMPONENT_RADIUS_MM = 48.3;
 
 /**
  * Resolve and cache the 2D canvas context. Returns true on success, false if the canvas element
@@ -201,11 +203,13 @@ function clearCanvas() {
 function drawStorageZone() {
     const ctx = _ctx;
     const sx = STORAGE_RECT_X_MIN;
+    const ex = STORAGE_RECT_X_MAX;
     const sy = STORAGE_RECT_Y_MIN;
+    const ey = STORAGE_RECT_Y_MAX;
     const pSw = mmToPx(sx, sy);
-    const pSe = mmToPx(0, sy);
-    const pNe = mmToPx(0, 0);
-    const pNw = mmToPx(sx, 0);
+    const pSe = mmToPx(ex, sy);
+    const pNe = mmToPx(ex, ey);
+    const pNw = mmToPx(sx, ey);
     ctx.beginPath();
     ctx.moveTo(pSw.x, pSw.y);
     ctx.lineTo(pSe.x, pSe.y);
@@ -227,14 +231,16 @@ function drawStorageZone() {
     if (!spec || !spec.nx || !spec.ny) return;
     const { nx, ny, cell_width_mm: cw, cell_height_mm: ch, q3 } = spec;
     const x0 = q3.x_min;
+    const x1 = q3.x_max;
     const y0 = q3.y_min;
+    const y1 = q3.y_max;
     ctx.strokeStyle = 'rgba(96, 165, 250, 0.55)';
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
     for (let i = 0; i <= nx; i++) {
         const xm = x0 + i * cw;
         const a = mmToPx(xm, y0);
-        const b = mmToPx(xm, 0);
+        const b = mmToPx(xm, y1);
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
@@ -243,7 +249,7 @@ function drawStorageZone() {
     for (let j = 0; j <= ny; j++) {
         const ym = y0 + j * ch;
         const a = mmToPx(x0, ym);
-        const b = mmToPx(0, ym);
+        const b = mmToPx(x1, ym);
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);

@@ -1,10 +1,9 @@
 """
 Inventory storage in the negative-x / negative-y corner of the lab frame (origin at table center).
 
-Rule ``negative_xy`` tile the rectangle from ``(storage_rect_x_min, storage_rect_y_min)`` up to the
-axes (exclusive at ``x == 0`` / ``y == 0``). By default that rectangle is the full lab quadrant
-(up to ``lab_bounds_mm``). Optional ``storage.extent_from_origin_mm`` in ``layout.json`` limits how
-far from the corner at ``(0,0)`` the grid extends (**width_mm** / **height_mm** into negative X/Y).
+Rule ``negative_xy`` tiles a rectangle in the negative-X / negative-Y quadrant. By default the
+rectangle reaches the axes. ``storage.bounds_mm`` may provide all four edges explicitly; legacy
+``storage.extent_from_origin_mm`` remains supported for layouts whose inner edges are the axes.
 
 Geometry is loaded from lab_view ``layout.json`` via :func:`configure_from_layout_document`.
 """
@@ -37,9 +36,11 @@ class LabLayoutSnapshot:
     storage_grid_nx: int
     storage_grid_ny: int
     storage_rule: str
-    #: West/south edges of the storage rectangle (negative values). Cells tile to ``(0, 0)`` (axes excluded).
+    #: Explicit edges of the storage rectangle in lab coordinates.
     storage_rect_x_min: float
+    storage_rect_x_max: float
     storage_rect_y_min: float
+    storage_rect_y_max: float
     breadboard_grid_spacing_mm: float
     breadboard_origin_offset_x_mm: float
     breadboard_origin_offset_y_mm: float
@@ -79,9 +80,26 @@ def configure_from_layout_document(document: Dict[str, Any]) -> LabLayoutSnapsho
 
     # Full negative quadrant clipped to lab bounds (legacy default).
     storage_rect_x_min = lab_x_min
+    storage_rect_x_max = min(0.0, lab_x_max)
     storage_rect_y_min = lab_y_min
+    storage_rect_y_max = min(0.0, lab_y_max)
+    explicit_bounds = st.get("bounds_mm")
     ext = st.get("extent_from_origin_mm")
-    if ext is not None:
+    if explicit_bounds is not None:
+        if not isinstance(explicit_bounds, dict):
+            raise ValueError(
+                "storage.bounds_mm must be an object with x_min, x_max, y_min, and y_max"
+            )
+        try:
+            storage_rect_x_min = float(explicit_bounds["x_min"])
+            storage_rect_x_max = float(explicit_bounds["x_max"])
+            storage_rect_y_min = float(explicit_bounds["y_min"])
+            storage_rect_y_max = float(explicit_bounds["y_max"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "storage.bounds_mm requires numeric x_min, x_max, y_min, and y_max"
+            ) from exc
+    elif ext is not None:
         if not isinstance(ext, dict):
             raise ValueError("storage.extent_from_origin_mm must be an object with width_mm and height_mm")
         try:
@@ -98,6 +116,14 @@ def configure_from_layout_document(document: Dict[str, Any]) -> LabLayoutSnapsho
         storage_rect_x_min = max(lab_x_min, -abs(ew))
         storage_rect_y_min = max(lab_y_min, -abs(eh))
 
+    if not (
+        lab_x_min <= storage_rect_x_min < storage_rect_x_max <= min(0.0, lab_x_max)
+        and lab_y_min <= storage_rect_y_min < storage_rect_y_max <= min(0.0, lab_y_max)
+    ):
+        raise ValueError(
+            "storage bounds must have positive area inside the negative-X / negative-Y lab quadrant"
+        )
+
     snapshot = LabLayoutSnapshot(
         lab_x_min=lab_x_min,
         lab_x_max=lab_x_max,
@@ -109,7 +135,9 @@ def configure_from_layout_document(document: Dict[str, Any]) -> LabLayoutSnapsho
         storage_grid_ny=int(st["grid_ny"]),
         storage_rule=rule,
         storage_rect_x_min=storage_rect_x_min,
+        storage_rect_x_max=storage_rect_x_max,
         storage_rect_y_min=storage_rect_y_min,
+        storage_rect_y_max=storage_rect_y_max,
         breadboard_grid_spacing_mm=float(br.get("grid_spacing_mm", 25.0)),
         breadboard_origin_offset_x_mm=float((br.get("origin_offset_mm") or {}).get("x", 0.0)),
         breadboard_origin_offset_y_mm=float((br.get("origin_offset_mm") or {}).get("y", 0.0)),
@@ -143,15 +171,15 @@ def padding_mm() -> float:
 
 
 def q3_width_mm() -> float:
-    """East–west span of the **configured** storage rectangle (toward ``x == 0``)."""
+    """East-west span of the configured storage rectangle."""
     g = get_lab_layout_snapshot()
-    return 0.0 - g.storage_rect_x_min
+    return g.storage_rect_x_max - g.storage_rect_x_min
 
 
 def q3_height_mm() -> float:
-    """North–south span of the **configured** storage rectangle (toward ``y == 0``)."""
+    """North-south span of the configured storage rectangle."""
     g = get_lab_layout_snapshot()
-    return 0.0 - g.storage_rect_y_min
+    return g.storage_rect_y_max - g.storage_rect_y_min
 
 
 def storage_grid_nx() -> int:
@@ -166,11 +194,11 @@ STORAGE_NOMINAL_ROTATION_DEG = 0.0
 
 
 def is_storage_region(x: float, y: float) -> bool:
-    """Inside the tiled storage rectangle open toward the origin (exclusive on ``x==0``, ``y==0``)."""
+    """Return whether a center point lies inside the tiled storage rectangle."""
     g = get_lab_layout_snapshot()
     return (
-        g.storage_rect_x_min <= x < 0.0
-        and g.storage_rect_y_min <= y < 0.0
+        g.storage_rect_x_min <= x < g.storage_rect_x_max
+        and g.storage_rect_y_min <= y < g.storage_rect_y_max
     )
 
 
@@ -349,9 +377,9 @@ def storage_grid_spec() -> Dict[str, Any]:
         "nominal_storage_rotation_deg": STORAGE_NOMINAL_ROTATION_DEG,
         "q3": {
             "x_min": g.storage_rect_x_min,
-            "x_max": 0.0,
+            "x_max": g.storage_rect_x_max,
             "y_min": g.storage_rect_y_min,
-            "y_max": 0.0,
+            "y_max": g.storage_rect_y_max,
         },
     }
 

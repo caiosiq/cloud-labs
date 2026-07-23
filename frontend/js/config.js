@@ -34,9 +34,11 @@ export let BREADBOARD_GRID_OFFSET_Y_MM = 0;
 /** Centered grid step in mm (default 25 mm). */
 export let BREADBOARD_GRID_SPACING_MM = 25;
 
-/** West/south edges of the inventory rectangle in lab mm ([x,y) extend toward 0); from ``/api/lab-layout`` → ``storage_grid.q3``. */
+/** Explicit inventory rectangle edges in lab mm; from `/api/lab-layout` -> `storage_grid.q3`. */
 export let STORAGE_RECT_X_MIN = -500;
+export let STORAGE_RECT_X_MAX = 0;
 export let STORAGE_RECT_Y_MIN = -500;
+export let STORAGE_RECT_Y_MAX = 0;
 
 export const POLLING_INTERVAL = 500;
 
@@ -136,16 +138,22 @@ export function applyLabLayoutFromApiDoc(payload) {
         }
     }
     let srx = LAB_X_MIN;
+    let srxx = 0;
     let sry = LAB_Y_MIN;
+    let sryy = 0;
     const sg = payload.storage_grid;
     if (sg && typeof sg === 'object') {
         const q = sg.q3;
         if (q && typeof q === 'object') {
             if (Number.isFinite(Number(q.x_min))) srx = Number(q.x_min);
+            if (Number.isFinite(Number(q.x_max))) srxx = Number(q.x_max);
             if (Number.isFinite(Number(q.y_min))) sry = Number(q.y_min);
+            if (Number.isFinite(Number(q.y_max))) sryy = Number(q.y_max);
         }
     }
     STORAGE_RECT_X_MIN = srx;
+    STORAGE_RECT_X_MAX = srxx;
     STORAGE_RECT_Y_MIN = sry;
+    STORAGE_RECT_Y_MAX = sryy;
     recomputeDerived();
 }

@@ -14,8 +14,8 @@
     "clearance_mm": 76.2,
     "clearance_in": 3.0,
     "minimum_component_footprint_mm": {
-      "width": 72.0,
-      "height": 64.2883
+      "width": 75.0,
+      "height": 75.0
     }
   },
   "manual_motion_workspace": {
@@ -25,10 +25,15 @@
     "rule": "negative_xy",
     "grid_nx": 4,
     "grid_ny": 4,
-    "extent_from_origin_mm": {
-    "width_mm": 300,
-    "height_mm": 380
-  }
+    "bounds_mm": {
+      "x_min": -361,
+      "x_max": -1,
+      "y_min": -361,
+      "y_max": -1
+    },
+    "pitch_mm": 90,
+    "minimum_clearance_mm": 10,
+    "component_base_diameter_mm": 75
   },
   "breadboard": {
     "grid_spacing_mm": 25,
