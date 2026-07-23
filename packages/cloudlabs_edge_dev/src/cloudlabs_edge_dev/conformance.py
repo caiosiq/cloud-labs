@@ -25,6 +25,7 @@ _SCHEMA_FILES = (
     "execute_request.schema.json",
     "execute_response.schema.json",
     "measurable_live_decl.schema.json",
+    "measurable_tensor.schema.json",
     "teleop_ws_client.schema.json",
     "teleop_ws_server.schema.json",
     "epoch_packet.schema.json",
@@ -111,6 +112,58 @@ def _execute(client: httpx.Client, primitive: str, args: dict | None = None) -> 
     return client.post("/execute", json={"primitive": primitive, "args": args or {}})
 
 
+def _check_measurable_envelope(client: httpx.Client, report: "Report", caps: dict) -> None:
+    """Validate that RECORD_MEASURABLES emits the canonical tensor envelope.
+
+    The measurable envelope is the one language every backend (mock / sim / real)
+    must speak so the SDK and UI treat all systems identically. When an edge
+    returns ``camera_image`` as an inline tensor envelope, it must match
+    ``measurable_tensor.schema.json`` and its own declared ``analysis`` block.
+    Edges that return a raw/wire value (materialized by the coordinator) are
+    noted but not failed.
+    """
+    try:
+        body = _execute(client, "RECORD_MEASURABLES", {"tag_id": "tag_22"}).json()
+    except Exception as e:  # noqa: BLE001
+        report.add("RECORD_MEASURABLES camera_image envelope", False, str(e))
+        return
+
+    result_obj = body.get("result") if isinstance(body.get("result"), dict) else {}
+    meas = result_obj.get("measurables") if isinstance(result_obj.get("measurables"), dict) else {}
+    cam = meas.get("camera_image")
+    if not isinstance(cam, dict) or not {"field", "dtype", "domain", "data"} <= set(cam):
+        report.add(
+            "camera_image emitted as canonical envelope",
+            True,
+            "camera_image not an inline envelope at the edge boundary "
+            "(coordinator will materialize from the registry)",
+        )
+        return
+
+    env_err = _validate(cam, "measurable_tensor.schema.json")
+    report.add(
+        "camera_image envelope matches canonical schema",
+        env_err is None,
+        env_err or f"axes={cam.get('axes')} dtype={cam.get('dtype')} domain={cam.get('domain')}",
+    )
+
+    decl = {}
+    for mid, m in (caps.get("measurables") or {}).items():
+        if str(mid).endswith("camera_image"):
+            decl = (m or {}).get("analysis") or {}
+            break
+    mism = []
+    if decl.get("dtype") and decl["dtype"] != cam.get("dtype"):
+        mism.append(f"dtype decl={decl['dtype']} env={cam.get('dtype')}")
+    if decl.get("domain") and decl["domain"] != cam.get("domain"):
+        mism.append(f"domain decl={decl['domain']} env={cam.get('domain')}")
+    report.add(
+        "camera_image envelope matches capabilities analysis",
+        not mism,
+        "; ".join(mism),
+    )
+
+
 def run_conformance(base_url: str, profile: str = "stub") -> Report:
     if profile not in PROFILES:
         raise ValueError(f"unknown profile {profile!r}; choose from {PROFILES}")
@@ -170,6 +223,10 @@ def run_conformance(base_url: str, profile: str = "stub") -> Report:
             )
         except Exception as e:  # noqa: BLE001
             report.add("unknown primitive -> structured refuse", False, str(e))
+
+        # --- measurable envelope conformance (canonical tensor language) ---
+        if "RECORD_MEASURABLES" in primitives:
+            _check_measurable_envelope(client, report, caps)
 
         if profile == "skeleton":
             return report

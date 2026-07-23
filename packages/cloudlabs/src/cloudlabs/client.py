@@ -1068,6 +1068,9 @@ class CloudLabsClient:
 
             tensor = lab.measurable("tag_22", "camera_image").resolve(record=True)
             arr = tensor.data  # numpy HxWx3 uint8 after resolve
+
+            # First-class torch for scripting (values 0..255, BGR):
+            t = lab.measurable("tag_22", "camera_image").resolve_torch(record=True)
         """
         from .measurable import MeasurableHandle
 

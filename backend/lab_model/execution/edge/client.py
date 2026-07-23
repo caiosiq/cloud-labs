@@ -79,7 +79,11 @@ class EdgeClient(Protocol):
 
     def get_bench(self) -> Optional[Dict[str, Any]]: ...
 
+    def get_lab_state(self) -> Optional[Dict[str, Any]]: ...
+
     def absolute_stream_url(self, path: str) -> Optional[str]: ...
+
+    def fetch_bytes(self, path: str) -> Optional[bytes]: ...
 
 
 def command_to_execute_body(command: Dict[str, Any]) -> Dict[str, Any]:
@@ -163,7 +167,13 @@ class InProcessEdgeClient:
     def get_bench(self) -> Optional[Dict[str, Any]]:
         return None
 
+    def get_lab_state(self) -> Optional[Dict[str, Any]]:
+        return None
+
     def absolute_stream_url(self, path: str) -> Optional[str]:
+        return None
+
+    def fetch_bytes(self, path: str) -> Optional[bytes]:
         return None
 
 
@@ -227,7 +237,13 @@ class PollEdgeClient:
     def get_bench(self) -> Optional[Dict[str, Any]]:
         return None
 
+    def get_lab_state(self) -> Optional[Dict[str, Any]]:
+        return None
+
     def absolute_stream_url(self, path: str) -> Optional[str]:
+        return None
+
+    def fetch_bytes(self, path: str) -> Optional[bytes]:
         return None
 
 
@@ -328,6 +344,22 @@ class HttpEdgeClient:
             return data
         return None
 
+    def get_lab_state(self) -> Optional[Dict[str, Any]]:
+        """Poll the edge's Tier-C overview snapshot (``GET /lab-state``).
+
+        Not cached: state changes with every RECORD / move. Returns ``None`` when
+        the edge does not implement the route or the poll fails.
+        """
+        try:
+            with httpx.Client(base_url=self.base_url, timeout=5.0) as client:
+                resp = client.get("/lab-state")
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("HttpEdgeClient lab-state failed: %s", exc)
+            return None
+        return data if isinstance(data, dict) else None
+
     def absolute_stream_url(self, path: str) -> Optional[str]:
         p = (path or "").strip()
         if not p:
@@ -337,6 +369,66 @@ class HttpEdgeClient:
         if not p.startswith("/"):
             p = "/" + p
         return f"{self.base_url}{p}"
+
+    def fetch_bytes(self, path: str) -> Optional[bytes]:
+        """Fetch raw bytes from an edge-resident resource (on-demand image proxy).
+
+        ``path`` may be an edge-relative path (e.g. ``/measurables/tag_22/
+        camera_image.jpg``) or an absolute URL. Returns ``None`` on any failure so
+        callers can fall back to a lazy reference.
+        """
+        url = self.absolute_stream_url(path)
+        if not url:
+            return None
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(url)
+                resp.raise_for_status()
+                return resp.content
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("HttpEdgeClient fetch_bytes failed (%s): %s", path, exc)
+            return None
+
+    def absolute_ws_url(self, path: str) -> Optional[str]:
+        """Return an absolute ``ws(s)://`` URL for an edge WebSocket ``path``.
+
+        Mirrors :meth:`absolute_stream_url` but maps the HTTP scheme to the
+        WebSocket scheme (``http`` -> ``ws``, ``https`` -> ``wss``) so the
+        coordinator can open an outbound socket to the edge (e.g. teleop proxy).
+        """
+        url = self.absolute_stream_url(path)
+        if not url:
+            return None
+        if url.startswith("https://"):
+            return "wss://" + url[len("https://") :]
+        if url.startswith("http://"):
+            return "ws://" + url[len("http://") :]
+        return url
+
+    def teleop_ws_url(self) -> Optional[str]:
+        """Resolve the edge's teleop WebSocket URL from advertised capabilities.
+
+        Looks for a ``telemetry_channels`` entry with ``transport == "websocket"``
+        (falling back to a channel literally named ``teleop``) and returns its
+        absolute ``ws(s)://`` URL, or ``None`` when the edge advertises no teleop
+        socket.
+        """
+        caps = self.get_capabilities() or {}
+        channels = caps.get("telemetry_channels")
+        if not isinstance(channels, dict):
+            return None
+        chan = channels.get("teleop")
+        if not isinstance(chan, dict):
+            for value in channels.values():
+                if isinstance(value, dict) and value.get("transport") == "websocket":
+                    chan = value
+                    break
+        if not isinstance(chan, dict):
+            return None
+        path = chan.get("path")
+        if not isinstance(path, str) or not path:
+            return None
+        return self.absolute_ws_url(path)
 
     def invalidate_cache(self) -> None:
         self._caps_cache = None

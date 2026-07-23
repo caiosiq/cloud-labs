@@ -1239,6 +1239,89 @@ async def post_component_record_measurables(tag_id: str):
     }
 
 
+async def _edge_measurable_tensor(
+    client: HttpEdgeClient,
+    tag_id: str,
+    field: str,
+    *,
+    record: bool,
+    resolve: bool,
+) -> Dict[str, Any]:
+    """Tensor read for an HTTP edge (no in-process ``lab`` state).
+
+    The canonical envelope comes from the ``RECORD_MEASURABLES`` execute result
+    (``record=true``) or a ``GET /lab-state`` poll. Lazy images are pointed at the
+    coordinator proxy route; ``resolve=true`` fetches the edge's JPEG bytes on
+    demand and decodes them into a numpy array inline.
+    """
+    from dataclasses import replace  # noqa: PLC0415
+    from lab_model.language.domain.component import get_measurables  # noqa: PLC0415
+    from lab_model.language.measurables.resolve_data import (  # noqa: PLC0415
+        resolve_tensor_from_bytes,
+    )
+    from lab_model.language.measurables.tensor import LazyRef  # noqa: PLC0415
+
+    raw: Any = None
+    if record:
+        edge_result = await _southbound_execute(
+            {"action": PrimitiveId.RECORD_MEASURABLES.value, "target_id": tag_id}
+        )
+        measurables = (
+            edge_result.result.get("measurables")
+            if isinstance(edge_result.result, dict)
+            else None
+        )
+        if isinstance(measurables, dict):
+            raw = measurables.get(field)
+    if raw is None:
+        state = client.get_lab_state() or {}
+        entry = (state.get("components") or {}).get(tag_id)
+        if isinstance(entry, dict):
+            raw = get_measurables(entry).get(field)
+    if raw is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Measurable {field!r} not set on {tag_id}; use ?record=true",
+        )
+
+    is_lazy_image = (
+        field in MEASURABLE_REGISTRY
+        and MEASURABLE_REGISTRY[field].tensor.layout == "lazy_image"
+    )
+    fetch_url = f"/api/components/{tag_id}/camera-image"
+    tensor = materialize_measurable(
+        tag_id,
+        field,
+        raw,
+        backend_id=_active_backend_id(),
+        fetch_url=fetch_url if is_lazy_image else None,
+    )
+
+    # The envelope short-circuits materialize, so its LazyRef still points at the
+    # edge-relative path — capture it before rewriting for outgoing clients.
+    edge_href = tensor.data.href if isinstance(tensor.data, LazyRef) else None
+
+    if resolve and isinstance(tensor.data, LazyRef):
+        href = (
+            edge_href
+            if isinstance(edge_href, str) and edge_href.startswith("/measurables/")
+            else f"/measurables/{tag_id}/camera_image.jpg"
+        )
+        data = client.fetch_bytes(href)
+        if data:
+            tensor = resolve_tensor_from_bytes(tensor, data)
+
+    # Still lazy (not resolved): expose the coordinator proxy URL so any client
+    # resolves through the coordinator rather than the edge-relative path.
+    if isinstance(tensor.data, LazyRef) and is_lazy_image:
+        tensor = replace(
+            tensor,
+            data=LazyRef(kind="url", href=fetch_url, format=tensor.data.format),
+        )
+
+    return {"status": "ok", "tensor": tensor.to_api_dict(include_data=True)}
+
+
 @app.get("/api/components/{tag_id}/measurables/{field}/tensor")
 async def get_measurable_tensor(
     tag_id: str,
@@ -1253,14 +1336,20 @@ async def get_measurable_tensor(
     ``RECORD_MEASURABLES``). Query ``resolve=true`` to materialize lazy image
     payloads server-side (numpy array serialized in JSON).
     """
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
-
     safe_field = (field or "").strip()
     if safe_field.startswith("measurables."):
         safe_field = safe_field.split(".", 1)[1]
     if not safe_field:
         raise HTTPException(status_code=400, detail="field is required")
+
+    client = _edge_client_for()
+    if isinstance(client, HttpEdgeClient):
+        return await _edge_measurable_tensor(
+            client, tag_id, safe_field, record=record, resolve=resolve
+        )
+
+    if lab is None:
+        raise HTTPException(status_code=503, detail="Lab not initialized")
 
     if record:
         state = lab.get_lab_state()
@@ -1801,12 +1890,28 @@ async def get_component_telemetry_live_pose(tag_id: str):
 
 @app.websocket("/api/components/{tag_id}/teleop/session")
 async def ws_component_teleop_session(websocket: WebSocket, tag_id: str):
-    """Duplex TeleOp session: server-push pose @ ~50 Hz; client ``goto`` / ``ping``."""
-    if lab is None:
-        await websocket.close(code=1013, reason="Lab not initialized")
-        return
+    """Duplex TeleOp session: server-push pose @ ~50 Hz; client ``goto`` / ``ping``.
+
+    Proxies to the edge's ``/ws/teleop`` when an HTTP Edge Contract backend is
+    configured (edge owns the arm + coordinate transform); otherwise drives the
+    in-process ``LabCommunicator``.
+    """
     if runtime_manager is not None and runtime_manager.mode == "mujoco":
         await websocket.close(code=4403, reason="TeleOp is unavailable in MuJoCo v1")
+        return
+
+    # HTTP edge: proxy to the edge's own teleop socket (no in-process lab needed).
+    client = _edge_client_for()
+    if isinstance(client, HttpEdgeClient):
+        from lab_model.execution.orchestration.teleop_session_ws import (
+            run_teleop_session_proxy,
+        )
+
+        await run_teleop_session_proxy(websocket, client, tag_id)
+        return
+
+    if lab is None:
+        await websocket.close(code=1013, reason="Lab not initialized")
         return
     catalog_row = (lab.catalog_map or {}).get(tag_id)
     if not isinstance(catalog_row, dict):
@@ -1874,7 +1979,18 @@ async def get_component_camera_image(tag_id: str):
     Path is read from saved lab state, not from the request, so there is no
     user-controlled path traversal vector; the on-disk file is still checked
     for existence + supported format as defense-in-depth.
+
+    For HTTP edge backends there is no local file: the JPEG is proxied on
+    demand from the edge's latched-frame route (``/measurables/{tag}/
+    camera_image.jpg``).
     """
+    client = _edge_client_for()
+    if isinstance(client, HttpEdgeClient):
+        data = client.fetch_bytes(f"/measurables/{tag_id}/camera_image.jpg")
+        if not data:
+            raise HTTPException(status_code=404, detail="No camera image recorded")
+        return Response(content=data, media_type="image/jpeg")
+
     if lab is None:
         raise HTTPException(status_code=503, detail="Lab not initialized")
     state = lab.get_lab_state()
