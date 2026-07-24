@@ -38,7 +38,28 @@ The user never talks to the edge directly; they talk to the coordinator in the u
 
 ## What was skeleton, what we created, and what we touched
 
-The tree began life as a scaffold produced by `cloudlabs-edge init` (the generator is `packages/cloudlabs_edge_dev/src/cloudlabs_edge_dev/scaffold.py`), which writes a *complete function surface* where every adapter is fully documented with docstrings but raises `NotImplementedError`, and where `main.py` serves through a reference stub so that `doctor` and `certify` pass before any hardware is wired. Our work was Phase 6: filling that surface against deathray, plus adding the infrastructure the scaffold intentionally left for the lab to design.
+Before the file table, it helps to know that the Cloud Labs monorepo ships **two installable packages under `packages/`, serving opposite ends of the system** — understanding them is what makes the word "skeleton" mean something concrete.
+
+- **`cloudlabs`** (`packages/cloudlabs`) is the **client SDK**. It is what a script imports to talk to the *coordinator*: `from cloudlabs import connect; lab = connect("real.default")`, then `lab.move_component(...)`, `lab.measurable("tag_22","camera_image").resolve_torch()`. The Twin (browser) is the same power wearing a UI shell. This package never touches hardware and never imports edge code — it only speaks the universal vocabulary over HTTP to the coordinator.
+- **`cloudlabs-edge-dev`** (`packages/cloudlabs_edge_dev`) is the **edge builder's toolbox** — a *development-time* dependency for whoever is standing up a new lab, **not** something the running edge imports. Installing it gives the `cloudlabs-edge` CLI:
+  - `cloudlabs-edge init ./cloudlabs_edge --backend-id real.default` — writes the skeleton (the generator is `scaffold.py`).
+  - `cloudlabs-edge serve-stub` — runs a reference Edge Contract server so the HTTP surface answers correctly before any adapter is filled.
+  - `cloudlabs-edge doctor` — static checks on a skeleton (files present, `capabilities.json` well-formed).
+  - `cloudlabs-edge check` / `cloudlabs-edge certify <url>` — run the conformance suite against a *live* edge URL, including the measurable-envelope conformance check.
+
+So the **skeleton** is precisely the *output of `cloudlabs-edge init`*: a complete function surface where every adapter is documented with docstrings but raises `NotImplementedError`, `capabilities.json` / `bench/layout.json` are valid, and `main.py` serves through the `cloudlabs-edge-dev` reference stub so that `doctor` and `certify` pass on a laptop with no hardware attached. The lab then does "Phase 6" — replacing the `NotImplementedError` bodies with real hardware calls — while `certify` keeps proving the contract is still honored. Our work on deathray *was* that Phase 6, plus the runtime/transport pieces the scaffold intentionally leaves to the lab to design.
+
+### How an edge becomes a usable backend
+
+A finished skeleton is just a process; three wiring steps turn it into a backend the coordinator — and therefore every script and the Twin — can select by name:
+
+1. **Serve the edge.** From the lab repo's `cloudlabs_edge/` folder, `uvicorn main:app --host 0.0.0.0 --port 8200`. This exposes the Edge Contract surface (`/capabilities`, `/bench`, `/execute`, the streams, `/ws/teleop`) described in the next sections.
+2. **Register it on the coordinator.** In `schemas/backends.json`, the entry whose `backend_id` matches (e.g. `real.default`) gets its `edge.base_url` set to that URL (`http://<bench-host>:8200`). This file — not a `.env`, not a hardcoded default — is the single place the server learns *which* edge backs a given `backend_id`; `mock.default` and `sim.default` are registered exactly the same way.
+3. **Let the coordinator resolve it.** On each command, `_edge_client_for(backend_id)` (in `backend/main.py`) reads that entry via `edge_config_for_backend` + `resolve_edge_client`; when `edge.base_url` is set it builds an `HttpEdgeClient` and forwards `POST /execute` southbound to the edge. When it is null, the coordinator falls back to an in-process backend (how the mock teaching bench runs).
+
+The pay-off is that a scientist writes `connect("real.default")` and never learns any of this: the `backend_id` string is the only handle they touch, and the `backends.json` row silently routes it to the right physical bench. Standing up a *new* lab is therefore always the same shape — `init` a skeleton, fill the adapters, serve it, add one `backends.json` row — no matter what hardware lives behind it.
+
+With that vocabulary in place, here is exactly what in this edge came from the skeleton versus what we built.
 
 | Provenance | Files |
 |---|---|
@@ -126,4 +147,4 @@ The subtler latency problem is not speed but **synchronization**, and the edge's
 - The edge passes `cloudlabs-edge doctor` and `cloudlabs-edge certify` (with expected warnings for the still-`NotImplementedError` inventory/storage verbs and a clean degradation to the synthetic camera when `lab_automation` is absent).
 - The measurable envelope now conforms exactly to the coordinator's canonical schema, with a `certify` check guarding against drift.
 - The frame calibration constants from the old `real.py` still need to be filled into `runtime/frames.py` before the arm is driven for real, since the default is identity.
-- The one architectural seam that is designed but not yet finished is the coordinator's `GET /lab-state` reconciliation plus image proxy: right now the edge emits the correct LazyRef and serves the exact latched JPEG at its own `/measurables/...` URL, but for a script to resolve a tensor *through the coordinator* against a remote HTTP edge, the coordinator still needs to poll the edge's state and proxy that image URL. That is the natural next piece, and it is the thing that would make `resolve()` / `resolve_torch()` work end-to-end from a laptop against the real bench.
+- The coordinator's `GET /lab-state` reconciliation plus image proxy — the seam that lets a script resolve a tensor *through the coordinator* against a remote HTTP edge — is now closed: `HttpEdgeClient` gained `get_lab_state` / `fetch_bytes`, the measurable and camera-image endpoints proxy the edge's JPEG on demand, and `resolve()` / `resolve_torch()` therefore work end-to-end from a laptop against the real bench. The teleop WebSocket is likewise proxied to the edge's `/ws/teleop` (with a read-only pose tick driving the server-push stream).
