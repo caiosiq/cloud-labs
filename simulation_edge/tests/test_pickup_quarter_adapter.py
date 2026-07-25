@@ -7,13 +7,15 @@ from simulation_edge.host.runtime import (
     CollisionPlanError,
     REAL_PICKUP_CAMERA_TO_GRIPPER_OFFSET_M,
     REAL_PICKUP_CANONICAL_RIGHT_CAMERA_YAW_DEG,
+    RETURN_HOME_JOINT_TOLERANCE_RAD,
     MuJoCoRobotRuntime,
     _canonical_equivalent_angle_rad,
     _manual_motion_workspace_allows_xy,
     _pickup_quarter_frame,
-    _quarter_grasp_yaw,
+    _short_edge_grasp_yaw,
     _radial_joint_path_sample_count,
     _radial_joint_path_travel_rad,
+    _radial_joint_targets_equivalent,
     _rotate_xy_deg,
 )
 
@@ -64,6 +66,38 @@ class PickupQuarterAdapterTests(unittest.TestCase):
                 expected[adapter.workspace_quarter],
             )
 
+    def test_storage_pickup_uses_fixed_bottom_left_camera_approach(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.home_tcp_rotation = np.eye(3)
+        adapter = runtime._real_pickup_adapter_targets(
+            np.array((-0.316, -0.316)),
+            runtime._target_rotation(0.0),
+            grasp_z=0.300,
+            grasp_policy="short_edges",
+            pickup_context="storage",
+        )
+        self.assertEqual(adapter.workspace_quarter, "storage_bottom_left")
+        self.assertAlmostEqual(adapter.camera_yaw_deg, -160.6)
+        self.assertTrue(adapter.base_first)
+        self.assertEqual(abs(adapter.grasp_yaw_offset_deg), 90.0)
+
+    def test_inner_table_pickup_flips_camera_approach_outside_radial_minimum(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.home_tcp_rotation = np.eye(3)
+        source_xy = np.array((-0.1275887, 0.0875656))
+        adapter = runtime._real_pickup_adapter_targets(
+            source_xy,
+            runtime._target_rotation(0.0),
+            grasp_z=0.300,
+        )
+
+        self.assertEqual(adapter.workspace_quarter, "left")
+        self.assertTrue(adapter.radial_inner_flip)
+        self.assertAlmostEqual(adapter.camera_yaw_deg, -25.6)
+        self.assertGreaterEqual(np.linalg.norm(adapter.camera_xy), 0.134)
+        self.assertGreaterEqual(np.linalg.norm(adapter.aligned_camera_xy), 0.134)
+        np.testing.assert_allclose(adapter.gripper_xy, source_xy, atol=1e-12)
+
     def test_gripper_side_of_camera_rotates_with_workspace_quarter(self):
         expected_gripper_directions = {
             "right": np.array((-1.0, 0.0)),
@@ -87,21 +121,17 @@ class PickupQuarterAdapterTests(unittest.TestCase):
                 atol=0.015,
             )
 
-    def test_quarter_grasp_uses_orthogonal_component_symmetry(self):
-        yaw, offset = _quarter_grasp_yaw(-90.0, 0.0)
-        self.assertEqual(yaw, 0.0)
+    def test_short_edge_grasp_closes_along_long_dimension(self):
+        yaw, offset = _short_edge_grasp_yaw(0.0, 154.4)
+        self.assertEqual(yaw, 90.0)
         self.assertEqual(offset, 90.0)
 
-        yaw, offset = _quarter_grasp_yaw(0.0, 0.0)
-        self.assertEqual(yaw, 0.0)
-        self.assertEqual(offset, 0.0)
-
-        yaw, offset = _quarter_grasp_yaw(0.0, 154.4)
-        self.assertEqual(yaw, 180.0)
-        self.assertEqual(offset, -180.0)
-
-        yaw, offset = _quarter_grasp_yaw(0.0, -115.6)
+        yaw, offset = _short_edge_grasp_yaw(0.0, -115.6)
         self.assertEqual(yaw, -90.0)
+        self.assertEqual(offset, -90.0)
+
+        yaw, offset = _short_edge_grasp_yaw(45.0, 20.0)
+        self.assertEqual(yaw, -45.0)
         self.assertEqual(offset, -90.0)
 
     def test_manual_workspace_only_trims_two_wall_corners(self):
@@ -143,6 +173,29 @@ class PickupQuarterAdapterTests(unittest.TestCase):
         )
         self.assertAlmostEqual(np.rad2deg(rebased), 29.5)
 
+    def test_home_endpoint_accepts_only_periodic_base_and_wrist_branches(self):
+        canonical = np.zeros(7)
+        periodic = canonical.copy()
+        periodic[0] += 2.0 * np.pi
+        periodic[6] -= 2.0 * np.pi
+        periodic[3] = RETURN_HOME_JOINT_TOLERANCE_RAD * 0.5
+        self.assertTrue(
+            _radial_joint_targets_equivalent(
+                periodic,
+                canonical,
+                atol=RETURN_HOME_JOINT_TOLERANCE_RAD,
+            )
+        )
+
+        periodic[3] = RETURN_HOME_JOINT_TOLERANCE_RAD * 2.0
+        self.assertFalse(
+            _radial_joint_targets_equivalent(
+                periodic,
+                canonical,
+                atol=RETURN_HOME_JOINT_TOLERANCE_RAD,
+            )
+        )
+
     def test_radial_wrist_travel_guard_rejects_long_branch(self):
         runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
         start = np.zeros(7)
@@ -178,7 +231,7 @@ class PickupQuarterAdapterTests(unittest.TestCase):
         runtime.model = FakeModel()
         runtime.home_tcp_rotation = np.eye(3)
         runtime._validate_radial_pose_target = lambda *args, **kwargs: None
-        runtime._load_radial_motion_library = lambda: SimpleNamespace(carry_z_m=0.532)
+        runtime._load_radial_motion_library = lambda: SimpleNamespace(carry_z_m=0.550)
         runtime._log = lambda *args, **kwargs: None
 
         current = np.zeros(7)

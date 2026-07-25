@@ -90,6 +90,8 @@ class ComponentSpec:
     grasp_height_m: float | None = None
     mesh_name: str | None = None
     mesh_offset_m: tuple[float, float, float] | None = None
+    base_cylinder_diameter_m: float | None = None
+    base_cylinder_height_m: float | None = None
 
     @property
     def center_z_m(self) -> float:
@@ -111,6 +113,28 @@ class ComponentSpec:
     @property
     def grasp_tcp_z_m(self) -> float:
         return self.center_z_m + self.grasp_site_local_z_m
+
+    def footprint_half_extents_m(self, yaw_deg: float) -> tuple[float, float]:
+        yaw = math.radians(float(yaw_deg))
+        c = abs(math.cos(yaw))
+        s = abs(math.sin(yaw))
+        half_x = c * self.width_m / 2.0 + s * self.depth_m / 2.0
+        half_y = s * self.width_m / 2.0 + c * self.depth_m / 2.0
+        if self.base_cylinder_diameter_m is not None:
+            radius = self.base_cylinder_diameter_m / 2.0
+            half_x = max(half_x, radius)
+            half_y = max(half_y, radius)
+        return half_x, half_y
+
+    @property
+    def footprint_width_m(self) -> float:
+        diameter = self.base_cylinder_diameter_m or 0.0
+        return max(self.width_m, diameter)
+
+    @property
+    def footprint_depth_m(self) -> float:
+        diameter = self.base_cylinder_diameter_m or 0.0
+        return max(self.depth_m, diameter)
 
 
 @dataclass(frozen=True)
@@ -163,6 +187,8 @@ class SimulationProfile:
     mesh_scale: float = 1.0
     mesh_offset_m: tuple[float, float, float] | None = None
     collision_size_m: tuple[float, float, float] | None = None
+    base_cylinder_diameter_m: float | None = None
+    base_cylinder_height_m: float | None = None
     grasp_height_m: float | None = None
     rgba: tuple[float, float, float, float] | None = None
     visual_meshes: tuple[VisualMeshSpec, ...] = ()
@@ -510,6 +536,28 @@ def load_simulation_profile(profile_id: str | None = None) -> SimulationProfile:
     )
     if any(value <= 0 for value in collision_mm):
         raise SceneValidationError(f"{selected} collision dimensions must be positive")
+    base_cylinder_diameter_m: float | None = None
+    base_cylinder_height_m: float | None = None
+    base_cylinder = geometry.get("base_collision_cylinder_mm")
+    if base_cylinder is not None:
+        if not isinstance(base_cylinder, Mapping):
+            raise SceneValidationError(
+                f"{selected}.geometry.base_collision_cylinder_mm must be an object"
+            )
+        diameter_mm = _finite_float(
+            base_cylinder.get("diameter"),
+            label=f"{selected}.geometry.base_collision_cylinder_mm.diameter",
+        )
+        base_height_mm = _finite_float(
+            base_cylinder.get("height"),
+            label=f"{selected}.geometry.base_collision_cylinder_mm.height",
+        )
+        if diameter_mm <= 0 or not 0 < base_height_mm <= collision_mm[2]:
+            raise SceneValidationError(
+                f"{selected} base cylinder must have positive diameter and fit inside the component height"
+            )
+        base_cylinder_diameter_m = diameter_mm / 1000.0
+        base_cylinder_height_m = base_height_mm / 1000.0
     grasp_height_mm = _finite_float(
         geometry.get("grasp_height_mm"),
         label=f"{selected}.geometry.grasp_height_mm",
@@ -531,6 +579,8 @@ def load_simulation_profile(profile_id: str | None = None) -> SimulationProfile:
         mesh_scale=mesh_scale,
         mesh_offset_m=mesh_offset_m,
         collision_size_m=tuple(value / 1000.0 for value in collision_mm),
+        base_cylinder_diameter_m=base_cylinder_diameter_m,
+        base_cylinder_height_m=base_cylinder_height_m,
         grasp_height_m=grasp_height_mm / 1000.0,
         rgba=rgba,
         visual_meshes=visual_meshes,
@@ -867,6 +917,10 @@ def build_scene_spec(
             depth_mm,
             yaw_deg,
         )
+        if profile.base_cylinder_diameter_m is not None:
+            base_radius_mm = profile.base_cylinder_diameter_m * 500.0
+            half_x_mm = max(half_x_mm, base_radius_mm)
+            half_y_mm = max(half_y_mm, base_radius_mm)
         if not _footprint_inside_bounds(
             x_mm,
             y_mm,
@@ -936,6 +990,8 @@ def build_scene_spec(
             grasp_height_m=profile.grasp_height_m,
             mesh_name=("profile_component_mesh" if profile.mesh_path else None),
             mesh_offset_m=profile.mesh_offset_m,
+            base_cylinder_diameter_m=profile.base_cylinder_diameter_m,
+            base_cylinder_height_m=profile.base_cylinder_height_m,
         )
 
     if invalid:
@@ -967,6 +1023,18 @@ def build_scene_spec(
         rgba = " ".join(f"{v:.5f}" for v in spec.rgba)
         if spec.mesh_name and spec.mesh_offset_m:
             mesh_offset = " ".join(f"{value:.8f}" for value in spec.mesh_offset_m)
+            base_geometry = ""
+            if (
+                spec.base_cylinder_diameter_m is not None
+                and spec.base_cylinder_height_m is not None
+            ):
+                base_center_z = -spec.height_m / 2.0 + spec.base_cylinder_height_m / 2.0
+                base_geometry = f"""
+      <geom name="base_geom_{html.escape(spec.body_name)}" type="cylinder"
+        pos="0 0 {base_center_z:.8f}"
+        size="{spec.base_cylinder_diameter_m / 2.0:.8f} {spec.base_cylinder_height_m / 2.0:.8f}"
+        mass="0" rgba="{rgba}" friction="1.2 0.02 0.002"
+        solref="0.008 1" solimp="0.95 0.99 0.001"/>"""
             geometry = f"""
       <geom name="visual_{html.escape(spec.body_name)}" type="mesh"
         mesh="{html.escape(spec.mesh_name)}" pos="{mesh_offset}"
@@ -975,7 +1043,7 @@ def build_scene_spec(
         size="{half[0]:.8f} {half[1]:.8f} {half[2]:.8f}"
         mass="{spec.mass_kg:.8f}" rgba="0 0 0 0"
         friction="1.2 0.02 0.002"
-        solref="0.008 1" solimp="0.95 0.99 0.001"/>"""
+        solref="0.008 1" solimp="0.95 0.99 0.001"/>{base_geometry}"""
         else:
             geometry = f"""
       <geom name="geom_{html.escape(spec.body_name)}" type="box"

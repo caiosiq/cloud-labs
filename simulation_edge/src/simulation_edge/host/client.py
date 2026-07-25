@@ -106,6 +106,8 @@ class MuJoCoProcessClient:
         target_x_mm: float,
         target_y_mm: float,
         target_rotation_deg: float,
+        grasp_policy: str = "short_edges",
+        pickup_context: str = "table",
         timeout_s: float = 240.0,
     ) -> Dict[str, Any]:
         with self._lock:
@@ -124,6 +126,8 @@ class MuJoCoProcessClient:
                     "target_x_mm": float(target_x_mm),
                     "target_y_mm": float(target_y_mm),
                     "target_rotation_deg": float(target_rotation_deg),
+                    "grasp_policy": str(grasp_policy),
+                    "pickup_context": str(pickup_context),
                 }
             )
             while True:

@@ -42,6 +42,7 @@ REAL_PICKUP_EDGE_X_NUDGE_M = 0.010
 # Put the gripper inward of the camera on the right side. The other three side
 # approaches are exact quarter turns of this canonical pose.
 REAL_PICKUP_CANONICAL_RIGHT_CAMERA_YAW_DEG = -25.6
+STORAGE_PICKUP_CAMERA_YAW_DEG = -160.6
 REAL_PICKUP_CALIB_Y_LOWER_MM = -345.884674
 REAL_PICKUP_CALIB_Y_UPPER_MM = 88.222145
 REAL_PICKUP_CALIB_FINE_ADJUST_COEFF = (
@@ -54,7 +55,8 @@ MOTION_TIME_SCALE = 1.0
 MUJOCO_VIEWER_SYNC_HZ_ENV_VAR = "CLOUDLAB_MUJOCO_VIEWER_SYNC_HZ"
 MUJOCO_VIEWER_SYNC_HZ = 60.0
 ARM_SERVO_STIFFNESS_SCALE = 2.0
-GRIPPER_FORCE_SCALE = 1.10
+GRIPPER_FORCE_LIMIT_N = 65.0
+GRIPPER_PAD_SLIDING_FRICTION = 3.0
 PLACEMENT_POSITION_TOLERANCE_MM = 5.0
 RADIAL_PLACEMENT_POSITION_TOLERANCE_MM = 8.0
 PLACEMENT_YAW_TOLERANCE_DEG = 2.0
@@ -82,13 +84,14 @@ RADIAL_HEIGHT_ZONE_MIN_RADIUS_MM_ENV_VAR = "CLOUDLAB_RADIAL_HEIGHT_ZONE_MIN_RADI
 RADIAL_DEFAULT_MIN_RADIUS_MM = 134.0
 RADIAL_DEFAULT_MAX_RADIUS_MM = 513.0
 RADIAL_DEFAULT_STEP_MM = 5.0
-RADIAL_DEFAULT_CARRY_Z_M = 0.532
+RADIAL_DEFAULT_CARRY_Z_M = 0.550
 RADIAL_DEFAULT_HEIGHT_ZONE_MARGIN_M = 0.0
 RADIAL_DEFAULT_GRASP_Z_M = 0.300
 RADIAL_DEFAULT_MAX_VERTICAL_Z_M = 0.550
 RADIAL_VERTICAL_STEP_MM = 10.0
 RADIAL_BASE_ROTATION_STEP_DEG = 12.0
 RADIAL_ROTATION_FINAL_DURATION_SCALE = 2.0
+RADIAL_CARRIED_SMOOTH_DURATION_SCALE = 1.5
 RADIAL_TRANSLATION_STEP_MM = 25.0
 RADIAL_XY_IK_STEP_M = 0.025
 RADIAL_OUTER_CARRY_Z_M = 0.416
@@ -256,11 +259,20 @@ def _rotate_xy_deg(vector: Sequence[float], yaw_deg: float) -> np.ndarray:
     )
 
 
-def _quarter_grasp_yaw(
+def _short_edge_grasp_yaw(
     source_yaw_deg: float,
     preferred_yaw_deg: float,
 ) -> tuple[float, float]:
-    candidates = [float(source_yaw_deg) + 90.0 * step for step in range(-2, 3)]
+    """Close the jaws along the component's longer local X dimension.
+
+    The fingers therefore contact the grooved short end faces. The two
+    orientations separated by 180 degrees are physically equivalent; choose
+    the one requiring less wrist rotation from the camera-approach pose.
+    """
+    candidates = [
+        float(source_yaw_deg) - 90.0,
+        float(source_yaw_deg) + 90.0,
+    ]
     chosen = min(
         candidates,
         key=lambda yaw: (
@@ -323,6 +335,22 @@ def _canonical_equivalent_angle_rad(
             key=abs,
         )
     )
+
+
+def _radial_joint_targets_equivalent(
+    first: np.ndarray,
+    second: np.ndarray,
+    *,
+    atol: float,
+) -> bool:
+    delta = np.asarray(first, dtype=float) - np.asarray(second, dtype=float)
+    delta = delta.copy()
+    for joint_index in (0, 6):
+        delta[joint_index] = math.atan2(
+            math.sin(float(delta[joint_index])),
+            math.cos(float(delta[joint_index])),
+        )
+    return bool(np.all(np.abs(delta) <= float(atol)))
 
 
 def _radial_joint_path_travel_rad(
@@ -472,6 +500,8 @@ class RealPickupAdapterTargets:
     workspace_quarter: str = "center"
     camera_yaw_deg: float = 0.0
     quarter_oriented: bool = False
+    base_first: bool = False
+    radial_inner_flip: bool = False
 
 
 @dataclass(frozen=True)
@@ -587,7 +617,18 @@ class MuJoCoRobotRuntime:
             ARM_SERVO_STIFFNESS_SCALE
         )
         self.model.actuator_forcerange[:ARM_DOF] *= ARM_SERVO_STIFFNESS_SCALE
-        self.model.actuator_forcerange[ARM_DOF] *= GRIPPER_FORCE_SCALE
+        self.model.actuator_forcerange[ARM_DOF] = (
+            -GRIPPER_FORCE_LIMIT_N,
+            GRIPPER_FORCE_LIMIT_N,
+        )
+        for geom_name in (
+            "left_finger_pad_1",
+            "left_finger_pad_2",
+            "right_finger_pad_1",
+            "right_finger_pad_2",
+        ):
+            geom_id = self.model.geom(geom_name).id
+            self.model.geom_friction[geom_id, 0] = GRIPPER_PAD_SLIDING_FRICTION
         self.data = mujoco.MjData(self.model)
         # Resetting the whole composed model to the xArm keyframe also zeros
         # free-joint qpos values added by the generated scene, which teleports
@@ -664,6 +705,9 @@ class MuJoCoRobotRuntime:
             initial_joint_target=self.current_joint_target.tolist(),
             initial_tcp_m=self.data.site("link_tcp").xpos.copy(),
             component_ids=sorted(self.scene.components),
+            gripper_force_limit_n=GRIPPER_FORCE_LIMIT_N,
+            gripper_pad_sliding_friction=GRIPPER_PAD_SLIDING_FRICTION,
+            gripper_force_range_n=self.model.actuator_forcerange[ARM_DOF].copy(),
         )
 
     def _log(self, event: str, **payload: Any) -> None:
@@ -1964,7 +2008,11 @@ class MuJoCoRobotRuntime:
             "radial coordinated rotate",
             "home coordinated rotate",
         }
-        if gentle_rotation_finish and durations:
+        smooth_carried_motion = (
+            allowed_tag is not None
+            and self._gripper_position >= GRIPPER_CLOSED * 0.5
+        )
+        if gentle_rotation_finish and durations and not smooth_carried_motion:
             durations[-1] *= RADIAL_ROTATION_FINAL_DURATION_SCALE
         self.stage_trace.append(name)
         self._emit_progress(
@@ -1978,6 +2026,12 @@ class MuJoCoRobotRuntime:
             waypoint_count=len(checked_waypoints),
             allowed_tag=allowed_tag,
             prevalidated=prevalidated,
+            smooth_carried_motion=smooth_carried_motion,
+            playback_duration_s=(
+                sum(durations) * RADIAL_CARRIED_SMOOTH_DURATION_SCALE
+                if smooth_carried_motion
+                else sum(durations)
+            ),
             worst_clearance_m=(
                 worst_report.min_clearance_m if worst_report is not None else None
             ),
@@ -1990,6 +2044,7 @@ class MuJoCoRobotRuntime:
                 checked_waypoints,
                 durations,
                 gentle_final=gentle_rotation_finish,
+                smooth_stage=smooth_carried_motion,
             )
             self.current_joint_target = checked_waypoints[-1].copy()
         finally:
@@ -2204,11 +2259,11 @@ class MuJoCoRobotRuntime:
         tcp_rotation = np.asarray(rotation, dtype=float)
         object_position = tcp_position + tcp_rotation @ relative_position
         object_rotation = tcp_rotation @ relative_rotation
-        object_yaw = math.atan2(object_rotation[1, 0], object_rotation[0, 0])
-        c, s = abs(math.cos(object_yaw)), abs(math.sin(object_yaw))
+        object_yaw_deg = math.degrees(
+            math.atan2(object_rotation[1, 0], object_rotation[0, 0])
+        )
         spec = self.scene.components[allowed_tag]
-        half_x_m = c * spec.width_m / 2.0 + s * spec.depth_m / 2.0
-        half_y_m = s * spec.width_m / 2.0 + c * spec.depth_m / 2.0
+        half_x_m, half_y_m = spec.footprint_half_extents_m(object_yaw_deg)
         frame_m = float(self.scene.frame_safety_clearance_mm) / 1000.0
         return bool(
             bounds["x_min"] / 1000.0 + frame_m + half_x_m - 1e-6
@@ -2515,6 +2570,7 @@ class MuJoCoRobotRuntime:
         durations_s: Sequence[float],
         *,
         gentle_final: bool = False,
+        smooth_stage: bool = False,
     ) -> None:
         if len(waypoints) < 2:
             return
@@ -2526,26 +2582,37 @@ class MuJoCoRobotRuntime:
                 cumulative[-1]
                 + self._scaled_manual_duration_s(duration, minimum_s=0.01)
             )
-        total_duration = cumulative[-1]
+        path_duration = cumulative[-1]
+        total_duration = path_duration
+        if smooth_stage:
+            total_duration *= RADIAL_CARRIED_SMOOTH_DURATION_SCALE
         started = float(self.data.time)
         segment_index = 0
         while self.data.time - started < total_duration:
             elapsed = self.data.time - started
+            path_elapsed = elapsed
+            if smooth_stage:
+                path_elapsed = _smoothstep(elapsed / total_duration) * path_duration
             while (
                 segment_index < len(cumulative) - 2
-                and elapsed > cumulative[segment_index + 1]
+                and path_elapsed > cumulative[segment_index + 1]
             ):
                 segment_index += 1
             start_time = cumulative[segment_index]
             end_time = cumulative[segment_index + 1]
             phase = float(
                 np.clip(
-                    (elapsed - start_time) / max(end_time - start_time, 1e-6),
+                    (path_elapsed - start_time)
+                    / max(end_time - start_time, 1e-6),
                     0.0,
                     1.0,
                 )
             )
-            if gentle_final and segment_index == len(waypoints) - 2:
+            if (
+                gentle_final
+                and not smooth_stage
+                and segment_index == len(waypoints) - 2
+            ):
                 # Doubling this segment's duration and using this ease-out keeps
                 # its initial commanded velocity continuous, then reaches zero
                 # velocity smoothly at the final rotation target.
@@ -2884,6 +2951,8 @@ class MuJoCoRobotRuntime:
         source_rotation: np.ndarray,
         *,
         grasp_z: float,
+        grasp_policy: str = "short_edges",
+        pickup_context: str = "table",
     ) -> RealPickupAdapterTargets:
         source_xy = np.asarray(source_xy, dtype=float)[:2]
         x_adjust_m = self._real_pickup_x_adjust_m(source_xy)
@@ -2892,39 +2961,89 @@ class MuJoCoRobotRuntime:
             + np.array((x_adjust_m, 0.0), dtype=float)
         )
         quarter = _pickup_quarter_frame(source_xy)
-        camera_yaw_deg = (
-            REAL_PICKUP_CANONICAL_RIGHT_CAMERA_YAW_DEG
-            + quarter.rotation_deg
-        )
-        camera_xy = (
-            source_xy
-            + REAL_PICKUP_EDGE_X_NUDGE_M
-            * np.asarray(quarter.inward_xy, dtype=float)
-            + _rotate_xy_deg(
-                REAL_PICKUP_CAMERA_PREOFFSET_M,
-                camera_yaw_deg,
+        radial_inner_flip = False
+        if pickup_context == "storage":
+            camera_yaw_deg = STORAGE_PICKUP_CAMERA_YAW_DEG
+            inward_xy = -source_xy / max(float(np.linalg.norm(source_xy)), 1e-9)
+            workspace_quarter = "storage_bottom_left"
+            quarter_oriented = False
+            base_first = True
+        elif pickup_context == "table":
+            camera_yaw_deg = (
+                REAL_PICKUP_CANONICAL_RIGHT_CAMERA_YAW_DEG
+                + quarter.rotation_deg
             )
+            inward_xy = np.asarray(quarter.inward_xy, dtype=float)
+            workspace_quarter = quarter.name
+            quarter_oriented = True
+            base_first = False
+        else:
+            raise SimulatorError(f"unknown pickup context {pickup_context!r}")
+
+        def camera_geometry(yaw_deg: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            camera_xy_value = (
+                source_xy
+                + REAL_PICKUP_EDGE_X_NUDGE_M * inward_xy
+                + _rotate_xy_deg(
+                    REAL_PICKUP_CAMERA_PREOFFSET_M,
+                    yaw_deg,
+                )
+            )
+            camera_offset_value = _rotate_xy_deg(
+                local_camera_to_gripper_offset,
+                yaw_deg,
+            )
+            aligned_camera_xy_value = source_xy - camera_offset_value
+            return (
+                camera_xy_value,
+                camera_offset_value,
+                aligned_camera_xy_value,
+            )
+
+        camera_xy, camera_to_gripper_offset, aligned_camera_xy = camera_geometry(
+            camera_yaw_deg
         )
-        camera_to_gripper_offset = _rotate_xy_deg(
-            local_camera_to_gripper_offset,
-            camera_yaw_deg,
-        )
+        if pickup_context == "table":
+            radial_min_m = self._radial_min_radius_m()
+            primary_min_radius = min(
+                float(np.linalg.norm(camera_xy)),
+                float(np.linalg.norm(aligned_camera_xy)),
+            )
+            if primary_min_radius < radial_min_m - 1e-6:
+                flipped_yaw_deg = (
+                    float(camera_yaw_deg) + 180.0 + 180.0
+                ) % 360.0 - 180.0
+                (
+                    flipped_camera_xy,
+                    flipped_camera_offset,
+                    flipped_aligned_camera_xy,
+                ) = camera_geometry(flipped_yaw_deg)
+                flipped_min_radius = min(
+                    float(np.linalg.norm(flipped_camera_xy)),
+                    float(np.linalg.norm(flipped_aligned_camera_xy)),
+                )
+                if flipped_min_radius > primary_min_radius:
+                    camera_yaw_deg = flipped_yaw_deg
+                    camera_xy = flipped_camera_xy
+                    camera_to_gripper_offset = flipped_camera_offset
+                    aligned_camera_xy = flipped_aligned_camera_xy
+                    radial_inner_flip = True
+
         camera_rotation = self._target_rotation(camera_yaw_deg)
         source_yaw_deg = self._target_yaw_from_rotation(source_rotation)
-        grasp_yaw_deg, grasp_yaw_offset_deg = _quarter_grasp_yaw(
-            source_yaw_deg,
-            camera_yaw_deg,
-        )
+        if grasp_policy == "short_edges":
+            grasp_yaw_deg, grasp_yaw_offset_deg = _short_edge_grasp_yaw(
+                source_yaw_deg,
+                camera_yaw_deg,
+            )
+        else:
+            raise SimulatorError(f"unknown grasp policy {grasp_policy!r}")
         grasp_rotation = self._target_rotation(grasp_yaw_deg)
         # The real fine-adjust loop moves until the tag is centered in the
         # gripper camera. At that point applying the calibrated camera-to-
         # gripper offset puts the TCP over the component center. Keep the rough
         # camera pose as the first stage, but model that centering result
         # explicitly instead of treating fine adjustment as a no-op.
-        aligned_camera_xy = (
-            np.asarray(source_xy, dtype=float).copy()
-            - camera_to_gripper_offset
-        )
         gripper_xy = (
             aligned_camera_xy + camera_to_gripper_offset
         )
@@ -2944,9 +3063,11 @@ class MuJoCoRobotRuntime:
             retract_z=self._real_pickup_retract_z(grasp_z),
             x_adjust_m=float(x_adjust_m),
             grasp_yaw_offset_deg=grasp_yaw_offset_deg,
-            workspace_quarter=quarter.name,
+            workspace_quarter=workspace_quarter,
             camera_yaw_deg=float(camera_yaw_deg),
-            quarter_oriented=True,
+            quarter_oriented=quarter_oriented,
+            base_first=base_first,
+            radial_inner_flip=radial_inner_flip,
         )
 
     def _log_real_pickup_adapter(
@@ -2972,6 +3093,8 @@ class MuJoCoRobotRuntime:
             workspace_quarter=adapter.workspace_quarter,
             camera_yaw_deg=adapter.camera_yaw_deg,
             quarter_oriented=adapter.quarter_oriented,
+            base_first=adapter.base_first,
+            radial_inner_flip=adapter.radial_inner_flip,
         )
 
     def _real_pickup_pregrasp_stage_specs(
@@ -3060,11 +3183,11 @@ class MuJoCoRobotRuntime:
     ) -> None:
         bounds = self.scene.lab_bounds_mm
         x_mm, y_mm = target_xy * 1000.0
-        yaw = math.radians(float(target_rotation_deg))
-        c = abs(math.cos(yaw))
-        s = abs(math.sin(yaw))
-        half_width_mm = c * spec.width_m * 500.0 + s * spec.depth_m * 500.0
-        half_depth_mm = s * spec.width_m * 500.0 + c * spec.depth_m * 500.0
+        half_width_m, half_depth_m = spec.footprint_half_extents_m(
+            target_rotation_deg
+        )
+        half_width_mm = half_width_m * 1000.0
+        half_depth_mm = half_depth_m * 1000.0
         frame_clearance_mm = float(self.scene.frame_safety_clearance_mm)
         if not (
             bounds["x_min"] + frame_clearance_mm + half_width_mm
@@ -3108,8 +3231,8 @@ class MuJoCoRobotRuntime:
             separation = np.abs(target_xy - other_position[:2])
             required = np.array(
                 (
-                    (spec.width_m + other_spec.width_m) / 2.0,
-                    (spec.depth_m + other_spec.depth_m) / 2.0,
+                    (spec.footprint_width_m + other_spec.footprint_width_m) / 2.0,
+                    (spec.footprint_depth_m + other_spec.footprint_depth_m) / 2.0,
                 )
             )
             if bool(np.all(separation < required + 0.005)):
@@ -3277,10 +3400,7 @@ class MuJoCoRobotRuntime:
         target_rotation_deg: float,
     ) -> np.ndarray:
         target = np.asarray(target_xy, dtype=float)[:2].copy()
-        yaw = math.radians(float(target_rotation_deg))
-        c, s = abs(math.cos(yaw)), abs(math.sin(yaw))
-        half_x_m = c * spec.width_m / 2.0 + s * spec.depth_m / 2.0
-        half_y_m = s * spec.width_m / 2.0 + c * spec.depth_m / 2.0
+        half_x_m, half_y_m = spec.footprint_half_extents_m(target_rotation_deg)
         bounds = self.scene.lab_bounds_mm
         frame_m = float(self.scene.frame_safety_clearance_mm) / 1000.0
         buffer_m = RADIAL_NO_WELD_BOUNDARY_BUFFER_M
@@ -3393,6 +3513,18 @@ class MuJoCoRobotRuntime:
         gripper_radius = float(np.linalg.norm(adapter.gripper_xy))
         current = self.current_joint_target.copy()
         pregrasp: list[RadialJointStagePlan] = []
+
+        if adapter.base_first:
+            base_aligned = current.copy()
+            base_aligned[0] = adapter.base_joint_rad
+            base_stage = RadialJointStagePlan(
+                "storage pickup base align",
+                (current.copy(), base_aligned.copy()),
+                None,
+            )
+            self._preflight_radial_stage(base_stage)
+            pregrasp.append(base_stage)
+            current = base_aligned
 
         camera_portal = (
             self._radial_outer_portal_xy(adapter.camera_xy)
@@ -3867,6 +3999,18 @@ class MuJoCoRobotRuntime:
             return self._plan_radial_outer_manual_pickup(tag_id, adapter)
         current = self.current_joint_target.copy()
         pregrasp: list[RadialJointStagePlan] = []
+
+        if adapter.base_first:
+            base_aligned = current.copy()
+            base_aligned[0] = adapter.base_joint_rad
+            base_stage = RadialJointStagePlan(
+                "storage pickup base align",
+                (current.copy(), base_aligned.copy()),
+                None,
+            )
+            self._preflight_radial_stage(base_stage)
+            pregrasp.append(base_stage)
+            current = base_aligned
 
         camera_carry = self._radial_xy_pose_joints(
             adapter.camera_xy,
@@ -4475,14 +4619,28 @@ class MuJoCoRobotRuntime:
         expected_home = self._radial_observation_home_joints(
             seed=self.current_joint_target,
         )
-        if not np.allclose(
+        raw_home_match = bool(
+            np.allclose(
+                self.current_joint_target,
+                expected_home,
+                atol=RETURN_HOME_JOINT_TOLERANCE_RAD,
+                rtol=0.0,
+            )
+        )
+        if not _radial_joint_targets_equivalent(
             self.current_joint_target,
             expected_home,
-            atol=RADIAL_FIXED_JOINT_TOLERANCE_RAD,
-            rtol=0.0,
+            atol=RETURN_HOME_JOINT_TOLERANCE_RAD,
         ):
             raise SimulatorError(
                 "radial home route did not finish at observation home"
+            )
+        if not raw_home_match:
+            self._log(
+                "radial_observation_home_periodic_endpoint",
+                planned_endpoint=self.current_joint_target,
+                canonical_home=expected_home,
+                joint_delta_rad=self.current_joint_target - expected_home,
             )
         self._log(
             "radial_observation_home_plan_success",
@@ -4620,6 +4778,8 @@ class MuJoCoRobotRuntime:
         target_x_mm: float,
         target_y_mm: float,
         target_rotation_deg: float,
+        grasp_policy: str = "short_edges",
+        pickup_context: str = "table",
     ) -> MoveResult:
         if self.planner_backend == MUJOCO_PLANNER_RADIAL:
             self._rebase_radial_periodic_joint_branches(
@@ -4634,6 +4794,8 @@ class MuJoCoRobotRuntime:
                 "rotation_deg": float(target_rotation_deg),
             },
             planner_backend=self.planner_backend,
+            grasp_policy=grasp_policy,
+            pickup_context=pickup_context,
             state=self._runtime_snapshot(),
         )
         try:
@@ -4643,6 +4805,8 @@ class MuJoCoRobotRuntime:
                     target_x_mm=target_x_mm,
                     target_y_mm=target_y_mm,
                     target_rotation_deg=target_rotation_deg,
+                    grasp_policy=grasp_policy,
+                    pickup_context=pickup_context,
                 )
             else:
                 result = self._pick_and_place_custom_ik(
@@ -4650,6 +4814,8 @@ class MuJoCoRobotRuntime:
                     target_x_mm=target_x_mm,
                     target_y_mm=target_y_mm,
                     target_rotation_deg=target_rotation_deg,
+                    grasp_policy=grasp_policy,
+                    pickup_context=pickup_context,
                 )
         except Exception as exc:  # noqa: BLE001
             self._log(
@@ -4677,6 +4843,8 @@ class MuJoCoRobotRuntime:
         target_x_mm: float,
         target_y_mm: float,
         target_rotation_deg: float,
+        grasp_policy: str = "short_edges",
+        pickup_context: str = "table",
     ) -> MoveResult:
         if tag_id not in self.scene.components:
             raise SimulatorError(f"MuJoCo body not found for {tag_id}")
@@ -4692,6 +4860,8 @@ class MuJoCoRobotRuntime:
             source_xy,
             source_rotation,
             grasp_z=grasp_z,
+            grasp_policy=grasp_policy,
+            pickup_context=pickup_context,
         )
         pickup_rotation = pickup_adapter.grasp_rotation
         target_rotation = self._target_rotation(
@@ -4925,6 +5095,8 @@ class MuJoCoRobotRuntime:
         target_x_mm: float,
         target_y_mm: float,
         target_rotation_deg: float,
+        grasp_policy: str = "short_edges",
+        pickup_context: str = "table",
     ) -> MoveResult:
         if tag_id not in self.scene.components:
             raise SimulatorError(f"MuJoCo body not found for {tag_id}")
@@ -4940,6 +5112,8 @@ class MuJoCoRobotRuntime:
             source_xy,
             source_rotation,
             grasp_z=grasp_z,
+            grasp_policy=grasp_policy,
+            pickup_context=pickup_context,
         )
         target_rotation = self._target_rotation(
             target_rotation_deg + pickup_adapter.grasp_yaw_offset_deg
@@ -5081,11 +5255,15 @@ class MuJoCoRobotRuntime:
                 f"physical gripper did not secure {spec.tag_id} during {stage}; "
                 f"finger contacts={names}"
             )
+        relative_pose = self._component_relative_pose(spec.tag_id)
         self._log(
             "physical_grasp_verified",
             tag_id=spec.tag_id,
             stage=stage,
             contact_bodies=sorted(contacts),
+            tcp_relative_position_m=(
+                relative_pose[1] if relative_pose is not None else None
+            ),
             state=self._runtime_snapshot(),
         )
 
@@ -5144,6 +5322,8 @@ def simulation_process_main(
                     target_x_mm=float(command["target_x_mm"]),
                     target_y_mm=float(command["target_y_mm"]),
                     target_rotation_deg=float(command["target_rotation_deg"]),
+                    grasp_policy=str(command.get("grasp_policy") or "short_edges"),
+                    pickup_context=str(command.get("pickup_context") or "table"),
                 )
                 result_queue.put(
                     {

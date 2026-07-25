@@ -32,6 +32,10 @@ PRIMITIVE_HANDLERS: dict[str, Handler] = {
     ),
     "EVAL_KERNEL": lambda a: observe.eval_kernel(str(a.get("kernel_id") or ""), a),
     "MOVE_COMPONENT": lambda a: motion.move_component(a),
+    "STORE_COMPONENT": lambda a: motion.store_component(a),
+    "PLACE_FROM_STORAGE": lambda a: motion.place_from_storage(a),
+    "REPACK_STORAGE": lambda a: motion.repack_storage_slot(a),
+    "RECENTER_IN_STORAGE": lambda a: motion.recenter_stored_in_inventory(a),
 }
 
 
