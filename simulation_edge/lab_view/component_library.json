@@ -7,8 +7,8 @@
       "name": "ND Filter",
       "tag_id": "tag_9",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 60,
       "parameters": {
@@ -80,8 +80,8 @@
       "name": "Gripper Camera 1",
       "tag_id": "tag_22",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 175,
       "parameters": {
@@ -191,8 +191,8 @@
       "name": "Gripper Camera 2",
       "tag_id": "tag_21",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 210,
       "parameters": {
@@ -301,8 +301,8 @@
       "name": "Curved Mirror (OC)",
       "tag_id": "tag_18",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 60,
       "parameters": {
@@ -400,8 +400,8 @@
       "name": "Beam Block",
       "tag_id": "tag_2",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 60,
       "parameters": {
@@ -473,8 +473,8 @@
       "name": "Beam Splitter (BS)",
       "tag_id": "tag_10",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 60,
       "parameters": {
@@ -546,8 +546,8 @@
       "name": "Main Lens",
       "tag_id": "tag_11",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 60,
       "parameters": {
@@ -645,8 +645,8 @@
       "name": "Planar Mirror (IC)",
       "tag_id": "tag_20",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 60,
       "parameters": {
@@ -744,8 +744,8 @@
       "name": "Filter",
       "tag_id": "tag_3",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 60,
       "parameters": {
@@ -817,8 +817,8 @@
       "name": "Crystal",
       "tag_id": "tag_19",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 60,
       "parameters": {
@@ -891,8 +891,8 @@
       "name": "Silver Mirror",
       "tag_id": "tag_8",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 60,
       "parameters": {
@@ -965,8 +965,8 @@
       "name": "Table-top camera",
       "tag_id": "tag_99",
       "size": {
-        "width": 62,
-        "height": 62
+        "width": 72.0,
+        "height": 64.2883
       },
       "height_mm": 60,
       "parameters": {

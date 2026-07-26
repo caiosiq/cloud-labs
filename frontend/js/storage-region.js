@@ -1,11 +1,14 @@
 /**
  * Lab frame (mm): inventory uses the rectangle from `/api/lab-layout` (`storage_grid.q3`):
- * [STORAGE_RECT_X_MIN, 0) × [STORAGE_RECT_Y_MIN, 0). Breadboard = complementary within lab bounds.
+ * [STORAGE_RECT_X_MIN, STORAGE_RECT_X_MAX) x
+ * [STORAGE_RECT_Y_MIN, STORAGE_RECT_Y_MAX). Breadboard is the complement.
  */
 
 import {
     STORAGE_RECT_X_MIN,
+    STORAGE_RECT_X_MAX,
     STORAGE_RECT_Y_MIN,
+    STORAGE_RECT_Y_MAX,
 } from './config.js';
 import {
     isBreadboardIntent,
@@ -15,7 +18,8 @@ import {
 } from './component-model.js';
 
 export function isStorageRegion(x, y) {
-    return STORAGE_RECT_X_MIN <= x && x < 0 && STORAGE_RECT_Y_MIN <= y && y < 0;
+    return STORAGE_RECT_X_MIN <= x && x < STORAGE_RECT_X_MAX
+        && STORAGE_RECT_Y_MIN <= y && y < STORAGE_RECT_Y_MAX;
 }
 
 export function isPlacedRegion(x, y) {

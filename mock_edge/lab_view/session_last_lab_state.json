@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "saved_at": "2026-07-22T04:09:05.895163+00:00",
+  "saved_at": "2026-07-22T18:03:12.729009+00:00",
   "lab_mode": "MOCK",
   "lab_state": {
     "system_status": "IDLE",
-    "last_updated": "2026-07-21T22:53:18.452725",
+    "last_updated": "2026-07-22T14:03:12.713190",
     "components": {
       "tag_9": {
         "id": "tag_9",
@@ -149,9 +149,9 @@
           "tunables": {
             "presence": "breadboard",
             "nominal_pose": {
-              "x": -241.90482003348217,
-              "y": 200.0,
-              "rotation": 0.0
+              "x": -168.90482003348217,
+              "y": 222.0,
+              "rotation": 33.0
             },
             "nominal_motor_positions": {
               "1": 2.6,
@@ -165,16 +165,16 @@
               "mode": "MANUAL"
             },
             "reported_pose": {
-              "x": -242.17836101938533,
-              "y": 199.79231175350242,
-              "rotation": 0.0
+              "x": -169.01880299530555,
+              "y": 222.10191590065682,
+              "rotation": 33.0
             }
           },
           "measurables": {
             "pose": {
-              "x": -242.17836101938533,
-              "y": 199.79231175350242,
-              "rotation": 0.0
+              "x": -169.01880299530555,
+              "y": 222.10191590065682,
+              "rotation": 33.0
             },
             "last_optimization_score": null,
             "last_optimized_pose": null,

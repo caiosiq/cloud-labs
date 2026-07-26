@@ -11,8 +11,8 @@ returns a JSON-serializable ``dict`` that will become the execute
 ``result`` (include ``tag_id`` and any updated pose or presence fields the
 coordinator should merge into lab state).
 
-simulation_edge v1 implements ``MOVE_COMPONENT`` via ``SimulationHost``;
-inventory / pick-place helpers remain ``NotImplementedError`` until ported.
+simulation_edge implements table and storage moves through ``SimulationHost``;
+in-air pick/hover helpers remain ``NotImplementedError`` until ported.
 """
 
 from __future__ import annotations
@@ -153,7 +153,8 @@ async def store_component(args: dict[str, Any]) -> dict[str, Any]:
     dict
         ``tag_id``, storage slot id/indices, and presence ``"STORED"``.
     """
-    raise NotImplementedError("Phase 6: store / inventory path")
+    tag = context.tag_from_args(args)
+    return await context.get_lab().store_component(tag)
 
 
 async def place_from_storage(args: dict[str, Any]) -> dict[str, Any]:
@@ -170,7 +171,22 @@ async def place_from_storage(args: dict[str, Any]) -> dict[str, Any]:
     dict
         ``tag_id``, presence ``"PLACED"``, and final pose.
     """
-    raise NotImplementedError("Phase 6: place_from_storage")
+    tag = context.tag_from_args(args)
+    x = float(args.get("x") if args.get("x") is not None else args.get("target_x") or 0.0)
+    y = float(args.get("y") if args.get("y") is not None else args.get("target_y") or 0.0)
+    rotation = float(
+        args.get("rotation")
+        if args.get("rotation") is not None
+        else args.get("yaw")
+        if args.get("yaw") is not None
+        else 0.0
+    )
+    return await context.get_lab().place_from_storage(
+        tag,
+        x=x,
+        y=y,
+        rotation=rotation,
+    )
 
 
 async def affirm_placed_at_current(args: dict[str, Any]) -> dict[str, Any]:
@@ -202,7 +218,8 @@ async def repack_storage_slot(args: dict[str, Any]) -> dict[str, Any]:
     dict
         Slot identity and outcome status.
     """
-    raise NotImplementedError("Phase 6: repack storage slot")
+    tag = context.tag_from_args(args)
+    return await context.get_lab().repack_storage_slot(tag)
 
 
 async def recenter_stored_in_inventory(args: dict[str, Any]) -> dict[str, Any]:
@@ -218,7 +235,8 @@ async def recenter_stored_in_inventory(args: dict[str, Any]) -> dict[str, Any]:
     dict
         ``tag_id`` and updated storage pose or slot metadata.
     """
-    raise NotImplementedError("Phase 6: recenter in inventory")
+    tag = context.tag_from_args(args)
+    return await context.get_lab().recenter_stored_in_inventory(tag)
 
 
 async def remove_component(args: dict[str, Any]) -> dict[str, Any]:

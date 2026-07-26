@@ -4,7 +4,15 @@ from __future__ import annotations
 import unittest
 
 from lab_model.language.domain.component import new_component_entry, PRESENCE_BREADBOARD, PRESENCE_STORAGE
-from lab_model.language.domain.storage_region import analyze_layout_issues, configure_from_layout_document
+from lab_model.language.domain.storage_region import (
+    analyze_layout_issues,
+    cell_center,
+    cell_dimensions_mm,
+    configure_from_layout_document,
+    find_storage_slot_and_center,
+    is_storage_region,
+    storage_grid_spec,
+)
 
 
 LAYOUT = {
@@ -72,6 +80,68 @@ class TestLayoutIssues(unittest.TestCase):
         )
         issues = analyze_layout_issues({"tag_9": entry}, lambda _tid: (62.0, 62.0))
         self.assertFalse(any(i["kind"] == "PLACED_IN_Q3" for i in issues))
+
+
+class TestExplicitStorageBounds(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        layout = dict(LAYOUT)
+        layout["storage"] = {
+            "rule": "negative_xy",
+            "grid_nx": 4,
+            "grid_ny": 4,
+            "bounds_mm": {
+                "x_min": -361,
+                "x_max": -1,
+                "y_min": -361,
+                "y_max": -1,
+            },
+        }
+        configure_from_layout_document(layout)
+
+    def test_grid_has_90_mm_pitch_and_expected_centers(self) -> None:
+        self.assertEqual(cell_dimensions_mm(), (90.0, 90.0))
+        self.assertEqual(cell_center(0, 0), (-316.0, -316.0))
+        self.assertEqual(cell_center(3, 3), (-46.0, -46.0))
+
+    def test_inner_strip_is_not_storage(self) -> None:
+        self.assertTrue(is_storage_region(-46.0, -46.0))
+        self.assertFalse(is_storage_region(0.0, -46.0))
+        self.assertEqual(storage_grid_spec()["q3"]["x_max"], -1.0)
+
+    def test_grid_provides_15_clear_housing_slots(self) -> None:
+        components = {}
+        for index in range(15):
+            tag_id = f"tag_{index}"
+            allocation = find_storage_slot_and_center(
+                components,
+                tag_id,
+                72.0,
+                64.2883,
+                lambda _tid: (72.0, 64.2883),
+            )
+            self.assertIsNotNone(allocation)
+            cx, cy, i, j = allocation
+            components[tag_id] = new_component_entry(
+                tag_id,
+                "OPTICAL_HOUSING",
+                presence=PRESENCE_STORAGE,
+                nominal_pose={"x": cx, "y": cy, "rotation": 0.0},
+                meas_pose={"x": cx, "y": cy, "rotation": 0.0},
+                placement_mode="STORAGE",
+                in_storage=True,
+                slot={"i": i, "j": j},
+            )
+
+        self.assertIsNone(
+            find_storage_slot_and_center(
+                components,
+                "tag_full",
+                72.0,
+                64.2883,
+                lambda _tid: (72.0, 64.2883),
+            )
+        )
 
 
 if __name__ == "__main__":

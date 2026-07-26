@@ -16,7 +16,11 @@
     "TELEOP_GOTO",
     "RECORD_MEASURABLES",
     "EVAL_KERNEL",
-    "MOVE_COMPONENT"
+    "MOVE_COMPONENT",
+    "STORE_COMPONENT",
+    "PLACE_FROM_STORAGE",
+    "REPACK_STORAGE",
+    "RECENTER_IN_STORAGE"
   ],
   "measurables": {
     "tag_22.camera_image": {
