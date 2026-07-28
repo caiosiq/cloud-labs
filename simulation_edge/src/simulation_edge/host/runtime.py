@@ -580,6 +580,103 @@ class RadialJointStagePlan:
     allowed_tag: str | None
 
 
+@dataclass(frozen=True)
+class RadialComponentObservation:
+    """Backend-normalized measured pose for one movable component."""
+
+    tag_id: str
+    position_m: np.ndarray
+    yaw_deg: float
+    source: str = "unknown"
+
+
+@dataclass(frozen=True)
+class RadialWorldSnapshot:
+    """Backend-specific pose acquisition, normalized for radial planning."""
+
+    components: Mapping[str, RadialComponentObservation]
+    current_joints: np.ndarray | None = None
+    gripper_position: float | None = None
+    frame_id: str = "unknown"
+    source: str = "unknown"
+
+    def component(self, tag_id: str) -> RadialComponentObservation:
+        try:
+            return self.components[str(tag_id)]
+        except KeyError as exc:
+            raise SimulatorError(
+                f"radial world snapshot does not include {tag_id!r}"
+            ) from exc
+
+
+@dataclass(frozen=True)
+class RadialJointStageAction:
+    stage: RadialJointStagePlan
+    attached_tag: str | None = None
+    validate_grasp_after: str | None = None
+    nominal_durations_s: tuple[float, ...] = ()
+
+
+@dataclass(frozen=True)
+class RadialGripperAction:
+    name: str
+    position: float
+
+
+@dataclass(frozen=True)
+class RadialSettleAction:
+    name: str
+    duration_s: float
+
+
+@dataclass(frozen=True)
+class RadialValidateGraspAction:
+    stage: str
+
+
+@dataclass(frozen=True)
+class RadialClearCollisionAction:
+    reason: str
+
+
+@dataclass(frozen=True)
+class RadialRebaseAction:
+    reason: str
+
+
+RadialMotionAction = (
+    RadialJointStageAction
+    | RadialGripperAction
+    | RadialSettleAction
+    | RadialValidateGraspAction
+    | RadialClearCollisionAction
+    | RadialRebaseAction
+)
+
+
+@dataclass(frozen=True)
+class RadialMotionPlan:
+    """Executor-neutral sequence for one radial component move.
+
+    The planner still uses MuJoCo IK/collision checks today. The plan boundary is
+    intentionally lower risk: it preserves the exact stage order and waypoint
+    structure while allowing a different executor, such as a real xArm runner,
+    to consume the same semantic actions with its own speed limits.
+    """
+
+    tag_id: str
+    target_xy: np.ndarray
+    target_rotation_deg: float
+    planned_target_xy: np.ndarray
+    source_outer: bool
+    target_outer: bool
+    portal_radius_m: float
+    outer_carry_z_m: float
+    actions: tuple[RadialMotionAction, ...]
+    world_source: str = "unknown"
+    world_frame_id: str = "unknown"
+
+
 class MuJoCoRobotRuntime:
     """Owns one compiled model, physics state, viewer, and IK solver."""
 
@@ -4729,6 +4826,30 @@ class MuJoCoRobotRuntime:
         yaw = math.degrees(math.atan2(rotation[1, 0], rotation[0, 0]))
         return position, yaw
 
+    def _radial_world_snapshot(
+        self,
+        tag_ids: Sequence[str] | None = None,
+    ) -> RadialWorldSnapshot:
+        tags = tuple(tag_ids) if tag_ids is not None else tuple(sorted(self.scene.components))
+        components: dict[str, RadialComponentObservation] = {}
+        for tag_id in tags:
+            if tag_id not in self.scene.components:
+                raise SimulatorError(f"MuJoCo body not found for {tag_id}")
+            position, yaw = self._object_pose(tag_id)
+            components[str(tag_id)] = RadialComponentObservation(
+                tag_id=str(tag_id),
+                position_m=position.copy(),
+                yaw_deg=float(yaw),
+                source="mujoco",
+            )
+        return RadialWorldSnapshot(
+            components=components,
+            current_joints=self.current_joint_target.copy(),
+            gripper_position=float(self._gripper_position),
+            frame_id="mujoco_world_m",
+            source="mujoco",
+        )
+
     def _placement_result(
         self,
         tag_id: str,
@@ -4836,7 +4957,24 @@ class MuJoCoRobotRuntime:
         )
         return result
 
-    def _pick_and_place_radial(
+    def _radial_joint_stage_action(
+        self,
+        stage: RadialJointStagePlan,
+        *,
+        attached_tag: str | None = None,
+        validate_grasp_after: str | None = None,
+    ) -> RadialJointStageAction:
+        return RadialJointStageAction(
+            stage=stage,
+            attached_tag=attached_tag,
+            validate_grasp_after=validate_grasp_after,
+            nominal_durations_s=tuple(
+                self._radial_joint_duration_s(start, end)
+                for start, end in zip(stage.waypoints, stage.waypoints[1:])
+            ),
+        )
+
+    def _build_radial_motion_plan(
         self,
         tag_id: str,
         *,
@@ -4845,12 +4983,16 @@ class MuJoCoRobotRuntime:
         target_rotation_deg: float,
         grasp_policy: str = "short_edges",
         pickup_context: str = "table",
-    ) -> MoveResult:
+        world_snapshot: RadialWorldSnapshot | None = None,
+    ) -> RadialMotionPlan:
         if tag_id not in self.scene.components:
             raise SimulatorError(f"MuJoCo body not found for {tag_id}")
         self.stage_trace = []
         spec = self.scene.components[tag_id]
-        object_position, source_yaw = self._object_pose(tag_id)
+        world_snapshot = world_snapshot or self._radial_world_snapshot((tag_id,))
+        component_observation = world_snapshot.component(tag_id)
+        object_position = component_observation.position_m.copy()
+        source_yaw = float(component_observation.yaw_deg)
         source_xy = object_position[:2]
         target_xy = np.array((target_x_mm / 1000.0, target_y_mm / 1000.0))
         source_rotation = self._target_rotation(source_yaw)
@@ -4979,6 +5121,86 @@ class MuJoCoRobotRuntime:
             raise
         self._restore_motion_snapshot(preflight_snapshot)
 
+        actions: list[RadialMotionAction] = [
+            RadialGripperAction("open gripper", GRIPPER_OPEN),
+        ]
+        actions.extend(
+            self._radial_joint_stage_action(stage)
+            for stage in radial_pickup_stages
+        )
+        actions.extend(
+            (
+                RadialGripperAction("close while stationary", GRIPPER_CLOSED),
+                RadialSettleAction("secure physical grasp", 0.20),
+                RadialValidateGraspAction("pickup"),
+                self._radial_joint_stage_action(
+                    radial_lift_stage,
+                    attached_tag=tag_id,
+                    validate_grasp_after="pickup lift",
+                ),
+            )
+        )
+        actions.extend(
+            self._radial_joint_stage_action(
+                stage,
+                attached_tag=tag_id,
+                validate_grasp_after=stage.name,
+            )
+            for stage in radial_source_outer_stages
+        )
+        actions.extend(
+            self._radial_joint_stage_action(
+                stage,
+                attached_tag=tag_id,
+                validate_grasp_after=stage.name,
+            )
+            for stage in radial_stages
+        )
+        actions.extend(
+            self._radial_joint_stage_action(
+                stage,
+                attached_tag=tag_id,
+                validate_grasp_after=stage.name,
+            )
+            for stage in radial_target_outer_stages
+        )
+        actions.extend(
+            (
+                self._radial_joint_stage_action(
+                    radial_place_stage,
+                    attached_tag=tag_id,
+                ),
+                RadialGripperAction("open and release", GRIPPER_OPEN),
+                RadialSettleAction("", 0.25),
+                RadialClearCollisionAction("post-release"),
+                self._radial_joint_stage_action(radial_retreat_stage),
+            )
+        )
+        actions.extend(
+            self._radial_joint_stage_action(stage)
+            for stage in radial_target_egress_stages
+        )
+        actions.extend(
+            self._radial_joint_stage_action(stage)
+            for stage in radial_home_stages
+        )
+        actions.append(RadialRebaseAction("radial observation home"))
+
+        return RadialMotionPlan(
+            tag_id=tag_id,
+            target_xy=target_xy.copy(),
+            target_rotation_deg=float(target_rotation_deg),
+            planned_target_xy=planned_target_xy.copy(),
+            source_outer=source_outer,
+            target_outer=target_outer,
+            portal_radius_m=portal_radius,
+            outer_carry_z_m=RADIAL_OUTER_CARRY_Z_M,
+            actions=tuple(actions),
+            world_source=world_snapshot.source,
+            world_frame_id=world_snapshot.frame_id,
+        )
+
+    def _execute_radial_motion_plan(self, plan: RadialMotionPlan) -> None:
         arm = XArmAPI(runtime=self)
         arm.motion_enable(True)
         arm.set_mode(0)
@@ -4986,103 +5208,69 @@ class MuJoCoRobotRuntime:
         arm.set_gripper_enable(True)
         arm.set_gripper_speed(2000)
 
+        spec = self.scene.components[plan.tag_id]
         self.allowed_collision_tag = None
-        self.stage_trace.append("open gripper")
-        arm.set_gripper_position(GRIPPER_OPEN, wait=True)
-        for stage in radial_pickup_stages:
-            self._execute_radial_joint_waypoints(
-                stage.name,
-                stage.waypoints,
-                allowed_tag=stage.allowed_tag,
-                prevalidated=True,
-            )
-        self.stage_trace.append("close while stationary")
-        arm.set_gripper_position(GRIPPER_CLOSED, wait=True)
-        self.stage_trace.append("secure physical grasp")
-        self._settle(0.20)
-        self._validate_physical_grasp(spec, stage="pickup")
-        attached_pose = self._component_relative_pose(tag_id)
-        self._execute_radial_joint_waypoints(
-            radial_lift_stage.name,
-            radial_lift_stage.waypoints,
-            allowed_tag=radial_lift_stage.allowed_tag,
-            attached_pose=attached_pose,
-            prevalidated=True,
-        )
-        self._validate_physical_grasp(spec, stage="pickup lift")
+        for action in plan.actions:
+            if isinstance(action, RadialGripperAction):
+                self.stage_trace.append(action.name)
+                arm.set_gripper_position(action.position, wait=True)
+            elif isinstance(action, RadialSettleAction):
+                if action.name:
+                    self.stage_trace.append(action.name)
+                self._settle(action.duration_s)
+            elif isinstance(action, RadialValidateGraspAction):
+                self._validate_physical_grasp(spec, stage=action.stage)
+            elif isinstance(action, RadialClearCollisionAction):
+                self.allowed_collision_tag = None
+            elif isinstance(action, RadialJointStageAction):
+                attached_pose = (
+                    self._component_relative_pose(action.attached_tag)
+                    if action.attached_tag is not None
+                    else None
+                )
+                stage = action.stage
+                self._execute_radial_joint_waypoints(
+                    stage.name,
+                    stage.waypoints,
+                    allowed_tag=stage.allowed_tag,
+                    attached_pose=attached_pose,
+                    prevalidated=True,
+                )
+                if action.validate_grasp_after:
+                    self._validate_physical_grasp(
+                        spec,
+                        stage=action.validate_grasp_after,
+                    )
+            elif isinstance(action, RadialRebaseAction):
+                self._rebase_radial_periodic_joint_branches(
+                    reason=action.reason,
+                )
+            else:
+                raise SimulatorError(f"unknown radial plan action {action!r}")
 
-        for stage in radial_source_outer_stages:
-            attached_pose = self._component_relative_pose(tag_id)
-            self._execute_radial_joint_waypoints(
-                stage.name,
-                stage.waypoints,
-                allowed_tag=stage.allowed_tag,
-                attached_pose=attached_pose,
-                prevalidated=True,
-            )
-            self._validate_physical_grasp(spec, stage=stage.name)
-
-        for stage in radial_stages:
-            attached_pose = self._component_relative_pose(tag_id)
-            self._execute_radial_joint_waypoints(
-                stage.name,
-                stage.waypoints,
-                allowed_tag=stage.allowed_tag,
-                attached_pose=attached_pose,
-                prevalidated=True,
-            )
-            self._validate_physical_grasp(spec, stage=stage.name)
-
-        for stage in radial_target_outer_stages:
-            attached_pose = self._component_relative_pose(tag_id)
-            self._execute_radial_joint_waypoints(
-                stage.name,
-                stage.waypoints,
-                allowed_tag=stage.allowed_tag,
-                attached_pose=attached_pose,
-                prevalidated=True,
-            )
-            self._validate_physical_grasp(spec, stage=stage.name)
-
-        attached_pose = self._component_relative_pose(tag_id)
-        self._execute_radial_joint_waypoints(
-            radial_place_stage.name,
-            radial_place_stage.waypoints,
-            allowed_tag=radial_place_stage.allowed_tag,
-            attached_pose=attached_pose,
-            prevalidated=True,
-        )
-        self.stage_trace.append("open and release")
-        arm.set_gripper_position(GRIPPER_OPEN, wait=True)
-        self._settle(0.25)
-        self.allowed_collision_tag = None
-        self._execute_radial_joint_waypoints(
-            radial_retreat_stage.name,
-            radial_retreat_stage.waypoints,
-            allowed_tag=radial_retreat_stage.allowed_tag,
-            prevalidated=True,
-        )
-        for stage in radial_target_egress_stages:
-            self._execute_radial_joint_waypoints(
-                stage.name,
-                stage.waypoints,
-                allowed_tag=stage.allowed_tag,
-                prevalidated=True,
-            )
-        for stage in radial_home_stages:
-            self._execute_radial_joint_waypoints(
-                stage.name,
-                stage.waypoints,
-                allowed_tag=stage.allowed_tag,
-                prevalidated=True,
-            )
-        self._rebase_radial_periodic_joint_branches(
-            reason="radial observation home",
-        )
-        return self._placement_result(
+    def _pick_and_place_radial(
+        self,
+        tag_id: str,
+        *,
+        target_x_mm: float,
+        target_y_mm: float,
+        target_rotation_deg: float,
+        grasp_policy: str = "short_edges",
+        pickup_context: str = "table",
+    ) -> MoveResult:
+        plan = self._build_radial_motion_plan(
             tag_id,
-            target_xy=target_xy,
+            target_x_mm=target_x_mm,
+            target_y_mm=target_y_mm,
             target_rotation_deg=target_rotation_deg,
+            grasp_policy=grasp_policy,
+            pickup_context=pickup_context,
+        )
+        self._execute_radial_motion_plan(plan)
+        return self._placement_result(
+            plan.tag_id,
+            target_xy=plan.target_xy,
+            target_rotation_deg=plan.target_rotation_deg,
             position_tolerance_mm=RADIAL_PLACEMENT_POSITION_TOLERANCE_MM,
             allow_yaw_180_equivalence=True,
             enforce_tolerance=False,
