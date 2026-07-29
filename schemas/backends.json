@@ -17,14 +17,16 @@
     },
     {
       "backend_id": "real.default",
-      "label": "Real bench (external edge)",
-      "description": "Physical bench via robot-deathray/cloudlabs_edge (Edge Contract). In-tree RealLabCommunicator removed.",
+      "label": "Lab automation (real robot)",
+      "description": "Physical robot bench via the Edge Contract server in the sibling lab_automation/cloudlabs_edge package.",
       "image": "/static/wiki/backends/real-default.png",
       "lab_view_path": "mock_edge/lab_view",
+      "communicator": "real",
+      "lab_mode": "REAL",
       "enabled": true,
-      "notes": "Set edge.base_url to the lab cloudlabs_edge URL (e.g. http://127.0.0.1:8100). lab_view_path is unused for physics; catalogs/VC may still use a local bundle later.",
+      "notes": "Start the lab_automation edge on port 8200 before connecting. lab_view_path is currently used only for coordinator-side catalog and version-control metadata; hardware geometry and commands come from the edge.",
       "edge": {
-        "base_url": null,
+        "base_url": "http://127.0.0.1:8200",
         "contract_version": "1.0.0",
         "lan_direct_ok": false
       }

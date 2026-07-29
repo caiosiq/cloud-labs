@@ -1,9 +1,10 @@
 {
   "heads": {
-    "main": null
+    "main": "2df171508d184fb3a346d8eb6fd7efb3"
   },
   "applied": {
     "configuration_id": null,
     "branch": null
-  }
+  },
+  "viewing": null
 }

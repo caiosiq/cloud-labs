@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "kind": "cloud_labs_configuration",
+  "id": "2df171508d184fb3a346d8eb6fd7efb3",
+  "repo_id": "experiment",
+  "branch": "main",
+  "parent_id": null,
+  "message": "Add tag_10 and tag_22 to the physical table",
+  "created_at": "2026-07-28T00:00:00+00:00",
+  "configuration": {
+    "holding": {
+      "tag_id": null,
+      "nominal_pose": null
+    },
+    "components": {
+      "tag_10": {
+        "id": "tag_10",
+        "type": "OPTICAL_BEAMSPLITTER",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": 256.66660853794644,
+              "y": 200.0,
+              "rotation": 180.0
+            },
+            "nominal_motor_positions": {},
+            "storage": { "in_storage": false, "slot": null },
+            "placement": { "mode": "MANUAL" }
+          }
+        }
+      },
+      "tag_22": {
+        "id": "tag_22",
+        "type": "OPTICAL_CAMERA",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": {
+              "x": -241.90482003348217,
+              "y": 54.64285714285717,
+              "rotation": 0.0
+            },
+            "nominal_motor_positions": {},
+            "storage": { "in_storage": false, "slot": null },
+            "placement": { "mode": "MANUAL" },
+            "exposure_time_ms": 200.0
+          }
+        }
+      }
+    },
+    "alignment_guides": [],
+    "laser_lines": {
+      "snap_line_id": null,
+      "lines": []
+    }
+  },
+  "catalog_hash": "3f03b41373769c21a2eaf6a3a0a5459e53d341ec167eab0d9af301525e55128a"
+}

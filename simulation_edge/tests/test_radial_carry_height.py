@@ -21,9 +21,17 @@ class RadialCarryHeightTests(unittest.TestCase):
         cls.library = json.loads(LIBRARY_PATH.read_text(encoding="utf-8"))
         cls.profile = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
 
-    def test_runtime_and_library_use_550_mm_carry_height(self):
+    def test_runtime_and_library_use_550_mm_world_tcp_height(self):
         self.assertEqual(RADIAL_DEFAULT_CARRY_Z_M, 0.550)
         self.assertEqual(self.library["carry_z_m"], 0.550)
+
+    def test_world_tcp_carry_is_430_mm_above_table(self):
+        self.assertEqual(TABLE_SURFACE_Z_M, 0.120)
+        self.assertAlmostEqual(
+            RADIAL_DEFAULT_CARRY_Z_M - TABLE_SURFACE_Z_M,
+            0.430,
+            places=9,
+        )
 
     def test_library_samples_promote_550_mm_pose_to_canonical(self):
         for sample in self.library["samples"]:

@@ -22,6 +22,8 @@ class BackendSpec:
     backend_id: str
     label: str
     lab_view_path: str
+    communicator: str = ""
+    lab_mode: str = ""
     enabled: bool = True
     notes: str = ""
     description: str = ""
@@ -49,11 +51,11 @@ class BackendRuntime:
 
     @property
     def communicator(self) -> str:
-        return self.manifest.communicator
+        return self.spec.communicator or self.manifest.communicator
 
     @property
     def lab_mode(self) -> str:
-        return self.manifest.lab_mode
+        return self.spec.lab_mode or self.manifest.lab_mode
 
     def control_dir(self) -> str:
         return self.paths.control_dir
@@ -84,12 +86,13 @@ def _default_config_path(project_root: str) -> str:
 
 def _probe_real_availability(spec: "BackendSpec", manifest: LabViewManifest) -> Optional[str]:
     """Real backends require an external edge URL (no in-tree RealLabCommunicator)."""
-    if manifest.communicator != "real" and not (spec.backend_id or "").startswith("real."):
+    communicator = spec.communicator or manifest.communicator
+    if communicator != "real" and not (spec.backend_id or "").startswith("real."):
         return None
     if spec.edge.configured:
         return None
     return (
-        "real backend has no edge.base_url; start robot-deathray/cloudlabs_edge "
+        "real backend has no edge.base_url; start lab_automation/cloudlabs_edge "
         "and set schemas/backends.json edge.base_url "
         "(in-tree RealLabCommunicator removed)"
     )
@@ -129,6 +132,8 @@ class BackendRegistry:
                     backend_id=bid,
                     label=str(raw.get("label") or bid).strip() or bid,
                     lab_view_path=lvp,
+                    communicator=str(raw.get("communicator") or "").strip().lower(),
+                    lab_mode=str(raw.get("lab_mode") or "").strip().upper(),
                     enabled=bool(raw.get("enabled", True)),
                     notes=str(raw.get("notes") or "").strip(),
                     description=str(raw.get("description") or "").strip(),
@@ -277,8 +282,8 @@ class BackendRegistry:
             "label": rt.spec.label,
             "description": rt.spec.description or None,
             "image": rt.spec.image or None,
-            "communicator": rt.manifest.communicator if rt.availability != "unavailable" else None,
-            "lab_mode": rt.manifest.lab_mode if rt.availability != "unavailable" else None,
+            "communicator": rt.communicator if rt.availability != "unavailable" else None,
+            "lab_mode": rt.lab_mode if rt.availability != "unavailable" else None,
             "lab_view_path": rt.spec.lab_view_path,
             "availability": rt.availability,
             "unavailable_reason": rt.unavailable_reason,

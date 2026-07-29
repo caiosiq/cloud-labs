@@ -84,6 +84,11 @@ RADIAL_HEIGHT_ZONE_MIN_RADIUS_MM_ENV_VAR = "CLOUDLAB_RADIAL_HEIGHT_ZONE_MIN_RADI
 RADIAL_DEFAULT_MIN_RADIUS_MM = 134.0
 RADIAL_DEFAULT_MAX_RADIUS_MM = 513.0
 RADIAL_DEFAULT_STEP_MM = 5.0
+# Radial Z values are MuJoCo WORLD coordinates of the modeled ``link_tcp``
+# grasp point. With TABLE_SURFACE_Z_M=0.120, a carry_z_m of 0.550 places that
+# grasp point 0.430 m above the table. It is not "550 mm above the table" and
+# must not be sent to the xArm as a Cartesian controller Z. Real radial-direct
+# execution sends the generated joint angles instead.
 RADIAL_DEFAULT_CARRY_Z_M = 0.550
 RADIAL_DEFAULT_HEIGHT_ZONE_MARGIN_M = 0.0
 RADIAL_DEFAULT_GRASP_Z_M = 0.300

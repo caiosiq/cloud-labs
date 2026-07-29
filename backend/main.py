@@ -974,15 +974,21 @@ async def _edge_runtime_mode_info(rt: BackendRuntime) -> Dict[str, Any]:
             simulator["last_error"] = last_error
 
     sim_backend = str(simulator.get("backend") or "").lower()
+    declared_physical = rt.lab_mode.upper() == "REAL" or rt.communicator == "real"
     active_mode = (
-        "mujoco"
-        if sim_backend.startswith("mujoco") or bool(simulator.get("mujoco_running"))
-        else "mock"
+        "physical"
+        if declared_physical
+        else (
+            "mujoco"
+            if sim_backend.startswith("mujoco") or bool(simulator.get("mujoco_running"))
+            else "mock"
+        )
     )
+    physical_armed = declared_physical and last_error is None
     reason = "runtime mode is fixed by the selected edge backend"
     return {
         "active_mode": active_mode,
-        "physical_armed": False,
+        "physical_armed": physical_armed,
         "locked": True,
         "available_modes": [
             {
@@ -1000,8 +1006,8 @@ async def _edge_runtime_mode_info(rt: BackendRuntime) -> Dict[str, Any]:
             {
                 "id": "physical",
                 "label": "Physical Experiment",
-                "enabled": False,
-                "reason": reason,
+                "enabled": physical_armed,
+                "reason": None if physical_armed else reason,
             },
         ],
         "simulator": simulator,
@@ -3172,9 +3178,13 @@ async def get_lab_layout():
         manifest = rt.manifest
         enriched["lab_view_root"] = paths.root_dir
         enriched["storage_grid"] = storage_grid_spec()
-        enriched["lab_manifest"] = manifest.as_dict()
-        enriched["lab_mode"] = manifest.lab_mode
-        enriched["communicator"] = manifest.communicator
+        enriched["lab_manifest"] = {
+            **manifest.as_dict(),
+            "communicator": rt.communicator,
+            "lab_mode": rt.lab_mode,
+        }
+        enriched["lab_mode"] = rt.lab_mode
+        enriched["communicator"] = rt.communicator
         enriched["backend_id"] = rt.backend_id
         return enriched
 

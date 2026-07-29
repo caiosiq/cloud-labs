@@ -18,7 +18,13 @@
 
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
-    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
-    <geom type="cylinder" size=".06 .06" pos="0 0 .06" rgba="1 1 1 1"/>
+    <!--
+      The xArm root in xarm7.xml is at z=0.12 m because the cloud-lab
+      environment's tabletop surface is at z=0.12 m.  Treat this plane as the
+      tabletop so the standalone calibration viewer matches the real arm's
+      direct table mounting.  The stock Menagerie pedestal cylinder is omitted.
+    -->
+    <geom name="floor" size="0 0 0.05" type="plane" pos="0 0 .12"
+      material="groundplane"/>
   </worldbody>
 </mujoco>

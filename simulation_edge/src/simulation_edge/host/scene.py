@@ -20,6 +20,9 @@ from lab_model.language.domain.component import (
 )
 
 
+# MuJoCo world-frame Z of both the tabletop surface and the xArm mounting
+# plane. This is not a height above the robot base: the xArm root in the
+# vendored model is also at world Z=0.12 m.
 TABLE_SURFACE_Z_M = 0.12
 INCH_TO_M = 0.0254
 DEFAULT_WIDTH_MM = 62.0
