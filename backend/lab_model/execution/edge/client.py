@@ -79,6 +79,10 @@ class EdgeClient(Protocol):
 
     def get_bench(self) -> Optional[Dict[str, Any]]: ...
 
+    def get_library(self) -> Optional[Dict[str, Any]]: ...
+
+    def get_inventory(self) -> Optional[Dict[str, Any]]: ...
+
     def get_lab_state(self) -> Optional[Dict[str, Any]]: ...
 
     def absolute_stream_url(self, path: str) -> Optional[str]: ...
@@ -167,6 +171,12 @@ class InProcessEdgeClient:
     def get_bench(self) -> Optional[Dict[str, Any]]:
         return None
 
+    def get_library(self) -> Optional[Dict[str, Any]]:
+        return None
+
+    def get_inventory(self) -> Optional[Dict[str, Any]]:
+        return None
+
     def get_lab_state(self) -> Optional[Dict[str, Any]]:
         return None
 
@@ -237,6 +247,12 @@ class PollEdgeClient:
     def get_bench(self) -> Optional[Dict[str, Any]]:
         return None
 
+    def get_library(self) -> Optional[Dict[str, Any]]:
+        return None
+
+    def get_inventory(self) -> Optional[Dict[str, Any]]:
+        return None
+
     def get_lab_state(self) -> Optional[Dict[str, Any]]:
         return None
 
@@ -257,6 +273,8 @@ class HttpEdgeClient:
     transport: EdgeTransport = EdgeTransport.HTTP
     _caps_cache: Optional[Dict[str, Any]] = field(default=None, repr=False)
     _bench_cache: Optional[Dict[str, Any]] = field(default=None, repr=False)
+    _library_cache: Optional[Dict[str, Any]] = field(default=None, repr=False)
+    _inventory_cache: Optional[Dict[str, Any]] = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
@@ -341,6 +359,38 @@ class HttpEdgeClient:
             return None
         if isinstance(data, dict):
             self._bench_cache = data
+            return data
+        return None
+
+    def get_library(self) -> Optional[Dict[str, Any]]:
+        if self._library_cache is not None:
+            return self._library_cache
+        try:
+            with httpx.Client(base_url=self.base_url, timeout=5.0) as client:
+                resp = client.get("/library")
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("HttpEdgeClient library failed: %s", exc)
+            return None
+        if isinstance(data, dict):
+            self._library_cache = data
+            return data
+        return None
+
+    def get_inventory(self) -> Optional[Dict[str, Any]]:
+        if self._inventory_cache is not None:
+            return self._inventory_cache
+        try:
+            with httpx.Client(base_url=self.base_url, timeout=5.0) as client:
+                resp = client.get("/inventory")
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("HttpEdgeClient inventory failed: %s", exc)
+            return None
+        if isinstance(data, dict):
+            self._inventory_cache = data
             return data
         return None
 
@@ -433,6 +483,8 @@ class HttpEdgeClient:
     def invalidate_cache(self) -> None:
         self._caps_cache = None
         self._bench_cache = None
+        self._library_cache = None
+        self._inventory_cache = None
 
 
 def resolve_edge_client(

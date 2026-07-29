@@ -18,7 +18,6 @@
  */
 import {
     DANGER_RADIUS_MM,
-    FRAME_SAFETY_CLEARANCE_IN,
     FRAME_SAFETY_CLEARANCE_MM,
     FRAME_SAFETY_MIN_HEIGHT_MM,
     FRAME_SAFETY_MIN_WIDTH_MM,
@@ -240,10 +239,9 @@ export function checkCollision(targetId, x, y, opts = {}) {
         else if (y - halfY < safeBounds.yMin) side = 'bottom';
         else if (y + halfY > safeBounds.yMax) side = 'top';
         if (side) {
-            const inches = FRAME_SAFETY_CLEARANCE_IN || FRAME_SAFETY_CLEARANCE_MM / 25.4;
             return {
                 detected: true,
-                other: `FRAME SAFETY BOUNDARY (${side}): keep the entire component at least ${inches.toFixed(0)} in (${FRAME_SAFETY_CLEARANCE_MM.toFixed(1)} mm) inside the frame`,
+                other: `FRAME SAFETY BOUNDARY (${side}): keep the entire component at least ${FRAME_SAFETY_CLEARANCE_MM.toFixed(1)} mm inside the frame`,
             };
         }
     }

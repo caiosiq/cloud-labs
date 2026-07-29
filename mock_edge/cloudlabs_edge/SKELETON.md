@@ -18,6 +18,10 @@ mock_edge/
 | `kernel_host.py` | Deterministic BGR mean stub |
 | `dispatch.py` | Same primitive map as init (async-aware) |
 | `server/app.py` | Thin HTTP over dispatch |
+| `.agents/skills/*` | Phase 6 coaching (same files as `cloudlabs-edge init`) |
+
+Phase 6 coaching for humans or any AI assistant lives under
+[`.agents/README.md`](.agents/README.md).
 
 ```powershell
 python -m mock_edge --port 8100

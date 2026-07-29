@@ -3301,8 +3301,8 @@ class MuJoCoRobotRuntime:
         ):
             if frame_clearance_mm > 0:
                 raise SimulatorError(
-                    f"destination for {spec.tag_id} enters the 3 in "
-                    f"({frame_clearance_mm:.1f} mm) frame safety boundary; "
+                    f"destination for {spec.tag_id} enters the "
+                    f"{frame_clearance_mm:.1f} mm frame safety boundary; "
                     "the entire component must remain inside the safe area"
                 )
             raise SimulatorError(

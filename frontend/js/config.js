@@ -12,7 +12,6 @@ export let DANGER_RADIUS_MM = 90;
 
 /** Clearance reserved inside each visible lab-frame boundary. */
 export let FRAME_SAFETY_CLEARANCE_MM = 0;
-export let FRAME_SAFETY_CLEARANCE_IN = 0;
 export let FRAME_SAFETY_MIN_WIDTH_MM = 0;
 export let FRAME_SAFETY_MIN_HEIGHT_MM = 0;
 export let MANUAL_MOTION_CORNER_CUTOFF_MM = 0;
@@ -81,7 +80,6 @@ export function applyLabLayoutFromApiDoc(payload) {
         DANGER_RADIUS_MM = Number(dz.radius_mm);
     }
     FRAME_SAFETY_CLEARANCE_MM = 0;
-    FRAME_SAFETY_CLEARANCE_IN = 0;
     FRAME_SAFETY_MIN_WIDTH_MM = 0;
     FRAME_SAFETY_MIN_HEIGHT_MM = 0;
     MANUAL_MOTION_CORNER_CUTOFF_MM = 0;
@@ -89,9 +87,6 @@ export function applyLabLayoutFromApiDoc(payload) {
     if (frameSafety && typeof frameSafety === 'object') {
         if (Number.isFinite(Number(frameSafety.clearance_mm))) {
             FRAME_SAFETY_CLEARANCE_MM = Math.max(0, Number(frameSafety.clearance_mm));
-        }
-        if (Number.isFinite(Number(frameSafety.clearance_in))) {
-            FRAME_SAFETY_CLEARANCE_IN = Math.max(0, Number(frameSafety.clearance_in));
         }
         const minimum = frameSafety.minimum_component_footprint_mm;
         if (minimum && typeof minimum === 'object') {

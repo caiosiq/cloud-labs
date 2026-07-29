@@ -46,6 +46,7 @@ def default_capabilities(backend_id: str = "stub.default") -> dict[str, Any]:
             "TELEOP_JOG",
             "RECORD_MEASURABLES",
             "EVAL_KERNEL",
+            "LOCALIZE_COMPONENTS",
         ],
         "measurables": {
             "tag_22.camera_image": {
@@ -112,27 +113,99 @@ def default_bench(backend_id: str = "stub.default") -> dict[str, Any]:
     }
 
 
+def _default_library(backend_id: str) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "backend_id": backend_id,
+        "components": {
+            "tag_22": {
+                "id": "cam_gripper_1",
+                "type": "OPTICAL_CAMERA",
+                "tag_id": "tag_22",
+                "name": "Gripper Camera 1",
+                "size": {"width": 40, "height": 40},
+                "parameters": {},
+                "capabilities": {
+                    "primitives": [
+                        "RECORD_MEASURABLES",
+                        "SET_EXPOSURE",
+                        "START_LIVE_FEED",
+                        "END_LIVE_FEED",
+                        "LOCALIZE_COMPONENTS",
+                    ],
+                    "statecontrol": {"tunables": {}, "measurables": {}},
+                    "telemetry": {},
+                },
+            }
+        },
+    }
+
+
+def _default_inventory(backend_id: str) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "backend_id": backend_id,
+        "entries": {
+            "tag_22": {
+                "placement": "table",
+                "storage_slot": None,
+                "localize": True,
+            }
+        },
+    }
+
+
 def create_app(
     backend_id: str = "stub.default",
     *,
     capabilities: dict[str, Any] | None = None,
     bench: dict[str, Any] | None = None,
+    edge_root: Any | None = None,
 ) -> FastAPI:
     """Reference Edge Contract app.
 
     Optional ``capabilities`` / ``bench`` let a lab skeleton declare the full
     primitive list while this stub still completes the live-plane subset and
     refuses the rest as ``NOT_IMPLEMENTED``.
+
+    When ``edge_root`` points at a ``cloudlabs_edge`` folder with
+    ``data/library.json`` / ``data/inventory.json``, those are served on
+    ``GET /library`` and ``GET /inventory``.
     """
+    from pathlib import Path
+
+    from cloudlabs_edge_dev.edge_data import (
+        default_localize_tag_ids,
+        load_inventory,
+        load_library,
+        stamp_backend,
+    )
+
     app = FastAPI(title="cloudlabs-edge-stub", version=CONTRACT_VERSION)
     caps = dict(capabilities) if capabilities is not None else default_capabilities(backend_id)
     caps.setdefault("backend_id", backend_id)
     caps.setdefault("contract_version", CONTRACT_VERSION)
     bench_body = dict(bench) if bench is not None else default_bench(backend_id)
     bench_body.setdefault("backend_id", backend_id)
+
+    root = Path(edge_root).resolve() if edge_root is not None else None
+    library_body = _default_library(backend_id)
+    inventory_body = _default_inventory(backend_id)
+    if root is not None:
+        try:
+            library_body = stamp_backend(load_library(root), backend_id)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            inventory_body = stamp_backend(load_inventory(root), backend_id)
+        except Exception:  # noqa: BLE001
+            pass
+
     state: dict[str, Any] = {
         "capabilities": caps,
         "bench": bench_body,
+        "library": library_body,
+        "inventory": inventory_body,
         "live_active": set(),  # channel or measurable keys
         "teleop_active": set(),  # tag ids
         "pose": {"x": 0.0, "y": 0.0, "rotation": 0.0},
@@ -172,6 +245,14 @@ def create_app(
     @app.get("/bench")
     async def bench() -> dict[str, Any]:
         return state["bench"]
+
+    @app.get("/library")
+    async def library() -> dict[str, Any]:
+        return state["library"]
+
+    @app.get("/inventory")
+    async def inventory() -> dict[str, Any]:
+        return state["inventory"]
 
     @app.post("/execute")
     async def execute(body: dict[str, Any]) -> JSONResponse:
@@ -325,6 +406,31 @@ def create_app(
                         "detail": "stub eval always passes",
                         "kernel_id": args.get("kernel_id"),
                     },
+                    "epoch_ms": epoch,
+                    "latch_quality": "software_approx",
+                }
+            )
+
+        if primitive == "LOCALIZE_COMPONENTS":
+            raw_ids = args.get("tag_ids")
+            if isinstance(raw_ids, list) and raw_ids:
+                tag_ids = [str(t).strip() for t in raw_ids if str(t).strip()]
+            else:
+                tag_ids = default_localize_tag_ids(state["inventory"])
+            poses = {
+                tid: {
+                    "x": float(state["pose"]["x"]),
+                    "y": float(state["pose"]["y"]),
+                    "rotation": float(state["pose"]["rotation"]),
+                    "stub": True,
+                }
+                for tid in tag_ids
+            }
+            epoch = bump_epoch()
+            return JSONResponse(
+                {
+                    "status": "completed",
+                    "result": {"tag_ids": tag_ids, "poses": poses},
                     "epoch_ms": epoch,
                     "latch_quality": "software_approx",
                 }

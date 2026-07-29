@@ -40,6 +40,27 @@ def active_tag_ids(active_path: Optional[str] = None) -> List[str]:
     lp = get_lab_view_paths_optional()
     if lp is None and not active_path:
         raise RuntimeError("lab_view not bootstrapped")
+
+    # Prefer edge inventory keys when library is data/library.json (or sibling inventory).
+    if lp is not None:
+        lib = lp.component_library_json
+        inv_candidate = os.path.join(os.path.dirname(lib), "inventory.json")
+        if os.path.basename(lib) == "library.json" and os.path.isfile(inv_candidate):
+            with open(inv_candidate, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            entries = data.get("entries") if isinstance(data, dict) else None
+            if not isinstance(entries, dict):
+                raise ValueError(f"inventory.json missing entries object: {inv_candidate}")
+            out: List[str] = []
+            for key in entries.keys():
+                if isinstance(key, str) and key.strip():
+                    out.append(key.strip())
+                else:
+                    raise ValueError(
+                        f"inventory.json entry keys must be non-empty strings: {inv_candidate}"
+                    )
+            return out
+
     p = active_path or (lp.active_catalog_json if lp else "")
     if not os.path.isfile(p):
         raise FileNotFoundError(f"active_catalog.json not found: {p}")
@@ -52,7 +73,7 @@ def active_tag_ids(active_path: Optional[str] = None) -> List[str]:
         raise ValueError(f"active_catalog.json missing \"tag_ids\" array: {p}")
     if not isinstance(raw, list):
         raise ValueError(f'active_catalog.json "tag_ids" must be an array: {p}')
-    out: List[str] = []
+    out = []
     for x in raw:
         if isinstance(x, str) and x.strip():
             out.append(x.strip())

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "entries": {
+    "tag_9": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    },
+    "tag_2": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    },
+    "tag_20": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    },
+    "tag_99": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    },
+    "tag_19": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    },
+    "tag_21": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    },
+    "tag_22": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    },
+    "tag_50": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    },
+    "tag_10": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    },
+    "tag_11": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    },
+    "tag_18": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    }
+  }
+}

@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Awaitable, Callable, Union
 
-from adapters import live_feed, motion, observe, teleop
+from adapters import live_feed, motion, observe, teleop, vision
 from kernel_host import eval_on_bgr
 from latch import begin_latch, end_latch, now_epoch_ms
 
@@ -36,6 +36,7 @@ PRIMITIVE_HANDLERS: dict[str, Handler] = {
     "PLACE_FROM_STORAGE": lambda a: motion.place_from_storage(a),
     "REPACK_STORAGE": lambda a: motion.repack_storage_slot(a),
     "RECENTER_IN_STORAGE": lambda a: motion.recenter_stored_in_inventory(a),
+    "LOCALIZE_COMPONENTS": lambda a: vision.localize_components(a),
 }
 
 

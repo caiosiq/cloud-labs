@@ -308,6 +308,29 @@ class MockLabCommunicator(LabCommunicator):
             f"for {plan.scan_tag_ids} (simulated camera)"
         )
 
+    async def localize_components(
+        self,
+        tag_ids: Optional[List[str]] = None,
+        force_rescan: bool = True,
+    ) -> Dict[str, Any]:
+        """LOCALIZE_COMPONENTS — mock camera re-localisation for inventory tags."""
+        _ = force_rescan
+        self.refresh_pose_from_camera(tag_ids=tag_ids)
+        state = self._read_state()
+        comps = state.get("components") or {}
+        poses: Dict[str, Any] = {}
+        ids = list(tag_ids or [])
+        if not ids:
+            ids = list(comps.keys()) if isinstance(comps, dict) else []
+        for tid in ids:
+            comp = comps.get(tid) if isinstance(comps, dict) else None
+            pose = None
+            if isinstance(comp, dict):
+                tun = ((comp.get("statecontrol") or {}).get("tunables") or {})
+                pose = tun.get("reported_pose") or tun.get("nominal_pose")
+            poses[tid] = dict(pose) if isinstance(pose, dict) else None
+        return {"tag_ids": ids, "poses": poses}
+
     def preview_refresh_pose_candidates(
         self,
         tag_ids: Optional[List[str]] = None,

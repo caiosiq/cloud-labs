@@ -200,4 +200,9 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "handler": "end_live_feed",
         "http": "POST /api/components/{tag_id}/telemetry/live-feed/end",
     },
+    PrimitiveId.LOCALIZE_COMPONENTS: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "localize_components",
+    },
 }

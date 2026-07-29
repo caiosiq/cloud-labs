@@ -20,7 +20,8 @@
     "STORE_COMPONENT",
     "PLACE_FROM_STORAGE",
     "REPACK_STORAGE",
-    "RECENTER_IN_STORAGE"
+    "RECENTER_IN_STORAGE",
+    "LOCALIZE_COMPONENTS"
   ],
   "measurables": {
     "tag_22.camera_image": {

@@ -40,3 +40,37 @@ def encode_jpeg(bgr: Any, *, quality: int = 80, scale: float = 1.0) -> bytes:
 def capture_jpeg(tag_id: str, *, profile: str | None = None) -> bytes:
     _ = profile
     return encode_jpeg(capture_bgr(tag_id))
+
+
+def localize_components(args: dict[str, Any]) -> dict[str, Any]:
+    """LOCALIZE_COMPONENTS for simulation — inventory-scoped; soft if no scan helper."""
+    from pathlib import Path
+
+    from cloudlabs_edge_dev.edge_data import default_localize_tag_ids, load_inventory
+
+    from adapters import context
+
+    edge_root = Path(__file__).resolve().parent.parent
+    inventory = load_inventory(edge_root)
+    raw_ids = args.get("tag_ids")
+    if isinstance(raw_ids, list) and raw_ids:
+        tag_ids = [str(t).strip() for t in raw_ids if str(t).strip()]
+    else:
+        tag_ids = default_localize_tag_ids(inventory)
+
+    lab = context.get_lab()
+    fn = getattr(lab, "refresh_pose_from_camera", None)
+    if callable(fn):
+        fn(tag_ids=tag_ids)
+
+    poses: dict[str, Any] = {}
+    state = lab.get_lab_state() if hasattr(lab, "get_lab_state") else {}
+    components = (state or {}).get("components") or {}
+    for tid in tag_ids:
+        comp = components.get(tid) if isinstance(components, dict) else None
+        pose = None
+        if isinstance(comp, dict):
+            tun = ((comp.get("statecontrol") or {}).get("tunables") or {})
+            pose = tun.get("reported_pose") or tun.get("nominal_pose")
+        poses[tid] = dict(pose) if isinstance(pose, dict) else None
+    return {"tag_ids": tag_ids, "poses": poses}

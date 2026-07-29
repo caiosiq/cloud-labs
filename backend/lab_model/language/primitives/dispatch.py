@@ -17,6 +17,7 @@ from .schemas import (
     EndTeleopBody,
     EvalKernelBody,
     HoverBody,
+    LocalizeComponentsBody,
     MoveComponentBody,
     MotorSendHomeBody,
     MotorSetZeroBody,
@@ -266,6 +267,10 @@ async def _invoke_atomic(
         if params.get("nominal_pose") and not params.get("target_pose"):
             params["target_pose"] = params.pop("nominal_pose")
         await lab.teleop_goto(cmd.target_id, params)
+    elif isinstance(cmd, LocalizeComponentsBody):
+        _log_primitive("LOCALIZE_COMPONENTS", None, macro_parent=macro_parent)
+        p = cmd.parameters.model_dump(exclude_none=True)
+        return await lab.localize_components(**p)
     else:
         raise NotImplementedError(type(cmd))
     return None
@@ -417,6 +422,15 @@ def schedule_validated_command(
 
     if isinstance(cmd, ScanBody):
         return {"status": "accepted", "message": "Scan started"}
+
+    if isinstance(cmd, LocalizeComponentsBody):
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        scope = cmd.parameters.tag_ids or []
+        note = f" ({', '.join(scope)})" if scope else ""
+        return {
+            "status": "accepted",
+            "message": f"LOCALIZE_COMPONENTS started{note}",
+        }
 
     if isinstance(cmd, RemoveComponentBody):
         background_tasks.add_task(execute_validated_command, lab, cmd)

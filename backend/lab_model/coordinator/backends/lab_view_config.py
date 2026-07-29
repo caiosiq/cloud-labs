@@ -456,12 +456,42 @@ def load_lab_view_bundle(project_root: str, lab_view_path: str) -> tuple[LabView
     if not os.path.isdir(root):
         raise FileNotFoundError(f"lab_view bundle does not exist: {root}")
 
+    # Prefer edge-owned catalogs when sibling ``cloudlabs_edge/data/`` is present.
+    edge_data = os.path.join(os.path.dirname(root), "cloudlabs_edge", "data")
+    edge_library = os.path.join(edge_data, "library.json")
+    edge_inventory = os.path.join(edge_data, "inventory.json")
+    library_json = (
+        edge_library if os.path.isfile(edge_library) else os.path.join(root, "component_library.json")
+    )
+    active_catalog_json = os.path.join(root, "active_catalog.json")
+    if os.path.isfile(edge_inventory) and os.path.isfile(active_catalog_json):
+        # Keep legacy active_catalog in sync with inventory keys (derived view).
+        try:
+            with open(edge_inventory, "r", encoding="utf-8") as f:
+                inv = json.load(f)
+            entries = inv.get("entries") if isinstance(inv, dict) else None
+            if isinstance(entries, dict):
+                tag_ids = [
+                    str(k).strip()
+                    for k in entries.keys()
+                    if isinstance(k, str) and str(k).strip()
+                ]
+                with open(active_catalog_json, "r", encoding="utf-8") as f:
+                    active_doc = json.load(f)
+                if not isinstance(active_doc, dict):
+                    active_doc = {"tag_ids": []}
+                if list(active_doc.get("tag_ids") or []) != tag_ids:
+                    active_doc["tag_ids"] = tag_ids
+                    atomic_write_json(active_catalog_json, active_doc)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[CONFIG] inventory→active_catalog sync skipped: {exc}", flush=True)
+
     paths = LabViewPaths(
         root_dir=root,
         layout_json=os.path.join(root, "layout.json"),
         laser_lines_json=os.path.join(root, "laser_lines.json"),
-        component_library_json=os.path.join(root, "component_library.json"),
-        active_catalog_json=os.path.join(root, "active_catalog.json"),
+        component_library_json=library_json,
+        active_catalog_json=active_catalog_json,
         motor_rotations_json=os.path.join(root, "motor_rotations.json"),
         lab_state_json=os.path.join(root, "lab_state.json"),
         stored_intent_json=os.path.join(root, "stored_intent.json"),

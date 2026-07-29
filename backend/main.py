@@ -890,15 +890,20 @@ async def get_platform_registries():
 @app.get("/api/catalog")
 async def get_component_catalog():
     """
-    Tags listed in ``active_catalog.json`` merged with rows from ``component_library.json``
-    under ``LAB_VIEW_PATH``. HTTP edge backends read the request-bound files
-    directly because they intentionally have no in-process communicator.
+    Tags listed in inventory (or legacy ``active_catalog.json``) merged with
+    library rows. HTTP edge backends prefer ``GET /library`` + ``GET /inventory``.
     """
     if lab is None:
         return []
     try:
         client = _edge_client_for()
         if client.transport != EdgeTransport.IN_PROCESS:
+            lib = client.get_library()
+            inv = client.get_inventory()
+            if isinstance(lib, dict) and isinstance(inv, dict):
+                from cloudlabs_edge_dev.edge_data import merged_active_rows
+
+                return merged_active_rows(lib, inv)
             from lab_model.coordinator.catalog.bundle import merged_catalog_rows
 
             return merged_catalog_rows()
@@ -1093,11 +1098,21 @@ class ComponentAddFromInventoryBody(BaseModel):
 
 @app.get("/api/catalog/active-tags")
 async def get_active_catalog_tags():
-    """Controlled tag ids (``active_catalog.json``) and full library tag ids."""
+    """Controlled tag ids (inventory keys) and full library tag ids."""
     from lab_model.coordinator.catalog.active_catalog_store import list_active_catalog_tags
     from lab_model.coordinator.catalog.bundle import library_by_tag
+    from cloudlabs_edge_dev.edge_data import inventory_tag_ids, library_tag_ids
 
     try:
+        client = _edge_client_for()
+        if client.transport != EdgeTransport.IN_PROCESS:
+            lib = client.get_library()
+            inv = client.get_inventory()
+            if isinstance(lib, dict) and isinstance(inv, dict):
+                return {
+                    "tag_ids": inventory_tag_ids(inv),
+                    "library_tag_ids": library_tag_ids(lib),
+                }
         return {
             "tag_ids": list_active_catalog_tags(),
             "library_tag_ids": sorted(library_by_tag().keys()),
@@ -1109,14 +1124,72 @@ async def get_active_catalog_tags():
 
 @app.get("/api/catalog/library-rows")
 async def get_library_catalog_rows():
-    """All component_library rows (for sidebar display of off-catalog inventory)."""
+    """All library rows (for sidebar display of off-inventory parts)."""
     from lab_model.coordinator.catalog.bundle import library_by_tag
+    from cloudlabs_edge_dev.edge_data import library_rows
 
     try:
+        client = _edge_client_for()
+        if client.transport != EdgeTransport.IN_PROCESS:
+            lib = client.get_library()
+            if isinstance(lib, dict):
+                return library_rows(lib)
         return list(library_by_tag().values())
     except Exception as e:
         logger.exception("GET /api/catalog/library-rows failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read component library: {e}")
+
+
+@app.get("/api/library")
+async def get_edge_library():
+    """Proxy ``GET /library`` (HTTP edge) or disk ``data/library.json`` / component library."""
+    from pathlib import Path
+
+    from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
+    from cloudlabs_edge_dev.edge_data import load_json
+
+    try:
+        client = _edge_client_for()
+        if client.transport != EdgeTransport.IN_PROCESS:
+            lib = client.get_library()
+            if isinstance(lib, dict):
+                return lib
+        lp = get_lab_view_paths()
+        return load_json(Path(lp.component_library_json))
+    except Exception as e:
+        logger.exception("GET /api/library failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to read library: {e}")
+
+
+@app.get("/api/inventory")
+async def get_edge_inventory():
+    """Proxy ``GET /inventory`` (HTTP edge) or disk ``data/inventory.json``."""
+    from pathlib import Path
+
+    from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
+    from cloudlabs_edge_dev.edge_data import load_json
+
+    try:
+        client = _edge_client_for()
+        if client.transport != EdgeTransport.IN_PROCESS:
+            inv = client.get_inventory()
+            if isinstance(inv, dict):
+                return inv
+        lp = get_lab_view_paths()
+        inv_path = Path(lp.component_library_json).parent / "inventory.json"
+        if inv_path.is_file():
+            return load_json(inv_path)
+        # Derived inventory from active_catalog when edge inventory is absent.
+        from lab_model.coordinator.catalog.bundle import active_tag_ids
+
+        entries = {
+            tid: {"placement": "table", "storage_slot": None, "localize": True}
+            for tid in active_tag_ids()
+        }
+        return {"schema_version": 1, "entries": entries}
+    except Exception as e:
+        logger.exception("GET /api/inventory failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to read inventory: {e}")
 
 
 class ComponentTrackBody(BaseModel):
@@ -2128,18 +2201,43 @@ def _schedule_pose_refresh(
     background_tasks: BackgroundTasks,
     payload: Optional[RefreshPoseBody] = None,
 ) -> Dict[str, Any]:
+    body = payload or RefreshPoseBody()
+    kwargs = {
+        "preserve_tag_ids": list(body.preserve_tag_ids or []),
+        "apply_tag_ids": list(body.apply_tag_ids or []),
+        "tag_ids": list(body.tag_ids or []),
+    }
+    scoped = kwargs["tag_ids"] or kwargs["apply_tag_ids"]
+
+    # Prefer Edge Contract LOCALIZE_COMPONENTS when the active backend is HTTP.
+    try:
+        client = _edge_client_for()
+        if client.transport == EdgeTransport.HTTP:
+
+            async def _localize() -> None:
+                args: Dict[str, Any] = {"force_rescan": True}
+                if scoped:
+                    args["tag_ids"] = list(scoped)
+                await client.execute_command(
+                    {"action": "LOCALIZE_COMPONENTS", "parameters": args}
+                )
+
+            background_tasks.add_task(_localize)
+            scope_note = f" (scope: {', '.join(scoped)})" if scoped else ""
+            return {
+                "status": "accepted",
+                "message": f"LOCALIZE_COMPONENTS started{scope_note}",
+                "scan_tag_ids": kwargs["apply_tag_ids"] or kwargs["tag_ids"] or None,
+                "via": "LOCALIZE_COMPONENTS",
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("LOCALIZE_COMPONENTS path unavailable, falling back: %s", exc)
+
     if lab is None:
         raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
     fn = getattr(lab, "refresh_pose_from_camera", None)
     if callable(fn):
-        body = payload or RefreshPoseBody()
-        kwargs = {
-            "preserve_tag_ids": list(body.preserve_tag_ids or []),
-            "apply_tag_ids": list(body.apply_tag_ids or []),
-            "tag_ids": list(body.tag_ids or []),
-        }
         background_tasks.add_task(functools.partial(fn, **kwargs))
-        scoped = kwargs["tag_ids"] or kwargs["apply_tag_ids"]
         scope_note = f" (scope: {', '.join(scoped)})" if scoped else ""
         return {
             "status": "accepted",

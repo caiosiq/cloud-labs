@@ -34,7 +34,8 @@
     "AFFIRM_PLACED_AT_CURRENT",
     "REPACK_STORAGE",
     "RECENTER_IN_STORAGE",
-    "REMOVE"
+    "REMOVE",
+    "LOCALIZE_COMPONENTS"
   ],
   "measurables": {
     "tag_22.camera_image": {

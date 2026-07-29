@@ -81,6 +81,9 @@ class PrimitiveId(StrEnum):
     START_LIVE_FEED = "START_LIVE_FEED"
     END_LIVE_FEED = "END_LIVE_FEED"
 
+    #: Measure poses for declared inventory tags (edge: scan_components_cloudlab).
+    LOCALIZE_COMPONENTS = "LOCALIZE_COMPONENTS"
+
 
 # Read primitives: not POST /api/command; used by GET routes + `fetch_read_primitive`.
 READ_PRIMITIVE_IDS: frozenset[PrimitiveId] = frozenset(

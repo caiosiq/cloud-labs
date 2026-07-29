@@ -12,8 +12,11 @@
  * capability channels or latched primitives (see ``docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md``).
  *
  * `fetchLabState` still mirrors the overview into `store.labState` and reconciles:
- *   1. **Ghost state** (`store.ghostState[tag]`) — user-editable target pose from
- *      `tunables.nominal_pose` on status edges (canvas-truth model).
+ *   1. **Ghost state** (`store.ghostState[tag]`) — user-editable / optimistic
+ *      commanded pose. Synced from `tunables.nominal_pose` on IDLE edges and
+ *      explicit Refresh — **not** immediately after a command is accepted, so
+ *      the ghost stays at the destination while the solid (committed) pose
+ *      catches up when the move finishes.
  *   2. **Context panel state snapshots** — placement / holding edges; skip BUSY flicker.
  *   3. **Auxiliary side effects** — optimization overlay, session reconciliation,
  *      layout conflict refresh, teleop poll sync.
@@ -281,6 +284,16 @@ export async function fetchLabState() {
                         }
                     }
                     else if (shouldSync && !store.isDragging) {
+                        // While a command is in flight, keep optimistic ghost for
+                        // pending tags even if something set forceGhostSync mid-BUSY
+                        // (HTTP accept still has the old lab pose).
+                        if (
+                            store.pendingCommands.has(name) &&
+                            store.labState.system_status === 'BUSY' &&
+                            !justFinishedCommand
+                        ) {
+                            return;
+                        }
                         store.ghostState[name] = { ...dp };
                         if (typeof store.ghostState[name].rotation !== 'number') {
                             store.ghostState[name].rotation = 0;

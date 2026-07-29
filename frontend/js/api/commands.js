@@ -196,7 +196,10 @@ export async function executeSendCommand(command) {
             }
         } else {
             try {
-                store.forceGhostSync = true;
+                // Refresh overview (BUSY badge, etc.) but do **not** force-sync
+                // ghost poses: the command was only accepted; lab nominal/reported
+                // may still be the pre-move pose. Keep the operator's commanded
+                // ghost until BUSY→IDLE reconciliation (or an explicit Refresh).
                 await fetchLabState();
                 _render();
             } catch (syncError) {

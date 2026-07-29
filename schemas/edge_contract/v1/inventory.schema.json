@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/inventory.schema.json",
+  "title": "EdgeInventoryV1",
+  "description": "GET /inventory (and edge file data/inventory.json): declared placement intent for tags this lab currently tracks. Not a camera measurement. Every key MUST exist in data/library.json. Coordinator active-tags.tag_ids is exactly the key set of this document (derived view — no separate active_catalog.json on the edge).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "entries"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "backend_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional stamp when served over HTTP; may be omitted on disk."
+    },
+    "entries": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/inventoryEntry" },
+      "description": "Map tag_id → declaration. Empty object means the lab tracks nothing yet."
+    }
+  },
+  "$defs": {
+    "inventoryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["placement"],
+      "properties": {
+        "placement": {
+          "type": "string",
+          "enum": ["table", "storage", "off"],
+          "description": "Declared home: on the breadboard, in inventory storage, or intentionally off-table / not placed."
+        },
+        "storage_slot": {
+          "description": "Required when placement is storage; grid slot id or {i,j}. Null otherwise.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1 },
+            {
+              "type": "object",
+              "required": ["i", "j"],
+              "additionalProperties": false,
+              "properties": {
+                "i": { "type": "integer", "minimum": 0 },
+                "j": { "type": "integer", "minimum": 0 }
+              }
+            }
+          ]
+        },
+        "localize": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true (default), LOCALIZE_COMPONENTS includes this tag when args.tag_ids is omitted and placement is table or storage. Fixed fixtures that never move may set false."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Human-facing lab note; ignored by the contract."
+        }
+      }
+    }
+  }
+}

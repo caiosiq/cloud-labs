@@ -53,6 +53,7 @@ except ImportError:
         TELEOP_GOTO = "TELEOP_GOTO"
         START_LIVE_FEED = "START_LIVE_FEED"
         END_LIVE_FEED = "END_LIVE_FEED"
+        LOCALIZE_COMPONENTS = "LOCALIZE_COMPONENTS"
 
     MEASURABLE_REGISTRY: Dict[str, Any] = {}
     _FROM_LAB_MODEL = False

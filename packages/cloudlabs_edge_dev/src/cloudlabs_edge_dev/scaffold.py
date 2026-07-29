@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cloudlabs_edge_dev.agent_skills import (
+    REQUIRED_AGENT_SKILL_FILES,
+    write_agent_skills,
+)
+
 # ---------------------------------------------------------------------------
 # Files written by ``cloudlabs-edge init`` (doctor also checks this set).
 # ---------------------------------------------------------------------------
@@ -23,6 +28,8 @@ REQUIRED_EDGE_FILES: tuple[str, ...] = (
     "dispatch.py",
     "SKELETON.md",
     "bench/layout.json",
+    "data/library.json",
+    "data/inventory.json",
     "adapters/__init__.py",
     "adapters/motion.py",
     "adapters/motors.py",
@@ -32,7 +39,7 @@ REQUIRED_EDGE_FILES: tuple[str, ...] = (
     "adapters/tunables.py",
     "adapters/optimize.py",
     "adapters/observe.py",
-)
+) + REQUIRED_AGENT_SKILL_FILES
 
 MAIN_PY = '''\
 """ASGI entrypoint for this lab's Edge Contract v1 agent.
@@ -45,10 +52,11 @@ That reference implementation completes the live-plane subset
 ``NOT_IMPLEMENTED`` refusal for every other declared primitive.
 
 In Phase 6 you keep the same HTTP surface (``GET /capabilities``, ``GET /bench``,
-``POST /execute``, stream URLs, teleop WebSocket) but route ``/execute`` through
-``dispatch.dispatch_primitive`` and fill the adapter modules with lab-automation
-callables. Do not import OpticalExperiment or recorder drivers from this file;
-keep hardware mapping inside ``adapters/``.
+``GET /library``, ``GET /inventory``, ``POST /execute``, stream URLs, teleop
+WebSocket) but route ``/execute`` through ``dispatch.dispatch_primitive`` and
+fill the adapter modules with lab-automation callables. Do not import
+OpticalExperiment or recorder drivers from this file; keep hardware mapping
+inside ``adapters/``.
 """
 
 from __future__ import annotations
@@ -74,6 +82,7 @@ app = create_app(
     backend_id=_BACKEND_ID,
     capabilities=_CAPS,
     bench=_BENCH,
+    edge_root=_HERE,
 )
 '''
 
@@ -115,7 +124,8 @@ CAPABILITIES_JSON = """\
     "AFFIRM_PLACED_AT_CURRENT",
     "REPACK_STORAGE",
     "RECENTER_IN_STORAGE",
-    "REMOVE"
+    "REMOVE",
+    "LOCALIZE_COMPONENTS"
   ],
   "measurables": {{
     "tag_22.camera_image": {{
@@ -158,6 +168,46 @@ CAPABILITIES_JSON = """\
     "default": {{ "scale": 1.0, "jpeg_quality": 80, "fps": 10 }}
   }}
 }}
+"""
+
+LIBRARY_JSON = """\
+{
+  "schema_version": 1,
+  "components": {
+    "tag_22": {
+      "id": "cam_gripper_1",
+      "type": "OPTICAL_CAMERA",
+      "tag_id": "tag_22",
+      "name": "Gripper Camera 1",
+      "size": { "width": 40, "height": 40 },
+      "parameters": {},
+      "capabilities": {
+        "primitives": [
+          "RECORD_MEASURABLES",
+          "SET_EXPOSURE",
+          "START_LIVE_FEED",
+          "END_LIVE_FEED",
+          "LOCALIZE_COMPONENTS"
+        ],
+        "statecontrol": { "tunables": {}, "measurables": {} },
+        "telemetry": {}
+      }
+    }
+  }
+}
+"""
+
+INVENTORY_JSON = """\
+{
+  "schema_version": 1,
+  "entries": {
+    "tag_22": {
+      "placement": "table",
+      "storage_slot": null,
+      "localize": true
+    }
+  }
+}
 """
 
 BENCH_JSON = """\
@@ -669,7 +719,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from adapters import live_feed, motion, motors, observe, optimize, teleop, tunables
+from adapters import live_feed, motion, motors, observe, optimize, teleop, tunables, vision
 from kernel_host import eval_on_bgr
 from latch import begin_latch, end_latch, now_epoch_ms
 
@@ -714,6 +764,7 @@ PRIMITIVE_HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "SET_EXPOSURE": lambda a: tunables.set_exposure_time_ms(a),
     "SET_LASER_OUTPUT": lambda a: tunables.set_output_power_mw(a),
     "OPTIMIZE": lambda a: optimize.optimize_component(a),
+    "LOCALIZE_COMPONENTS": lambda a: vision.localize_components(a),
 }
 
 
@@ -1158,6 +1209,26 @@ def capture_jpeg(tag_id: str, *, profile: str | None = None) -> bytes:
     raise NotImplementedError(
         f"Phase 6: capture JPEG for {tag_id!r} profile={profile!r}"
     )
+
+
+def localize_components(args: dict[str, Any]) -> dict[str, Any]:
+    """Measure poses for declared inventory tags (LOCALIZE_COMPONENTS).
+
+    Parameters
+    ----------
+    args:
+        Optional ``tag_ids`` (list of strings). When omitted, localize every
+        inventory entry with ``localize != false`` and ``placement`` in
+        ``{"table", "storage"}`` (see ``data/inventory.json``). Optional
+        ``force_rescan`` (bool, default true).
+
+    Returns
+    -------
+    dict
+        ``{"tag_ids": [...], "poses": {tag_id: {x,y,rotation,...}, ...}}``.
+        Map to ``OpticalExperiment.scan_components_cloudlab`` (or equivalent).
+    """
+    raise NotImplementedError("Phase 6: LOCALIZE_COMPONENTS / scan_components_cloudlab")
 '''
 
 ADAPTERS_LIVE = '''\
@@ -1528,16 +1599,29 @@ cloudlabs_edge/
   kernel_host.py       # TorchScript on local BGR (provisioning ships working)
   dispatch.py          # primitive name → adapter callable
   bench/layout.json    # static geometry for GET /bench
+  data/
+    library.json       # full component library (GET /library)
+    inventory.json     # tracked tags + placement (GET /inventory)
   adapters/
     motion.py          # MOVE_*, pick/hover/place, storage, REMOVE
     motors.py          # MOVE_MOTOR, setpoints, zero, home
-    vision.py          # BGR analysis + JPEG wire encode
+    vision.py          # BGR analysis + JPEG wire + LOCALIZE_COMPONENTS
     live_feed.py       # START/END_LIVE_FEED + read_live_jpeg
     teleop.py          # lease, JOG/GOTO, pose_sample
     tunables.py        # SET_EXPOSURE, SET_LASER_OUTPUT
     optimize.py        # OPTIMIZE
     observe.py         # RECORD_MEASURABLES, EVAL_KERNEL
+  .agents/             # tool-agnostic coaching for Phase 6 (humans + AI)
+    README.md          # skill index
+    skills/*/SKILL.md  # contract, tensors, latency, kernels, frames, inventory
 ```
+
+## Phase 6 coaching (`.agents/skills`)
+
+Before filling an adapter, open the matching skill under `.agents/skills/` —
+or point any assistant at that file. Skills are not a second API; they remind
+you how to honor the contract (one mutation door, canonical measurables,
+fail-loud frames, honest inventory). Start from [`.agents/README.md`](.agents/README.md).
 
 ## Suggested deathray targets
 
@@ -1573,7 +1657,9 @@ Generated by::
     cloudlabs-edge init ./cloudlabs_edge --backend-id {backend_id}
 
 Read [`SKELETON.md`](./SKELETON.md) for the layout overview, then open each
-adapter module for long-form input and output documentation.
+adapter module for long-form input and output documentation. For Phase 6
+coaching (humans or any AI assistant), start at
+[`.agents/README.md`](.agents/README.md).
 
 ## Install and run
 
@@ -1607,11 +1693,14 @@ def init_edge(dest: Path, backend_id: str = "stub.default", force: bool = False)
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "adapters").mkdir(exist_ok=True)
     (dest / "bench").mkdir(exist_ok=True)
+    (dest / "data").mkdir(exist_ok=True)
 
     files = {
         dest / "main.py": MAIN_PY,
         dest / "capabilities.json": CAPABILITIES_JSON.format(backend_id=backend_id),
         dest / "bench" / "layout.json": BENCH_JSON.format(backend_id=backend_id),
+        dest / "data" / "library.json": LIBRARY_JSON,
+        dest / "data" / "inventory.json": INVENTORY_JSON,
         dest / "contract_version.txt": "1.0.0\n",
         dest / "contract.py": CONTRACT_PY,
         dest / "latch.py": LATCH_PY,
@@ -1631,4 +1720,5 @@ def init_edge(dest: Path, backend_id: str = "stub.default", force: bool = False)
     }
     for path, content in files.items():
         path.write_text(content, encoding="utf-8", newline="\n")
+    write_agent_skills(dest)
     return dest

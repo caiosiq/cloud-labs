@@ -89,6 +89,18 @@ def create_app(*, lab: Any = None, backend_id: str = "mock.default") -> FastAPI:
     async def get_bench() -> Dict[str, Any]:
         return bench_body
 
+    @app.get("/library")
+    async def get_library() -> Dict[str, Any]:
+        from cloudlabs_edge_dev.edge_data import load_library, stamp_backend
+
+        return stamp_backend(load_library(_edge_root()), backend_id)
+
+    @app.get("/inventory")
+    async def get_inventory() -> Dict[str, Any]:
+        from cloudlabs_edge_dev.edge_data import load_inventory, stamp_backend
+
+        return stamp_backend(load_inventory(_edge_root()), backend_id)
+
     @app.get("/lab-state")
     async def get_lab_state() -> Dict[str, Any]:
         return context.get_lab().get_lab_state()

@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Awaitable, Callable, Union
 
-from adapters import live_feed, motion, motors, observe, optimize, teleop, tunables
+from adapters import live_feed, motion, motors, observe, optimize, teleop, tunables, vision
 from kernel_host import eval_on_bgr
 from latch import begin_latch, end_latch, now_epoch_ms
 
@@ -55,6 +55,7 @@ PRIMITIVE_HANDLERS: dict[str, Handler] = {
     "SET_EXPOSURE": lambda a: tunables.set_exposure_time_ms(a),
     "SET_LASER_OUTPUT": lambda a: tunables.set_output_power_mw(a),
     "OPTIMIZE": lambda a: optimize.optimize_component(a),
+    "LOCALIZE_COMPONENTS": lambda a: vision.localize_components(a),
 }
 
 

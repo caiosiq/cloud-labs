@@ -11,15 +11,14 @@
     "padding_mm": 5
   },
   "frame_safety": {
-    "clearance_mm": 76.2,
-    "clearance_in": 3.0,
+    "clearance_mm": 30.2,
     "minimum_component_footprint_mm": {
       "width": 72.0,
       "height": 64.2883
     }
   },
   "manual_motion_workspace": {
-    "corner_cutoff_mm": 330.0
+    "corner_cutoff_mm": 450.0
   },
   "storage": {
     "rule": "negative_xy",

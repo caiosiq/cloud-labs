@@ -389,6 +389,25 @@ class TeleopJogBody(BaseModel):
     parameters: TeleopJogParameters
 
 
+class LocalizeComponentsParameters(BaseModel):
+    """Optional explicit tag list; when omitted the edge uses inventory defaults."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tag_ids: list[str] | None = None
+    force_rescan: bool = True
+
+
+class LocalizeComponentsBody(BaseModel):
+    """Measure poses for declared inventory tags (LOCALIZE_COMPONENTS)."""
+
+    action: Literal["LOCALIZE_COMPONENTS"]
+    target_id: str | None = None
+    parameters: LocalizeComponentsParameters = Field(
+        default_factory=LocalizeComponentsParameters
+    )
+
+
 ValidatedCommand = Annotated[
     Union[
         MoveComponentBody,
@@ -420,6 +439,7 @@ ValidatedCommand = Annotated[
         EndLiveFeedBody,
         TeleopGotoBody,
         TeleopJogBody,
+        LocalizeComponentsBody,
     ],
     Field(discriminator="action"),
 ]

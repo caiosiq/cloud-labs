@@ -14,6 +14,8 @@ and an **edge agent** (mock process or `cloudlabs_edge/` in a lab repo).
 |--------|------|--------|
 | `GET` | `/capabilities` | [`capabilities.schema.json`](./capabilities.schema.json) |
 | `GET` | `/bench` | [`bench.schema.json`](./bench.schema.json) |
+| `GET` | `/library` | [`library.schema.json`](./library.schema.json) — full lab component library |
+| `GET` | `/inventory` | [`inventory.schema.json`](./inventory.schema.json) — declared tracked tags + placement |
 | `POST` | `/execute` | request [`execute_request.schema.json`](./execute_request.schema.json), response [`execute_response.schema.json`](./execute_response.schema.json) |
 | WS | path from capabilities (`teleop` channel) | client→edge [`teleop_ws_client.schema.json`](./teleop_ws_client.schema.json), edge→client [`teleop_ws_server.schema.json`](./teleop_ws_server.schema.json) |
 | stream | path from capabilities (`live_feed` / measurable wire) | JPEG/MJPEG bytes; not JSON-schema’d |
@@ -23,6 +25,10 @@ Latch / observe payloads (inside execute results or dedicated observe bodies):
 
 Measurable catalog fields for wire + live channel binding:
 [`measurable_live_decl.schema.json`](./measurable_live_decl.schema.json).
+
+Library / inventory design (active-tags as a derived view, `LOCALIZE_COMPONENTS`):
+[`docs/EDGE_LIBRARY_AND_INVENTORY.md`](../../../docs/EDGE_LIBRARY_AND_INVENTORY.md).
+
 
 ## UC rules (non-negotiable)
 

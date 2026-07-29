@@ -14,7 +14,6 @@
     },
     "frame_safety": {
       "clearance_mm": 76.2,
-      "clearance_in": 3.0,
       "minimum_component_footprint_mm": {
         "width": 72.0,
         "height": 64.2883
