@@ -32,6 +32,7 @@ import {
     initLaserLinesPanelDeps,
 } from './ui/laser-lines-panel.js';
 import { initPoseRefresh, runLabPoseRefresh } from './ui/pose-refresh.js';
+import { showLabInitPendingGate } from './ui/lab-init-overlay.js';
 import { runtimeEditableOrMessage } from './control/control-state.js';
 import { getTableCamExposureSeconds } from './camera-exposure.js';
 import {
@@ -242,6 +243,8 @@ function initAlignmentDockTools() {
 function init() {
     log("Interface loaded.");
     log(`Client id ${getClientId()}`, 'info');
+    // Opaque gate before first poll — canvas / component lists stay hidden.
+    showLabInitPendingGate();
     void fetchBackends()
         .then(() => {
             const p = store.coordinatorPolicy;

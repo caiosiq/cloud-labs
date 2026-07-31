@@ -39,7 +39,8 @@ keeps scripts portable across benches.
 **Edge READY** means `SYNC_RUNTIME` has completed (recordable tunables overwritten
 from the world; non-recordable tunables set from `set_at_init`) — not merely that
 `/health` responds. Mock/sim may implement sync as copy-from-state/JSON; a real
-bench must measure.
+bench must measure. Twin hides canvas / component lists until
+`lab_initialization.ready` (opaque init gate).
 
 ## Who talks to whom
 

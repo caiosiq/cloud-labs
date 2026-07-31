@@ -117,6 +117,11 @@ export function deriveLabInit(labState) {
     };
 }
 
+/** Whether Twin may populate canvas / component list / tunables. */
+export function isLabInitReady(labState = store.labState) {
+    return !!deriveLabInit(labState).ready;
+}
+
 /**
  * Log lab initialization phase when runtime_sync / edge attach changes.
  * Updates the blocking Twin overlay. Does not spam the console on every poll.
@@ -264,12 +269,22 @@ export async function fetchLabState() {
 
         store.labState = await response.json();
         refreshSessionLeaseBanner();
+        _noteLabInitChange(store.labState);
+        const labInit = deriveLabInit(store.labState);
+        if (!labInit.ready) {
+            // Do not populate canvas / component list / tunables until SYNC ready.
+            syncLabStatePollingInterval();
+            console.log(
+                `[${new Date().toLocaleTimeString()}] Lab state received; `
+                + `waiting for init (phase=${labInit.phase}).`,
+            );
+            return;
+        }
         syncTeleopLivePosePolls();
         // Versioned alignment overlays travel with lab-state — mirror them into
         // the canvas mirrors so commit / checkout / stash changes show up.
         syncGuidesFromLabState();
         syncLaserLinesFromLabState();
-        _noteLabInitChange(store.labState);
         console.log(`[${new Date().toLocaleTimeString()}] Received Lab State successfully.`);
 
         const runtimeError = store.labState.last_runtime_error;

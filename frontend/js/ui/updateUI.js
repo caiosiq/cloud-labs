@@ -6,6 +6,7 @@
  * hover and clicks stay stable.
  */
 import { store } from '../state/store.js';
+import { isLabInitReady } from '../state/lab-state.js';
 import {
     getCatalogRow,
     getHolding,
@@ -307,6 +308,8 @@ function maybeRebuildComponentSidebar({ force = false } = {}) {
  */
 export function updateUI(opts = {}) {
     if (!store.labState) return;
+    // Catalog / other callers must not build sidebar or canvas before SYNC ready.
+    if (!isLabInitReady()) return;
 
     const statusBadge = document.getElementById('system-status-badge');
     const status = store.labState.system_status;

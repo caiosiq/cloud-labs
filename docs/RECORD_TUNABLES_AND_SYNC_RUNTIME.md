@@ -248,13 +248,15 @@ Suggested merge checklist:
 Prefix: **`[lab_init]`** (edges + coordinator logger `lab_init` + Twin `console.info`).
 
 - Edge boot: `runtime_sync status=pending|running|ready|failed … errors=N`
+- Edge boot (in-process under uvicorn): `runtime_sync scheduled (on running event loop)` — never leave deferred/pending forever
 - Per RECORD: `RECORD_TUNABLES tag=… path=… ok|refuse`
 - Edge refuse: `refuse primitive=… runtime_sync=… (lab not initialized)`
 - Coordinator: status-change only on heartbeat / `GET /api/lab-state` via `lab_initialization.note_lab_state`
 - Coordinator schedule: `schedule action=… REFUSED|ok` → HTTP 409 `lab_not_initialized`
-- Twin: `[lab-init] phase=… ready=…` on change only (not every poll) + blocking overlay
+- Twin: `[lab-init] phase=… ready=…` on change only + opaque overlay; canvas/sidebar hidden until ready
+- Twin poll while not ready: `waiting for init (phase=…)` — no component/tunable populate
 - Doctor: non-recordable tunable missing `set_at_init` → fail
 
 ---
 
-*Last updated: coordinator hard refuse + Twin lab-init overlay.*
+*Last updated: boot SYNC schedule-on-loop + Twin hide-until-ready.*

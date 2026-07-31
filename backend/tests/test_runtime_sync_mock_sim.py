@@ -60,6 +60,37 @@ class MockRuntimeSyncTests(unittest.TestCase):
                     sys.path.remove(str(edge))
                 os.environ.pop("CLOUDLABS_MOCK_INIT_DELAY_S", None)
 
+    def test_boot_sync_schedules_on_running_loop(self) -> None:
+        """Coordinator constructs mock inside uvicorn's loop — must not stick pending."""
+        from lab_model.coordinator.backends.lab_view_config import (
+            bootstrap_lab_view,
+            get_lab_view_paths,
+        )
+        from lab_model.language.domain import motor_rotation_store as motor_rot
+        from mock_edge.host.communicator import MockLabCommunicator
+
+        os.environ.pop("CLOUDLABS_SKIP_RUNTIME_SYNC", None)
+        os.environ["CLOUDLABS_MOCK_INIT_DELAY_S"] = "0"
+        with tempfile.TemporaryDirectory() as tmp:
+            lab_view = Path(tmp) / "lab_view"
+            shutil.copytree(_MOCK_LAB_VIEW, lab_view)
+            os.environ["LAB_VIEW_PATH"] = str(lab_view)
+            bootstrap_lab_view(str(_PROJECT_ROOT))
+            motor_rot.configure(get_lab_view_paths().motor_rotations_json)
+
+            async def _construct_and_await() -> str:
+                lab = MockLabCommunicator()
+                task = getattr(lab, "_boot_sync_task", None)
+                self.assertIsNotNone(task)
+                await task
+                return lab.get_lab_state()["runtime_sync"]["status"]
+
+            try:
+                status = asyncio.run(_construct_and_await())
+                self.assertEqual(status, "ready")
+            finally:
+                os.environ.pop("CLOUDLABS_MOCK_INIT_DELAY_S", None)
+
 
 class SimRuntimeSyncTests(unittest.TestCase):
     def test_sim_boot_sync_ready(self) -> None:

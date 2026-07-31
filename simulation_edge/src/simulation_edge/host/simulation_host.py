@@ -172,14 +172,29 @@ class SimulationHost:
             print(f"{self.log_prefix} runtime_sync skipped (CLOUDLABS_SKIP_RUNTIME_SYNC)")
             return
         try:
-            asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
             asyncio.run(self._boot_sync_runtime())
             return
         print(
-            f"{self.log_prefix} runtime_sync deferred "
-            "(event loop already running at construct)"
+            f"[lab_init] {self.log_prefix} runtime_sync scheduled "
+            "(on running event loop)"
         )
+        self.set_runtime_sync_status("running")
+        task = loop.create_task(self._boot_sync_runtime())
+
+        def _boot_done(t: asyncio.Task) -> None:
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                print(
+                    f"[lab_init] {self.log_prefix} runtime_sync boot task "
+                    f"failed: {exc}"
+                )
+
+        task.add_done_callback(_boot_done)
+        self._boot_sync_task = task
 
     async def _boot_sync_runtime(self) -> None:
         from lab_model.language.primitives.macros.sync_runtime import run_sync_runtime

@@ -97,6 +97,15 @@
             flex: 1;
             min-height: 0;
             overflow: hidden;
+            position: relative;
+        }
+
+        /* Hide Twin surfaces until lab initialization (SYNC_RUNTIME) is ready. */
+        .app-shell.lab-init-pending #sidebar,
+        .app-shell.lab-init-pending #main-content,
+        .app-shell.lab-init-pending #sidebar-right {
+            visibility: hidden;
+            pointer-events: none;
         }
 
         /* --- Sidebar (Left) --- */

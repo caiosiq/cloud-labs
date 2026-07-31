@@ -1,12 +1,12 @@
 /**
- * Blocking "Initializing lab…" overlay over Twin canvas + sidebar controls.
+ * Blocking "Initializing lab…" overlay over Twin.
  *
- * Driven by composed ``lab_initialization`` (or client-derived phase) from
- * lab-state polls. Orthogonal to lease / BUSY / OPTIMIZING.
+ * Until ``lab_initialization.ready``, hide sidebar / canvas / right panel and
+ * show an opaque gate. Driven by lab-state polls.
  */
 
 import { withBackendQuery } from '../state/backend-selection.js';
-import { leaseHeaders } from '../api/session-lease.js';
+import { acquireSessionLease, leaseHeaders } from '../api/session-lease.js';
 
 const OVERLAY_ID = 'lab-init-overlay';
 
@@ -22,9 +22,17 @@ function _subtitleForPhase(phase) {
             return 'Waiting for edge readiness…';
         case 'ready':
             return '';
+        case 'starting':
+            return 'Starting…';
         default:
             return 'Starting…';
     }
+}
+
+function _setShellPending(pending) {
+    const shell = document.querySelector('.app-shell');
+    if (!shell) return;
+    shell.classList.toggle('lab-init-pending', !!pending);
 }
 
 function _ensureOverlay() {
@@ -42,7 +50,8 @@ function _ensureOverlay() {
         'align-items:center',
         'justify-content:center',
         'pointer-events:auto',
-        'background:radial-gradient(ellipse at 40% 30%, rgba(30,41,59,0.92) 0%, rgba(11,18,32,0.96) 55%, rgba(2,6,23,0.98) 100%)',
+        // Fully opaque so canvas / component lists never show through.
+        'background:#0b1220',
         'font-family:ui-sans-serif,system-ui,sans-serif',
         'color:#e2e8f0',
         'padding:24px',
@@ -83,6 +92,10 @@ async function _retrySyncRuntime(btn) {
         btn.textContent = 'Retrying…';
     }
     try {
+        const lease = await acquireSessionLease();
+        if (!lease.ok) {
+            console.warn('[lab-init] retry needs Take control first', lease.error);
+        }
         const headers = {
             'Content-Type': 'application/json',
             ...(leaseHeaders() || {}),
@@ -113,6 +126,18 @@ async function _retrySyncRuntime(btn) {
 }
 
 /**
+ * Show the opaque gate immediately (before first lab-state poll).
+ */
+export function showLabInitPendingGate() {
+    updateLabInitOverlay({
+        ready: false,
+        phase: 'starting',
+        runtime_sync: 'pending',
+        errors: [],
+    });
+}
+
+/**
  * @param {{ ready?: boolean, phase?: string, errors?: unknown[] } | null | undefined} init
  */
 export function updateLabInitOverlay(init) {
@@ -121,6 +146,8 @@ export function updateLabInitOverlay(init) {
     const phase = init && init.phase != null ? String(init.phase) : 'starting';
     const errors = Array.isArray(init?.errors) ? init.errors : [];
 
+    _setShellPending(!ready);
+
     if (ready) {
         if (el.style.display !== 'none') {
             el.style.opacity = '0';
@@ -128,6 +155,8 @@ export function updateLabInitOverlay(init) {
                 el.style.display = 'none';
                 el.style.opacity = '1';
             }, 220);
+        } else {
+            el.style.display = 'none';
         }
         return;
     }

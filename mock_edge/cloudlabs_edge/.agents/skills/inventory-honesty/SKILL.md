@@ -27,6 +27,11 @@ description: >-
   `recordable` explicitly (doctor strict mode).
 - Wire `RECORD_TUNABLES` (and `SYNC_RUNTIME` = RECORD(recordable) + SET(set_at_init)
   for inventory tags). Edge is not READY until SYNC completes.
+- If the host is constructed **inside a running asyncio loop** (coordinator /
+  uvicorn in-process), **schedule** boot `SYNC_RUNTIME` with
+  `loop.create_task(...)` — do not leave `runtime_sync` stuck at `pending`
+  ("deferred forever"). Outside a loop, `asyncio.run(...)` is fine.
+- Log with prefix `[lab_init]` when scheduling / skipping / failing boot SYNC.
 - Mock/sim may implement RECORD as copy-from-state/JSON; real edges must measure.
 - `LOCALIZE_COMPONENTS` is a **deprecated alias** of RECORD for `nominal_pose` only;
   prefer RECORD_TUNABLES / SYNC_RUNTIME. Default inventory scope: `localize != false`
@@ -40,6 +45,8 @@ description: >-
 - Do not keep a separate edge `active_catalog.json`; active tags are inventory keys.
 - Do not invent `reported_*` shadow tunables; recording overwrites the real tunable.
 - Do not advertise READY / accept motion before SYNC_RUNTIME has succeeded.
+- Do not leave boot SYNC "deferred" when an event loop is already running —
+  Twin will sit on Initializing lab… forever.
 - Do not silently backfill / infer missing library `capabilities` or `recordable`
   metadata at load time — fix the authored JSON so doctor fails for the real cause.
 
