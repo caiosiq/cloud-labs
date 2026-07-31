@@ -43,7 +43,7 @@ def warn_shared_lab_view_paths(
         )
     by_root: Dict[str, List[str]] = {}
     for spec in specs:
-        if not spec.enabled:
+        if not spec.enabled or not (spec.lab_view_path or "").strip():
             continue
         root = _resolve_lab_view_root(project_root, spec.lab_view_path)
         by_root.setdefault(root, []).append(spec.backend_id)
@@ -63,18 +63,61 @@ def warn_shared_lab_view_paths(
     return messages
 
 
+def warn_shared_coordinator_data_paths(
+    project_root: str,
+    specs: List[BackendSpec],
+    *,
+    strict: Optional[bool] = None,
+) -> List[str]:
+    """Warn (or fail) when two enabled backends share one coordinator_data root."""
+    from lab_model.coordinator.backends.coordinator_data import (
+        default_coordinator_data_path,
+    )
+
+    if strict is None:
+        strict = os.environ.get("CLOUDLABS_STRICT_LAB_VIEW", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+    by_root: Dict[str, List[str]] = {}
+    for spec in specs:
+        if not spec.enabled:
+            continue
+        rel = (spec.coordinator_data_path or default_coordinator_data_path(spec.backend_id)).strip()
+        root = _resolve_lab_view_root(project_root, rel)
+        by_root.setdefault(root, []).append(spec.backend_id)
+    messages: List[str] = []
+    for root, ids in sorted(by_root.items(), key=lambda item: item[0]):
+        if len(ids) < 2:
+            continue
+        joined = ", ".join(ids)
+        msg = f"coordinator_data shared by {joined} -> {root}"
+        messages.append(msg)
+        print(f"[backend] {msg}", flush=True)
+    if messages and strict:
+        raise ValueError(
+            "backends share coordinator_data (set unique paths or unset "
+            f"CLOUDLABS_STRICT_LAB_VIEW): {'; '.join(messages)}"
+        )
+    return messages
+
+
 @dataclass(frozen=True)
 class BackendSpec:
     backend_id: str
     label: str
-    lab_view_path: str
+    #: Optional local edge host bundle (mock/sim teaching). Empty for HTTP-only real.
+    lab_view_path: str = ""
+    #: Thin coordinator store (VC + working FSM + Twin overlays). Auto-created.
+    coordinator_data_path: str = ""
     communicator: str = ""
     lab_mode: str = ""
     enabled: bool = True
     notes: str = ""
     description: str = ""
     image: str = ""
-    #: Optional Edge Contract HTTP endpoint (Phase 3). Poll attach still wins.
+    #: Optional Edge Contract HTTP endpoint. Poll attach still wins.
     edge: EdgeEndpointConfig = field(default_factory=EdgeEndpointConfig)
 
 
@@ -167,31 +210,45 @@ class BackendRegistry:
         rows = doc.get("backends")
         if not isinstance(rows, list):
             raise ValueError(f"backends config missing 'backends' list: {config_path}")
+        from lab_model.coordinator.backends.coordinator_data import (
+            default_coordinator_data_path,
+        )
+
         specs: List[BackendSpec] = []
         for raw in rows:
             if not isinstance(raw, dict):
                 continue
             bid = str(raw.get("backend_id") or "").strip()
-            lvp = str(raw.get("lab_view_path") or "").strip()
-            if not bid or not lvp:
+            if not bid:
                 continue
+            lvp = str(raw.get("lab_view_path") or "").strip()
+            edge = parse_edge_endpoint(raw.get("edge"))
+            communicator = str(raw.get("communicator") or "").strip().lower()
+            # HTTP-edge real backends need no local edge lab_view; mock/sim do.
+            if not lvp and not edge.configured and communicator != "real":
+                continue
+            cdp = str(raw.get("coordinator_data_path") or "").strip()
+            if not cdp:
+                cdp = default_coordinator_data_path(bid)
             specs.append(
                 BackendSpec(
                     backend_id=bid,
                     label=str(raw.get("label") or bid).strip() or bid,
                     lab_view_path=lvp,
-                    communicator=str(raw.get("communicator") or "").strip().lower(),
+                    coordinator_data_path=cdp,
+                    communicator=communicator,
                     lab_mode=str(raw.get("lab_mode") or "").strip().upper(),
                     enabled=bool(raw.get("enabled", True)),
                     notes=str(raw.get("notes") or "").strip(),
                     description=str(raw.get("description") or "").strip(),
                     image=str(raw.get("image") or "").strip(),
-                    edge=parse_edge_endpoint(raw.get("edge")),
+                    edge=edge,
                 )
             )
         if not specs:
             raise ValueError(f"no backends defined in {config_path}")
         warn_shared_lab_view_paths(os.path.abspath(project_root), specs)
+        warn_shared_coordinator_data_paths(os.path.abspath(project_root), specs)
         reg = cls(project_root, specs)
         reg.probe_all()
         return reg
@@ -230,18 +287,28 @@ class BackendRegistry:
                 self._runtimes[spec.backend_id] = self._probe_spec(spec)
         for bid in self.known_backend_ids():
             rt = self._runtimes.get(bid)
-            if rt is None or not rt.paths.root_dir:
+            if rt is None:
                 continue
+            edge_url = ""
+            if rt.spec.edge.configured:
+                edge_url = rt.spec.edge.base_url or ""
             print(
-                f"[backend] backend_id={bid!r} lab_view={rt.paths.root_dir!r} "
+                f"[backend] backend_id={bid!r} "
+                f"coordinator_data={rt.paths.control_dir!r} "
+                f"lab_view={rt.spec.lab_view_path or '(none)'} "
+                f"edge={edge_url or 'in-process'} "
                 f"availability={rt.availability!r}",
                 flush=True,
             )
-        # Restore geometry for the first ready backend so probing a real
-        # layout.json does not leave the process on the wrong storage grid.
+        # Restore geometry for the first ready backend that has a local layout.
         for bid in self.known_backend_ids():
             rt = self._runtimes.get(bid)
-            if rt is None or rt.availability != "ready" or not rt.paths.root_dir:
+            if (
+                rt is None
+                or rt.availability != "ready"
+                or not rt.paths.layout_json
+                or not os.path.isfile(rt.paths.layout_json)
+            ):
                 continue
             try:
                 import json
@@ -265,16 +332,55 @@ class BackendRegistry:
                 availability="unavailable",
                 unavailable_reason="disabled in backends.json",
             )
+        from lab_model.coordinator.backends.coordinator_data import (
+            apply_coordinator_overrides,
+            coordinator_only_paths,
+            ensure_coordinator_data,
+        )
+        from lab_model.coordinator.state.lab_state_store import LabStateStore
+
         try:
-            paths, manifest = load_lab_view_bundle(self.project_root, spec.lab_view_path)
+            coord = ensure_coordinator_data(
+                self.project_root,
+                spec.backend_id,
+                coordinator_data_path=spec.coordinator_data_path,
+                migrate_from_lab_view=spec.lab_view_path,
+            )
         except BaseException as exc:
             return BackendRuntime(
                 spec=spec,
                 paths=_empty_paths(),
                 manifest=_empty_manifest(),
                 availability="unavailable",
-                unavailable_reason=str(exc),
+                unavailable_reason=f"coordinator_data: {exc}",
             )
+
+        lvp = (spec.lab_view_path or "").strip()
+        if lvp:
+            try:
+                paths, manifest = load_lab_view_bundle(self.project_root, lvp)
+            except BaseException as exc:
+                return BackendRuntime(
+                    spec=spec,
+                    paths=_empty_paths(),
+                    manifest=_empty_manifest(),
+                    availability="unavailable",
+                    unavailable_reason=str(exc),
+                )
+            paths = apply_coordinator_overrides(paths, coord)
+        else:
+            # HTTP-edge only: no local edge lab_view (library/layout on edge).
+            paths = coordinator_only_paths(coord)
+            comm = (spec.communicator or "real").strip().lower() or "real"
+            mode = (spec.lab_mode or comm.upper()).strip().upper() or "REAL"
+            manifest = LabViewManifest(
+                communicator=comm,
+                lab_mode=mode,
+                session_checkpoint=False,
+            )
+            os.makedirs(paths.states_dir, exist_ok=True)
+            os.makedirs(paths.camera_captures_dir, exist_ok=True)
+
         reason = _probe_real_availability(spec, manifest)
         if reason:
             return BackendRuntime(
@@ -284,9 +390,8 @@ class BackendRegistry:
                 availability="unavailable",
                 unavailable_reason=reason,
             )
-        store_dir = os.path.join(paths.root_dir, "catalog_store")
-        from lab_model.coordinator.state.lab_state_store import LabStateStore
-
+        store_dir = os.path.join(coord.root_dir, "catalog_store")
+        os.makedirs(store_dir, exist_ok=True)
         lab_state_store = LabStateStore.from_disk(spec.backend_id, paths.lab_state_json)
         return BackendRuntime(
             spec=spec,
@@ -357,7 +462,8 @@ class BackendRegistry:
             "image": rt.spec.image or None,
             "communicator": rt.communicator if rt.availability != "unavailable" else None,
             "lab_mode": rt.lab_mode if rt.availability != "unavailable" else None,
-            "lab_view_path": rt.spec.lab_view_path,
+            "lab_view_path": rt.spec.lab_view_path or None,
+            "coordinator_data_path": rt.spec.coordinator_data_path or None,
             "availability": rt.availability,
             "unavailable_reason": rt.unavailable_reason,
             "enabled": rt.spec.enabled,
@@ -452,5 +558,6 @@ __all__ = [
     "BackendRegistry",
     "BackendRuntime",
     "BackendSpec",
+    "warn_shared_coordinator_data_paths",
     "warn_shared_lab_view_paths",
 ]

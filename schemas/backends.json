@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Backends registered on this cloud-labs server. Users/scripts pick one at connect time; the server does not choose a default communicator from .env.",
+  "description": "Backends registered on this cloud-labs server. Users/scripts pick one at connect time; the server does not choose a default communicator from .env. Coordinator VC/FSM live under coordinator_data/<backend_id>/ (auto-created). Edge library/inventory/layout stay on the edge (or mock_edge/lab_view for teaching).",
   "backends": [
     {
       "backend_id": "mock.default",
@@ -8,6 +8,7 @@
       "description": "Teaching edge via top-level mock_edge/ (in-process by default). Set edge.base_url to http://127.0.0.1:8100 when running `python -m mock_edge`.",
       "image": "/static/wiki/backends/mock-default.png",
       "lab_view_path": "mock_edge/lab_view",
+      "coordinator_data_path": "coordinator_data/mock.default",
       "enabled": true,
       "edge": {
         "base_url": null,
@@ -20,11 +21,11 @@
       "label": "Lab automation (real robot)",
       "description": "Physical robot bench via the Edge Contract server in the sibling lab_automation/cloudlabs_edge package.",
       "image": "/static/wiki/backends/real-default.png",
-      "lab_view_path": "backends/real.default/lab_view",
+      "coordinator_data_path": "coordinator_data/real.default",
       "communicator": "real",
       "lab_mode": "REAL",
       "enabled": true,
-      "notes": "Start the lab_automation edge on port 8200 before connecting. Coordinator lab_view holds VC + working state for this backend only; hardware geometry and commands come from the edge.",
+      "notes": "Start the lab_automation edge on port 8200 before connecting. Coordinator store is auto-created under coordinator_data/real.default (VC + working state only). Library, inventory, and layout come from the edge.",
       "edge": {
         "base_url": "http://127.0.0.1:8200",
         "contract_version": "1.0.0",
@@ -37,6 +38,7 @@
       "description": "MuJoCo / soft-pose simulation via simulation_edge/cloudlabs_edge. Default soft mode; set SIMULATION_EDGE_MUJOCO=1 for the viewer process. Point edge.base_url at http://127.0.0.1:8120 when serving `python -m simulation_edge`.",
       "image": "/static/wiki/backends/mock-default.png",
       "lab_view_path": "simulation_edge/lab_view",
+      "coordinator_data_path": "coordinator_data/sim.default",
       "enabled": true,
       "edge": {
         "base_url": "http://127.0.0.1:8120",

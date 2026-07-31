@@ -1,4 +1,4 @@
-"""Phase 1: per-backend lab_view isolation and ControlManager cache keys."""
+"""Per-backend coordinator_data isolation and ControlManager cache keys."""
 from __future__ import annotations
 
 import json
@@ -9,7 +9,8 @@ import unittest
 from pathlib import Path
 
 
-def _seed_lab_view(root: Path) -> None:
+def _seed_edge_lab_view(root: Path) -> None:
+    """Minimal *edge* lab_view (layout/library/motors) — not coordinator store."""
     root.mkdir(parents=True, exist_ok=True)
     (root / "control").mkdir(exist_ok=True)
     (root / "recipes").mkdir(exist_ok=True)
@@ -71,9 +72,7 @@ class BackendIsolationTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="backend_isolation_"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.mock_lv = self.tmp / "mock_lv"
-        self.real_lv = self.tmp / "real_lv"
-        _seed_lab_view(self.mock_lv)
-        _seed_lab_view(self.real_lv)
+        _seed_edge_lab_view(self.mock_lv)
         cfg = {
             "schema_version": 1,
             "backends": [
@@ -81,12 +80,13 @@ class BackendIsolationTests(unittest.TestCase):
                     "backend_id": "mock.default",
                     "label": "Mock",
                     "lab_view_path": str(self.mock_lv),
+                    "coordinator_data_path": str(self.tmp / "coord_mock"),
                     "enabled": True,
                 },
                 {
                     "backend_id": "real.default",
                     "label": "Real",
-                    "lab_view_path": str(self.real_lv),
+                    "coordinator_data_path": str(self.tmp / "coord_real"),
                     "communicator": "real",
                     "lab_mode": "REAL",
                     "enabled": True,
@@ -100,7 +100,7 @@ class BackendIsolationTests(unittest.TestCase):
         self.addCleanup(os.environ.pop, "CLOUDLABS_BACKENDS_CONFIG", None)
         os.environ.pop("CLOUDLABS_STRICT_LAB_VIEW", None)
 
-    def test_distinct_control_dirs_and_repos(self) -> None:
+    def test_distinct_coordinator_control_dirs(self) -> None:
         from lab_model.coordinator.backends.registry import BackendRegistry
         from lab_model.coordinator.state.control_manager import (
             ControlManager,
@@ -112,6 +112,10 @@ class BackendIsolationTests(unittest.TestCase):
         mock_rt = reg.get_runtime("mock.default", init=False)
         real_rt = reg.get_runtime("real.default", init=False)
         self.assertNotEqual(mock_rt.control_dir(), real_rt.control_dir())
+        self.assertIn("coord_mock", mock_rt.control_dir().replace("\\", "/"))
+        self.assertIn("coord_real", real_rt.control_dir().replace("\\", "/"))
+        # Coordinator owns lab_state path (not the edge lab_view for mock).
+        self.assertIn("coord_mock", mock_rt.paths.lab_state_json.replace("\\", "/"))
 
         create_control_repo(mock_rt.control_dir(), "laser-cavity")
         create_control_repo(real_rt.control_dir(), "default")
@@ -120,18 +124,28 @@ class BackendIsolationTests(unittest.TestCase):
         real_ids = {r["repo_id"] for r in list_control_repos(real_rt.control_dir())}
         self.assertEqual(mock_ids, {"laser-cavity"})
         self.assertEqual(real_ids, {"default"})
-        self.assertEqual(set(mock_rt.list_control_repo_ids()), {"laser-cavity"})
-        self.assertEqual(set(real_rt.list_control_repo_ids()), {"default"})
 
-        # Same repo_id string on two backends must not share ControlManager state.
         create_control_repo(mock_rt.control_dir(), "shared-name")
         create_control_repo(real_rt.control_dir(), "shared-name")
         mock_mgr = ControlManager(mock_rt.control_dir(), "shared-name")
         real_mgr = ControlManager(real_rt.control_dir(), "shared-name")
         mock_rt.control_managers["shared-name"] = mock_mgr
         real_rt.control_managers["shared-name"] = real_mgr
-        self.assertIsNot(mock_rt.control_managers["shared-name"], real_rt.control_managers["shared-name"])
+        self.assertIsNot(
+            mock_rt.control_managers["shared-name"],
+            real_rt.control_managers["shared-name"],
+        )
         self.assertNotEqual(mock_mgr.repo_dir, real_mgr.repo_dir)
+
+    def test_real_probes_without_local_lab_view(self) -> None:
+        from lab_model.coordinator.backends.registry import BackendRegistry
+
+        reg = BackendRegistry.from_project(str(self.tmp))
+        real_rt = reg.get_runtime("real.default", init=False)
+        self.assertEqual(real_rt.availability, "ready")
+        self.assertFalse(real_rt.spec.lab_view_path)
+        self.assertTrue(os.path.isfile(real_rt.paths.lab_state_json))
+        self.assertTrue(os.path.isdir(real_rt.control_dir()))
 
     def test_warn_shared_lab_view_path(self) -> None:
         from lab_model.coordinator.backends.registry import (
@@ -141,8 +155,8 @@ class BackendIsolationTests(unittest.TestCase):
 
         shared = str(self.mock_lv)
         specs = [
-            BackendSpec("a", "A", shared),
-            BackendSpec("b", "B", shared),
+            BackendSpec("a", "A", shared, "coord_a"),
+            BackendSpec("b", "B", shared, "coord_b"),
         ]
         msgs = warn_shared_lab_view_paths(str(self.tmp), specs, strict=False)
         self.assertEqual(len(msgs), 1)
@@ -151,10 +165,10 @@ class BackendIsolationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             warn_shared_lab_view_paths(str(self.tmp), specs, strict=True)
 
-    def test_project_backends_json_isolates_real(self) -> None:
-        """Repo schemas/backends.json: real.default must not share mock lab_view."""
+    def test_project_backends_json_isolates_coordinator_data(self) -> None:
         from lab_model.coordinator.backends.registry import (
             BackendRegistry,
+            warn_shared_coordinator_data_paths,
             warn_shared_lab_view_paths,
         )
 
@@ -165,19 +179,43 @@ class BackendIsolationTests(unittest.TestCase):
         real_rt = reg.get_runtime("real.default", init=False)
         self.assertEqual(mock_rt.availability, "ready")
         self.assertEqual(real_rt.availability, "ready")
-        self.assertTrue(mock_rt.paths.root_dir)
-        self.assertTrue(real_rt.paths.root_dir)
         self.assertNotEqual(
-            os.path.normcase(mock_rt.paths.root_dir),
-            os.path.normcase(real_rt.paths.root_dir),
+            os.path.normcase(mock_rt.control_dir()),
+            os.path.normcase(real_rt.control_dir()),
         )
-        self.assertIn("real.default", real_rt.spec.lab_view_path.replace("\\", "/"))
-        msgs = warn_shared_lab_view_paths(
-            str(project),
-            reg.list_specs(),
-            strict=False,
+        self.assertIn("coordinator_data", real_rt.control_dir().replace("\\", "/"))
+        self.assertFalse(real_rt.spec.lab_view_path)
+        self.assertEqual(
+            warn_shared_lab_view_paths(str(project), reg.list_specs(), strict=False),
+            [],
         )
-        self.assertEqual(msgs, [])
+        self.assertEqual(
+            warn_shared_coordinator_data_paths(
+                str(project), reg.list_specs(), strict=False
+            ),
+            [],
+        )
+
+
+class CoordinatorDataEnsureTests(unittest.TestCase):
+    def test_ensure_creates_thin_store(self) -> None:
+        from lab_model.coordinator.backends.coordinator_data import ensure_coordinator_data
+
+        tmp = Path(tempfile.mkdtemp(prefix="coord_ensure_"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        paths = ensure_coordinator_data(
+            str(tmp),
+            "real.default",
+            coordinator_data_path=str(tmp / "coordinator_data" / "real.default"),
+        )
+        self.assertTrue(paths.created)
+        self.assertTrue(os.path.isfile(paths.lab_state_json))
+        self.assertTrue(os.path.isdir(paths.control_dir))
+        # Must not invent edge catalogs.
+        root = Path(paths.root_dir)
+        self.assertFalse((root / "component_library.json").exists())
+        self.assertFalse((root / "layout.json").exists())
+        self.assertFalse((root / "motor_rotations.json").exists())
 
 
 if __name__ == "__main__":

@@ -129,6 +129,23 @@ registered id) is how a scientist picks an instrument. Mock, sim, and real are
 the same kind of system behind different names — this edge is one of those
 instruments.
 
+## Coordinator vs edge data (do not mix)
+
+| Belongs on **this edge** | Belongs on the **coordinator** (cloud-labs) |
+|--------------------------|---------------------------------------------|
+| `data/library.json` + `data/inventory.json` | Working Twin lab-state FSM (`HOLDING`, presence, commanded tunables) |
+| Bench layout / geometry (`GET /bench`) | Version control (`control/` under `coordinator_data/<backend_id>/`) |
+| Motor / physical tunable tracking, RECORD/SYNC truth | Twin-only overlays for now (e.g. laser lines) |
+| Streams, teleop live samples, `runtime_sync` | Session lease / jobs |
+
+- After a successful primitive, the coordinator may apply language `commit_*`
+  so Twin shows HOLDING even if edge lab-state stays IDLE — **do not** invent
+  Twin FSM writers on the edge to “fix” the UI.
+- Do not author a parallel library / inventory / active_catalog on the
+  coordinator; active tags are inventory keys.
+- Debug: `[lab_init]` = SYNC/READY; `[lab_state]` / `[control]` / `[backend]`
+  are coordinator-side. See Cloud Labs `docs/BACKEND_ISOLATION.md`.
+
 ## Full onboarding
 
 Longer scientist-facing narrative (with figures): Cloud Labs repo
@@ -360,6 +377,9 @@ description: >-
 - Do not invent slot maps or AprilTag locations without a source of truth.
 - Do not silently no-op STORE/PLACE — refusal is better than a lie.
 - Do not keep a separate edge `active_catalog.json`; active tags are inventory keys.
+- Do not push library/inventory/layout into the coordinator’s
+  `coordinator_data/` tree — that store is VC + working FSM only; lab people
+  author library/inventory here on the edge.
 - Do not invent `reported_*` shadow tunables; recording overwrites the real tunable.
 - Do not advertise READY / accept motion before SYNC_RUNTIME has succeeded.
 - Do not leave boot SYNC "deferred" when an event loop is already running —

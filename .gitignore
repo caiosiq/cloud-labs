@@ -14,6 +14,11 @@ __pycache__/
 # Session / job TorchScript scratch + archives
 .cloudlabs_kernel_sessions/
 
+# Per-backend coordinator store (auto-created; keep README only in git)
+coordinator_data/**
+!coordinator_data/README.md
+!coordinator_data/**/.gitkeep
+
 # Legacy laser-line helper output (scripts/generate_laser_line_fit.py)
 laser_line_fit.npy
 

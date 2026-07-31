@@ -43,6 +43,9 @@ description: >-
 - Do not invent slot maps or AprilTag locations without a source of truth.
 - Do not silently no-op STORE/PLACE — refusal is better than a lie.
 - Do not keep a separate edge `active_catalog.json`; active tags are inventory keys.
+- Do not push library/inventory/layout into the coordinator’s
+  `coordinator_data/` tree — that store is VC + working FSM only; lab people
+  author library/inventory here on the edge.
 - Do not invent `reported_*` shadow tunables; recording overwrites the real tunable.
 - Do not advertise READY / accept motion before SYNC_RUNTIME has succeeded.
 - Do not leave boot SYNC "deferred" when an event loop is already running —
