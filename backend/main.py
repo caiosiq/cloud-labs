@@ -319,7 +319,13 @@ async def _southbound_execute(
     timeout_s: float = 120.0,
     lease_id: str | None = None,
 ):
-    """Run one primitive via the unified EdgeClient southbound path."""
+    """Run one primitive via the unified EdgeClient southbound path.
+
+    After a successful **remote** (HTTP/poll) execute, apply coordinator
+    language commits for in-air primitives so Twin FSM fields
+    (``HOLDING`` / presence) update even when the edge lab-state stays IDLE.
+    In-process mock already commits inside orchestration — skipped here.
+    """
     bid = (backend_id or _active_backend_id()).strip()
     client = _edge_client_for(bid)
     result = await client.execute_command(
@@ -328,6 +334,26 @@ async def _southbound_execute(
     if not result.ok:
         status = 502 if result.transport != EdgeTransport.IN_PROCESS else 409
         raise HTTPException(status_code=status, detail=result.error or "edge execute failed")
+    if result.transport != EdgeTransport.IN_PROCESS:
+        try:
+            from lab_model.coordinator.state.apply_primitive_commit import (
+                apply_edge_primitive_commit,
+            )
+            from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+
+            rt = require_backend(backend_registry, bid, init=False)
+            store = ensure_lab_state_store(rt)
+            edge_payload = result.result if isinstance(result.result, dict) else {}
+            apply_edge_primitive_commit(
+                store,
+                command,
+                edge_result=edge_payload,
+                backend_id=bid,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "coordinator commit after southbound failed backend=%s", bid
+            )
     return result
 
 
@@ -2100,23 +2126,25 @@ async def get_component_camera_image(tag_id: str):
 
 @app.get("/api/lab-state")
 async def get_lab_state():
-    """Return runtime lab state.
+    """Return Twin lab-state (coordinator working copy + edge overlays).
 
-    When an edge agent is attached, the **edge** is the source of truth:
-    prefer the latest heartbeat snapshot, otherwise proxy ``get_lab_state``.
+    Phase 2: semantic FSM fields come from the per-backend coordinator store;
+    ``runtime_sync`` / teleop telemetry overlay from the edge when attached.
+    Edge snapshots are still fetched (cache → proxy → HTTP) for overlays and
+    one-time seed when the working copy has no components.
     """
     bid = _active_backend_id()
     logger.debug("GET /api/lab-state backend=%s", bid)
     try:
-        state: Optional[Dict[str, Any]] = None
-        edge_source = False
+        from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+        from lab_model.coordinator.state.merge_lab_state import merge_lab_state_for_twin
+
+        edge_snapshot: Optional[Dict[str, Any]] = None
         if edge_agent_registry.is_attached(bid):
             cached = edge_agent_registry.get_cached_lab_state(bid)
             if isinstance(cached, dict):
-                state = cached
-                edge_source = True
+                edge_snapshot = cached
             else:
-                # On-demand fetch from edge (agent must poll commands).
                 try:
                     proxied = await _proxy_to_edge(
                         backend_id=bid,
@@ -2127,13 +2155,11 @@ async def get_lab_state():
                     if isinstance(proxied, dict) and isinstance(
                         proxied.get("lab_state"), dict
                     ):
-                        state = proxied["lab_state"]
-                        edge_source = True
-                        # Refresh cache so subsequent polls are cheap.
+                        edge_snapshot = proxied["lab_state"]
                         rec = edge_agent_registry.get_for_backend(bid)
                         if rec is not None:
                             edge_agent_registry.heartbeat(
-                                rec.agent_id, lab_state=state
+                                rec.agent_id, lab_state=edge_snapshot
                             )
                 except HTTPException as exc:
                     disconnect = edge_agent_registry.last_disconnect(bid)
@@ -2148,7 +2174,7 @@ async def get_lab_state():
                         },
                     ) from exc
 
-        if state is None:
+        if edge_snapshot is None:
             _edge_client = _edge_client_for(bid)
             if _edge_client.transport == EdgeTransport.HTTP:
                 try:
@@ -2160,8 +2186,7 @@ async def get_lab_state():
                         resp.raise_for_status()
                         edge_state = resp.json()
                     if isinstance(edge_state, dict):
-                        state = edge_state
-                        edge_source = True
+                        edge_snapshot = edge_state
                 except Exception as exc:  # noqa: BLE001
                     raise HTTPException(
                         status_code=503,
@@ -2170,12 +2195,27 @@ async def get_lab_state():
                             "reason": str(exc),
                         },
                     ) from exc
-            else:
-                state = lab.get_lab_state()
 
-        logger.debug("GET /api/lab-state: ok edge_source=%s", edge_source)
+        rt = _runtime_for_active(init=True)
+        store = ensure_lab_state_store(rt)
+        if isinstance(edge_snapshot, dict):
+            store.ensure_seeded_from_edge(edge_snapshot)
+
+        working = store.snapshot()
+        if isinstance(edge_snapshot, dict):
+            state = merge_lab_state_for_twin(
+                working, edge_snapshot, backend_id=bid
+            )
+            edge_state_source = "merged"
+        else:
+            state = working if isinstance(working, dict) else {}
+            edge_state_source = "coordinator"
+
+        logger.debug(
+            "GET /api/lab-state: ok edge_state_source=%s", edge_state_source
+        )
         if isinstance(state, dict):
-            active_runtime = _runtime_for_active(init=False).lab_mode.upper()
+            active_runtime = rt.lab_mode.upper()
             disconnect = edge_agent_registry.last_disconnect(bid)
             edge_rec = edge_agent_registry.get_for_backend(bid)
             state = {
@@ -2186,7 +2226,7 @@ async def get_lab_state():
                 "active_backend_id": bid,
                 "active_job_id": job_hub.active_job_id(bid),
                 "edge_attached": edge_rec is not None,
-                "edge_state_source": "edge" if edge_source else "coordinator",
+                "edge_state_source": edge_state_source,
                 "edge_agent": edge_rec.to_api_dict() if edge_rec else None,
                 "edge_offline": disconnect,
                 "edge_stale_after_s": DEFAULT_STALE_AFTER_S,
@@ -2421,16 +2461,26 @@ async def api_session_checkpoint_save():
     return {"status": "ok"}
 
 
-_control_managers: Dict[str, Any] = {}
-
-
 def _get_control_manager(repo_id: str):
+    """Return ControlManager for ``repo_id`` on the *active* backend.
+
+    Cache is keyed per ``BackendRuntime`` (i.e. ``backend_id`` + ``repo_id``).
+    Never share managers across backends — even when repo ids collide.
+    """
     from lab_model.coordinator.state.control_manager import ControlManager
 
     safe = (repo_id or "default").strip() or "default"
-    if safe not in _control_managers:
-        _control_managers[safe] = ControlManager(_CONTROL_DIR(), safe)
-    return _control_managers[safe]
+    rt = _runtime_for_active(init=False)
+    cache = rt.control_managers
+    if safe not in cache:
+        control_dir = rt.control_dir()
+        print(
+            f"[control] backend={rt.backend_id!r} repo={safe!r} "
+            f"control_dir={control_dir!r}",
+            flush=True,
+        )
+        cache[safe] = ControlManager(control_dir, safe)
+    return cache[safe]
 
 
 _CONTROL_DEBUG = os.environ.get("CONTROL_DEBUG", "1").strip().lower() not in (
@@ -2506,11 +2556,12 @@ def _lab_runtime_manager():
 
 
 def _invalidate_control_manager_cache(repo_id: Optional[str] = None) -> None:
+    rt = _runtime_for_active(init=False)
     if repo_id is None:
-        _control_managers.clear()
+        rt.control_managers.clear()
         return
     safe = (repo_id or "default").strip() or "default"
-    _control_managers.pop(safe, None)
+    rt.control_managers.pop(safe, None)
 
 
 @app.get("/api/control/repos")
@@ -4322,6 +4373,15 @@ async def edge_heartbeat(body: Dict[str, Any] = Body(...)):
         rec = edge_agent_registry.heartbeat(agent_id, lab_state=lab_state)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"unknown agent {agent_id!r}") from exc
+    # One-time seed of coordinator working copy when empty (Phase 2).
+    if isinstance(lab_state, dict):
+        try:
+            from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+
+            rt = require_backend(backend_registry, rec.backend_id, init=False)
+            ensure_lab_state_store(rt).ensure_seeded_from_edge(lab_state)
+        except Exception:  # noqa: BLE001
+            logger.debug("lab_state edge seed on heartbeat failed", exc_info=True)
     return {"ok": True, "agent": rec.to_api_dict()}
 
 

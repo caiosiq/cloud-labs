@@ -17,6 +17,52 @@ from lab_model.coordinator.catalog.pins_store import CatalogPinsStore
 from lab_model.execution.edge.endpoint import EdgeEndpointConfig, parse_edge_endpoint
 
 
+def _resolve_lab_view_root(project_root: str, lab_view_path: str) -> str:
+    root = lab_view_path
+    if not os.path.isabs(root):
+        root = os.path.join(project_root, root)
+    return os.path.abspath(root)
+
+
+def warn_shared_lab_view_paths(
+    project_root: str,
+    specs: List[BackendSpec],
+    *,
+    strict: Optional[bool] = None,
+) -> List[str]:
+    """Warn (or fail) when two enabled backends share one lab_view root.
+
+    Returns human-readable warning lines. When ``strict`` is true (or env
+    ``CLOUDLABS_STRICT_LAB_VIEW=1``), raises ``ValueError`` instead of only warning.
+    """
+    if strict is None:
+        strict = os.environ.get("CLOUDLABS_STRICT_LAB_VIEW", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+    by_root: Dict[str, List[str]] = {}
+    for spec in specs:
+        if not spec.enabled:
+            continue
+        root = _resolve_lab_view_root(project_root, spec.lab_view_path)
+        by_root.setdefault(root, []).append(spec.backend_id)
+    messages: List[str] = []
+    for root, ids in sorted(by_root.items(), key=lambda item: item[0]):
+        if len(ids) < 2:
+            continue
+        joined = ", ".join(ids)
+        msg = f"lab_view_path shared by {joined} -> {root}"
+        messages.append(msg)
+        print(f"[backend] {msg}", flush=True)
+    if messages and strict:
+        raise ValueError(
+            "backends share lab_view_path (set unique paths or unset "
+            f"CLOUDLABS_STRICT_LAB_VIEW): {'; '.join(messages)}"
+        )
+    return messages
+
+
 @dataclass(frozen=True)
 class BackendSpec:
     backend_id: str
@@ -41,6 +87,8 @@ class BackendRuntime:
     runtime_manager: Any = None
     catalog_pins_store: Optional[CatalogPinsStore] = None
     control_managers: Dict[str, Any] = field(default_factory=dict)
+    #: Per-backend coordinator working lab-state (Phase 2). None until probe/init.
+    lab_state_store: Any = None
     availability: str = "unknown"  # ready | unavailable | error
     unavailable_reason: Optional[str] = None
     init_error: Optional[str] = None
@@ -143,6 +191,7 @@ class BackendRegistry:
             )
         if not specs:
             raise ValueError(f"no backends defined in {config_path}")
+        warn_shared_lab_view_paths(os.path.abspath(project_root), specs)
         reg = cls(project_root, specs)
         reg.probe_all()
         return reg
@@ -179,6 +228,15 @@ class BackendRegistry:
         for spec in self._specs.values():
             with self._lock:
                 self._runtimes[spec.backend_id] = self._probe_spec(spec)
+        for bid in self.known_backend_ids():
+            rt = self._runtimes.get(bid)
+            if rt is None or not rt.paths.root_dir:
+                continue
+            print(
+                f"[backend] backend_id={bid!r} lab_view={rt.paths.root_dir!r} "
+                f"availability={rt.availability!r}",
+                flush=True,
+            )
         # Restore geometry for the first ready backend so probing a real
         # layout.json does not leave the process on the wrong storage grid.
         for bid in self.known_backend_ids():
@@ -227,11 +285,15 @@ class BackendRegistry:
                 unavailable_reason=reason,
             )
         store_dir = os.path.join(paths.root_dir, "catalog_store")
+        from lab_model.coordinator.state.lab_state_store import LabStateStore
+
+        lab_state_store = LabStateStore.from_disk(spec.backend_id, paths.lab_state_json)
         return BackendRuntime(
             spec=spec,
             paths=paths,
             manifest=manifest,
             catalog_pins_store=CatalogPinsStore(store_dir),
+            lab_state_store=lab_state_store,
             availability="ready",
         )
 
@@ -247,6 +309,12 @@ class BackendRegistry:
                 rt.lab = None
                 rt.runtime_manager = None
                 rt.init_error = None
+                if rt.lab_state_store is None:
+                    from lab_model.coordinator.state.lab_state_store import LabStateStore
+
+                    rt.lab_state_store = LabStateStore.from_disk(
+                        rt.backend_id, rt.paths.lab_state_json
+                    )
                 return
             # real.* without edge URL already marked unavailable in probe.
             if (rt.manifest.communicator or "").lower() == "real":
@@ -256,6 +324,7 @@ class BackendRegistry:
             try:
                 with backend_context(rt.paths, rt.manifest):
                     from lab_model.language.domain import motor_rotation_store as motor_rot
+                    from lab_model.coordinator.state.lab_state_store import LabStateStore
                     from mock_edge.host.communicator import MockLabCommunicator
                     from mock_edge.host.runtime_mode import RuntimeLabProxy
 
@@ -264,6 +333,10 @@ class BackendRegistry:
                     runtime_manager = RuntimeLabProxy(lab)
                     rt.lab = runtime_manager
                     rt.runtime_manager = runtime_manager
+                    # Single writer: Twin store aliases the mock host RuntimeManager.
+                    rt.lab_state_store = LabStateStore.alias_host(
+                        rt.backend_id, rt.paths.lab_state_json, lab
+                    )
                     rt.init_error = None
             except Exception as exc:
                 rt.availability = "error"
@@ -375,4 +448,9 @@ def _empty_manifest() -> LabViewManifest:
     return LabViewManifest(communicator="mock", lab_mode="MOCK")
 
 
-__all__ = ["BackendRegistry", "BackendRuntime", "BackendSpec"]
+__all__ = [
+    "BackendRegistry",
+    "BackendRuntime",
+    "BackendSpec",
+    "warn_shared_lab_view_paths",
+]

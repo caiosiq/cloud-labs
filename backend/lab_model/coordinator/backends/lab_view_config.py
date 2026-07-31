@@ -310,9 +310,13 @@ def _load_lab_manifest(paths: LabViewPaths, project_root: str) -> LabViewManifes
             )
 
     if comm == "real" and not lab_auto:
-        raise SystemExit(
-            f"[CONFIG] lab_manifest.json for communicator 'real' requires "
-            f"'lab_automation_path' (path to the lab_automation package directory): {p}"
+        # HTTP Edge Contract backends need no in-process lab_automation tree.
+        # Keep the path optional; warn so local RealLabCommunicator checkouts
+        # still notice a missing sibling package.
+        print(
+            f"[CONFIG] lab_manifest.json communicator 'real' has no "
+            f"lab_automation_path (ok for edge.base_url backends): {p}",
+            flush=True,
         )
 
     pos_mm, yaw_deg, stale_h = _session_reconciliation_fields(raw, comm)

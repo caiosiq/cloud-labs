@@ -1,0 +1,12 @@
+﻿{
+  "version": 1,
+  "description": "Coordinator lab_view for real.default (VC + working state). Hardware geometry and commands come from the edge.",
+  "communicator": "real",
+  "lab_mode": "REAL",
+  "session_checkpoint": false,
+  "session_reconciliation": {
+    "position_mm": 8,
+    "yaw_deg": 10,
+    "stale_warning_hours": 168
+  }
+}

@@ -20,11 +20,11 @@
       "label": "Lab automation (real robot)",
       "description": "Physical robot bench via the Edge Contract server in the sibling lab_automation/cloudlabs_edge package.",
       "image": "/static/wiki/backends/real-default.png",
-      "lab_view_path": "mock_edge/lab_view",
+      "lab_view_path": "backends/real.default/lab_view",
       "communicator": "real",
       "lab_mode": "REAL",
       "enabled": true,
-      "notes": "Start the lab_automation edge on port 8200 before connecting. lab_view_path is currently used only for coordinator-side catalog and version-control metadata; hardware geometry and commands come from the edge.",
+      "notes": "Start the lab_automation edge on port 8200 before connecting. Coordinator lab_view holds VC + working state for this backend only; hardware geometry and commands come from the edge.",
       "edge": {
         "base_url": "http://127.0.0.1:8200",
         "contract_version": "1.0.0",

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "description": "Table camera live preview: recorder JPEG scale/quality and UI poll rate.",
+  "scale": 0.75,
+  "jpeg_quality": 72,
+  "target_fps": 144,
+  "max_inflight_requests": 3,
+  "teleop_scale": 0.25,
+  "teleop_jpeg_quality": 50,
+  "teleop_poll_fps": 20,
+  "teleop_fetch_timeout_s": 0.08,
+  "teleop_stream_drain_frames": 12
+}
