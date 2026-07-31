@@ -134,7 +134,7 @@ def audit_primitive_handlers(
 
 def audit_real_hardware_hooks(real_cls: type) -> List[Dict[str, Any]]:
     """Report ``_primitive_*`` hooks on ``RealLabCommunicator``."""
-    from mock_edge.host.base import LabCommunicator
+    from mock_backend.host.base import LabCommunicator
 
     expected = (
         "_primitive_move_component",

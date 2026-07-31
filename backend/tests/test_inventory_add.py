@@ -18,7 +18,7 @@ from lab_model.language.domain.component import is_off_table, presence_of
 from lab_model.coordinator.state.runtime_manager import MutationKind
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_backend" / "lab_view"
 
 
 class InventoryAddTests(unittest.TestCase):
@@ -96,7 +96,7 @@ class InventoryAddTests(unittest.TestCase):
     def test_track_component_places_off_table_on_breadboard(self) -> None:
         import asyncio
 
-        from mock_edge.host.communicator import MockLabCommunicator
+        from mock_backend.host.communicator import MockLabCommunicator
         from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
         from lab_model.language.domain import motor_rotation_store as motor_rot
         from lab_model.coordinator.catalog.active_catalog_store import (
@@ -140,7 +140,7 @@ class InventoryAddTests(unittest.TestCase):
     def test_track_component_places_library_part_on_breadboard(self) -> None:
         import asyncio
 
-        from mock_edge.host.communicator import MockLabCommunicator
+        from mock_backend.host.communicator import MockLabCommunicator
         from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
         from lab_model.language.domain import motor_rotation_store as motor_rot
         from lab_model.language.domain.component import is_on_table, presence_of
@@ -182,7 +182,7 @@ class InventoryAddTests(unittest.TestCase):
     def test_untrack_component_removes_runtime_row(self) -> None:
         import asyncio
 
-        from mock_edge.host.communicator import MockLabCommunicator
+        from mock_backend.host.communicator import MockLabCommunicator
         from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
         from lab_model.language.domain import motor_rotation_store as motor_rot
         from lab_model.coordinator.catalog.active_catalog_store import list_active_catalog_tags
@@ -237,7 +237,7 @@ class InventoryAddTests(unittest.TestCase):
         return lab_view
 
     def test_add_component_from_inventory_reactivates_off_table(self) -> None:
-        from mock_edge.host.communicator import MockLabCommunicator
+        from mock_backend.host.communicator import MockLabCommunicator
 
         with tempfile.TemporaryDirectory() as tmp:
             state = copy.deepcopy(self.fixture_runtime)
@@ -264,7 +264,7 @@ class InventoryAddTests(unittest.TestCase):
             self.assertTrue(any(r.kind == MutationKind.ADMINISTRATIVE_LOAD for r in log))
 
     def test_add_component_from_inventory_inserts_library_tag(self) -> None:
-        from mock_edge.host.communicator import MockLabCommunicator
+        from mock_backend.host.communicator import MockLabCommunicator
 
         with tempfile.TemporaryDirectory() as tmp:
             state = copy.deepcopy(self.fixture_runtime)

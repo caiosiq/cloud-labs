@@ -17,7 +17,7 @@ from cloudlabs.objective import ObjectiveGraphBuilder, objective_term
 from lab_model.execution.optimization.spec import ObjectiveSpec
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_backend" / "lab_view"
 _LAB_STATE = _MOCK_LAB_VIEW / "lab_state.json"
 _GRAPH_EXAMPLE = (
     _PROJECT_ROOT

@@ -24,7 +24,7 @@ from lab_model.execution.orchestration.optimize_ensemble import run_optimize_ens
 from lab_model.coordinator.state.commits import commit_optimization_ensemble_complete
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_backend" / "lab_view"
 _LAB_STATE = _MOCK_LAB_VIEW / "lab_state.json"
 
 

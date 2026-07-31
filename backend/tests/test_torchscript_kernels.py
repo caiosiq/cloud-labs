@@ -126,7 +126,7 @@ class TorchScriptRuntimeTests(unittest.TestCase):
 @unittest.skipUnless(torch_available(), "PyTorch not installed")
 class TorchScriptMockEnsembleSmoke(unittest.TestCase):
     def test_mock_landscape_runs_torchscript_term(self) -> None:
-        from mock_edge.host.ensemble import MockEnsembleLandscape
+        from mock_backend.host.ensemble import MockEnsembleLandscape
         from lab_model.execution.optimization.spec import ObjectiveSpec, VariableRef
 
         variables = [

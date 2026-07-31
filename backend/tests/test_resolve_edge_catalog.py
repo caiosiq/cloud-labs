@@ -50,7 +50,7 @@ class ResolveEdgeCatalogTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
     def test_teaching_disk_beside_lab_view(self) -> None:
-        pkg = self.tmp / "mock_edge"
+        pkg = self.tmp / "mock_backend"
         lab_view = pkg / "lab_view"
         lab_view.mkdir(parents=True)
         _write_edge_data(pkg / "cloudlabs_edge")

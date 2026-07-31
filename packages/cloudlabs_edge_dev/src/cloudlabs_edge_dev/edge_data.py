@@ -251,7 +251,7 @@ def stamp_backend(doc: Dict[str, Any], backend_id: str) -> Dict[str, Any]:
 
 
 def resolve_edge_root_beside_lab_view(lab_view_root: Path) -> Optional[Path]:
-    """``mock_edge/lab_view`` → ``mock_edge/cloudlabs_edge`` when that tree exists."""
+    """``mock_backend/lab_view`` → ``mock_backend/cloudlabs_edge`` when that tree exists."""
     candidate = lab_view_root.resolve().parent / "cloudlabs_edge"
     if (candidate / "data" / "library.json").is_file():
         return candidate

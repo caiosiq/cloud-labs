@@ -10,7 +10,7 @@ from lab_model.language.domain.component import is_teleop_ready
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
-    from mock_edge.host.base import LabCommunicator
+    from mock_backend.host.base import LabCommunicator
     from lab_model.execution.edge.client import HttpEdgeClient
 
 _LOG = logging.getLogger(__name__)

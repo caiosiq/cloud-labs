@@ -24,7 +24,7 @@ from lab_model.coordinator.state.reconcile_executor import validate_reconcile_pl
 from lab_model.coordinator.state.runtime_manager import MutationKind, RuntimeManager
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_backend" / "lab_view"
 _LAB_STATE = _MOCK_LAB_VIEW / "lab_state.json"
 
 
@@ -430,7 +430,7 @@ class ControlRuntimeTests(unittest.TestCase):
     def test_execute_reconcile_plan_moves_mock_component(self) -> None:
         import copy
 
-        from mock_edge.host.communicator import MockLabCommunicator
+        from mock_backend.host.communicator import MockLabCommunicator
         from lab_model.coordinator.state.reconcile_executor import execute_reconcile_plan
 
         lab = MockLabCommunicator()

@@ -1,7 +1,7 @@
 # Lab model: UC language, execution, coordinator
 
 This folder is the **`lab_model`** Python package: shared domain logic for the
-digital twin (**not** hardware I/O). Hardware lives in **`mock_edge/`** (teaching)
+digital twin (**not** hardware I/O). Hardware lives in **`mock_backend/`** (teaching)
 or a lab **`cloudlabs_edge/`** process, reached via **`execution.edge`**.
 
 **Platform map:** [`ARCHITECTURE.md`](ARCHITECTURE.md) ·

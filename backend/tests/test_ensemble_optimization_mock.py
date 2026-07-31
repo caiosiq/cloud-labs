@@ -11,7 +11,7 @@ from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock
 
 from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view
-from mock_edge.host.ensemble import (
+from mock_backend.host.ensemble import (
     MockActuatorRouter,
     MockEnsembleHardwareBridge,
     MockEnsembleLandscape,
@@ -23,7 +23,7 @@ from lab_model.execution.optimization.preflight import preflight_ensemble
 from lab_model.execution.orchestration.optimize_ensemble import run_optimize_ensemble
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_backend" / "lab_view"
 _LAB_STATE = _MOCK_LAB_VIEW / "lab_state.json"
 
 
@@ -222,7 +222,7 @@ class EnsembleOptimizationMockTests(unittest.TestCase):
         host._primitive_finalize_optimization_run = MagicMock()
 
         async def _mock_ensemble(**kwargs: Any) -> Dict[str, Any]:
-            from mock_edge.host.ensemble import run_mock_ensemble_session
+            from mock_backend.host.ensemble import run_mock_ensemble_session
 
             spec_obj = kwargs["spec"]
             x0_map = kwargs["x0"]

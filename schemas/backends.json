@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "description": "Backends registered on this cloud-labs server. Users/scripts pick one at connect time; the server does not choose a default communicator from .env. Coordinator VC/FSM live under coordinator_data/<backend_id>/ (auto-created). Edge library/inventory/layout stay on the edge (or mock_edge/lab_view for teaching).",
+  "description": "Backends registered on this cloud-labs server. Users/scripts pick one at connect time; the server does not choose a default communicator from .env. Coordinator VC/FSM live under coordinator_data/<backend_id>/ (auto-created). Edge library/inventory/layout stay on the edge (or mock_backend/lab_view for teaching).",
   "backends": [
     {
       "backend_id": "mock.default",
       "label": "Mock bench (default)",
-      "description": "Teaching edge via top-level mock_edge/ (in-process by default). Set edge.base_url to http://127.0.0.1:8100 when running `python -m mock_edge`.",
+      "description": "Teaching edge via top-level mock_backend/ (in-process by default). Set edge.base_url to http://127.0.0.1:8100 when running `python -m mock_backend`.",
       "image": "/static/wiki/backends/mock-default.png",
-      "lab_view_path": "mock_edge/lab_view",
+      "lab_view_path": "mock_backend/lab_view",
       "coordinator_data_path": "coordinator_data/mock.default",
       "enabled": true,
       "edge": {

@@ -7,14 +7,14 @@ import os
 import unittest
 from pathlib import Path
 
-from mock_edge.host.communicator import MockLabCommunicator
+from mock_backend.host.communicator import MockLabCommunicator
 from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view, get_lab_view_paths
 from lab_model.coordinator.jobs.job_manager import JobManager
 from lab_model.coordinator.jobs.lease_manager import SessionLeaseManager
 from lab_model.coordinator.jobs.runner import run_job
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_backend" / "lab_view"
 _EXAMPLE = _PROJECT_ROOT / "schemas" / "ensemble_optimization_examples" / "two_mirror_mock.json"
 
 

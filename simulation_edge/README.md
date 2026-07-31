@@ -1,6 +1,6 @@
 # simulation_edge
 
-MuJoCo-backed simulation lab for Cloud Labs, structured like `mock_edge`:
+MuJoCo-backed simulation lab for Cloud Labs, structured like `mock_backend`:
 
 ```text
 simulation_edge/

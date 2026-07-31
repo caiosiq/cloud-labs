@@ -1,11 +1,11 @@
-﻿"""
+"""
 One-time migration: legacy component shape (state, pose, intent, metadata)
 -> tunables + measurables (see refactor.md).
 
 Usage (from repo root):
   python scripts/archive/migrate_to_tunables.py schemas/mock_lab_state.json
   python scripts/archive/migrate_to_tunables.py backend/lab_communicator/real/lab_view/default/states/*.json
-  python scripts/archive/migrate_to_tunables.py mock_edge/lab_view/recipes/*.json
+  python scripts/archive/migrate_to_tunables.py mock_backend/lab_view/recipes/*.json
 """
 from __future__ import annotations
 

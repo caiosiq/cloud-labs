@@ -1,6 +1,6 @@
 """Session checkpoint merge must read statecontrol-shaped component entries."""
 
-from mock_edge.shared.session_checkpoint import (
+from mock_backend.shared.session_checkpoint import (
     ReconciliationThresholds,
     merge_offers_with_debug,
 )

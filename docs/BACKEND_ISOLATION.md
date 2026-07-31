@@ -23,7 +23,7 @@
 |-------|------------|----------|
 | **Coordinator** | `coordinator_data/<backend_id>/` (auto-created on probe/connect) | Working `lab_state.json`, `control/` (VC), `laser_lines.json`, `recipes/`, optional `catalog_store/` pins |
 | **Edge** | `data/library.json`, `data/inventory.json`, bench layout, motor tracking | What the lab has, geometry, physical RECORD/SYNC truth, streams / teleop / `runtime_sync` |
-| **Teaching only** | `mock_edge/lab_view`, `simulation_edge/lab_view` | Local edge host bootstrap (layout/library/motors). Twin/VC SoT is still `coordinator_data/<id>/` |
+| **Teaching only** | `mock_backend/lab_view`, `simulation_edge/lab_view` | Local edge host bootstrap (layout/library/motors). Twin/VC SoT is still `coordinator_data/<id>/` |
 
 [`schemas/backends.json`](../schemas/backends.json) registers **identity + reachability** (`backend_id`, `edge.base_url`, optional `lab_view_path` for in-process teaching). It does **not** hand-author a fat clone of edge catalogs for real backends.
 
@@ -73,4 +73,4 @@ Ownership mistakes log under `[backend]` or `[lab_state]` with an explicit reaso
 | 0–3 | Isolation, working store, remote commits (checkpoint) |
 | **Ownership** | Thin `coordinator_data/`, skills, retire fat `backends/real.default` |
 | **Catalog** | Twin `/api/catalog*` / `/api/library` / `/api/inventory` via `resolve_edge_catalog` (HTTP edge or teaching `cloudlabs_edge/data/`) — never `coordinator_data/` |
-| Later | `mock_edge` → `mock_backend` rename |
+| **PR D** | `mock_edge` → `mock_backend` (folder, package, ops scripts) |

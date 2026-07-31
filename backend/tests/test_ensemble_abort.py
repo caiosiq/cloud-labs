@@ -7,12 +7,12 @@ import os
 import unittest
 from pathlib import Path
 
-from mock_edge.host.ensemble import build_mock_ensemble_backend, run_mock_ensemble_session
+from mock_backend.host.ensemble import build_mock_ensemble_backend, run_mock_ensemble_session
 from lab_model.coordinator.backends.lab_view_config import bootstrap_lab_view
 from lab_model.execution.optimization.preflight import preflight_ensemble
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_backend" / "lab_view"
 _LAB_STATE = _MOCK_LAB_VIEW / "lab_state.json"
 
 

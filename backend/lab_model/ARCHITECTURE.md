@@ -98,11 +98,11 @@ lab_model/                      ← HOW THE LAB WORKS (semantics; no hardware I/
     state/                      ← RuntimeManager, ControlManager, reconcile
   platform.py                   ← integrity / registry export
 
-mock_edge/                      ← teaching Edge Contract host (outside lab_model)
+mock_backend/                      ← teaching Edge Contract host (outside lab_model)
 lab cloudlabs_edge/             ← physical bench edge (sibling repo)
 ```
 
-**Import rule:** `lab_model` must **not** import edge host packages (`mock_edge`, lab
+**Import rule:** `lab_model` must **not** import edge host packages (`mock_backend`, lab
 `cloudlabs_edge`). Hosts and `main.py` import `lab_model`. Southbound from the
 coordinator is only via `lab_model.execution.edge` (EdgeClient).
 
@@ -180,7 +180,7 @@ Historical one-shot migration scripts live under `scripts/archive/`.
 | **RuntimeManager** | Live runtime JSON mutations (working tree). |
 | **ControlManager** | Configuration version history (commits, branches, setups). **Not** lab-side `OpticalExperiment`. |
 
-Aggregates: **Configuration** (tunables), **Observations** (measurables), **Setup** (both), **Runtime** (working tree). Teaching edge: [`../../mock_edge/`](../../mock_edge/).
+Aggregates: **Configuration** (tunables), **Observations** (measurables), **Setup** (both), **Runtime** (working tree). Teaching edge: [`../../mock_backend/`](../../mock_backend/).
 
 ## Repository layout
 
@@ -189,7 +189,7 @@ Aggregates: **Configuration** (tunables), **Observations** (measurables), **Setu
 | `lab_model/language/domain/` | Component shapes, holding, storage geometry, motor angles |
 | `lab_model/execution/orchestration/` | TeleOp, live feed, moves, record, optimize, … |
 | `lab_model/execution/edge/` | EdgeClient southbound |
-| `../../mock_edge/` | Teaching Edge Contract host |
+| `../../mock_backend/` | Teaching Edge Contract host |
 | `frontend/js/ui/component-viewer.js` | Read-only StateControl + Telemetry |
 | `frontend/js/primitives/` | Primitive forms (write path) |
 
@@ -197,7 +197,7 @@ Aggregates: **Configuration** (tunables), **Observations** (measurables), **Setu
 
 - [`README.md`](README.md) — StateControl tunables vs measurables
 - [`language/primitives/README.md`](language/primitives/README.md) — HTTP command layer
-- [`../../mock_edge/README.md`](../../mock_edge/README.md) — teaching edge
+- [`../../mock_backend/README.md`](../../mock_backend/README.md) — teaching edge
 - [`../../docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md`](../../docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md) — Edge Contract
 - [`../../docs/LAB_SURFACES_VC_AND_INITIALIZATION.md`](../../docs/LAB_SURFACES_VC_AND_INITIALIZATION.md) — surfaces + VC
 - [`../../schemas/edge_contract/v1/`](../../schemas/edge_contract/v1/) — machine-readable edge schemas

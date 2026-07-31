@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_backend" / "lab_view"
 
 
 class MockRuntimeSyncTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class MockRuntimeSyncTests(unittest.TestCase):
             get_lab_view_paths,
         )
         from lab_model.language.domain import motor_rotation_store as motor_rot
-        from mock_edge.host.communicator import MockLabCommunicator
+        from mock_backend.host.communicator import MockLabCommunicator
 
         os.environ.pop("CLOUDLABS_SKIP_RUNTIME_SYNC", None)
         os.environ["CLOUDLABS_MOCK_INIT_DELAY_S"] = "0"
@@ -37,7 +37,7 @@ class MockRuntimeSyncTests(unittest.TestCase):
             # Edge dispatch gate
             import sys
 
-            edge = _PROJECT_ROOT / "mock_edge" / "cloudlabs_edge"
+            edge = _PROJECT_ROOT / "mock_backend" / "cloudlabs_edge"
             sys.path.insert(0, str(edge))
             try:
                 from adapters import context as edge_context
@@ -67,7 +67,7 @@ class MockRuntimeSyncTests(unittest.TestCase):
             get_lab_view_paths,
         )
         from lab_model.language.domain import motor_rotation_store as motor_rot
-        from mock_edge.host.communicator import MockLabCommunicator
+        from mock_backend.host.communicator import MockLabCommunicator
 
         os.environ.pop("CLOUDLABS_SKIP_RUNTIME_SYNC", None)
         os.environ["CLOUDLABS_MOCK_INIT_DELAY_S"] = "0"

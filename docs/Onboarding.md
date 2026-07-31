@@ -162,6 +162,6 @@ Some inventory and storage verbs are not implemented on every bench yet; the sys
 
 ## Appendix: Where Things Live, If You Open the Repository
 
-The shared service lives in `backend/`. The browser Twin lives in `frontend/`. The scientist package is `packages/cloudlabs`. The builder toolkit is `packages/cloudlabs_edge_dev`. Shared wire definitions, including which name points at which lab, live under `schemas/`. Lab software for a given instrument lives in that lab's own repository under a `cloudlabs_edge/` folder; teaching copies for mock and simulation also live in this tree as `mock_edge/` and `simulation_edge/`. None of those paths is part of the experimental vocabulary — they are only a map for people who need to find the code.
+The shared service lives in `backend/`. The browser Twin lives in `frontend/`. The scientist package is `packages/cloudlabs`. The builder toolkit is `packages/cloudlabs_edge_dev`. Shared wire definitions, including which name points at which lab, live under `schemas/`. Lab software for a given instrument lives in that lab's own repository under a `cloudlabs_edge/` folder; teaching copies for mock and simulation also live in this tree as `mock_backend/` and `simulation_edge/`. None of those paths is part of the experimental vocabulary — they are only a map for people who need to find the code.
 
 > The typeset PDF is `docs/Onboarding.pdf`. Regenerate it with `python docs/build_onboarding_pdf.py` after editing this file or the figures under `docs/figures/`.

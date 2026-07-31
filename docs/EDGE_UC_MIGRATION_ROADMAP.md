@@ -61,7 +61,7 @@ Everyone agrees what is legal to say. No new verbs without a primitive. No live 
 | Add | `schemas/edge_contract/v1/README.md` (human summary of endpoints) |
 | Edit | [`backend/lab_model/coordinator/catalog/schema.py`](../backend/lab_model/coordinator/catalog/schema.py) — document/validate live_channel bindings (schema only first) |
 | Edit | Wiki [`frontend/wiki/guides/04-primitives.md`](../frontend/wiki/guides/04-primitives.md) — “what is not a primitive” + wire vs analysis note |
-| Edit | [`mock_edge/README.md`](../mock_edge/README.md) — teaching edge entrypoint |
+| Edit | [`mock_backend/README.md`](../mock_backend/README.md) — teaching edge entrypoint |
 
 ### Exit criteria
 
@@ -114,7 +114,7 @@ Distributable **`cloudlabs-edge-dev`** (`packages/cloudlabs_edge_dev/`):
 
 ## Phase 2 — Mock edge becomes the gold-standard contract implementation
 
-**Status:** **done** for teaching cutover — [`mock_edge/cloudlabs_edge/`](../mock_edge/cloudlabs_edge/) is the Edge Contract face (filled `init` skeleton); teaching physics stays in `mock_edge/src/mock_edge/host/`. In-tree `lab_communicator/mock` deleted. Default coordinator path remains **in-process** `MockLabCommunicator` via `EdgeClient`; optional `python -m mock_edge` serves `cloudlabs_edge` on `:8100`.
+**Status:** **done** for teaching cutover — [`mock_backend/cloudlabs_edge/`](../mock_backend/cloudlabs_edge/) is the Edge Contract face (filled `init` skeleton); teaching physics stays in `mock_backend/src/mock_backend/host/`. In-tree `lab_communicator/mock` deleted. Default coordinator path remains **in-process** `MockLabCommunicator` via `EdgeClient`; optional `python -m mock_backend` serves `cloudlabs_edge` on `:8100`.
 
 **Simulation:** [`simulation_edge/cloudlabs_edge/`](../simulation_edge/cloudlabs_edge/) (`sim.default`) ports Josh’s MuJoCo process host into the same bookkeeping layout; soft pose mode by default, `SIMULATION_EDGE_MUJOCO=1` for the viewer. Serve with `python -m simulation_edge` on `:8120`.
 
@@ -124,23 +124,23 @@ Teaching/CI path runs **as an edge process** implementing v1, not as “fat in-p
 
 ### Deliverables
 
-1. Refactor today’s mock path into something that exposes Edge Contract endpoints. **(met — `mock_edge/server/app.py`)**  
-2. Reuse existing mock physics (`ensemble`, teleop sim, synthetic cameras) **behind** host adapters. **(met — `mock_edge/host/`)**  
+1. Refactor today’s mock path into something that exposes Edge Contract endpoints. **(met — `mock_backend/server/app.py`)**  
+2. Reuse existing mock physics (`ensemble`, teleop sim, synthetic cameras) **behind** host adapters. **(met — `mock_backend/host/`)**  
 3. Conformance suite green on mock. **(target: `cloudlabs-edge check http://127.0.0.1:8100 --profile stub`)**
 
 ### Likely files (cloud-labs)
 
 | Action | Path |
 |--------|------|
-| Add | [`mock_edge/`](../mock_edge/) — `cloudlabs_edge/` contract face + `src/mock_edge/host/` + `lab_view/` |
-| Edit | [`scripts/ops/mock_edge_agent.py`](../scripts/ops/mock_edge_agent.py) — poll-attach jobs; prefer `python -m mock_edge` |
-| Edit | [`schemas/backends.json`](../schemas/backends.json) — `mock.default` → `mock_edge/lab_view` |
+| Add | [`mock_backend/`](../mock_backend/) — `cloudlabs_edge/` contract face + `src/mock_backend/host/` + `lab_view/` |
+| Edit | [`scripts/ops/mock_backend_agent.py`](../scripts/ops/mock_backend_agent.py) — poll-attach jobs; prefer `python -m mock_backend` |
+| Edit | [`schemas/backends.json`](../schemas/backends.json) — `mock.default` → `mock_backend/lab_view` |
 | Delete | `backend/lab_communicator/{mock,real,mujoco}/`, `base.py`, factory |
 
 ### Exit criteria
 
 - Language scripts + Twin against mock work with coordinator → mock edge (in-process or HTTP).
-- Conformance green on `python -m mock_edge`.
+- Conformance green on `python -m mock_backend`.
 
 ---
 
@@ -319,7 +319,7 @@ Map UC primitives to **current** OpticalExperiment / recorder / LiveControlSessi
 
 ## Phase 7 — Registry, packaging, retire legacy
 
-**Status (partial):** In-tree `real/` / `mock/` / `mujoco/` **deleted**. Coordinator boots mock via `mock_edge`; `real.default` unavailable until `edge.base_url` points at lab `cloudlabs_edge`.
+**Status (partial):** In-tree `real/` / `mock/` / `mujoco/` **deleted**. Coordinator boots mock via `mock_backend`; `real.default` unavailable until `edge.base_url` points at lab `cloudlabs_edge`.
 
 ### Goal
 
@@ -339,7 +339,7 @@ Backends are just registry rows; communicators are not a cloud-labs monorepo fea
 | Edit | [`schemas/backends.json`](../schemas/backends.json) |
 | Edit | backend startup / [`backend/lab_model/coordinator/backends/`](../backend/lab_model/backends) |
 | Delete | `backend/lab_communicator/{real,mock,mujoco}/` **(done)** |
-| Edit | [`mock_edge/README.md`](../mock_edge/README.md) |
+| Edit | [`mock_backend/README.md`](../mock_backend/README.md) |
 | Edit | [`docs/LAB_SURFACES_VC_AND_INITIALIZATION.md`](./LAB_SURFACES_VC_AND_INITIALIZATION.md) |
 | Edit | Wiki connecting / backends guides |
 

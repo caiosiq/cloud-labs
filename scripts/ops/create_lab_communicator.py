@@ -1,8 +1,8 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Retired — in-tree lab_communicator backends are gone.
 
 Use ``cloudlabs-edge init`` (packages/cloudlabs_edge_dev) to scaffold a lab
-``cloudlabs_edge/`` package, or extend ``mock_edge/`` for teaching physics.
+``cloudlabs_edge/`` package, or extend ``mock_backend/`` for teaching physics.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import sys
 def main() -> int:
     print(
         "create_lab_communicator.py retired.\n"
-        "  Teaching edge: mock_edge/ (python -m mock_edge)\n"
+        "  Teaching edge: mock_backend/ (python -m mock_backend)\n"
         "  Lab edge scaffold: cloudlabs-edge init\n"
         "  See backend/lab_communicator/README.md",
         file=sys.stderr,

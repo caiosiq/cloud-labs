@@ -41,7 +41,7 @@ from lab_model.coordinator.state.state_machine import (
 )
 
 if TYPE_CHECKING:
-    from mock_edge.host.base import LabCommunicator
+    from mock_backend.host.base import LabCommunicator
 
 
 def read_teleop_safety() -> Tuple[bool, int]:

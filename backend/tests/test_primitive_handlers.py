@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import unittest
 
-from mock_edge.host.base import LabCommunicator
-from mock_edge.host.communicator import MockLabCommunicator
+from mock_backend.host.base import LabCommunicator
+from mock_backend.host.communicator import MockLabCommunicator
 from lab_model.language import measurables as _measurables  # noqa: F401
 from lab_model.language import tunables as _tunables  # noqa: F401
 from lab_model.language.domain.component import new_component_entry

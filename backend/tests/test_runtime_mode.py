@@ -1,9 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import copy
 import unittest
 
-from mock_edge.host.runtime_mode import RuntimeLabProxy, RuntimeModeError
+from mock_backend.host.runtime_mode import RuntimeLabProxy, RuntimeModeError
 
 
 class FakeMock:

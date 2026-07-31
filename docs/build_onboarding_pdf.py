@@ -415,7 +415,7 @@ BLOCKS: list[tuple] = [
      "which name points at which lab, live under `schemas/`. Lab software for a "
      "given instrument lives in that lab's own repository under a "
      "`cloudlabs_edge/` folder; teaching copies for mock and simulation also live "
-     "in this tree as `mock_edge/` and `simulation_edge/`. None of those paths is "
+     "in this tree as `mock_backend/` and `simulation_edge/`. None of those paths is "
      "part of the experimental vocabulary \u2014 they are only a map for people "
      "who need to find the code."),
 ]

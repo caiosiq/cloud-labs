@@ -249,7 +249,7 @@ def _manifest_bool(doc: Mapping[str, Any], key: str, default: bool) -> bool:
 
 def _infer_communicator_from_bundle_path(bundle_root: str) -> str:
     norm = bundle_root.replace("\\", "/").lower()
-    if "/mock_edge/" in norm or norm.endswith("/mock_edge/lab_view"):
+    if "/mock_backend/" in norm or norm.endswith("/mock_backend/lab_view"):
         return "mock"
     if "/mock/" in norm or norm.endswith("/mock/lab_view") or "/mock/lab_view" in norm:
         return "mock"

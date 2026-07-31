@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import unittest
 
-from mock_edge.shared.mock_scan_preview import build_mock_scan_proposed_poses
-from mock_edge.shared.session_checkpoint import ReconciliationThresholds
+from mock_backend.shared.mock_scan_preview import build_mock_scan_proposed_poses
+from mock_backend.shared.session_checkpoint import ReconciliationThresholds
 from lab_model.language.domain.component import new_component_entry
 from lab_model.coordinator.state.pose_refresh_offers import build_pose_refresh_offers
 

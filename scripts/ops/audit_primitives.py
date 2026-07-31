@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print primitive handler coverage. Run from repo root:
 
-    $env:PYTHONPATH="backend;mock_edge/src"
+    $env:PYTHONPATH="backend;mock_backend/src"
     python scripts/ops/audit_primitives.py
 """
 from __future__ import annotations
@@ -11,13 +11,13 @@ import sys
 
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _BACKEND = os.path.join(_REPO, "backend")
-_MOCK_SRC = os.path.join(_REPO, "mock_edge", "src")
+_MOCK_SRC = os.path.join(_REPO, "mock_backend", "src")
 for p in (_BACKEND, _MOCK_SRC):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from mock_edge.host.base import LabCommunicator  # noqa: E402
-from mock_edge.host.communicator import MockLabCommunicator  # noqa: E402
+from mock_backend.host.base import LabCommunicator  # noqa: E402
+from mock_backend.host.communicator import MockLabCommunicator  # noqa: E402
 from lab_model.language import measurables as _measurables  # noqa: F401, E402
 from lab_model.language import tunables as _tunables  # noqa: F401, E402
 from lab_model.platform import audit_primitive_handlers  # noqa: E402

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Mapping
 
-from mock_edge.shared.session_checkpoint import (
+from mock_backend.shared.session_checkpoint import (
     ReconciliationThresholds,
     _pose_xy_yaw,
     poses_close,

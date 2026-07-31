@@ -5,7 +5,7 @@
 **Last updated:** 2026-07-16  
 
 **Machine-readable contract:** [`schemas/edge_contract/v1/`](../schemas/edge_contract/v1/README.md)  
-**Related:** [`mock_edge/README.md`](../mock_edge/README.md), Wiki Learn → Primitives / Kernels / OPU, [`EDGE_UC_MIGRATION_ROADMAP.md`](./EDGE_UC_MIGRATION_ROADMAP.md)
+**Related:** [`mock_backend/README.md`](../mock_backend/README.md), Wiki Learn → Primitives / Kernels / OPU, [`EDGE_UC_MIGRATION_ROADMAP.md`](./EDGE_UC_MIGRATION_ROADMAP.md)
 
 ---
 

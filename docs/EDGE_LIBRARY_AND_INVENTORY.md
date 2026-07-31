@@ -140,4 +140,4 @@ when `edge.base_url` is set.
 | `recipes/`, `control/` | `data/recipes/`, `data/control/` (same cut, wire later) |
 
 Mock can keep serving in-process from files that physically sit under
-`mock_edge/cloudlabs_edge/data/` so ownership matches deathray.
+`mock_backend/cloudlabs_edge/data/` so ownership matches deathray.

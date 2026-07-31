@@ -212,7 +212,7 @@ def render_markdown(md: str, *, figure_prefix: str = "figures/") -> str:
 MOCK_BACKEND = "mock.default"
 SKIP_MEAS = frozenset({"pose", "motor_rotations", "last_optimized_pose"})
 SKIP_TUN = frozenset({"reported_pose"})
-MOCK_LAB_VIEW = ROOT / "mock_edge" / "lab_view"
+MOCK_LAB_VIEW = ROOT / "mock_backend" / "lab_view"
 BACKENDS_SCHEMA = ROOT / "schemas" / "backends.json"
 
 TENSOR_SPEC = {

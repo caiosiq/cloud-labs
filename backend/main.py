@@ -708,7 +708,7 @@ class _ReservedBackgroundTasks:
 
 
 def _session_reconciliation_offers_dict() -> Dict[str, Any]:
-    from mock_edge.shared.session_checkpoint import (
+    from mock_backend.shared.session_checkpoint import (
         checkpoint_age_hours,
         checkpoint_lab_state,
         merge_offers_with_debug,
@@ -1064,7 +1064,7 @@ async def set_runtime_mode(payload: RuntimeModeBody):
     try:
         return await asyncio.to_thread(runtime_manager.switch_mode, payload.mode)
     except Exception as exc:
-        from mock_edge.host.runtime_mode import RuntimeModeError
+        from mock_backend.host.runtime_mode import RuntimeModeError
 
         if isinstance(exc, RuntimeModeError):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -2294,7 +2294,7 @@ def _schedule_pose_refresh(
 
 
 def _pose_refresh_offers_dict(scope_tag_ids: Optional[List[str]] = None) -> Dict[str, Any]:
-    from mock_edge.shared.session_checkpoint import reconciliation_thresholds_from_manifest
+    from mock_backend.shared.session_checkpoint import reconciliation_thresholds_from_manifest
     from lab_model.coordinator.state.pose_refresh_offers import build_pose_refresh_offers
     from lab_model.coordinator.state.pose_refresh_selection import normalize_tag_id_list
 

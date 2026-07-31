@@ -1,4 +1,4 @@
-"""hardware_binding resolver (mock_edge catalog ``parameters``)."""
+"""hardware_binding resolver (mock_backend catalog ``parameters``)."""
 from __future__ import annotations
 
 import json
@@ -17,7 +17,7 @@ from lab_model.coordinator.state.fixture_seed import enrich_runtime_entry_from_c
 
 _MOCK_LIB = (
     Path(__file__).resolve().parents[2]
-    / "mock_edge"
+    / "mock_backend"
     / "lab_view"
     / "component_library.json"
 )

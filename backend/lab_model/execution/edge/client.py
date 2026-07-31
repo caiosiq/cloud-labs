@@ -189,7 +189,7 @@ class InProcessEdgeClient:
 
 @dataclass
 class PollEdgeClient:
-    """Step-B poll queue (attached ``mock_edge_agent`` / future edge agents)."""
+    """Step-B poll queue (attached ``mock_backend_agent`` / future edge agents)."""
 
     backend_id: str
     transport: EdgeTransport = EdgeTransport.POLL

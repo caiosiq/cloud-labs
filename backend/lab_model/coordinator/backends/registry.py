@@ -403,7 +403,7 @@ class BackendRegistry:
         )
 
     def _init_communicator(self, rt: BackendRuntime) -> None:
-        """Lazy-init mock edge host in-process (HTTP edge skips local lab)."""
+        """Lazy-init mock backend host in-process (HTTP edge skips local lab)."""
         if rt.lab is not None or rt.availability != "ready":
             return
         with self._lock:
@@ -430,8 +430,8 @@ class BackendRegistry:
                 with backend_context(rt.paths, rt.manifest):
                     from lab_model.language.domain import motor_rotation_store as motor_rot
                     from lab_model.coordinator.state.lab_state_store import LabStateStore
-                    from mock_edge.host.communicator import MockLabCommunicator
-                    from mock_edge.host.runtime_mode import RuntimeLabProxy
+                    from mock_backend.host.communicator import MockLabCommunicator
+                    from mock_backend.host.runtime_mode import RuntimeLabProxy
 
                     motor_rot.configure(rt.paths.motor_rotations_json)
                     lab = MockLabCommunicator()

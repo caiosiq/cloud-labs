@@ -1,2 +1,0 @@
-[console_scripts]
-cloudlabs-mock-edge = mock_edge.__main__:main

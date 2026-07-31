@@ -63,9 +63,9 @@ throttle cable directly to the passenger — it goes through the tower.
 $env:PYTHONPATH="backend"
 python backend/main.py
 
-# Optional Terminal 2 — mock edge (distributed path)
+# Optional Terminal 2 — mock backend agent (distributed path)
 $env:PYTHONPATH="backend"
-python scripts/ops/mock_edge_agent.py
+python scripts/ops/mock_backend_agent.py
 
 # Terminal 3 — author script
 pip install -e ./packages/cloudlabs
@@ -83,7 +83,7 @@ components, kernels, and frozen snapshots per lab.
 Point **`LAB_VIEW_PATH`** in `.env` at a lab deployment bundle when **running
 the server** (catalog, layout, lasers, recipes). That is operator setup, not
 something script authors configure. Bundles and scaffolding are explained in
-[`mock_edge/README.md`](mock_edge/README.md) (teaching edge).
+[`mock_backend/README.md`](mock_backend/README.md) (teaching edge).
 
 ---
 
@@ -92,7 +92,7 @@ something script authors configure. Bundles and scaffolding are explained in
 1. You issue a **primitive** (move a mirror, record a camera, run OPTIMIZE).
 2. The coordinator validates the command, checks the **lease**, and sends it
    southbound via **EdgeClient** (in-process mock, poll-attach, or HTTP edge).
-3. The edge host (`mock_edge` or lab `cloudlabs_edge`) turns that intent into
+3. The edge host (`mock_backend` or lab `cloudlabs_edge`) turns that intent into
    instrument calls (or a faithful simulation) and updates **lab state**.
 4. The Twin polls lab state so solids (measured poses) and ghosts (intent)
    stay honest.
@@ -108,7 +108,7 @@ not a second programming language.
 
 | Topic | Document |
 |-------|----------|
-| Teaching mock edge / lab bundles | [`mock_edge/README.md`](mock_edge/README.md) |
+| Teaching mock backend / lab bundles | [`mock_backend/README.md`](mock_backend/README.md) |
 | Scripting language & modes | [`packages/cloudlabs/README.md`](packages/cloudlabs/README.md) |
 | Platform architecture | [`backend/lab_model/ARCHITECTURE.md`](backend/lab_model/ARCHITECTURE.md) |
 | Edge Contract + live plane | [`docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md`](docs/EDGE_CONTRACT_AND_UC_LIVE_PLANE.md) |
@@ -126,7 +126,7 @@ not a second programming language.
 
 ```text
 backend/          Coordinator API, lab_model (semantics, EdgeClient)
-mock_edge/        Teaching Edge Contract edge + lab_view bundle
+mock_backend/        Teaching Edge Contract edge + lab_view bundle
 frontend/         Twin, Operations, Wiki (static ES modules)
 packages/cloudlabs/   Author-facing Python SDK
 scripts/language/ Language demos    scripts/ops/    Edge agent, builders

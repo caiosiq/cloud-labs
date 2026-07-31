@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict
 
-from mock_edge.host.communicator import MockLabCommunicator
+from mock_backend.host.communicator import MockLabCommunicator
 from lab_model.coordinator.backends.lab_view_config import (
     TableCamPreviewConfig,
     bootstrap_lab_view,
@@ -18,7 +18,7 @@ from lab_model.language.domain.component import new_component_entry
 from lab_model.execution.orchestration.live_feed import _resolve_live_feed_profile, run_end_live_feed
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_edge" / "lab_view"
+_MOCK_LAB_VIEW = _PROJECT_ROOT / "mock_backend" / "lab_view"
 
 
 class _FakeHost:
