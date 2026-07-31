@@ -36,6 +36,7 @@ def default_capabilities(backend_id: str = "stub.default") -> dict[str, Any]:
             "torchscript_execution": False,
             "hardware_reconciliation": False,
             "hardware_triggered_latch": False,
+            "runtime_sync": True,
             "lan_direct_streams": True,
         },
         "supported_primitives": [
@@ -47,6 +48,8 @@ def default_capabilities(backend_id: str = "stub.default") -> dict[str, Any]:
             "RECORD_MEASURABLES",
             "EVAL_KERNEL",
             "LOCALIZE_COMPONENTS",
+            "RECORD_TUNABLES",
+            "SYNC_RUNTIME",
         ],
         "measurables": {
             "tag_22.camera_image": {
@@ -132,8 +135,33 @@ def _default_library(backend_id: str) -> dict[str, Any]:
                         "START_LIVE_FEED",
                         "END_LIVE_FEED",
                         "LOCALIZE_COMPONENTS",
+                        "RECORD_TUNABLES",
+                        "SYNC_RUNTIME",
                     ],
-                    "statecontrol": {"tunables": {}, "measurables": {}},
+                    "statecontrol": {
+                        "tunables": {
+                            "nominal_pose": {
+                                "widget": "TablePose",
+                                "recordable": True,
+                            },
+                            "exposure_time_ms": {
+                                "widget": "FloatRange",
+                                "min": 10.0,
+                                "max": 1000.0,
+                                "default": 200.0,
+                                "unit": "ms",
+                                "recordable": True,
+                            },
+                        },
+                        "measurables": {
+                            "camera_image": {
+                                "widget": "ImageViewer",
+                                "dtype": "uint8",
+                                "layout": "bgr_hwc_uint8",
+                                "domain": "spatial",
+                            }
+                        },
+                    },
                     "telemetry": {},
                 },
             }
@@ -411,12 +439,15 @@ def create_app(
                 }
             )
 
-        if primitive == "LOCALIZE_COMPONENTS":
+        if primitive in {"LOCALIZE_COMPONENTS", "RECORD_TUNABLES", "SYNC_RUNTIME"}:
             raw_ids = args.get("tag_ids")
             if isinstance(raw_ids, list) and raw_ids:
                 tag_ids = [str(t).strip() for t in raw_ids if str(t).strip()]
             else:
                 tag_ids = default_localize_tag_ids(state["inventory"])
+            paths = args.get("tunable_paths")
+            if not isinstance(paths, list) or not paths:
+                paths = ["nominal_pose"]
             poses = {
                 tid: {
                     "x": float(state["pose"]["x"]),
@@ -426,11 +457,25 @@ def create_app(
                 }
                 for tid in tag_ids
             }
+            values = {
+                tid: {str(p): (poses[tid] if p == "nominal_pose" else None) for p in paths}
+                for tid in tag_ids
+            }
+            epoch = bump_epoch()
+            result: dict = {
+                "tag_ids": tag_ids,
+                "tunable_paths": [str(p) for p in paths],
+                "values": values,
+                "poses": poses,
+            }
+            if primitive == "SYNC_RUNTIME":
+                result["status"] = "ready"
+                result["runtime_sync"] = {"status": "ready", "stub": True}
             epoch = bump_epoch()
             return JSONResponse(
                 {
                     "status": "completed",
-                    "result": {"tag_ids": tag_ids, "poses": poses},
+                    "result": result,
                     "epoch_ms": epoch,
                     "latch_quality": "software_approx",
                 }

@@ -47,7 +47,8 @@ SUPPORTED_SCHEMA_VERSIONS: FrozenSet[int] = frozenset({1})
 #: §14.1 tunable widgets.
 KNOWN_WIDGETS_TUNABLE: FrozenSet[str] = frozenset({
     "TablePose",
-    "PoseReadout",  # reported_pose (read-only bench report of the pose tunable)
+    # Deprecated: do not infer reported_pose; kept so legacy catalogs soft-load.
+    "PoseReadout",
     "NudgeMotorGroup",
     "FloatRange",
     "IntRange",
@@ -277,15 +278,12 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
     motor_ids = row.get("motor_ids") or []
     tag_id = str(row.get("tag_id") or "")
 
+    # One pose tunable: RECORD_TUNABLES / SYNC_RUNTIME overwrite nominal_pose.
+    # No parallel reported_pose / PoseReadout (see docs/RECORD_TUNABLES_AND_SYNC_RUNTIME.md).
     tunables: Dict[str, Any] = {
-        "nominal_pose": {"widget": "TablePose"},
-        "reported_pose": {
-            "widget": "PoseReadout",
-            "physical_interpretation": (
-                "Bench-reported table pose for the same DOF as nominal_pose "
-                "(mm / degrees). Refresh from scan or settle after motion — "
-                "not a measurable."
-            ),
+        "nominal_pose": {
+            "widget": "TablePose",
+            "recordable": True,
         },
     }
     teleop: Dict[str, Any] = {
@@ -315,6 +313,7 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
         tunables["nominal_motor_positions"] = {
             "widget": "JsonInspector",
             "unit": "deg",
+            "recordable": True,
             "physical_interpretation": (
                 "Motor angles for this mount (degrees). Lab observe / tracker "
                 "recalculates this same tunable — it is not a measurable."
@@ -340,6 +339,7 @@ def infer_default_capabilities(row: Dict[str, Any]) -> Dict[str, Any]:
             "max": 1000.0,
             "default": 200.0,
             "unit": "ms",
+            "recordable": True,
         }
         primitives.extend(list(_CAMERA_TUNABLE_PRIMITIVES))
         measurables["camera_image"] = {
@@ -527,6 +527,27 @@ def validate_catalog_v1(
                         fname, desc, known=known,
                         scope=f"{prefix}.capabilities.statecontrol.{scope}", errors=errors,
                     )
+                    if scope == "tunables":
+                        if fname == "reported_pose":
+                            errors.append(
+                                f"__WARN__{prefix}.capabilities.statecontrol.tunables."
+                                f"reported_pose: deprecated — RECORD_TUNABLES writes "
+                                f"nominal_pose; remove PoseReadout / reported_pose"
+                            )
+                        else:
+                            from lab_model.language.primitives.macros.sync_runtime import (
+                                validate_tunable_record_metadata,
+                            )
+
+                            errors.extend(
+                                validate_tunable_record_metadata(
+                                    fname,
+                                    desc,
+                                    scope=(
+                                        f"{prefix}.capabilities.statecontrol.tunables"
+                                    ),
+                                )
+                            )
             tel = caps_norm.get("telemetry") or {}
             for scope, known in (
                 ("teleop", KNOWN_WIDGETS_TUNABLE),

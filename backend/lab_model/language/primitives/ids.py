@@ -82,7 +82,13 @@ class PrimitiveId(StrEnum):
     END_LIVE_FEED = "END_LIVE_FEED"
 
     #: Measure poses for declared inventory tags (edge: scan_components_cloudlab).
+    #: Deprecated alias of RECORD_TUNABLES for ``nominal_pose`` only — prefer RECORD_TUNABLES.
     LOCALIZE_COMPONENTS = "LOCALIZE_COMPONENTS"
+
+    #: Overwrite specific tunables from the physical/world truth (recordable fields only).
+    RECORD_TUNABLES = "RECORD_TUNABLES"
+    #: Boot/readiness macro: RECORD(recordable) + SET(set_at_init) for inventory components.
+    SYNC_RUNTIME = "SYNC_RUNTIME"
 
 
 # Read primitives: not POST /api/command; used by GET routes + `fetch_read_primitive`.
@@ -99,5 +105,7 @@ MACRO_PRIMITIVE_IDS: frozenset[PrimitiveId] = frozenset(
     {
         PrimitiveId.MOTOR_SEND_HOME,
         PrimitiveId.APPLY_TUNABLES_PATCH,
+        PrimitiveId.SYNC_RUNTIME,
+        PrimitiveId.LOCALIZE_COMPONENTS,  # expands to RECORD_TUNABLES(nominal_pose)
     }
 )

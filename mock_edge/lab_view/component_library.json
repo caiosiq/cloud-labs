@@ -19,7 +19,8 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             }
           },
           "measurables": {}
@@ -99,14 +100,16 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             },
             "exposure_time_ms": {
               "widget": "FloatRange",
               "min": 10.0,
               "max": 1000.0,
               "default": 200.0,
-              "unit": "ms"
+              "unit": "ms",
+              "recordable": true
             }
           },
           "measurables": {
@@ -117,8 +120,8 @@
               "domain": "spatial",
               "shape": "(H, W, 3)",
               "axes": {
-                "H": "rows (y), pixels top→bottom",
-                "W": "cols (x), pixels left→right",
+                "H": "rows (y), pixels top\u2192bottom",
+                "W": "cols (x), pixels left\u2192right",
                 "3": "BGR channels (OpenCV / kernel layout)"
               },
               "wire_format": "png",
@@ -210,14 +213,16 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             },
             "exposure_time_ms": {
               "widget": "FloatRange",
               "min": 10.0,
               "max": 1000.0,
               "default": 200.0,
-              "unit": "ms"
+              "unit": "ms",
+              "recordable": true
             }
           },
           "measurables": {
@@ -228,8 +233,8 @@
               "domain": "spatial",
               "shape": "(H, W, 3)",
               "axes": {
-                "H": "rows (y), pixels top→bottom",
-                "W": "cols (x), pixels left→right",
+                "H": "rows (y), pixels top\u2192bottom",
+                "W": "cols (x), pixels left\u2192right",
                 "3": "BGR channels (OpenCV / kernel layout)"
               },
               "wire_format": "png",
@@ -319,12 +324,14 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             },
             "nominal_motor_positions": {
               "widget": "JsonInspector",
               "unit": "deg",
-              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable — it is not a measurable."
+              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable \u2014 it is not a measurable.",
+              "recordable": true
             }
           },
           "measurables": {
@@ -412,7 +419,8 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             }
           },
           "measurables": {}
@@ -485,7 +493,8 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             }
           },
           "measurables": {}
@@ -564,12 +573,14 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             },
             "nominal_motor_positions": {
               "widget": "JsonInspector",
               "unit": "deg",
-              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable — it is not a measurable."
+              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable \u2014 it is not a measurable.",
+              "recordable": true
             }
           },
           "measurables": {
@@ -663,12 +674,14 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             },
             "nominal_motor_positions": {
               "widget": "JsonInspector",
               "unit": "deg",
-              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable — it is not a measurable."
+              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable \u2014 it is not a measurable.",
+              "recordable": true
             }
           },
           "measurables": {
@@ -756,7 +769,8 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             }
           },
           "measurables": {}
@@ -830,7 +844,8 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             }
           },
           "measurables": {}
@@ -904,7 +919,8 @@
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
-              "widget": "TablePose"
+              "widget": "TablePose",
+              "recordable": true
             }
           },
           "measurables": {}
@@ -981,7 +997,8 @@
               "min": 10.0,
               "max": 1000.0,
               "default": 50.0,
-              "unit": "ms"
+              "unit": "ms",
+              "recordable": true
             }
           },
           "measurables": {
@@ -992,8 +1009,8 @@
               "domain": "spatial",
               "shape": "(H, W, 3)",
               "axes": {
-                "H": "rows (y), pixels top→bottom",
-                "W": "cols (x), pixels left→right",
+                "H": "rows (y), pixels top\u2192bottom",
+                "W": "cols (x), pixels left\u2192right",
                 "3": "BGR channels (OpenCV / kernel layout)"
               },
               "wire_format": "png",
@@ -1046,7 +1063,9 @@
               "min": 0.0,
               "max": 100.0,
               "default": 0.0,
-              "unit": "mW"
+              "unit": "mW",
+              "recordable": false,
+              "set_at_init": 0.0
             }
           },
           "measurables": {
@@ -1057,7 +1076,7 @@
               "dtype": "float64",
               "layout": "scalar",
               "domain": "scalar",
-              "physical_interpretation": "Measured optical output power (mW). A captured sensor summary — not a command."
+              "physical_interpretation": "Measured optical output power (mW). A captured sensor summary \u2014 not a command."
             }
           }
         },

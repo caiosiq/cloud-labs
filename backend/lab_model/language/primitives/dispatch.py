@@ -10,6 +10,11 @@ from pydantic import ValidationError
 from .ids import READ_PRIMITIVE_IDS, PrimitiveId
 from .macros.apply_tunables_patch import run_apply_tunables_patch
 from .macros.motor_send_home import run_motor_send_home
+from .macros.sync_runtime import (
+    run_localize_as_record,
+    run_record_tunables,
+    run_sync_runtime,
+)
 from .schemas import (
     AffirmPlacedBody,
     ApplyTunablesPatchBody,
@@ -31,6 +36,7 @@ from .schemas import (
     PlaceFromStorageBody,
     RecenterInStorageBody,
     RecordMeasurablesBody,
+    RecordTunablesBody,
     RemoveComponentBody,
     RepackStorageBody,
     ScanBody,
@@ -39,6 +45,7 @@ from .schemas import (
     StoreComponentBody,
     StartLiveFeedBody,
     EndLiveFeedBody,
+    SyncRuntimeBody,
     TagQuery,
     TeleopGotoBody,
     TeleopJogBody,
@@ -92,7 +99,11 @@ ValidatedCommand = Union[
     EndTeleopBody,
     StartLiveFeedBody,
     EndLiveFeedBody,
+    TeleopGotoBody,
     TeleopJogBody,
+    LocalizeComponentsBody,
+    RecordTunablesBody,
+    SyncRuntimeBody,
 ]
 
 
@@ -268,9 +279,12 @@ async def _invoke_atomic(
             params["target_pose"] = params.pop("nominal_pose")
         await lab.teleop_goto(cmd.target_id, params)
     elif isinstance(cmd, LocalizeComponentsBody):
-        _log_primitive("LOCALIZE_COMPONENTS", None, macro_parent=macro_parent)
-        p = cmd.parameters.model_dump(exclude_none=True)
-        return await lab.localize_components(**p)
+        raise RuntimeError("LOCALIZE_COMPONENTS must be handled by macro path")
+    elif isinstance(cmd, RecordTunablesBody):
+        _log_primitive("RECORD_TUNABLES", None, macro_parent=macro_parent)
+        return await run_record_tunables(lab, cmd)
+    elif isinstance(cmd, SyncRuntimeBody):
+        raise RuntimeError("SYNC_RUNTIME must be handled by macro path")
     else:
         raise NotImplementedError(type(cmd))
     return None
@@ -283,6 +297,35 @@ async def execute_validated_command(
 
     Returns an optional result dict for sync primitives such as EVAL_KERNEL.
     """
+    from lab_model.coordinator.lab_initialization import (
+        LabNotInitializedError,
+        ensure_action_allowed,
+    )
+
+    action = str(getattr(cmd, "action", "") or "")
+    state = lab.get_lab_state() if hasattr(lab, "get_lab_state") else None
+    backend_id = ""
+    edge_attached = None
+    edge_offline = None
+    if isinstance(state, dict):
+        backend_id = str(state.get("active_backend_id") or "")
+        if "edge_attached" in state:
+            edge_attached = bool(state.get("edge_attached"))
+        if "edge_offline" in state:
+            edge_offline = bool(state.get("edge_offline"))
+    try:
+        ensure_action_allowed(
+            backend_id,
+            action,
+            state,
+            edge_attached=edge_attached,
+            edge_offline=edge_offline,
+        )
+    except LabNotInitializedError:
+        raise
+    except Exception:  # noqa: BLE001
+        _LOG.debug("lab_init execute gate failed", exc_info=True)
+
     if isinstance(cmd, MotorSendHomeBody):
         _log_primitive("MOTOR_SEND_HOME", cmd.target_id)
         await run_motor_send_home(lab, cmd)
@@ -291,6 +334,12 @@ async def execute_validated_command(
         _log_primitive("APPLY_TUNABLES_PATCH", cmd.target_id)
         await run_apply_tunables_patch(lab, cmd)
         return None
+    if isinstance(cmd, SyncRuntimeBody):
+        _log_primitive("SYNC_RUNTIME", None)
+        return await run_sync_runtime(lab, cmd)
+    if isinstance(cmd, LocalizeComponentsBody):
+        _log_primitive("LOCALIZE_COMPONENTS", None)
+        return await run_localize_as_record(lab, cmd)
     return await _invoke_atomic(lab, cmd)
 
 
@@ -303,6 +352,35 @@ def schedule_validated_command(
     Queue async lab work like the legacy main.py handlers; return HTTP JSON body.
     SCAN is accepted without scheduling lab work (stub).
     """
+    from lab_model.coordinator.lab_initialization import (
+        LabNotInitializedError,
+        ensure_action_allowed,
+    )
+
+    action = str(getattr(cmd, "action", "") or "")
+    state = lab.get_lab_state() if hasattr(lab, "get_lab_state") else None
+    backend_id = ""
+    edge_attached = None
+    edge_offline = None
+    if isinstance(state, dict):
+        backend_id = str(state.get("active_backend_id") or "")
+        if "edge_attached" in state:
+            edge_attached = bool(state.get("edge_attached"))
+        if "edge_offline" in state:
+            edge_offline = bool(state.get("edge_offline"))
+    try:
+        ensure_action_allowed(
+            backend_id,
+            action,
+            state,
+            edge_attached=edge_attached,
+            edge_offline=edge_offline,
+        )
+    except LabNotInitializedError:
+        raise
+    except Exception:  # noqa: BLE001
+        _LOG.debug("lab_init schedule gate failed", exc_info=True)
+
     if isinstance(cmd, MoveComponentBody):
         background_tasks.add_task(execute_validated_command, lab, cmd)
         return {"status": "accepted", "message": f"Robot dispatched to move {cmd.target_id}"}
@@ -429,7 +507,26 @@ def schedule_validated_command(
         note = f" ({', '.join(scope)})" if scope else ""
         return {
             "status": "accepted",
-            "message": f"LOCALIZE_COMPONENTS started{note}",
+            "message": f"LOCALIZE_COMPONENTS started{note} (alias of RECORD_TUNABLES)",
+        }
+
+    if isinstance(cmd, RecordTunablesBody):
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": (
+                f"RECORD_TUNABLES started "
+                f"(tags={cmd.parameters.tag_ids}, paths={cmd.parameters.tunable_paths})"
+            ),
+        }
+
+    if isinstance(cmd, SyncRuntimeBody):
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        scope = cmd.parameters.tag_ids or []
+        note = f" ({', '.join(scope)})" if scope else ""
+        return {
+            "status": "accepted",
+            "message": f"SYNC_RUNTIME started{note}",
         }
 
     if isinstance(cmd, RemoveComponentBody):

@@ -92,11 +92,12 @@ The digital twin canvas on `/operations` uses the **same** `render.js` + `lab-st
 - Remote catalog publish/approval workflow (future: “request publish” action may start here)
 - Global job queue administration beyond “my run” (see Operations)
 
-**Lease UX (target, not fully implemented):**
+**Lease UX:**
 
 - Banner: `Bench leased by job:…` / `sdk:…` when another holder is active
-- Gray out motor sliders and primitive buttons when unleased or foreign lease
-- Explicit **“Take control”** acquires lease (may queue behind active job)
+- Mutations blocked until **Take control** (session lease); escape only via `CLOUDLABS_SOLO=1`
+- Applies to **mock / sim / real** alike (soft mock lease removed)
+- Explicit **“Take control”** acquires lease; **Release** drops it
 
 ---
 

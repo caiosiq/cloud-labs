@@ -201,8 +201,37 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "http": "POST /api/components/{tag_id}/telemetry/live-feed/end",
     },
     PrimitiveId.LOCALIZE_COMPONENTS: {
-        "kind": PrimitiveKind.ATOMIC,
+        "kind": PrimitiveKind.MACRO,
         "read_only": False,
         "handler": "localize_components",
+        "macro_expands_to": [PrimitiveId.RECORD_TUNABLES],
+        "notes": (
+            "Deprecated alias: expands to RECORD_TUNABLES for nominal_pose. "
+            "Prefer RECORD_TUNABLES / SYNC_RUNTIME."
+        ),
+    },
+    PrimitiveId.RECORD_TUNABLES: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "record_tunables",
+        "notes": (
+            "Overwrite named tunables from world/hardware. Only paths with "
+            "recordable:true. Pose recording writes nominal_pose (no reported_pose)."
+        ),
+    },
+    PrimitiveId.SYNC_RUNTIME: {
+        "kind": PrimitiveKind.MACRO,
+        "read_only": False,
+        "handler": "sync_runtime",
+        "macro_expands_to": [
+            PrimitiveId.RECORD_TUNABLES,
+            PrimitiveId.SET_EXPOSURE,
+            PrimitiveId.SET_LASER_OUTPUT,
+            PrimitiveId.SET_MOTOR_SETPOINT,
+        ],
+        "notes": (
+            "Required before edge READY: RECORD(recordable) + SET(set_at_init) "
+            "for each inventory component tunable."
+        ),
     },
 }

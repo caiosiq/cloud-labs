@@ -247,7 +247,8 @@ function init() {
             const p = store.coordinatorPolicy;
             if (p) {
                 log(
-                    `Coordinator policy: solo=${Boolean(p.solo)} strict_mock=${Boolean(p.strict_lease_mock)}`,
+                    `Coordinator policy: solo=${Boolean(p.solo)} `
+                    + `command_lease_required=${p.command_lease_required !== false}`,
                     'info',
                 );
             }

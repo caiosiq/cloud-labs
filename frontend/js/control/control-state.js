@@ -179,6 +179,14 @@ export function runtimeEditableOrMessage() {
     if (commandLeaseRequired() && !weHoldSessionLease()) {
         return 'Take control of this backend before editing (session lease).';
     }
+    const labInit = store.labState?.lab_initialization;
+    if (labInit && typeof labInit === 'object' && labInit.ready === false) {
+        const phase = labInit.phase ? String(labInit.phase) : 'starting';
+        if (phase === 'failed') {
+            return 'Lab initialization failed. Retry SYNC_RUNTIME or restart the edge.';
+        }
+        return 'Lab is still initializing…';
+    }
     if (isConfigViewMode()) {
         return 'You are viewing a configuration preview. Return to bench or apply on bench before editing.';
     }
@@ -256,16 +264,17 @@ export function refreshSessionLeaseBanner() {
         wire(
             `No session lease — `
             + `<button type="button" data-lease-action="take" style="cursor:pointer;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:4px;padding:2px 8px">Take control</button> `
-            + `to edit this backend.`,
+            + `before editing this backend.`,
         );
         return;
     }
 
+    // Solo escape only — mutations do not require a lease.
     el.style.color = '#cbd5e1';
     el.style.borderColor = 'rgba(148, 163, 184, 0.35)';
     el.style.background = 'rgba(148, 163, 184, 0.1)';
     wire(
-        (solo ? 'Solo mode — ' : 'Mock soft lease — ')
+        (solo ? 'Solo mode — ' : '')
         + `edits allowed without a lease. `
         + `<button type="button" data-lease-action="take" style="cursor:pointer;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:4px;padding:2px 8px">Take control</button> `
         + `to lock others out. `

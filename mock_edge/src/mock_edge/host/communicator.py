@@ -4,6 +4,7 @@ import asyncio
 import time
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from lab_model.language.domain.component import (
@@ -88,6 +89,91 @@ class MockLabCommunicator(LabCommunicator):
         self._table_cam_streaming = {1: False, 2: False}
         self._table_cam_stream_profile: Dict[int, str] = {1: "default", 2: "default"}
         self._reconcile_holding_on_boot()
+        self._maybe_boot_sync_runtime()
+
+    def _edge_data_root(self) -> Optional[Path]:
+        """``mock_edge/cloudlabs_edge`` when present beside this package."""
+        candidate = Path(__file__).resolve().parents[3] / "cloudlabs_edge"
+        if (candidate / "data" / "library.json").is_file():
+            return candidate
+        return None
+
+    def get_component_library(self) -> Dict[str, Any]:
+        """Edge ``data/library.json`` (source of recordable / set_at_init)."""
+        from cloudlabs_edge_dev.edge_data import load_library
+
+        root = self._edge_data_root()
+        if root is None:
+            return {"schema_version": 1, "components": {}}
+        return load_library(root, strict_recordable=False, validate=True)
+
+    def get_inventory(self) -> Dict[str, Any]:
+        """Edge ``data/inventory.json`` (SYNC / LOCALIZE scope)."""
+        from cloudlabs_edge_dev.edge_data import load_inventory
+
+        root = self._edge_data_root()
+        if root is None:
+            return {"schema_version": 1, "entries": {}}
+        return load_inventory(root)
+
+    def _maybe_boot_sync_runtime(self) -> None:
+        """Run SYNC_RUNTIME once at boot unless explicitly skipped."""
+        skip = os.getenv("CLOUDLABS_SKIP_RUNTIME_SYNC", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if skip:
+            print(
+                f"[lab_init] {self.log_prefix} runtime_sync skipped "
+                "(CLOUDLABS_SKIP_RUNTIME_SYNC)"
+            )
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # Common path: constructed outside an event loop.
+            asyncio.run(self._boot_sync_runtime())
+            return
+        # Already inside a loop (rare for __init__): mark pending; edge
+        # lifespan / explicit SYNC_RUNTIME will finish the job.
+        print(
+            f"[lab_init] {self.log_prefix} runtime_sync deferred "
+            "(event loop already running at construct)"
+        )
+
+    async def _boot_sync_runtime(self) -> None:
+        from lab_model.language.primitives.macros.sync_runtime import run_sync_runtime
+        from lab_model.language.primitives.schemas import SyncRuntimeBody
+
+        self.set_runtime_sync_status("running")
+        # Hold "running" so Twin / coordinator can observe measuring_inventory.
+        # Tests set CLOUDLABS_MOCK_INIT_DELAY_S=0.
+        try:
+            delay_s = float(os.getenv("CLOUDLABS_MOCK_INIT_DELAY_S", "2") or "2")
+        except ValueError:
+            delay_s = 2.0
+        if delay_s > 0:
+            print(
+                f"[lab_init] {self.log_prefix} runtime_sync measuring "
+                f"(delay={delay_s:g}s)"
+            )
+            await asyncio.sleep(delay_s)
+        try:
+            result = await run_sync_runtime(
+                self, SyncRuntimeBody(action="SYNC_RUNTIME")
+            )
+            status = "ready"
+            errors = []
+            if isinstance(result, dict):
+                errors = list(result.get("errors") or [])
+                if errors or result.get("status") == "failed":
+                    status = "failed"
+            self.set_runtime_sync_status(status, errors=errors)
+        except Exception as exc:  # noqa: BLE001
+            self.set_runtime_sync_status("failed", errors=[str(exc)])
+            print(f"{self.log_prefix} SYNC_RUNTIME boot failed: {exc}")
 
     def _reconcile_holding_on_boot(self) -> None:
         """
@@ -313,23 +399,76 @@ class MockLabCommunicator(LabCommunicator):
         tag_ids: Optional[List[str]] = None,
         force_rescan: bool = True,
     ) -> Dict[str, Any]:
-        """LOCALIZE_COMPONENTS — mock camera re-localisation for inventory tags."""
-        _ = force_rescan
-        self.refresh_pose_from_camera(tag_ids=tag_ids)
+        """LOCALIZE_COMPONENTS — deprecated alias of RECORD(nominal_pose)."""
+        return await self.record_tunables(
+            tag_ids=tag_ids,
+            tunable_paths=["nominal_pose"],
+            force_rescan=force_rescan,
+        )
+
+    async def record_tunables(
+        self,
+        tag_ids: Optional[List[str]] = None,
+        tunable_paths: Optional[List[str]] = None,
+        force_rescan: bool = True,
+    ) -> Dict[str, Any]:
+        """RECORD_TUNABLES — overwrite recordable fields from the mock world.
+
+        Pose: simulated camera scan writes ``nominal_pose``.
+        Other paths: copy current tunable value (already the world truth in mock).
+        """
+        from lab_model.language.domain.component import get_tunables, nominal_pose
+        from lab_model.language.tunables._commit import (
+            commit_nominal_pose,
+            commit_tunable_value,
+        )
+
+        paths = [str(p) for p in (tunable_paths or ["nominal_pose"]) if str(p).strip()]
+        ids = [str(t).strip() for t in (tag_ids or []) if str(t).strip()]
+        if not ids:
+            inv = self.get_inventory()
+            from cloudlabs_edge_dev.edge_data import default_localize_tag_ids
+
+            ids = default_localize_tag_ids(inv)
+
+        if "nominal_pose" in paths and force_rescan:
+            self.refresh_pose_from_camera(tag_ids=ids)
+
+        values: Dict[str, Dict[str, Any]] = {}
+        poses: Dict[str, Any] = {}
         state = self._read_state()
         comps = state.get("components") or {}
-        poses: Dict[str, Any] = {}
-        ids = list(tag_ids or [])
-        if not ids:
-            ids = list(comps.keys()) if isinstance(comps, dict) else []
         for tid in ids:
-            comp = comps.get(tid) if isinstance(comps, dict) else None
-            pose = None
-            if isinstance(comp, dict):
-                tun = ((comp.get("statecontrol") or {}).get("tunables") or {})
-                pose = tun.get("reported_pose") or tun.get("nominal_pose")
-            poses[tid] = dict(pose) if isinstance(pose, dict) else None
-        return {"tag_ids": ids, "poses": poses}
+            entry = comps.get(tid) if isinstance(comps, dict) else None
+            if not isinstance(entry, dict):
+                values[tid] = {p: None for p in paths}
+                poses[tid] = None
+                continue
+            tun = get_tunables(entry)
+            recorded: Dict[str, Any] = {}
+            for path in paths:
+                if path == "nominal_pose":
+                    pose = nominal_pose(entry)
+                    if pose:
+                        commit_nominal_pose(self, tid, pose)
+                    recorded[path] = dict(pose) if pose else None
+                    poses[tid] = recorded[path]
+                else:
+                    # Mock "measure" = current world value already on the tunable.
+                    value = tun.get(path)
+                    if value is not None:
+                        commit_tunable_value(self, tid, path, value)
+                    recorded[path] = value
+            values[tid] = recorded
+            if tid not in poses:
+                poses[tid] = recorded.get("nominal_pose")
+            print(f"[lab_init] {self.log_prefix} RECORD_TUNABLES tag={tid} paths={paths} ok")
+        return {
+            "tag_ids": ids,
+            "tunable_paths": paths,
+            "values": values,
+            "poses": poses,
+        }
 
     def preview_refresh_pose_candidates(
         self,

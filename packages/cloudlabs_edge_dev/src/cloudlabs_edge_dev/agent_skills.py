@@ -89,6 +89,11 @@ rewriting the science.
 Rule: if it should happen, it must be nameable in this vocabulary — that is what
 keeps scripts portable across benches.
 
+**Edge READY** means `SYNC_RUNTIME` has completed (recordable tunables overwritten
+from the world; non-recordable tunables set from `set_at_init`) — not merely that
+`/health` responds. Mock/sim may implement sync as copy-from-state/JSON; a real
+bench must measure.
+
 ## Who talks to whom
 
 The scientist’s script and the **Twin** both talk to a **shared service**
@@ -312,9 +317,10 @@ INVENTORY_HONESTY_SKILL = """\
 ---
 name: inventory-honesty
 description: >-
-  Keeps store, place, and inventory primitives honest on a Cloud Labs edge.
-  Use when implementing STORE_COMPONENT, PLACE_FROM_STORAGE, AFFIRM, REPACK,
-  RECENTER, REMOVE, or any inventory claim about where components live.
+  Keeps store, place, inventory, and runtime-sync primitives honest on a Cloud
+  Labs edge. Use when implementing STORE/PLACE, RECORD_TUNABLES, SYNC_RUNTIME,
+  LOCALIZE_COMPONENTS (alias), or any claim about where components live / what
+  tunables are.
 ---
 
 # Inventory honesty
@@ -327,9 +333,20 @@ description: >-
 - Until then, keep scaffold `NotImplementedError` → `refused` / `NOT_IMPLEMENTED`.
 - Prefer confirming holding/presence from real session + gripper/vision state over guesses.
 - Document in capabilities what you truly support; do not advertise inventory you cannot enforce.
-- Wire `LOCALIZE_COMPONENTS` to a real scan (`scan_components_cloudlab` or equivalent);
-  default scope is inventory tags with `localize != false` and `placement` in
-  `{table, storage}`.
+- Declare per-tunable metadata in the library (authored JSON — doctor/load
+  **fail hard**; nothing silently backfills missing capabilities):
+  - `recordable: true` → `RECORD_TUNABLES` may overwrite from the world
+    (pose writes **`nominal_pose`**, never a shadow `reported_pose`).
+  - `recordable: false` → **`set_at_init` is required**; SYNC sets that value.
+- When `features.runtime_sync` is true, `RECORD_TUNABLES` + `SYNC_RUNTIME` must
+  be in `supported_primitives`, and every non-`nominal_pose` tunable must declare
+  `recordable` explicitly (doctor strict mode).
+- Wire `RECORD_TUNABLES` (and `SYNC_RUNTIME` = RECORD(recordable) + SET(set_at_init)
+  for inventory tags). Edge is not READY until SYNC completes.
+- Mock/sim may implement RECORD as copy-from-state/JSON; real edges must measure.
+- `LOCALIZE_COMPONENTS` is a **deprecated alias** of RECORD for `nominal_pose` only;
+  prefer RECORD_TUNABLES / SYNC_RUNTIME. Default inventory scope: `localize != false`
+  and `placement` in `{table, storage}`.
 
 ## Do not
 
@@ -337,11 +354,16 @@ description: >-
 - Do not invent slot maps or AprilTag locations without a source of truth.
 - Do not silently no-op STORE/PLACE — refusal is better than a lie.
 - Do not keep a separate edge `active_catalog.json`; active tags are inventory keys.
+- Do not invent `reported_*` shadow tunables; recording overwrites the real tunable.
+- Do not advertise READY / accept motion before SYNC_RUNTIME has succeeded.
+- Do not silently backfill / infer missing library `capabilities` or `recordable`
+  metadata at load time — fix the authored JSON so doctor fails for the real cause.
 
 ## Related
 
 - Holding confirmation (e.g. `CONFIRM_HOLDING_TAG`) may use session state + gripper
   when that is all the hardware exposes — say so in the result (`source` field).
+- Design brief: Cloud Labs `docs/RECORD_TUNABLES_AND_SYNC_RUNTIME.md`.
 """
 
 

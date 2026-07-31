@@ -50,9 +50,92 @@ import { syncGuidesFromLabState } from '../canvas/guides.js';
 import { syncLaserLinesFromLabState } from '../ui/laser-lines-panel.js';
 import { refreshSessionLeaseBanner } from '../control/control-state.js';
 import { withBackendQuery, ensureBackendSelected } from './backend-selection.js';
+import { updateLabInitOverlay } from '../ui/lab-init-overlay.js';
 const OPTIMIZING_POLL_MS = 100;
 let _pollTimerId = null;
 let _pollIntervalMs = POLLING_INTERVAL;
+/** Last lab-init key logged to the console (status-change only). */
+let _lastLabInitKey = null;
+
+/**
+ * Compose lab-init view: prefer coordinator ``lab_initialization``, else derive.
+ * @param {object | null | undefined} labState
+ */
+export function deriveLabInit(labState) {
+    if (!labState || typeof labState !== 'object') {
+        return {
+            ready: false,
+            phase: 'starting',
+            runtime_sync: 'missing',
+            errors: [],
+        };
+    }
+    const server = labState.lab_initialization;
+    if (server && typeof server === 'object' && server.phase != null) {
+        return {
+            ready: !!server.ready,
+            phase: String(server.phase),
+            runtime_sync: String(server.runtime_sync || 'missing'),
+            errors: Array.isArray(server.errors) ? server.errors : [],
+            edge_attached: server.edge_attached,
+            edge_offline: server.edge_offline,
+        };
+    }
+    const rs = labState.runtime_sync;
+    const rsStatus =
+        rs && typeof rs === 'object' && rs.status != null
+            ? String(rs.status)
+            : 'missing';
+    const edgeAttached = !!labState.edge_attached;
+    const edgeOffline = !!labState.edge_offline;
+    const knownSync = ['ready', 'running', 'failed', 'pending'].includes(rsStatus);
+    let phase = 'starting';
+    let ready = false;
+    if (edgeOffline && !knownSync) {
+        phase = 'waiting_for_edge';
+    } else if (rsStatus === 'ready') {
+        phase = 'ready';
+        ready = true;
+    } else if (rsStatus === 'running') {
+        phase = 'measuring_inventory';
+    } else if (rsStatus === 'failed') {
+        phase = 'failed';
+    } else if (rsStatus === 'pending') {
+        phase = 'starting';
+    } else if (edgeOffline || !edgeAttached) {
+        phase = 'waiting_for_edge';
+    } else {
+        phase = 'missing_runtime_sync';
+    }
+    return {
+        ready,
+        phase,
+        runtime_sync: rsStatus,
+        errors: Array.isArray(rs?.errors) ? rs.errors : [],
+        edge_attached: edgeAttached,
+        edge_offline: edgeOffline,
+    };
+}
+
+/**
+ * Log lab initialization phase when runtime_sync / edge attach changes.
+ * Updates the blocking Twin overlay. Does not spam the console on every poll.
+ */
+function _noteLabInitChange(labState) {
+    const init = deriveLabInit(labState);
+    updateLabInitOverlay(init);
+    const key = `${init.phase}|${init.runtime_sync}|${init.edge_attached}|${init.edge_offline}`;
+    if (key === _lastLabInitKey) return;
+    _lastLabInitKey = key;
+    const errN = Array.isArray(init.errors) ? init.errors.length : 0;
+    console.info(
+        `[lab-init] phase=${init.phase} ready=${init.ready} runtime_sync=${init.runtime_sync} ` +
+            `edge_attached=${init.edge_attached} edge_offline=${init.edge_offline} errors=${errN}`,
+    );
+    if (errN) {
+        console.warn('[lab-init] errors', init.errors);
+    }
+}
 
 let _deps = {
     placementUiLabel: () => 'PLACED',
@@ -186,6 +269,7 @@ export async function fetchLabState() {
         // the canvas mirrors so commit / checkout / stash changes show up.
         syncGuidesFromLabState();
         syncLaserLinesFromLabState();
+        _noteLabInitChange(store.labState);
         console.log(`[${new Date().toLocaleTimeString()}] Received Lab State successfully.`);
 
         const runtimeError = store.labState.last_runtime_error;

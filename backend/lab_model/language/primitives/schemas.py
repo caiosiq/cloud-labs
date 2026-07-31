@@ -399,13 +399,52 @@ class LocalizeComponentsParameters(BaseModel):
 
 
 class LocalizeComponentsBody(BaseModel):
-    """Measure poses for declared inventory tags (LOCALIZE_COMPONENTS)."""
+    """Deprecated alias of RECORD_TUNABLES for ``nominal_pose`` (LOCALIZE_COMPONENTS)."""
 
     action: Literal["LOCALIZE_COMPONENTS"]
     target_id: str | None = None
     parameters: LocalizeComponentsParameters = Field(
         default_factory=LocalizeComponentsParameters
     )
+
+
+class RecordTunablesParameters(BaseModel):
+    """Overwrite tunables from world/hardware for the given tags and paths."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tag_ids: list[str] = Field(..., min_length=1)
+    tunable_paths: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Tunable field ids, e.g. nominal_pose, exposure_time_ms.",
+    )
+    force_rescan: bool = True
+
+
+class RecordTunablesBody(BaseModel):
+    """RECORD_TUNABLES — overwrite specific recordable tunables from the world."""
+
+    action: Literal["RECORD_TUNABLES"]
+    target_id: str | None = None
+    parameters: RecordTunablesParameters
+
+
+class SyncRuntimeParameters(BaseModel):
+    """Optional tag scope; when omitted, sync all inventory-tracked components."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tag_ids: list[str] | None = None
+    force_rescan: bool = True
+
+
+class SyncRuntimeBody(BaseModel):
+    """SYNC_RUNTIME — RECORD(recordable) + SET(set_at_init) before READY."""
+
+    action: Literal["SYNC_RUNTIME"]
+    target_id: str | None = None
+    parameters: SyncRuntimeParameters = Field(default_factory=SyncRuntimeParameters)
 
 
 ValidatedCommand = Annotated[
@@ -440,6 +479,8 @@ ValidatedCommand = Annotated[
         TeleopGotoBody,
         TeleopJogBody,
         LocalizeComponentsBody,
+        RecordTunablesBody,
+        SyncRuntimeBody,
     ],
     Field(discriminator="action"),
 ]

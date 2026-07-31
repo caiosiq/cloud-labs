@@ -178,16 +178,18 @@ export function releaseSessionLeaseBeacon() {
 }
 
 /**
- * Whether mutations require a lease for the selected backend (from coordinator policy).
+ * Whether Twin mutations require a session lease.
+ *
+ * Always required unless coordinator ``solo`` mode (``CLOUDLABS_SOLO=1``).
+ * Matches backend ``_command_lease_required`` — mock/sim/real are the same.
  * @returns {boolean}
  */
 export function commandLeaseRequired() {
     const policy = store.coordinatorPolicy;
     if (policy?.solo) return false;
-    const backendId = getSelectedBackendId() || '';
-    if (backendId.startsWith('mock.')) {
-        return Boolean(policy?.strict_lease_mock);
+    if (policy && typeof policy.command_lease_required === 'boolean') {
+        return policy.command_lease_required;
     }
-    // Real / other: require lease unless solo.
+    // Fail closed when policy not loaded yet: Twin must Take control.
     return true;
 }

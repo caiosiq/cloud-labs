@@ -114,6 +114,11 @@ from lab_model.execution.optimization.spec import ObjectiveSpec
 from lab_model.execution.optimization.metrics import METRIC_REGISTRY
 from lab_model.execution.optimization.metrics import weighted_sum as _weighted_sum_metrics  # noqa: F401 â€” register
 from lab_model.execution.optimization.kernels import list_kernels
+from lab_model.coordinator.lease_policy import (
+    command_lease_required as _policy_command_lease_required,
+    coordinator_policy as _policy_coordinator_policy,
+    solo_mode as _policy_solo_mode,
+)
 from lab_model.coordinator.jobs.lease_manager import (
     LeaseConflictError,
     LeaseExpiredError,
@@ -137,6 +142,10 @@ from lab_model.coordinator.backends.dispatch import (
 )
 from lab_model.coordinator.jobs.job_manager import JobNotFoundError, parse_snapshot_ref, validate_submit_spec
 from lab_model.coordinator.jobs.initialization_policy import normalize_initialization_policy
+from lab_model.coordinator.lab_initialization import (
+    LabNotInitializedError,
+    ensure_action_allowed,
+)
 from lab_model.coordinator.jobs.runner import run_job, schedule_job_runner
 from lab_model.coordinator.backends.server import BackendSession, require_backend, resolve_backend_id
 from lab_model.execution.edge import edge_agent_registry, edge_command_queue
@@ -344,34 +353,16 @@ def _mock_auto_approve_publish() -> bool:
 
 def _solo_mode() -> bool:
     """Local single-operator mode: mutations do not require a session lease."""
-    flag = (os.environ.get("CLOUDLABS_SOLO") or "").strip().lower()
-    return flag in ("1", "true", "yes")
-
-
-def _strict_lease_mock() -> bool:
-    strict = (os.environ.get("CLOUDLABS_STRICT_LEASE") or "").strip().lower()
-    return strict in ("1", "true", "yes")
+    return _policy_solo_mode()
 
 
 def _coordinator_policy() -> Dict[str, Any]:
-    return {
-        "solo": _solo_mode(),
-        "strict_lease_mock": _strict_lease_mock(),
-    }
+    return _policy_coordinator_policy()
 
 
 def _command_lease_required_for(backend_id: str) -> bool:
-    """Whether mutating commands must present a matching session lease.
-
-    - ``CLOUDLABS_SOLO=1``: never required (laptop / single operator).
-    - ``mock.*``: required only when ``CLOUDLABS_STRICT_LEASE=1``.
-    - real / other backends: always required (Take control or SDK ``connect``).
-    """
-    if _solo_mode():
-        return False
-    if backend_id.startswith("mock."):
-        return _strict_lease_mock()
-    return True
+    """Whether mutating commands must present a matching session lease."""
+    return _policy_command_lease_required(backend_id)
 
 
 def _mock_auto_approve_publish_for(backend_id: str) -> bool:
@@ -442,6 +433,16 @@ def _lease_conflict_response(exc: LeaseConflictError) -> JSONResponse:
         },
     )
 
+
+def _lab_not_initialized_http(exc: LabNotInitializedError) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "message": str(exc),
+            "reason": "lab_not_initialized",
+            "lab_initialization": exc.init,
+        },
+    )
 
 
 def _persist_session_checkpoint_on_shutdown() -> None:
@@ -2190,6 +2191,18 @@ async def get_lab_state():
                 "edge_offline": disconnect,
                 "edge_stale_after_s": DEFAULT_STALE_AFTER_S,
             }
+            try:
+                from lab_model.coordinator.lab_initialization import note_lab_state
+
+                state["lab_initialization"] = note_lab_state(
+                    bid,
+                    state,
+                    source="get_lab_state",
+                    edge_attached=edge_rec is not None,
+                    edge_offline=bool(disconnect),
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("lab_init note_lab_state failed", exc_info=True)
         return JSONResponse(content=state)
     except HTTPException:
         raise
@@ -2201,52 +2214,74 @@ def _schedule_pose_refresh(
     background_tasks: BackgroundTasks,
     payload: Optional[RefreshPoseBody] = None,
 ) -> Dict[str, Any]:
-    body = payload or RefreshPoseBody()
-    kwargs = {
-        "preserve_tag_ids": list(body.preserve_tag_ids or []),
-        "apply_tag_ids": list(body.apply_tag_ids or []),
-        "tag_ids": list(body.tag_ids or []),
-    }
-    scoped = kwargs["tag_ids"] or kwargs["apply_tag_ids"]
+    """Deprecated HTTP helper — Twin uses ``POST /api/command`` RECORD_TUNABLES.
 
-    # Prefer Edge Contract LOCALIZE_COMPONENTS when the active backend is HTTP.
+    Kept for legacy clients; schedules the same RECORD(nominal_pose) path.
+    """
+    from lab_model.coordinator.state.pose_refresh_selection import resolve_pose_refresh_plan
+
+    body = payload or RefreshPoseBody()
+    components: Dict[str, Any] = {}
+    if lab is not None and hasattr(lab, "get_lab_state"):
+        try:
+            st = lab.get_lab_state() or {}
+            raw = st.get("components") if isinstance(st, dict) else None
+            if isinstance(raw, dict):
+                components = raw
+        except Exception:  # noqa: BLE001
+            components = {}
+    plan = resolve_pose_refresh_plan(
+        components,
+        tag_ids=list(body.tag_ids or []) or None,
+        apply_tag_ids=list(body.apply_tag_ids or []) or None,
+        preserve_tag_ids=list(body.preserve_tag_ids or []) or None,
+    )
+    tag_ids = list(plan.scan_tag_ids)
+    if not tag_ids:
+        return {
+            "status": "ok",
+            "message": "No tags selected for RECORD_TUNABLES (nominal_pose)",
+            "scan_tag_ids": [],
+            "via": "RECORD_TUNABLES",
+        }
+
+    cmd_payload: Dict[str, Any] = {
+        "action": "RECORD_TUNABLES",
+        "parameters": {
+            "tag_ids": tag_ids,
+            "tunable_paths": ["nominal_pose"],
+            "force_rescan": True,
+        },
+    }
+    scope_note = f" (scope: {', '.join(tag_ids)})"
+
     try:
         client = _edge_client_for()
-        if client.transport == EdgeTransport.HTTP:
+        if client.transport != EdgeTransport.IN_PROCESS:
 
-            async def _localize() -> None:
-                args: Dict[str, Any] = {"force_rescan": True}
-                if scoped:
-                    args["tag_ids"] = list(scoped)
-                await client.execute_command(
-                    {"action": "LOCALIZE_COMPONENTS", "parameters": args}
-                )
+            async def _record() -> None:
+                await client.execute_command(cmd_payload)
 
-            background_tasks.add_task(_localize)
-            scope_note = f" (scope: {', '.join(scoped)})" if scoped else ""
+            background_tasks.add_task(_record)
             return {
                 "status": "accepted",
-                "message": f"LOCALIZE_COMPONENTS started{scope_note}",
-                "scan_tag_ids": kwargs["apply_tag_ids"] or kwargs["tag_ids"] or None,
-                "via": "LOCALIZE_COMPONENTS",
+                "message": f"RECORD_TUNABLES started{scope_note}",
+                "scan_tag_ids": tag_ids,
+                "via": "RECORD_TUNABLES",
             }
     except Exception as exc:  # noqa: BLE001
-        logger.warning("LOCALIZE_COMPONENTS path unavailable, falling back: %s", exc)
+        logger.warning("RECORD_TUNABLES edge path unavailable, falling back: %s", exc)
 
     if lab is None:
         raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
-    fn = getattr(lab, "refresh_pose_from_camera", None)
-    if callable(fn):
-        background_tasks.add_task(functools.partial(fn, **kwargs))
-        scope_note = f" (scope: {', '.join(scoped)})" if scoped else ""
-        return {
-            "status": "accepted",
-            "message": f"Pose refresh from camera started{scope_note}",
-            "scan_tag_ids": kwargs["apply_tag_ids"] or None,
-        }
+    try:
+        cmd = parse_command_payload(cmd_payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=validation_error_detail(e)) from e
     return {
-        "status": "ok",
-        "message": "Pose refresh not supported for this lab backend",
+        **schedule_validated_command(lab, cmd, background_tasks),
+        "scan_tag_ids": tag_ids,
+        "via": "RECORD_TUNABLES",
     }
 
 
@@ -2267,9 +2302,9 @@ def _pose_refresh_offers_dict(scope_tag_ids: Optional[List[str]] = None) -> Dict
         "thresholds": thresholds_dict,
         "offers": [],
         "hardware_note": (
-            "Applying refresh runs a camera scan and updates tunables.reported_pose "
-            "(bench report of the pose tunable; legacy measurables.pose is mirrored)."
-            "for checked components."
+            "Applying refresh runs RECORD_TUNABLES for tunables.nominal_pose "
+            "(camera / world overwrite) on checked components. Twin applies via "
+            "POST /api/command; this offers endpoint is preview-only."
         ),
     }
 
@@ -2321,9 +2356,10 @@ async def refresh_lab_pose_from_camera(
     background_tasks: BackgroundTasks,
     payload: Optional[RefreshPoseBody] = Body(None),
 ):
-    """
-    Re-localize component poses from the overhead / table camera (real: full scan; mock: simulated noise).
-  Supports scoped refresh via ``tag_ids`` / ``apply_tag_ids`` (preferred) or legacy ``preserve_tag_ids``.
+    """Deprecated: Twin uses ``POST /api/command`` with ``RECORD_TUNABLES``.
+
+    Legacy convenience wrapper that schedules RECORD(nominal_pose) for the
+    resolved apply/preserve tag set.
     """
     cur = getattr(lab, "get_lab_state", lambda: {})
     try:
@@ -2342,7 +2378,7 @@ async def refresh_lab_state_legacy(
     background_tasks: BackgroundTasks,
     payload: Optional[RefreshPoseBody] = Body(None),
 ):
-    """Deprecated: use ``POST /api/lab-state/refresh-pose`` (same behavior)."""
+    """Deprecated: use ``POST /api/command`` RECORD_TUNABLES (nominal_pose)."""
     return _schedule_pose_refresh(background_tasks, payload)
 
 
@@ -4539,6 +4575,19 @@ async def receive_command(
             cmd = parse_command_payload(payload)
         except ValidationError as e:
             raise HTTPException(status_code=400, detail=validation_error_detail(e))
+        edge_rec = edge_agent_registry.get_for_backend(backend_id)
+        disconnect = edge_agent_registry.last_disconnect(backend_id)
+        gate_state = edge_agent_registry.get_cached_lab_state(backend_id)
+        try:
+            ensure_action_allowed(
+                backend_id,
+                cmd.action,
+                gate_state if isinstance(gate_state, dict) else None,
+                edge_attached=edge_rec is not None,
+                edge_offline=bool(disconnect),
+            )
+        except LabNotInitializedError as exc:
+            raise _lab_not_initialized_http(exc) from exc
         edge_result = await _southbound_execute(
             payload if isinstance(payload, dict) else {"action": cmd.action},
             backend_id=backend_id,
@@ -4575,73 +4624,78 @@ async def receive_command(
     lab._command_lease_id = lease_id
     lab._command_backend_id = backend_id
 
-    if isinstance(cmd, RecordMeasurablesBody):
-        if runtime_manager is None:
-            await execute_validated_command(lab, cmd)
-            meas = fetch_read_primitive(
-                lab,
-                PrimitiveId.GET_MEASURABLES,
-                cmd.target_id,
-            )
+    try:
+        if isinstance(cmd, RecordMeasurablesBody):
+            if runtime_manager is None:
+                await execute_validated_command(lab, cmd)
+                meas = fetch_read_primitive(
+                    lab,
+                    PrimitiveId.GET_MEASURABLES,
+                    cmd.target_id,
+                )
+                return {"status": "ok", "measurables": meas}
+            try:
+                target_lab, token = runtime_manager.reserve_operation()
+            except Exception as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            try:
+                target_lab._command_lease_id = lease_id
+                target_lab._command_backend_id = backend_id
+                await execute_validated_command(target_lab, cmd)
+                meas = fetch_read_primitive(
+                    target_lab,
+                    PrimitiveId.GET_MEASURABLES,
+                    cmd.target_id,
+                )
+            finally:
+                runtime_manager.release_operation(token)
             return {"status": "ok", "measurables": meas}
+
+        if isinstance(cmd, EvalKernelBody):
+            try:
+                if runtime_manager is None:
+                    result = await execute_validated_command(lab, cmd)
+                else:
+                    try:
+                        target_lab, token = runtime_manager.reserve_operation()
+                    except Exception as exc:
+                        raise HTTPException(status_code=409, detail=str(exc)) from exc
+                    try:
+                        target_lab._command_lease_id = lease_id
+                        target_lab._command_backend_id = backend_id
+                        result = await execute_validated_command(target_lab, cmd)
+                    finally:
+                        runtime_manager.release_operation(token)
+            except LabNotInitializedError as exc:
+                raise _lab_not_initialized_http(exc) from exc
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if not isinstance(result, dict):
+                raise HTTPException(status_code=500, detail="EVAL_KERNEL returned no result")
+            return {"status": "ok", **result}
+
+        if runtime_manager is None:
+            return schedule_validated_command(lab, cmd, background_tasks)
+
         try:
             target_lab, token = runtime_manager.reserve_operation()
         except Exception as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        reserved_tasks = _ReservedBackgroundTasks(
+            background_tasks,
+            runtime_manager,
+            token,
+        )
         try:
-            target_lab._command_lease_id = lease_id
-            target_lab._command_backend_id = backend_id
-            await execute_validated_command(target_lab, cmd)
-            meas = fetch_read_primitive(
-                target_lab,
-                PrimitiveId.GET_MEASURABLES,
-                cmd.target_id,
-            )
-        finally:
+            response = schedule_validated_command(target_lab, cmd, reserved_tasks)
+        except Exception:
             runtime_manager.release_operation(token)
-        return {"status": "ok", "measurables": meas}
-
-    if isinstance(cmd, EvalKernelBody):
-        try:
-            if runtime_manager is None:
-                result = await execute_validated_command(lab, cmd)
-            else:
-                try:
-                    target_lab, token = runtime_manager.reserve_operation()
-                except Exception as exc:
-                    raise HTTPException(status_code=409, detail=str(exc)) from exc
-                try:
-                    target_lab._command_lease_id = lease_id
-                    target_lab._command_backend_id = backend_id
-                    result = await execute_validated_command(target_lab, cmd)
-                finally:
-                    runtime_manager.release_operation(token)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if not isinstance(result, dict):
-            raise HTTPException(status_code=500, detail="EVAL_KERNEL returned no result")
-        return {"status": "ok", **result}
-
-    if runtime_manager is None:
-        return schedule_validated_command(lab, cmd, background_tasks)
-
-    try:
-        target_lab, token = runtime_manager.reserve_operation()
-    except Exception as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    reserved_tasks = _ReservedBackgroundTasks(
-        background_tasks,
-        runtime_manager,
-        token,
-    )
-    try:
-        response = schedule_validated_command(target_lab, cmd, reserved_tasks)
-    except Exception:
-        runtime_manager.release_operation(token)
-        raise
-    if not reserved_tasks.scheduled:
-        runtime_manager.release_operation(token)
-    return response
+            raise
+        if not reserved_tasks.scheduled:
+            runtime_manager.release_operation(token)
+        return response
+    except LabNotInitializedError as exc:
+        raise _lab_not_initialized_http(exc) from exc
 
 # --------------------------------------------------------------------------
 # Lab-wide ``/api/table-cam/*`` HTTP surface removed in Phase 9d.

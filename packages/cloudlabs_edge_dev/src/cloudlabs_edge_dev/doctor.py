@@ -13,12 +13,22 @@ from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
 from cloudlabs_edge_dev import CONTRACT_VERSION, __version__ as KIT_VERSION
+from cloudlabs_edge_dev.edge_data import (
+    LibraryValidationError,
+    capabilities_wants_runtime_sync,
+    load_inventory,
+    load_library,
+    validate_inventory_against_library,
+    validate_library_document,
+)
 from cloudlabs_edge_dev.scaffold import REQUIRED_EDGE_FILES as _REQUIRED_EDGE_FILES
 from cloudlabs_edge_dev.schemas_path import contract_schemas_dir, load_schema
 
 _SCHEMA_FILES = (
     "capabilities.schema.json",
     "bench.schema.json",
+    "library.schema.json",
+    "inventory.schema.json",
     "execute_request.schema.json",
     "execute_response.schema.json",
     "measurable_live_decl.schema.json",
@@ -26,6 +36,8 @@ _SCHEMA_FILES = (
     "teleop_ws_server.schema.json",
     "epoch_packet.schema.json",
 )
+
+_RUNTIME_SYNC_PRIMITIVES = frozenset({"RECORD_TUNABLES", "SYNC_RUNTIME"})
 
 
 def _schema_registry() -> Registry:
@@ -196,6 +208,8 @@ def run_doctor(edge_path: Optional[Path] = None) -> DoctorReport:
         for name in (
             "capabilities.schema.json",
             "bench.schema.json",
+            "library.schema.json",
+            "inventory.schema.json",
             "execute_request.schema.json",
             "execute_response.schema.json",
         ):
@@ -267,6 +281,7 @@ def run_doctor(edge_path: Optional[Path] = None) -> DoctorReport:
         report.add("contract_version.txt pin", False, "file missing")
 
     # capabilities.json
+    caps: dict[str, Any] | None = None
     caps_path = root / "capabilities.json"
     if caps_path.is_file():
         try:
@@ -302,6 +317,36 @@ def run_doctor(edge_path: Optional[Path] = None) -> DoctorReport:
                 repr(backend_id),
                 level="warn" if not backend_id else "info",
             )
+
+            wants_sync = capabilities_wants_runtime_sync(caps)
+            features = caps.get("features") if isinstance(caps.get("features"), dict) else {}
+            feature_flag = bool(features.get("runtime_sync"))
+            missing_sync_prims = sorted(_RUNTIME_SYNC_PRIMITIVES - declared)
+            if wants_sync or feature_flag:
+                report.add(
+                    "runtime_sync primitives declared",
+                    not missing_sync_prims,
+                    (
+                        "missing: " + ", ".join(missing_sync_prims)
+                        if missing_sync_prims
+                        else "RECORD_TUNABLES + SYNC_RUNTIME present"
+                    ),
+                )
+                if feature_flag and "SYNC_RUNTIME" not in declared:
+                    report.add(
+                        "features.runtime_sync implies SYNC_RUNTIME",
+                        False,
+                        "capabilities.features.runtime_sync=true but "
+                        "SYNC_RUNTIME not in supported_primitives "
+                        "(fix the declaration; do not paper this over at runtime)",
+                    )
+            else:
+                report.add(
+                    "runtime_sync primitives declared",
+                    True,
+                    "features.runtime_sync not set (skipped)",
+                    level="info",
+                )
     else:
         report.add("capabilities.json parse", False, "file missing")
 
@@ -317,6 +362,81 @@ def run_doctor(edge_path: Optional[Path] = None) -> DoctorReport:
             report.add("bench/layout.json schema", err is None, err or "")
     else:
         report.add("bench/layout.json schema", False, "file missing")
+
+    # data/library.json + inventory — validate, never backfill
+    lib_path = root / "data" / "library.json"
+    inv_path = root / "data" / "inventory.json"
+    strict_recordable = bool(
+        isinstance(caps, dict) and capabilities_wants_runtime_sync(caps)
+    )
+    if lib_path.is_file():
+        try:
+            library = json.loads(lib_path.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            report.add("data/library.json parse", False, str(e))
+            library = None
+        if isinstance(library, dict):
+            err = _validate_instance(library, "library.schema.json")
+            report.add("data/library.json schema", err is None, err or "")
+            try:
+                warns = validate_library_document(
+                    library,
+                    source=str(lib_path),
+                    strict_recordable=strict_recordable,
+                )
+                report.add(
+                    "library tunable recordable/set_at_init",
+                    True,
+                    (
+                        f"strict_recordable={strict_recordable}; "
+                        + (
+                            f"{len(warns)} soft warning(s) — "
+                            "declare recordable explicitly before enabling "
+                            "features.runtime_sync"
+                            if warns
+                            else "ok"
+                        )
+                    ),
+                )
+                for w in warns[:12]:
+                    report.add(
+                        "library tunable metadata warning",
+                        False,
+                        w,
+                        level="warn",
+                    )
+                if len(warns) > 12:
+                    report.add(
+                        "library tunable metadata warning",
+                        False,
+                        f"... and {len(warns) - 12} more",
+                        level="warn",
+                    )
+            except LibraryValidationError as e:
+                report.add(
+                    "library tunable recordable/set_at_init",
+                    False,
+                    str(e),
+                )
+    else:
+        report.add("data/library.json parse", False, "file missing")
+
+    if inv_path.is_file() and lib_path.is_file():
+        try:
+            library = load_library(root, strict_recordable=False, validate=True)
+            inventory = load_inventory(root)
+            validate_inventory_against_library(library, inventory)
+            err = _validate_instance(inventory, "inventory.schema.json")
+            report.add("data/inventory.json schema", err is None, err or "")
+            report.add("inventory tags ⊆ library", True, "ok")
+        except Exception as e:  # noqa: BLE001
+            report.add("inventory tags ⊆ library", False, str(e))
+    elif inv_path.is_file():
+        report.add(
+            "inventory tags ⊆ library",
+            False,
+            "inventory present but library missing",
+        )
 
     # adapters / latch / kernel_host: warn while still Phase-5 NotImplementedError
     skeleton_modules = [

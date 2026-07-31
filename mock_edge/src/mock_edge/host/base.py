@@ -161,6 +161,13 @@ class LabCommunicator:
             on_motion_idle=self._on_teleop_motion_idle,
         )
         self._teleop = TeleopController(self)
+        # READY gate: SYNC_RUNTIME must succeed before motion (see
+        # docs/RECORD_TUNABLES_AND_SYNC_RUNTIME.md).
+        self._runtime_sync: Dict[str, Any] = {
+            "status": "pending",
+            "errors": [],
+            "completed_at": None,
+        }
 
     def _on_teleop_motion_idle(self, tag_id: str) -> None:
         with self._state_lock:
@@ -296,6 +303,37 @@ class LabCommunicator:
                 "lines": json.loads(json.dumps(seed.get("lines") or [])),
             }
 
+    def set_runtime_sync_status(
+        self,
+        status: str,
+        *,
+        errors: Optional[List[Any]] = None,
+    ) -> None:
+        """Stamp ``runtime_sync`` for lab-state / READY gating."""
+        from datetime import timezone
+
+        status_norm = str(status or "pending").strip().lower()
+        payload: Dict[str, Any] = {
+            "status": status_norm,
+            "errors": list(errors or []),
+            "completed_at": (
+                datetime.now(timezone.utc).isoformat()
+                if status_norm == "ready"
+                else None
+            ),
+        }
+        self._runtime_sync = payload
+        print(
+            f"[lab_init] {self.log_prefix} runtime_sync status={status_norm} "
+            f"errors={len(payload.get('errors') or [])}"
+        )
+
+    def runtime_sync_status(self) -> str:
+        return str((self._runtime_sync or {}).get("status") or "pending")
+
+    def is_runtime_ready(self) -> bool:
+        return self.runtime_sync_status() == "ready"
+
     def get_lab_state(self) -> Dict[str, Any]:
         """Deep-copy snapshot of ``self.current_state`` for the UI.
 
@@ -309,6 +347,7 @@ class LabCommunicator:
           keys only â€” never overwrites committed setpoints.
         - Normalizes ``state["holding"]`` so the UI never sees
           ``undefined`` for held tag / requires_operator_confirm.
+        - Exposes ``runtime_sync`` (READY = status ``ready`` after SYNC_RUNTIME).
         """
         with self._state_lock:
             self._ensure_overlay_fields_locked()
@@ -316,6 +355,7 @@ class LabCommunicator:
         normalize_components_map(state.get("components") or {})
         inject_motor_rotations_into_state(state, self._catalog_meta_for_tag)
         get_holding(state)  # normalizes in-place
+        state["runtime_sync"] = dict(self._runtime_sync or {"status": "pending"})
         return state
 
     def return_tunables_for_tag(self, tag_id: str) -> Dict[str, Any]:

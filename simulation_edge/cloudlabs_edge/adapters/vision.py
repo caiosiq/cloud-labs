@@ -1,8 +1,10 @@
-"""Synthetic camera capture for sim observe / kernel eval."""
+"""Synthetic camera capture for sim observe / kernel eval + RECORD/SYNC."""
 
 from __future__ import annotations
 
 from typing import Any, Optional
+
+from adapters import context
 
 
 def capture_bgr(tag_id: str, *, exposure_s: Optional[float] = None) -> Any:
@@ -42,35 +44,74 @@ def capture_jpeg(tag_id: str, *, profile: str | None = None) -> bytes:
     return encode_jpeg(capture_bgr(tag_id))
 
 
-def localize_components(args: dict[str, Any]) -> dict[str, Any]:
-    """LOCALIZE_COMPONENTS for simulation — inventory-scoped; soft if no scan helper."""
-    from pathlib import Path
+async def localize_components(args: dict[str, Any]) -> dict[str, Any]:
+    return await record_tunables(
+        {
+            "tag_ids": args.get("tag_ids"),
+            "tunable_paths": ["nominal_pose"],
+            "force_rescan": args.get("force_rescan", True),
+        }
+    )
 
-    from cloudlabs_edge_dev.edge_data import default_localize_tag_ids, load_inventory
 
-    from adapters import context
-
-    edge_root = Path(__file__).resolve().parent.parent
-    inventory = load_inventory(edge_root)
+async def record_tunables(args: dict[str, Any]) -> dict[str, Any]:
+    lab = context.get_lab()
+    fn = getattr(lab, "record_tunables", None)
+    if not callable(fn):
+        raise RuntimeError("lab.record_tunables is not implemented")
     raw_ids = args.get("tag_ids")
-    if isinstance(raw_ids, list) and raw_ids:
-        tag_ids = [str(t).strip() for t in raw_ids if str(t).strip()]
-    else:
-        tag_ids = default_localize_tag_ids(inventory)
+    tag_ids = (
+        [str(t).strip() for t in raw_ids if str(t).strip()]
+        if isinstance(raw_ids, list)
+        else None
+    )
+    raw_paths = args.get("tunable_paths")
+    paths = (
+        [str(p).strip() for p in raw_paths if str(p).strip()]
+        if isinstance(raw_paths, list)
+        else None
+    )
+    result = fn(
+        tag_ids=tag_ids,
+        tunable_paths=paths,
+        force_rescan=bool(args.get("force_rescan", True)),
+    )
+    if hasattr(result, "__await__"):
+        result = await result
+    return result if isinstance(result, dict) else {"status": "ok"}
+
+
+async def sync_runtime(args: dict[str, Any]) -> dict[str, Any]:
+    from lab_model.language.primitives.macros.sync_runtime import run_sync_runtime
+    from lab_model.language.primitives.schemas import SyncRuntimeBody
 
     lab = context.get_lab()
-    fn = getattr(lab, "refresh_pose_from_camera", None)
-    if callable(fn):
-        fn(tag_ids=tag_ids)
-
-    poses: dict[str, Any] = {}
-    state = lab.get_lab_state() if hasattr(lab, "get_lab_state") else {}
-    components = (state or {}).get("components") or {}
-    for tid in tag_ids:
-        comp = components.get(tid) if isinstance(components, dict) else None
-        pose = None
-        if isinstance(comp, dict):
-            tun = ((comp.get("statecontrol") or {}).get("tunables") or {})
-            pose = tun.get("reported_pose") or tun.get("nominal_pose")
-        poses[tid] = dict(pose) if isinstance(pose, dict) else None
-    return {"tag_ids": tag_ids, "poses": poses}
+    if hasattr(lab, "set_runtime_sync_status"):
+        lab.set_runtime_sync_status("running")
+    raw_ids = args.get("tag_ids")
+    tag_ids = (
+        [str(t).strip() for t in raw_ids if str(t).strip()]
+        if isinstance(raw_ids, list)
+        else None
+    )
+    params: dict[str, Any] = {}
+    if tag_ids:
+        params["tag_ids"] = tag_ids
+    body = SyncRuntimeBody(action="SYNC_RUNTIME", parameters=params)
+    try:
+        result = await run_sync_runtime(lab, body)
+    except Exception as exc:  # noqa: BLE001
+        if hasattr(lab, "set_runtime_sync_status"):
+            lab.set_runtime_sync_status("failed", errors=[str(exc)])
+        raise
+    errors = []
+    status = "ready"
+    if isinstance(result, dict):
+        errors = list(result.get("errors") or [])
+        if errors or result.get("status") == "failed":
+            status = "failed"
+    if hasattr(lab, "set_runtime_sync_status"):
+        lab.set_runtime_sync_status(status, errors=errors)
+    out = dict(result) if isinstance(result, dict) else {"status": status}
+    out.setdefault("runtime_sync", {"status": status})
+    return out

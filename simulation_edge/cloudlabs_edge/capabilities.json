@@ -5,6 +5,7 @@
     "torchscript_execution": true,
     "hardware_reconciliation": false,
     "hardware_triggered_latch": false,
+    "runtime_sync": true,
     "lan_direct_streams": true
   },
   "supported_primitives": [
@@ -21,7 +22,9 @@
     "PLACE_FROM_STORAGE",
     "REPACK_STORAGE",
     "RECENTER_IN_STORAGE",
-    "LOCALIZE_COMPONENTS"
+    "LOCALIZE_COMPONENTS",
+    "RECORD_TUNABLES",
+    "SYNC_RUNTIME"
   ],
   "measurables": {
     "tag_22.camera_image": {

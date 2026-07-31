@@ -23,6 +23,10 @@
         "torchscript_execution": { "type": "boolean" },
         "hardware_reconciliation": { "type": "boolean" },
         "hardware_triggered_latch": { "type": "boolean" },
+        "runtime_sync": {
+          "type": "boolean",
+          "description": "If true, edge runs SYNC_RUNTIME (RECORD + set_at_init) before advertising READY."
+        },
         "lan_direct_streams": {
           "type": "boolean",
           "description": "If true, clients on same LAN may attach to stream URLs directly; coordinator still proxies by default."

@@ -70,10 +70,41 @@
               "minItems": 1,
               "items": { "type": "string", "minLength": 1 }
             },
-            "statecontrol": { "type": "object", "additionalProperties": true },
+            "statecontrol": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "tunables": {
+                  "type": "object",
+                  "additionalProperties": { "$ref": "#/$defs/tunableDescriptor" },
+                  "description": "Per-tunable widgets; recordable / set_at_init for SYNC_RUNTIME."
+                },
+                "measurables": { "type": "object", "additionalProperties": true }
+              }
+            },
             "telemetry": { "type": "object", "additionalProperties": true }
           }
         }
+      }
+    },
+    "tunableDescriptor": {
+      "type": "object",
+      "required": ["widget"],
+      "additionalProperties": true,
+      "properties": {
+        "widget": { "type": "string", "minLength": 1 },
+        "recordable": {
+          "type": "boolean",
+          "description": "If true, RECORD_TUNABLES / SYNC_RUNTIME may overwrite from the world. If false/omitted (except nominal_pose default true), set_at_init is required."
+        },
+        "set_at_init": {
+          "description": "Required when recordable is false: standard value applied during SYNC_RUNTIME."
+        },
+        "physical_interpretation": { "type": "string" },
+        "unit": { "type": "string" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "default": {}
       }
     }
   }

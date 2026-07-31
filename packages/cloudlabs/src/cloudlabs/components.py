@@ -65,10 +65,45 @@ class ComponentProxy:
         return self.client.measurable(self.tag_id, field)
 
     def refresh_pose(self, *, include_measurables: bool = True) -> Dict[str, Any]:
+        """Read current ``nominal_pose`` from lab-state (not a camera RECORD)."""
         return self.client.refresh_pose(
             self.tag_id,
             include_measurables=include_measurables,
         )
+
+    def record_tunables(
+        self,
+        tunable_paths: Union[str, Sequence[str]],
+        *,
+        force_rescan: bool = True,
+        wait: bool = True,
+    ) -> "ComponentProxy":
+        """``RECORD_TUNABLES`` for this tag (one or more tunable paths)."""
+        if isinstance(tunable_paths, str):
+            paths: Sequence[str] = [tunable_paths]
+        else:
+            paths = tunable_paths
+        self.client.record_tunables(
+            [self.tag_id],
+            paths,
+            force_rescan=force_rescan,
+            wait=wait,
+        )
+        return self
+
+    def record_pose(
+        self,
+        *,
+        force_rescan: bool = True,
+        wait: bool = True,
+    ) -> "ComponentProxy":
+        """Re-measure ``nominal_pose`` from the world (camera / scan)."""
+        self.client.record_nominal_poses(
+            [self.tag_id],
+            force_rescan=force_rescan,
+            wait=wait,
+        )
+        return self
 
     def describe(self, *, refresh: bool = False) -> Dict[str, Any]:
         return self.client.describe_component(self.tag_id, refresh=refresh)

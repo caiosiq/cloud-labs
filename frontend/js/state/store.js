@@ -6,8 +6,8 @@ export const store = {
     /** Cached rows from GET /api/backends. */
     backends: [],
     /**
-     * Coordinator policy from GET /api/backends (solo / strict mock lease).
-     * @type {{ solo?: boolean, strict_lease_mock?: boolean } | null}
+     * Coordinator policy from GET /api/backends (solo / command_lease_required).
+     * @type {{ solo?: boolean, command_lease_required?: boolean, strict_lease_mock?: boolean } | null}
      */
     coordinatorPolicy: null,
     runtimeMode: null,

@@ -12,8 +12,9 @@ import copy
 import math
 import os
 import threading
-from datetime import datetime
-from typing import Any, Dict, Iterable, Mapping, Optional
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -86,8 +87,15 @@ class SimulationHost:
         self.current_state = copy.deepcopy(dict(state))
         self.layout = copy.deepcopy(dict(layout))
         self._lock = threading.RLock()
+        # Alias for coordinator tunable commit helpers (``commit_nominal_pose``).
+        self._state_lock = self._lock
         self._last_runtime_error: Optional[Dict[str, Any]] = None
         self._poses: Dict[str, Dict[str, float]] = {}
+        self._runtime_sync: Dict[str, Any] = {
+            "status": "pending",
+            "errors": [],
+            "completed_at": None,
+        }
         components = self.current_state.get("components")
         if isinstance(components, dict):
             for tag, comp in components.items():
@@ -105,6 +113,103 @@ class SimulationHost:
         )
         if want:
             self._start_mujoco(show_viewer=show_viewer, realtime=realtime)
+        self._maybe_boot_sync_runtime()
+
+    def _persist_state(self) -> None:
+        """No-op persist hook for shared tunable commit helpers."""
+
+    def _edge_data_root(self) -> Optional[Path]:
+        candidate = Path(__file__).resolve().parents[3] / "cloudlabs_edge"
+        if (candidate / "data" / "library.json").is_file():
+            return candidate
+        return None
+
+    def get_component_library(self) -> Dict[str, Any]:
+        from cloudlabs_edge_dev.edge_data import load_library
+
+        root = self._edge_data_root()
+        if root is None:
+            return {"schema_version": 1, "components": {}}
+        return load_library(root, strict_recordable=False, validate=True)
+
+    def get_inventory(self) -> Dict[str, Any]:
+        from cloudlabs_edge_dev.edge_data import load_inventory
+
+        root = self._edge_data_root()
+        if root is None:
+            return {"schema_version": 1, "entries": {}}
+        return load_inventory(root)
+
+    def set_runtime_sync_status(
+        self,
+        status: str,
+        *,
+        errors: Optional[List[Any]] = None,
+    ) -> None:
+        status_norm = str(status or "pending").strip().lower()
+        self._runtime_sync = {
+            "status": status_norm,
+            "errors": list(errors or []),
+            "completed_at": (
+                datetime.now(timezone.utc).isoformat()
+                if status_norm == "ready"
+                else None
+            ),
+        }
+        print(
+            f"[lab_init] {self.log_prefix} runtime_sync status={status_norm} "
+            f"errors={len(self._runtime_sync.get('errors') or [])}"
+        )
+
+    def runtime_sync_status(self) -> str:
+        return str((self._runtime_sync or {}).get("status") or "pending")
+
+    def is_runtime_ready(self) -> bool:
+        return self.runtime_sync_status() == "ready"
+
+    def _maybe_boot_sync_runtime(self) -> None:
+        if _env_bool("CLOUDLABS_SKIP_RUNTIME_SYNC", False):
+            print(f"{self.log_prefix} runtime_sync skipped (CLOUDLABS_SKIP_RUNTIME_SYNC)")
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self._boot_sync_runtime())
+            return
+        print(
+            f"{self.log_prefix} runtime_sync deferred "
+            "(event loop already running at construct)"
+        )
+
+    async def _boot_sync_runtime(self) -> None:
+        from lab_model.language.primitives.macros.sync_runtime import run_sync_runtime
+        from lab_model.language.primitives.schemas import SyncRuntimeBody
+
+        self.set_runtime_sync_status("running")
+        try:
+            delay_s = float(os.getenv("CLOUDLABS_MOCK_INIT_DELAY_S", "2") or "2")
+        except ValueError:
+            delay_s = 2.0
+        if delay_s > 0:
+            print(
+                f"[lab_init] {self.log_prefix} runtime_sync measuring "
+                f"(delay={delay_s:g}s)"
+            )
+            await asyncio.sleep(delay_s)
+        try:
+            result = await run_sync_runtime(
+                self, SyncRuntimeBody(action="SYNC_RUNTIME")
+            )
+            status = "ready"
+            errors: List[Any] = []
+            if isinstance(result, dict):
+                errors = list(result.get("errors") or [])
+                if errors or result.get("status") == "failed":
+                    status = "failed"
+            self.set_runtime_sync_status(status, errors=errors)
+        except Exception as exc:  # noqa: BLE001
+            self.set_runtime_sync_status("failed", errors=[str(exc)])
+            print(f"{self.log_prefix} SYNC_RUNTIME boot failed: {exc}")
 
     def _start_mujoco(
         self,
@@ -181,6 +286,7 @@ class SimulationHost:
             if spawn_adjustments:
                 simulator["spawn_adjustments"] = copy.deepcopy(spawn_adjustments)
             state["simulator"] = simulator
+            state["runtime_sync"] = dict(self._runtime_sync or {"status": "pending"})
             return state
 
     def supports_primitive(self, action: str) -> bool:
@@ -208,6 +314,94 @@ class SimulationHost:
             pose = copy.deepcopy(self._poses.get(tag) or {"x": 0.0, "y": 0.0, "rotation": 0.0})
         return {"nominal_pose": pose}
 
+    async def set_exposure_time_ms(self, target_id: str, exposure_time_ms: float) -> None:
+        with self._lock:
+            tun = self._component_tunables(str(target_id))
+            tun["exposure_time_ms"] = float(exposure_time_ms)
+
+    async def set_output_power_mw(self, target_id: str, output_power_mw: float) -> None:
+        with self._lock:
+            tun = self._component_tunables(str(target_id))
+            tun["output_power_mw"] = float(output_power_mw)
+
+    async def set_motor_setpoint(
+        self, target_id: str, motor_id: int, angle_deg: float
+    ) -> None:
+        with self._lock:
+            tun = self._component_tunables(str(target_id))
+            motors = tun.setdefault("nominal_motor_positions", {})
+            if not isinstance(motors, dict):
+                motors = {}
+                tun["nominal_motor_positions"] = motors
+            motors[str(int(motor_id))] = float(angle_deg)
+
+    async def record_tunables(
+        self,
+        tag_ids: Optional[List[str]] = None,
+        tunable_paths: Optional[List[str]] = None,
+        force_rescan: bool = True,
+    ) -> Dict[str, Any]:
+        """RECORD_TUNABLES — copy soft world poses/values into tunables."""
+        _ = force_rescan
+        from cloudlabs_edge_dev.edge_data import default_localize_tag_ids
+
+        paths = [str(p) for p in (tunable_paths or ["nominal_pose"]) if str(p).strip()]
+        ids = [str(t).strip() for t in (tag_ids or []) if str(t).strip()]
+        if not ids:
+            ids = default_localize_tag_ids(self.get_inventory())
+
+        values: Dict[str, Dict[str, Any]] = {}
+        poses: Dict[str, Any] = {}
+        for tid in ids:
+            recorded: Dict[str, Any] = {}
+            for path in paths:
+                if path == "nominal_pose":
+                    with self._lock:
+                        pose = copy.deepcopy(
+                            self._poses.get(tid)
+                            or {"x": 0.0, "y": 0.0, "rotation": 0.0}
+                        )
+                    self._set_pose(
+                        tid,
+                        float(pose["x"]),
+                        float(pose["y"]),
+                        float(pose.get("rotation", 0.0)),
+                    )
+                    recorded[path] = pose
+                    poses[tid] = pose
+                else:
+                    with self._lock:
+                        try:
+                            tun = self._component_tunables(tid)
+                            value = copy.deepcopy(tun.get(path))
+                        except ValueError:
+                            value = None
+                    if value is not None:
+                        with self._lock:
+                            tun = self._component_tunables(tid)
+                            tun[path] = copy.deepcopy(value)
+                    recorded[path] = value
+            values[tid] = recorded
+            poses.setdefault(tid, recorded.get("nominal_pose"))
+            print(f"[lab_init] {self.log_prefix} RECORD_TUNABLES tag={tid} paths={paths} ok")
+        return {
+            "tag_ids": ids,
+            "tunable_paths": paths,
+            "values": values,
+            "poses": poses,
+        }
+
+    async def localize_components(
+        self,
+        tag_ids: Optional[List[str]] = None,
+        force_rescan: bool = True,
+    ) -> Dict[str, Any]:
+        return await self.record_tunables(
+            tag_ids=tag_ids,
+            tunable_paths=["nominal_pose"],
+            force_rescan=force_rescan,
+        )
+
     def _set_pose(self, tag_id: str, x: float, y: float, rotation: float) -> None:
         with self._lock:
             self._poses[tag_id] = {"x": x, "y": y, "rotation": rotation}
@@ -228,9 +422,7 @@ class SimulationHost:
                 tun = {}
                 sc["tunables"] = tun
             tun["nominal_pose"] = {"x": x, "y": y, "rotation": rotation}
-            reported = tun.setdefault("reported_pose", {})
-            if isinstance(reported, dict):
-                reported.update({"x": x, "y": y, "rotation": rotation})
+            tun.pop("reported_pose", None)
 
             measurables = sc.setdefault("measurables", {})
             if isinstance(measurables, dict):
@@ -239,16 +431,22 @@ class SimulationHost:
                     measured_pose.update({"x": x, "y": y, "rotation": rotation})
 
     def _component_tunables(self, tag_id: str) -> Dict[str, Any]:
-        components = self.current_state.get("components")
-        entry = components.get(tag_id) if isinstance(components, dict) else None
+        components = self.current_state.setdefault("components", {})
+        if not isinstance(components, dict):
+            components = {}
+            self.current_state["components"] = components
+        entry = components.get(tag_id)
         if not isinstance(entry, dict):
-            raise ValueError(f"unknown component {tag_id!r}")
-        statecontrol = entry.get("statecontrol")
+            entry = {"tag_id": tag_id, "statecontrol": {"tunables": {}, "measurables": {}}}
+            components[tag_id] = entry
+        statecontrol = entry.setdefault("statecontrol", {})
         if not isinstance(statecontrol, dict):
-            raise ValueError(f"component {tag_id!r} has no statecontrol")
-        tunables = statecontrol.get("tunables")
+            statecontrol = {}
+            entry["statecontrol"] = statecontrol
+        tunables = statecontrol.setdefault("tunables", {})
         if not isinstance(tunables, dict):
-            raise ValueError(f"component {tag_id!r} has no tunables")
+            tunables = {}
+            statecontrol["tunables"] = tunables
         return tunables
 
     @staticmethod

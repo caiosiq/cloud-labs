@@ -16,7 +16,8 @@ import {
     RECONCILE_POLL_INTERVAL_MS,
     RECONCILE_STEP_TIMEOUT_MS,
 } from '../config.js';
-import { backendHeaders } from '../state/backend-selection.js';
+import { leaseHeaders } from '../api/session-lease.js';
+import { runtimeEditableOrMessage } from './control-state.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -111,7 +112,7 @@ function clearAllHighlights() {
 async function postPrimitive(envelope) {
     const res = await fetch('/api/command', {
         method: 'POST',
-        headers: backendHeaders({ 'Content-Type': 'application/json' }),
+        headers: leaseHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
             action: envelope.action,
             target_id: envelope.target_id,
@@ -173,6 +174,12 @@ export async function runReconcilePlan(
         applyOverlaysFirst = false,
     } = {},
 ) {
+    const blocked = runtimeEditableOrMessage();
+    if (blocked) {
+        log(blocked, 'warn');
+        throw new Error(blocked);
+    }
+
     const primitives = Array.isArray(plan) ? plan : [];
     const includeOverlays = applyOverlaysFirst && targetConfig;
     const steps = buildReconcileStepList(primitives, { includeOverlays });

@@ -9,8 +9,9 @@ from lab_model.language.domain.component import (
     PRESENCE_BREADBOARD,
     PRESENCE_STORAGE,
     get_tunables,
-    reported_pose,
-    set_reported_pose,
+    measurables_bucket,
+    nominal_pose,
+    tunables_bucket,
 )
 
 
@@ -46,11 +47,10 @@ def build_mock_scan_proposed_poses(
         tun = get_tunables(comp)
         if tun.get("presence") not in (PRESENCE_BREADBOARD, PRESENCE_STORAGE):
             continue
-        pose = reported_pose(dict(comp))
-        np = tun.get("nominal_pose") if isinstance(tun.get("nominal_pose"), dict) else {}
-        base_x = float(np.get("x", pose.get("x", 0.0)))
-        base_y = float(np.get("y", pose.get("y", 0.0)))
-        base_r = float(np.get("rotation", pose.get("rotation", 0.0)))
+        np = nominal_pose(dict(comp))
+        base_x = float(np.get("x", 0.0))
+        base_y = float(np.get("y", 0.0))
+        base_r = float(np.get("rotation", 0.0))
         sx, sy, sr = _jitter_from_tag(tag_id, base_x, base_y, base_r)
         proposed[tag_id] = {"x": sx, "y": sy, "rotation": sr}
 
@@ -58,16 +58,24 @@ def build_mock_scan_proposed_poses(
 
 
 def apply_mock_scan_to_component(comp: Dict[str, Any], proposed_pose: Mapping[str, float]) -> Dict[str, Any]:
-    """Return a component copy with ``tunables.reported_pose`` set to ``proposed_pose``."""
+    """Return a component copy with ``tunables.nominal_pose`` set to ``proposed_pose``.
+
+    Also mirrors into legacy ``measurables.pose`` for UI readers. Does **not**
+    write ``reported_pose`` (RECORD_TUNABLES overwrites the real tunable).
+    """
     import json
 
     refreshed = json.loads(json.dumps(comp))
-    set_reported_pose(
-        refreshed,
-        {
-            "x": float(proposed_pose.get("x", 0.0)),
-            "y": float(proposed_pose.get("y", 0.0)),
-            "rotation": float(proposed_pose.get("rotation", 0.0)),
-        },
-    )
+    pose = {
+        "x": float(proposed_pose.get("x", 0.0)),
+        "y": float(proposed_pose.get("y", 0.0)),
+        "rotation": float(proposed_pose.get("rotation", 0.0)),
+    }
+    tun = tunables_bucket(refreshed)
+    tun["nominal_pose"] = dict(pose)
+    # Drop shadow field if present so sync/record path stays single-valued.
+    if "reported_pose" in tun:
+        tun.pop("reported_pose", None)
+    meas = measurables_bucket(refreshed)
+    meas["pose"] = dict(pose)
     return refreshed

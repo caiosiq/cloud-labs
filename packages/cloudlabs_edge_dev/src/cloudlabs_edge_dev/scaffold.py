@@ -95,6 +95,7 @@ CAPABILITIES_JSON = """\
     "torchscript_execution": false,
     "hardware_reconciliation": false,
     "hardware_triggered_latch": false,
+    "runtime_sync": true,
     "lan_direct_streams": true
   }},
   "supported_primitives": [
@@ -125,7 +126,9 @@ CAPABILITIES_JSON = """\
     "REPACK_STORAGE",
     "RECENTER_IN_STORAGE",
     "REMOVE",
-    "LOCALIZE_COMPONENTS"
+    "LOCALIZE_COMPONENTS",
+    "RECORD_TUNABLES",
+    "SYNC_RUNTIME"
   ],
   "measurables": {{
     "tag_22.camera_image": {{
@@ -187,9 +190,34 @@ LIBRARY_JSON = """\
           "SET_EXPOSURE",
           "START_LIVE_FEED",
           "END_LIVE_FEED",
-          "LOCALIZE_COMPONENTS"
+          "LOCALIZE_COMPONENTS",
+          "RECORD_TUNABLES",
+          "SYNC_RUNTIME"
         ],
-        "statecontrol": { "tunables": {}, "measurables": {} },
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose",
+              "recordable": true
+            },
+            "exposure_time_ms": {
+              "widget": "FloatRange",
+              "min": 10.0,
+              "max": 1000.0,
+              "default": 200.0,
+              "unit": "ms",
+              "recordable": true
+            }
+          },
+          "measurables": {
+            "camera_image": {
+              "widget": "ImageViewer",
+              "dtype": "uint8",
+              "layout": "bgr_hwc_uint8",
+              "domain": "spatial"
+            }
+          }
+        },
         "telemetry": {}
       }
     }
@@ -765,6 +793,8 @@ PRIMITIVE_HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "SET_LASER_OUTPUT": lambda a: tunables.set_output_power_mw(a),
     "OPTIMIZE": lambda a: optimize.optimize_component(a),
     "LOCALIZE_COMPONENTS": lambda a: vision.localize_components(a),
+    "RECORD_TUNABLES": lambda a: vision.record_tunables(a),
+    "SYNC_RUNTIME": lambda a: vision.sync_runtime(a),
 }
 
 
@@ -1212,23 +1242,30 @@ def capture_jpeg(tag_id: str, *, profile: str | None = None) -> bytes:
 
 
 def localize_components(args: dict[str, Any]) -> dict[str, Any]:
-    """Measure poses for declared inventory tags (LOCALIZE_COMPONENTS).
+    """Deprecated alias: RECORD_TUNABLES for ``nominal_pose`` only."""
+    return record_tunables(
+        {
+            "tag_ids": args.get("tag_ids"),
+            "tunable_paths": ["nominal_pose"],
+            "force_rescan": args.get("force_rescan", True),
+        }
+    )
 
-    Parameters
-    ----------
-    args:
-        Optional ``tag_ids`` (list of strings). When omitted, localize every
-        inventory entry with ``localize != false`` and ``placement`` in
-        ``{"table", "storage"}`` (see ``data/inventory.json``). Optional
-        ``force_rescan`` (bool, default true).
 
-    Returns
-    -------
-    dict
-        ``{"tag_ids": [...], "poses": {tag_id: {x,y,rotation,...}, ...}}``.
-        Map to ``OpticalExperiment.scan_components_cloudlab`` (or equivalent).
+def record_tunables(args: dict[str, Any]) -> dict[str, Any]:
+    """Overwrite recordable tunables from the world (RECORD_TUNABLES).
+
+    Pose recording must write **nominal_pose**, not a shadow reported_pose.
     """
-    raise NotImplementedError("Phase 6: LOCALIZE_COMPONENTS / scan_components_cloudlab")
+    raise NotImplementedError("RECORD_TUNABLES — measure/overwrite named tunables")
+
+
+def sync_runtime(args: dict[str, Any]) -> dict[str, Any]:
+    """Boot/readiness macro: RECORD(recordable) + SET(set_at_init).
+
+    Must succeed before the edge advertises READY.
+    """
+    raise NotImplementedError("SYNC_RUNTIME — required before edge READY")
 '''
 
 ADAPTERS_LIVE = '''\

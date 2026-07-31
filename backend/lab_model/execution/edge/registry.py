@@ -123,7 +123,22 @@ class EdgeAgentRegistry:
             if isinstance(lab_state, dict):
                 rec.lab_state = lab_state
                 rec.lab_state_updated_at = now
-            return rec
+            backend_id = rec.backend_id
+            snapshot = rec.lab_state if isinstance(rec.lab_state, dict) else None
+        if isinstance(snapshot, dict):
+            try:
+                from lab_model.coordinator.lab_initialization import note_lab_state
+
+                note_lab_state(
+                    backend_id,
+                    snapshot,
+                    source="edge_heartbeat",
+                    edge_attached=True,
+                    edge_offline=False,
+                )
+            except Exception:  # noqa: BLE001
+                _LOG.debug("lab_init heartbeat note failed", exc_info=True)
+        return rec
 
     def unregister(self, agent_id: str) -> bool:
         with self._lock:

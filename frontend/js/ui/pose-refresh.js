@@ -1,13 +1,13 @@
 /**
  * Pose-refresh modal + runner.
  *
- * Pose refresh = ask the lab to re-localize on-table components from a camera scan.
- * When supported, fetches dry-run offers (delta vs session-reconciliation thresholds)
- * before applying. Unchecked tags are preserved (full component row unchanged).
+ * Pose refresh = RECORD_TUNABLES for ``nominal_pose`` on selected on-table tags.
+ * Dry-run offers stay on GET; apply goes through the language plane
+ * (``POST /api/command``). Unchecked tags are preserved.
  *
  * Endpoints:
- *   GET  /api/lab-state/refresh-pose/offers?tag_ids=tag_a,tag_b
- *   POST /api/lab-state/refresh-pose  { apply_tag_ids, tag_ids, preserve_tag_ids }
+ *   GET  /api/lab-state/refresh-pose/offers?tag_ids=…  (preview only)
+ *   POST /api/command  { action: RECORD_TUNABLES, parameters: { tag_ids, tunable_paths: ["nominal_pose"] } }
  *
  * Wired into:
  *   - the "Refresh Pose" sidebar button (app-main)
@@ -18,6 +18,8 @@ import { runtimeEditableOrMessage } from '../control/control-state.js';
 import { log } from './log.js';
 import { isOnTableComponent } from '../component-model.js';
 import { fetchLaserLines } from './laser-lines-panel.js';
+import { withBackendQuery } from '../state/backend-selection.js';
+import { executeSendCommand } from '../api/commands.js';
 
 let _fetchLabState = async () => {};
 
@@ -36,12 +38,33 @@ function poseRefreshEligibleTagIds() {
         .sort();
 }
 
+/**
+ * Map modal selection → RECORD_TUNABLES tag_ids.
+ * @param {{ apply_tag_ids?: string[], preserve_tag_ids?: string[], tag_ids?: string[] }} selection
+ * @returns {string[]}
+ */
+export function resolveRecordTagIds(selection) {
+    if (!selection || typeof selection !== 'object') return [];
+    if (Array.isArray(selection.apply_tag_ids)) {
+        return selection.apply_tag_ids.filter(Boolean);
+    }
+    const scope =
+        Array.isArray(selection.tag_ids) && selection.tag_ids.length
+            ? selection.tag_ids.filter(Boolean)
+            : poseRefreshEligibleTagIds();
+    if (Array.isArray(selection.preserve_tag_ids)) {
+        const frozen = new Set(selection.preserve_tag_ids.filter(Boolean));
+        return scope.filter((tid) => !frozen.has(tid));
+    }
+    return scope;
+}
+
 async function fetchRefreshPoseOffers(scopeTagIds = null) {
     const qs =
         scopeTagIds && scopeTagIds.length
             ? `?tag_ids=${encodeURIComponent(scopeTagIds.join(','))}`
             : '';
-    const res = await fetch(`/api/lab-state/refresh-pose/offers${qs}`);
+    const res = await fetch(withBackendQuery(`/api/lab-state/refresh-pose/offers${qs}`));
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
         throw new Error(data.detail || res.statusText || 'Refresh pose offers failed');
@@ -92,7 +115,7 @@ function promptRefreshPoseOffersModal(payload) {
         const sub = document.createElement('p');
         sub.style.cssText = 'margin:0 0 8px 0;color:#94a3b8;font-size:13px;line-height:1.5;';
         sub.textContent =
-            'Checked components will receive scan updates (tunables.reported_pose). Unchecked rows stay frozen. Applying runs a camera scan on the bench.';
+            'Checked components will be overwritten via RECORD_TUNABLES → tunables.nominal_pose. Unchecked rows stay frozen. Applying runs a camera scan on the bench.';
 
         const meta = document.createElement('p');
         meta.style.cssText = 'margin:0 0 12px 0;color:#64748b;font-size:12px;';
@@ -183,7 +206,7 @@ function promptRefreshPoseOffersModal(payload) {
         goBtn.type = 'button';
         goBtn.className = 'btn btn-primary';
         goBtn.style.width = 'auto';
-        goBtn.textContent = 'Start refresh';
+        goBtn.textContent = 'RECORD nominal_pose';
 
         const finish = () => overlay.remove();
 
@@ -266,7 +289,7 @@ function promptRefreshPosePreserveIds() {
         sub.style.fontSize = '13px';
         sub.style.lineHeight = '1.5';
         sub.textContent =
-            'Checked = update this component from the scan. Unchecked = keep the entire current row (measurables, tunables, nominal pose) unchanged.';
+            'Checked = freeze this tag (skip RECORD). Unchecked = overwrite tunables.nominal_pose from the scan.';
 
         const listHost = document.createElement('div');
         listHost.style.maxHeight = '260px';
@@ -337,7 +360,7 @@ function promptRefreshPosePreserveIds() {
         goBtn.type = 'button';
         goBtn.className = 'btn btn-primary';
         goBtn.style.width = 'auto';
-        goBtn.textContent = 'Start refresh';
+        goBtn.textContent = 'RECORD nominal_pose';
 
         const finish = () => {
             overlay.remove();
@@ -396,29 +419,30 @@ async function resolveRefreshSelection(scopeTagIds = null) {
 }
 
 async function executePoseRefresh(selection) {
-    const body = { ...selection };
-    if (body.tag_ids == null) delete body.tag_ids;
+    const tagIds = resolveRecordTagIds(selection);
+    if (!tagIds.length) {
+        log('No tags selected for RECORD_TUNABLES (nominal_pose).', 'info');
+        return;
+    }
     log(
-        body.apply_tag_ids?.length
-            ? `Refreshing poses for ${body.apply_tag_ids.length} tag(s)…`
-            : body.preserve_tag_ids?.length
-              ? `Refreshing poses (${body.preserve_tag_ids.length} tag(s) frozen)…`
-              : 'Refreshing poses from camera (re-localize)…',
+        `RECORD_TUNABLES nominal_pose for ${tagIds.length} tag(s): ${tagIds.join(', ')}…`,
         'warn',
     );
-    const res = await fetch('/api/lab-state/refresh-pose', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+    const result = await executeSendCommand({
+        action: 'RECORD_TUNABLES',
+        parameters: {
+            tag_ids: tagIds,
+            tunable_paths: ['nominal_pose'],
+            force_rescan: true,
+        },
     });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Refresh pose failed');
+    if (!result.ok) {
+        throw new Error(result.error || 'RECORD_TUNABLES failed');
     }
 
     const start = Date.now();
     while (Date.now() - start < 30000) {
-        const stateRes = await fetch('/api/lab-state');
+        const stateRes = await fetch(withBackendQuery('/api/lab-state'));
         const state = await stateRes.json();
         if (state && state.system_status === 'IDLE') break;
         await new Promise((r) => setTimeout(r, 500));
@@ -463,7 +487,7 @@ export async function runScopedPoseRefresh(tagIds, { skipModal = false } = {}) {
     }
 }
 
-/** Same behavior as the Refresh Pose button (shared with Command Console): camera pose pass → tunables.reported_pose. */
+/** Refresh Pose button / Command Console: RECORD_TUNABLES → tunables.nominal_pose. */
 export async function runLabPoseRefresh() {
     const blocked = runtimeEditableOrMessage();
     if (blocked) {

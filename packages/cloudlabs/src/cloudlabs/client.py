@@ -1086,7 +1086,11 @@ class CloudLabsClient:
         *,
         include_measurables: bool = True,
     ) -> Dict[str, Any]:
-        """Read nominal_pose and optional measurables for one tag from live state."""
+        """Read ``nominal_pose`` (and optional measurables) from live lab-state.
+
+        This is a **read**, not a camera re-measure. To overwrite poses from the
+        world, use :meth:`record_nominal_poses` / :meth:`record_tunables`.
+        """
         tag_id = tag_id.strip()
         state = self.get_lab_state()
         components = state.get("components")
@@ -1120,6 +1124,157 @@ class CloudLabsClient:
     def refresh_state(self) -> Dict[str, Any]:
         """Alias for :meth:`get_lab_state` (SDK naming parity)."""
         return self.get_lab_state()
+
+    # --- Runtime sync / RECORD_TUNABLES ------------------------------------
+
+    def lab_initialization(
+        self,
+        state: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Derived lab-init view (``lab_initialization`` on lab-state).
+
+        Fail-closed: missing ``runtime_sync`` ⇒ not ready. Prefer the
+        coordinator field when present; otherwise derive from ``runtime_sync``.
+        """
+        st = dict(state) if isinstance(state, Mapping) else self.get_lab_state()
+        server = st.get("lab_initialization")
+        if isinstance(server, dict) and server.get("phase") is not None:
+            return {
+                "ready": bool(server.get("ready")),
+                "phase": str(server.get("phase")),
+                "runtime_sync": str(server.get("runtime_sync") or "missing"),
+                "errors": list(server.get("errors") or [])
+                if isinstance(server.get("errors"), list)
+                else [],
+                "edge_attached": server.get("edge_attached"),
+                "edge_offline": server.get("edge_offline"),
+            }
+        return _derive_lab_initialization(st)
+
+    def wait_until_lab_ready(
+        self,
+        *,
+        poll_interval_s: float = 0.25,
+        timeout_s: float = 180.0,
+    ) -> Dict[str, Any]:
+        """Poll until ``lab_initialization.ready`` (or raise on failed / timeout)."""
+        deadline = time.monotonic() + timeout_s
+        last: Dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            last = self.get_lab_state()
+            init = self.lab_initialization(last)
+            if init.get("ready"):
+                return last
+            if str(init.get("phase") or "") == "failed" or str(
+                init.get("runtime_sync") or ""
+            ) == "failed":
+                errors = init.get("errors") or []
+                raise CloudLabsCommandError(
+                    f"lab initialization failed: {errors or init.get('phase')}",
+                    status_code=409,
+                    detail={
+                        "reason": "lab_not_initialized",
+                        "lab_initialization": init,
+                    },
+                    action=primitive_action(PrimitiveId.SYNC_RUNTIME),
+                )
+            time.sleep(poll_interval_s)
+        raise CloudLabsTimeoutError(
+            f"Timed out after {timeout_s}s waiting for lab ready; "
+            f"last phase={self.lab_initialization(last).get('phase')!r}"
+        )
+
+    def record_tunables(
+        self,
+        tag_ids: Sequence[str],
+        tunable_paths: Sequence[str],
+        *,
+        force_rescan: bool = True,
+        wait: bool = True,
+        poll_interval_s: float = 0.25,
+        timeout_s: float = 120.0,
+    ) -> Dict[str, Any]:
+        """``RECORD_TUNABLES`` — overwrite recordable tunables from the world.
+
+        Example (Twin Refresh Pose equivalent)::
+
+            lab.record_tunables(["tag_20", "tag_22"], ["nominal_pose"])
+        """
+        self._require_lease()
+        tags = _normalize_id_list(tag_ids, name="tag_ids")
+        paths = _normalize_id_list(tunable_paths, name="tunable_paths")
+        self._vlog(
+            "RECORD_TUNABLES tags=%s paths=%s force_rescan=%s",
+            tags,
+            paths,
+            force_rescan,
+        )
+        result = self._post_command(
+            {
+                "action": primitive_action(PrimitiveId.RECORD_TUNABLES),
+                "parameters": {
+                    "tag_ids": tags,
+                    "tunable_paths": paths,
+                    "force_rescan": bool(force_rescan),
+                },
+            }
+        )
+        if wait:
+            self.wait_until_idle(
+                poll_interval_s=poll_interval_s,
+                timeout_s=timeout_s,
+            )
+        return result
+
+    def record_nominal_poses(
+        self,
+        tag_ids: Sequence[str],
+        *,
+        force_rescan: bool = True,
+        wait: bool = True,
+        poll_interval_s: float = 0.25,
+        timeout_s: float = 120.0,
+    ) -> Dict[str, Any]:
+        """Re-measure poses: ``RECORD_TUNABLES`` for ``nominal_pose`` only."""
+        return self.record_tunables(
+            tag_ids,
+            ["nominal_pose"],
+            force_rescan=force_rescan,
+            wait=wait,
+            poll_interval_s=poll_interval_s,
+            timeout_s=timeout_s,
+        )
+
+    def sync_runtime(
+        self,
+        tag_ids: Optional[Sequence[str]] = None,
+        *,
+        force_rescan: bool = True,
+        wait: bool = True,
+        poll_interval_s: float = 0.25,
+        timeout_s: float = 180.0,
+    ) -> Dict[str, Any]:
+        """``SYNC_RUNTIME`` — SET(set_at_init) + RECORD(recordable) boot gate.
+
+        When ``wait`` is true, polls :meth:`wait_until_lab_ready` after accept.
+        """
+        self._require_lease()
+        params: Dict[str, Any] = {"force_rescan": bool(force_rescan)}
+        if tag_ids is not None:
+            params["tag_ids"] = _normalize_id_list(tag_ids, name="tag_ids")
+        self._vlog("SYNC_RUNTIME params=%s", params)
+        result = self._post_command(
+            {
+                "action": primitive_action(PrimitiveId.SYNC_RUNTIME),
+                "parameters": params,
+            }
+        )
+        if wait:
+            self.wait_until_lab_ready(
+                poll_interval_s=poll_interval_s,
+                timeout_s=timeout_s,
+            )
+        return result
 
     # --- Capability wiki / discovery ---------------------------------------
 
@@ -1894,6 +2049,58 @@ def _response_detail(resp: requests.Response) -> Any:
     if isinstance(payload, dict):
         return payload.get("detail", payload)
     return payload
+
+
+def _normalize_id_list(items: Sequence[str], *, name: str) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for item in items:
+        s = str(item).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    if not out:
+        raise ValueError(f"{name} must be a non-empty list of ids")
+    return out
+
+
+def _derive_lab_initialization(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Client-side fallback when coordinator omits ``lab_initialization``."""
+    rs = state.get("runtime_sync")
+    rs_status = "missing"
+    errors: List[Any] = []
+    if isinstance(rs, Mapping):
+        rs_status = str(rs.get("status") or "missing").strip().lower() or "missing"
+        if isinstance(rs.get("errors"), list):
+            errors = list(rs.get("errors") or [])
+    edge_attached = state.get("edge_attached")
+    edge_offline = bool(state.get("edge_offline"))
+    known = rs_status in {"ready", "running", "failed", "pending"}
+    ready = False
+    if edge_offline and not known:
+        phase = "waiting_for_edge"
+    elif rs_status == "ready":
+        phase = "ready"
+        ready = True
+    elif rs_status == "running":
+        phase = "measuring_inventory"
+    elif rs_status == "failed":
+        phase = "failed"
+    elif rs_status == "pending":
+        phase = "starting"
+    elif edge_offline or edge_attached is False:
+        phase = "waiting_for_edge"
+    else:
+        phase = "missing_runtime_sync"
+    return {
+        "ready": ready,
+        "phase": phase,
+        "runtime_sync": rs_status,
+        "errors": errors,
+        "edge_attached": edge_attached,
+        "edge_offline": edge_offline,
+    }
 
 
 def _normalize_measurable_path(path: str) -> str:

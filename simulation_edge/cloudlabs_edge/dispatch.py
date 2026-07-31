@@ -6,6 +6,7 @@ import inspect
 from typing import Any, Awaitable, Callable, Union
 
 from adapters import live_feed, motion, observe, teleop, vision
+from adapters.runtime_ready import ensure_runtime_ready
 from kernel_host import eval_on_bgr
 from latch import begin_latch, end_latch, now_epoch_ms
 
@@ -37,11 +38,14 @@ PRIMITIVE_HANDLERS: dict[str, Handler] = {
     "REPACK_STORAGE": lambda a: motion.repack_storage_slot(a),
     "RECENTER_IN_STORAGE": lambda a: motion.recenter_stored_in_inventory(a),
     "LOCALIZE_COMPONENTS": lambda a: vision.localize_components(a),
+    "RECORD_TUNABLES": lambda a: vision.record_tunables(a),
+    "SYNC_RUNTIME": lambda a: vision.sync_runtime(a),
 }
 
 
 async def dispatch_primitive(primitive: str, args: dict[str, Any] | None = None) -> Any:
     args = args or {}
+    ensure_runtime_ready(primitive)
     handler = PRIMITIVE_HANDLERS.get(primitive)
     if handler is None:
         raise KeyError(f"no adapter mapping for primitive {primitive!r}")

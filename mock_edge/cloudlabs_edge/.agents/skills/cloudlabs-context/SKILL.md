@@ -36,6 +36,11 @@ rewriting the science.
 Rule: if it should happen, it must be nameable in this vocabulary — that is what
 keeps scripts portable across benches.
 
+**Edge READY** means `SYNC_RUNTIME` has completed (recordable tunables overwritten
+from the world; non-recordable tunables set from `set_at_init`) — not merely that
+`/health` responds. Mock/sim may implement sync as copy-from-state/JSON; a real
+bench must measure.
+
 ## Who talks to whom
 
 The scientist’s script and the **Twin** both talk to a **shared service**
