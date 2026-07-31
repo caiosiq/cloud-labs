@@ -1,6 +1,6 @@
 # Backend isolation and coordinator vs edge ownership
 
-**Status:** Phases 0–3 + ownership split (`coordinator_data/`)  
+**Status:** Phases 0–3 + ownership split + edge catalog resolve  
 **Last updated:** 2026-07-31  
 **Audience:** cloud-labs maintainers wiring multi-backend Twin / edge  
 
@@ -72,4 +72,5 @@ Ownership mistakes log under `[backend]` or `[lab_state]` with an explicit reaso
 |-------|------|
 | 0–3 | Isolation, working store, remote commits (checkpoint) |
 | **Ownership** | Thin `coordinator_data/`, skills, retire fat `backends/real.default` |
-| Later | Twin catalogs only from edge GET; `mock_edge` → `mock_backend` rename |
+| **Catalog** | Twin `/api/catalog*` / `/api/library` / `/api/inventory` via `resolve_edge_catalog` (HTTP edge or teaching `cloudlabs_edge/data/`) — never `coordinator_data/` |
+| Later | `mock_edge` → `mock_backend` rename |

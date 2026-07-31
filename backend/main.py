@@ -916,25 +916,17 @@ async def get_platform_registries():
 
 @app.get("/api/catalog")
 async def get_component_catalog():
-    """
-    Tags listed in inventory (or legacy ``active_catalog.json``) merged with
-    library rows. HTTP edge backends prefer ``GET /library`` + ``GET /inventory``.
-    """
-    if lab is None:
-        return []
+    """Inventory ∩ library rows — edge SoT (never coordinator_data)."""
+    from lab_model.coordinator.catalog.resolve_edge_catalog import (
+        EdgeCatalogUnavailable,
+        resolve_edge_catalog,
+    )
+
     try:
-        client = _edge_client_for()
-        if client.transport != EdgeTransport.IN_PROCESS:
-            lib = client.get_library()
-            inv = client.get_inventory()
-            if isinstance(lib, dict) and isinstance(inv, dict):
-                from cloudlabs_edge_dev.edge_data import merged_active_rows
-
-                return merged_active_rows(lib, inv)
-            from lab_model.coordinator.catalog.bundle import merged_catalog_rows
-
-            return merged_catalog_rows()
-        return lab.get_catalog()
+        rt = _runtime_for_active(init=False)
+        return resolve_edge_catalog(rt).active_rows()
+    except EdgeCatalogUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         logger.exception("GET /api/catalog failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read catalog: {e}")
@@ -1125,25 +1117,20 @@ class ComponentAddFromInventoryBody(BaseModel):
 
 @app.get("/api/catalog/active-tags")
 async def get_active_catalog_tags():
-    """Controlled tag ids (inventory keys) and full library tag ids."""
-    from lab_model.coordinator.catalog.active_catalog_store import list_active_catalog_tags
-    from lab_model.coordinator.catalog.bundle import library_by_tag
-    from cloudlabs_edge_dev.edge_data import inventory_tag_ids, library_tag_ids
+    """Inventory keys + full library tag ids (edge SoT)."""
+    from lab_model.coordinator.catalog.resolve_edge_catalog import (
+        EdgeCatalogUnavailable,
+        resolve_edge_catalog,
+    )
 
     try:
-        client = _edge_client_for()
-        if client.transport != EdgeTransport.IN_PROCESS:
-            lib = client.get_library()
-            inv = client.get_inventory()
-            if isinstance(lib, dict) and isinstance(inv, dict):
-                return {
-                    "tag_ids": inventory_tag_ids(inv),
-                    "library_tag_ids": library_tag_ids(lib),
-                }
+        cat = resolve_edge_catalog(_runtime_for_active(init=False))
         return {
-            "tag_ids": list_active_catalog_tags(),
-            "library_tag_ids": sorted(library_by_tag().keys()),
+            "tag_ids": cat.active_tag_ids(),
+            "library_tag_ids": cat.library_tag_id_list(),
         }
+    except EdgeCatalogUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         logger.exception("GET /api/catalog/active-tags failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read active catalog: {e}")
@@ -1152,16 +1139,15 @@ async def get_active_catalog_tags():
 @app.get("/api/catalog/library-rows")
 async def get_library_catalog_rows():
     """All library rows (for sidebar display of off-inventory parts)."""
-    from lab_model.coordinator.catalog.bundle import library_by_tag
-    from cloudlabs_edge_dev.edge_data import library_rows
+    from lab_model.coordinator.catalog.resolve_edge_catalog import (
+        EdgeCatalogUnavailable,
+        resolve_edge_catalog,
+    )
 
     try:
-        client = _edge_client_for()
-        if client.transport != EdgeTransport.IN_PROCESS:
-            lib = client.get_library()
-            if isinstance(lib, dict):
-                return library_rows(lib)
-        return list(library_by_tag().values())
+        return resolve_edge_catalog(_runtime_for_active(init=False)).all_library_rows()
+    except EdgeCatalogUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         logger.exception("GET /api/catalog/library-rows failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read component library: {e}")
@@ -1169,20 +1155,16 @@ async def get_library_catalog_rows():
 
 @app.get("/api/library")
 async def get_edge_library():
-    """Proxy ``GET /library`` (HTTP edge) or disk ``data/library.json`` / component library."""
-    from pathlib import Path
-
-    from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
-    from cloudlabs_edge_dev.edge_data import load_json
+    """Edge ``GET /library`` or teaching ``cloudlabs_edge/data/library.json``."""
+    from lab_model.coordinator.catalog.resolve_edge_catalog import (
+        EdgeCatalogUnavailable,
+        resolve_edge_catalog,
+    )
 
     try:
-        client = _edge_client_for()
-        if client.transport != EdgeTransport.IN_PROCESS:
-            lib = client.get_library()
-            if isinstance(lib, dict):
-                return lib
-        lp = get_lab_view_paths()
-        return load_json(Path(lp.component_library_json))
+        return resolve_edge_catalog(_runtime_for_active(init=False)).library
+    except EdgeCatalogUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         logger.exception("GET /api/library failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read library: {e}")
@@ -1190,30 +1172,16 @@ async def get_edge_library():
 
 @app.get("/api/inventory")
 async def get_edge_inventory():
-    """Proxy ``GET /inventory`` (HTTP edge) or disk ``data/inventory.json``."""
-    from pathlib import Path
-
-    from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths
-    from cloudlabs_edge_dev.edge_data import load_json
+    """Edge ``GET /inventory`` or teaching ``cloudlabs_edge/data/inventory.json``."""
+    from lab_model.coordinator.catalog.resolve_edge_catalog import (
+        EdgeCatalogUnavailable,
+        resolve_edge_catalog,
+    )
 
     try:
-        client = _edge_client_for()
-        if client.transport != EdgeTransport.IN_PROCESS:
-            inv = client.get_inventory()
-            if isinstance(inv, dict):
-                return inv
-        lp = get_lab_view_paths()
-        inv_path = Path(lp.component_library_json).parent / "inventory.json"
-        if inv_path.is_file():
-            return load_json(inv_path)
-        # Derived inventory from active_catalog when edge inventory is absent.
-        from lab_model.coordinator.catalog.bundle import active_tag_ids
-
-        entries = {
-            tid: {"placement": "table", "storage_slot": None, "localize": True}
-            for tid in active_tag_ids()
-        }
-        return {"schema_version": 1, "entries": entries}
+        return resolve_edge_catalog(_runtime_for_active(init=False)).inventory
+    except EdgeCatalogUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         logger.exception("GET /api/inventory failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read inventory: {e}")
@@ -3376,10 +3344,19 @@ async def get_lab_layout():
 
 @app.get("/api/component-library")
 async def get_component_library():
-    """Full component definitions (human-edited); broader than GET /api/catalog."""
-    path = get_lab_view_paths().component_library_json
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """Full library document (edge SoT); alias of GET /api/library."""
+    from lab_model.coordinator.catalog.resolve_edge_catalog import (
+        EdgeCatalogUnavailable,
+        resolve_edge_catalog,
+    )
+
+    try:
+        return resolve_edge_catalog(_runtime_for_active(init=False)).library
+    except EdgeCatalogUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("GET /api/component-library failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to read library: {e}")
 
 
 GUIDE_MIN_LENGTH_MM = 2.0
