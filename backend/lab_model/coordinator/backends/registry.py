@@ -383,6 +383,23 @@ class BackendRegistry:
                 availability="unavailable",
                 unavailable_reason=reason,
             )
+        # In-process teaching host: fail probe if the package is not importable
+        # (common when PYTHONPATH omits mock_backend/src). Otherwise Twin shows
+        # ready, then hangs on connect with a silent ImportError.
+        import_err = _probe_inprocess_host_import(spec, manifest)
+        if import_err:
+            print(
+                f"[backend] backend_id={spec.backend_id!r} probe FAILED: {import_err}",
+                flush=True,
+            )
+            return BackendRuntime(
+                spec=spec,
+                paths=paths,
+                manifest=manifest,
+                availability="error",
+                unavailable_reason=import_err,
+                init_error=import_err,
+            )
         store_dir = os.path.join(coord.root_dir, "catalog_store")
         os.makedirs(store_dir, exist_ok=True)
         lab_state_store = LabStateStore.from_disk(spec.backend_id, paths.lab_state_json)
@@ -437,9 +454,14 @@ class BackendRegistry:
                     )
                     rt.init_error = None
             except Exception as exc:
+                msg = _format_host_init_error(exc)
                 rt.availability = "error"
-                rt.init_error = str(exc)
-                rt.unavailable_reason = str(exc)
+                rt.init_error = msg
+                rt.unavailable_reason = msg
+                print(
+                    f"[backend] backend_id={rt.backend_id!r} init FAILED: {msg}",
+                    flush=True,
+                )
 
     def to_api_row(
         self,
@@ -517,10 +539,52 @@ class BackendRegistry:
                 row["health"] = "degraded"
                 row["system_status"] = None
                 row["init_error"] = str(exc)
+        elif rt.availability == "error":
+            row["health"] = "error"
+            row["system_status"] = None
+            if rt.init_error:
+                row["init_error"] = rt.init_error
         else:
             row["health"] = "uninitialized" if rt.availability == "ready" else "unavailable"
             row["system_status"] = None
         return row
+
+
+def _format_host_init_error(exc: BaseException) -> str:
+    msg = str(exc).strip() or type(exc).__name__
+    if isinstance(exc, ModuleNotFoundError) or (
+        isinstance(exc, ImportError) and "mock_backend" in msg
+    ):
+        return (
+            f"{msg}. Teaching mock needs mock_backend on PYTHONPATH "
+            "(e.g. mock_backend/src), or restart via scripts/ops/run_cloud_labs_backend.ps1 "
+            "/ python backend/main.py after the path bootstrap fix."
+        )
+    if isinstance(exc, ImportError) and "simulation_edge" in msg:
+        return (
+            f"{msg}. Simulation host needs simulation_edge/src on PYTHONPATH."
+        )
+    return msg
+
+
+def _probe_inprocess_host_import(
+    spec: BackendSpec, manifest: LabViewManifest
+) -> Optional[str]:
+    """Return an error string if the in-process teaching host cannot be imported."""
+    if spec.edge.configured:
+        return None
+    comm = (spec.communicator or manifest.communicator or "").strip().lower()
+    if comm == "real" or (spec.backend_id or "").startswith("real."):
+        return None
+    # mock / sim teaching (and default communicator=mock)
+    try:
+        if "sim" in (spec.backend_id or "").lower() or comm in ("sim", "simulation", "mujoco"):
+            import simulation_edge  # noqa: F401
+        else:
+            import mock_backend.host.communicator  # noqa: F401
+    except Exception as exc:  # noqa: BLE001
+        return _format_host_init_error(exc)
+    return None
 
 
 def _empty_paths() -> LabViewPaths:

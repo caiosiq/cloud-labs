@@ -51,6 +51,20 @@ def _install_windows_connection_reset_handler() -> None:
 
 # Load .env from project root (parent of backend/) â€” only LAB_VIEW_PATH is required there.
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Teaching hosts + SDK packages: so `python backend/main.py` works without
+# manually setting PYTHONPATH (ImportError: No module named 'mock_backend').
+import sys
+
+for _rel in (
+    "mock_backend/src",
+    "simulation_edge/src",
+    "packages/cloudlabs/src",
+    "packages/cloudlabs_edge_dev/src",
+):
+    _p = os.path.join(_project_root, _rel.replace("/", os.sep))
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+
 _env_path = os.path.join(_project_root, ".env")
 if os.path.exists(_env_path):
     from dotenv import load_dotenv

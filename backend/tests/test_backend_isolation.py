@@ -147,6 +147,13 @@ class BackendIsolationTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(real_rt.paths.lab_state_json))
         self.assertTrue(os.path.isdir(real_rt.control_dir()))
 
+    def test_format_host_init_error_mentions_pythonpath(self) -> None:
+        from lab_model.coordinator.backends.registry import _format_host_init_error
+
+        msg = _format_host_init_error(ModuleNotFoundError("No module named 'mock_backend'"))
+        self.assertIn("mock_backend", msg)
+        self.assertIn("PYTHONPATH", msg)
+
     def test_warn_shared_lab_view_path(self) -> None:
         from lab_model.coordinator.backends.registry import (
             BackendSpec,

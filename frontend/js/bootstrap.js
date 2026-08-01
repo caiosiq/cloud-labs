@@ -32,16 +32,21 @@ function showGate(backends) {
         const cards = backends
             .map((b) => {
                 const ready = b.availability === 'ready';
-                const busy = b.active_job_id
-                    ? `Job running: ${String(b.active_job_id).slice(0, 16)}…`
-                    : b.queued_jobs
-                      ? `${b.queued_jobs} job(s) queued`
-                      : b.session_lease
-                        ? `Lease held by ${b.session_lease.holder}`
-                        : 'Idle — available';
+                const busy = ready
+                    ? (b.active_job_id
+                        ? `Job running: ${String(b.active_job_id).slice(0, 16)}…`
+                        : b.queued_jobs
+                          ? `${b.queued_jobs} job(s) queued`
+                          : b.session_lease
+                            ? `Lease held by ${b.session_lease.holder}`
+                            : 'Idle — available')
+                    : (b.availability === 'error'
+                        ? 'Host failed to initialize'
+                        : 'Unavailable on this server');
                 const repos = (b.control_repos || []).join(', ') || 'no local repos yet';
-                const reason = b.unavailable_reason
-                    ? `<p style="margin:8px 0 0;font-size:12px;color:#fca5a5;line-height:1.4">${escapeHtml(b.unavailable_reason)}</p>`
+                const detail = b.unavailable_reason || b.init_error || '';
+                const reason = detail
+                    ? `<p style="margin:8px 0 0;font-size:12px;color:#fca5a5;line-height:1.4">${escapeHtml(detail)}</p>`
                     : '';
                 return `
                 <button type="button"
