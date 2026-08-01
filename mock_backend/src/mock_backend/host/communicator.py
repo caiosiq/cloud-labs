@@ -393,10 +393,17 @@ class MockLabCommunicator(LabCommunicator):
                 continue
             candidate[tag_id] = apply_mock_scan_to_component(comp, proposed_poses[tag_id])
 
+        # Tags selected for apply but missing from the scan (off_table, occluded,
+        # etc.) must keep their previous row — never delete from components.
+        preserve = list(plan.preserve_tag_ids)
+        for tid in plan.scan_tag_ids:
+            if tid not in candidate and tid not in preserve:
+                preserve.append(tid)
+
         merged_components = merge_scan_into_components(
             baseline,
             candidate,
-            plan.preserve_tag_ids,
+            preserve,
         )
 
         state = self._read_state()

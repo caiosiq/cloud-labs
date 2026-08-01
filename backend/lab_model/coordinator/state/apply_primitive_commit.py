@@ -1,7 +1,7 @@
 """Apply language ``commit_*`` after successful remote (HTTP/poll) southbound.
 
 In-process mock already commits inside orchestration — skip that transport.
-See ``docs/BACKEND_ISOLATION.md`` Phase 3.
+See ``docs/BACKEND_ISOLATION.md`` Phase 3 / Phase 4.
 """
 
 from __future__ import annotations
@@ -9,26 +9,42 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping, Optional, Set
 
 from lab_model.coordinator.state.commits import (
+    commit_affirm_placed,
     commit_hover,
+    commit_move_to_breadboard,
+    commit_move_to_storage,
     commit_pick,
     commit_place_from_hover,
+    commit_scan_rotation,
 )
 from lab_model.coordinator.state.lab_state_store import LabStateStore
 from lab_model.coordinator.state.runtime_manager import MutationKind
 from lab_model.coordinator.state.snapshot import LabPose
-from lab_model.language.domain.component import resolve_pick_table_pose
+from lab_model.language.domain.component import (
+    PRESENCE_STORAGE,
+    resolve_pick_table_pose,
+)
 from lab_model.language.domain.holding import (
     DEFAULT_HOVER_Z_MM,
     confirm_holding_tag,
 )
 from lab_model.language.primitives.dispatch import RECIPE_ACTION_ALIASES
 
-IN_AIR_COMMIT_ACTIONS: Set[str] = {
+#: Primitives that update Twin FSM / presence / pose after remote execute.
+REMOTE_COMMIT_ACTIONS: Set[str] = {
     "PICK_COMPONENT",
     "HOVER",
     "PLACE_FROM_HOVER",
     "CONFIRM_HOLDING_TAG",
+    "MOVE_COMPONENT",
+    "STORE_COMPONENT",
+    "PLACE_FROM_STORAGE",
+    "AFFIRM_PLACED_AT_CURRENT",
+    "SCAN_ROTATE_IN_PLACE",
 }
+
+# Back-compat alias (Phase 3 name).
+IN_AIR_COMMIT_ACTIONS = REMOTE_COMMIT_ACTIONS
 
 
 def canonical_action(command: Mapping[str, Any]) -> str:
@@ -80,7 +96,71 @@ def _float_from(mapping: Mapping[str, Any], *keys: str, default: float = 0.0) ->
     return float(default)
 
 
-def apply_in_air_commit(
+def _optional_int(mapping: Mapping[str, Any], *keys: str) -> Optional[int]:
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            try:
+                return int(mapping[key])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _pose_xyr(
+    params: Mapping[str, Any],
+    edge_result: Mapping[str, Any],
+) -> tuple[float, float, float]:
+    pose = edge_result.get("pose") if isinstance(edge_result.get("pose"), Mapping) else {}
+    x = _float_from(params, "target_x", "x", default=_float_from(pose, "x"))
+    y = _float_from(params, "target_y", "y", default=_float_from(pose, "y"))
+    rotation = _float_from(
+        params, "rotation", default=_float_from(pose, "rotation")
+    )
+    return x, y, rotation
+
+
+def _actual_pose_from_edge(
+    edge_result: Mapping[str, Any],
+    *,
+    x: float,
+    y: float,
+    rotation: float,
+) -> Optional[LabPose]:
+    pose = edge_result.get("pose") if isinstance(edge_result.get("pose"), Mapping) else {}
+    if not pose:
+        return None
+    return LabPose(
+        x=_float_from(pose, "x", default=x),
+        y=_float_from(pose, "y", default=y),
+        z=_float_from(pose, "z", default=0.0),
+        rotation=_float_from(pose, "rotation", default=rotation),
+    )
+
+
+def _wants_storage(
+    params: Mapping[str, Any],
+    edge_result: Mapping[str, Any],
+) -> bool:
+    presence = str(edge_result.get("presence") or params.get("presence") or "").strip().lower()
+    if presence in (PRESENCE_STORAGE, "storage"):
+        return True
+    mode = str(
+        params.get("placement_mode")
+        or edge_result.get("placement_mode")
+        or ""
+    ).strip().upper()
+    if mode == "STORAGE":
+        return True
+    slot_i = _optional_int(edge_result, "slot_i", "i")
+    if slot_i is None:
+        slot_i = _optional_int(params, "slot_i", "i")
+    slot_j = _optional_int(edge_result, "slot_j", "j")
+    if slot_j is None:
+        slot_j = _optional_int(params, "slot_j", "j")
+    return slot_i is not None and slot_j is not None
+
+
+def apply_remote_commit(
     state: Dict[str, Any],
     action: str,
     command: Mapping[str, Any],
@@ -175,7 +255,82 @@ def apply_in_air_commit(
         confirm_holding_tag(state, tag_id)
         return True
 
+    if action in ("MOVE_COMPONENT", "PLACE_FROM_STORAGE", "STORE_COMPONENT"):
+        x, y, rotation = _pose_xyr(params, result)
+        actual = _actual_pose_from_edge(result, x=x, y=y, rotation=rotation)
+        to_storage = action == "STORE_COMPONENT" or (
+            action == "MOVE_COMPONENT" and _wants_storage(params, result)
+        )
+        if to_storage:
+            slot_i = _optional_int(result, "slot_i", "i")
+            if slot_i is None:
+                slot_i = _optional_int(params, "slot_i", "i")
+            slot_j = _optional_int(result, "slot_j", "j")
+            if slot_j is None:
+                slot_j = _optional_int(params, "slot_j", "j")
+            if slot_i is None or slot_j is None:
+                print(
+                    f"[lab_state] source=edge_commit action={action!r} "
+                    f"tag={tag_id!r} skipped: missing slot_i/slot_j",
+                    flush=True,
+                )
+                return False
+            commit_move_to_storage(
+                state,
+                tag_id,
+                x=x,
+                y=y,
+                rotation=rotation,
+                slot_i=slot_i,
+                slot_j=slot_j,
+                actual_pose=actual,
+            )
+            return True
+        commit_move_to_breadboard(
+            state,
+            tag_id,
+            x=x,
+            y=y,
+            rotation=rotation,
+            actual_pose=actual,
+        )
+        return True
+
+    if action == "AFFIRM_PLACED_AT_CURRENT":
+        commit_affirm_placed(state, tag_id)
+        return True
+
+    if action == "SCAN_ROTATE_IN_PLACE":
+        mode = str(params.get("mode") or result.get("mode") or "placed").strip().lower()
+        if mode not in ("held", "placed"):
+            mode = "placed"
+        x, y, rotation = _pose_xyr(params, result)
+        z_val = None
+        if mode == "held":
+            z_raw = params.get("z", result.get("z"))
+            if z_raw is None and isinstance(pose_from_edge, Mapping):
+                z_raw = pose_from_edge.get("z")
+            if z_raw is not None:
+                try:
+                    z_val = float(z_raw)
+                except (TypeError, ValueError):
+                    z_val = None
+        commit_scan_rotation(
+            state,
+            tag_id,
+            mode=mode,
+            x=x,
+            y=y,
+            rotation=rotation,
+            z=z_val,
+        )
+        return True
+
     return False
+
+
+# Back-compat name used by older tests / imports.
+apply_in_air_commit = apply_remote_commit
 
 
 def apply_edge_primitive_commit(
@@ -187,13 +342,13 @@ def apply_edge_primitive_commit(
 ) -> bool:
     """Commit into the coordinator working store after a successful remote execute."""
     action = canonical_action(command)
-    if action not in IN_AIR_COMMIT_ACTIONS:
+    if action not in REMOTE_COMMIT_ACTIONS:
         return False
 
     applied = {"ok": False}
 
     def _mutate(state: Dict[str, Any]) -> None:
-        applied["ok"] = apply_in_air_commit(state, action, command, edge_result)
+        applied["ok"] = apply_remote_commit(state, action, command, edge_result)
 
     store.mutate(
         _mutate,
@@ -214,8 +369,10 @@ def apply_edge_primitive_commit(
 
 __all__ = [
     "IN_AIR_COMMIT_ACTIONS",
+    "REMOTE_COMMIT_ACTIONS",
     "apply_edge_primitive_commit",
     "apply_in_air_commit",
+    "apply_remote_commit",
     "canonical_action",
     "resolve_tag_id",
 ]

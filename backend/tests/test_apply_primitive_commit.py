@@ -138,6 +138,54 @@ class ApplyInAirCommitTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertFalse(state["holding"]["requires_operator_confirm"])
 
+    def test_move_to_breadboard(self) -> None:
+        state = _seed_component()
+        ok = apply_in_air_commit(
+            state,
+            "MOVE_COMPONENT",
+            {
+                "action": "MOVE_COMPONENT",
+                "target_id": "tag_10",
+                "parameters": {"target_x": 100.0, "target_y": 200.0, "rotation": 15.0},
+            },
+            {"tag_id": "tag_10", "pose": {"x": 101.0, "y": 199.0, "rotation": 15.0}},
+        )
+        self.assertTrue(ok)
+        tun = state["components"]["tag_10"]["statecontrol"]["tunables"]
+        self.assertEqual(tun["presence"], "breadboard")
+        self.assertEqual(tun["nominal_pose"]["x"], 100.0)
+        self.assertEqual(tun["reported_pose"]["x"], 101.0)
+
+    def test_store_requires_slots(self) -> None:
+        state = _seed_component()
+        ok = apply_in_air_commit(
+            state,
+            "STORE_COMPONENT",
+            {"action": "STORE_COMPONENT", "target_id": "tag_10", "parameters": {}},
+            {"tag_id": "tag_10", "pose": {"x": -100.0, "y": -100.0}},
+        )
+        self.assertFalse(ok)
+
+    def test_store_with_slots(self) -> None:
+        state = _seed_component()
+        ok = apply_in_air_commit(
+            state,
+            "STORE_COMPONENT",
+            {"action": "STORE_COMPONENT", "target_id": "tag_10", "parameters": {}},
+            {
+                "tag_id": "tag_10",
+                "pose": {"x": -120.0, "y": -80.0, "rotation": 0.0},
+                "slot_i": 1,
+                "slot_j": 2,
+                "presence": "storage",
+            },
+        )
+        self.assertTrue(ok)
+        tun = state["components"]["tag_10"]["statecontrol"]["tunables"]
+        self.assertEqual(tun["presence"], "storage")
+        self.assertEqual(tun["storage"]["slot"]["i"], 1)
+        self.assertEqual(tun["storage"]["slot"]["j"], 2)
+
 
 class StoreAndMergeAfterPickTests(unittest.TestCase):
     def setUp(self) -> None:

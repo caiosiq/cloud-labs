@@ -64,7 +64,6 @@ from lab_model.coordinator.backends.lab_view_config import (
     get_lab_view_paths,
     laser_line_coeffs_from_doc,
     line_id_pattern,
-    load_layout_document,
     read_laser_lines_doc,
     set_backend_registry,
     two_points_define_line,
@@ -322,9 +321,9 @@ async def _southbound_execute(
     """Run one primitive via the unified EdgeClient southbound path.
 
     After a successful **remote** (HTTP/poll) execute, apply coordinator
-    language commits for in-air primitives so Twin FSM fields
-    (``HOLDING`` / presence) update even when the edge lab-state stays IDLE.
-    In-process mock already commits inside orchestration — skipped here.
+    language commits (in-air, move/store, affirm, scan-rotate) so Twin FSM
+    fields update even when the edge lab-state stays IDLE. In-process mock
+    already commits inside orchestration — skipped here.
     """
     bid = (backend_id or _active_backend_id()).strip()
     client = _edge_client_for(bid)
@@ -551,12 +550,7 @@ async def _backend_selection_middleware(request: Request, call_next):
         backend_id = (request.query_params.get("backend_id") or "").strip()
         if not backend_id:
             backend_id = (request.headers.get("X-CloudLabs-Backend") or "").strip()
-        if not backend_id:
-            for spec in backend_registry.list_specs():
-                rt = backend_registry.get_runtime(spec.backend_id, init=False)
-                if rt.availability == "ready":
-                    backend_id = rt.backend_id
-                    break
+        # Fail-closed: never silently bind the first ready backend.
         if not backend_id:
             return JSONResponse(
                 status_code=400,
@@ -3320,13 +3314,20 @@ async def get_storage_grid():
 
 @app.get("/api/lab-layout")
 async def get_lab_layout():
-    """Breadboard/table bounds + storage grid overlay (single source matching ``layout.json``)."""
+    """Breadboard/table bounds + storage grid — edge GET /bench (teaching disk fallback)."""
+    from lab_model.coordinator.catalog.resolve_edge_bench import (
+        EdgeBenchUnavailable,
+        resolve_edge_bench,
+    )
     from lab_model.language.domain.storage_region import storage_grid_spec
 
     rt = require_backend(backend_registry, _active_backend_id(), init=False)
     with BackendSession(rt):
-        doc = load_layout_document()
-        enriched = dict(doc)
+        try:
+            resolved = resolve_edge_bench(rt)
+        except EdgeBenchUnavailable as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
+        enriched = dict(resolved.layout)
         paths = rt.paths
         manifest = rt.manifest
         enriched["lab_view_root"] = paths.root_dir
@@ -3339,6 +3340,7 @@ async def get_lab_layout():
         enriched["lab_mode"] = rt.lab_mode
         enriched["communicator"] = rt.communicator
         enriched["backend_id"] = rt.backend_id
+        enriched["layout_source"] = resolved.source
         return enriched
 
 

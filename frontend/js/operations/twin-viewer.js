@@ -9,7 +9,7 @@ import { fetchCatalogMap, fetchStorageGridSpec } from '../api/fetchers.js';
 import { fetchLabState, initLabState, startLabStatePolling } from '../state/lab-state.js';
 import { store } from '../state/store.js';
 import { getHolding } from '../component-model.js';
-import { ensureBackendSelected, setSelectedBackendId, withBackendQuery } from '../state/backend-selection.js';
+import { ensureBackendSelected, withBackendQuery } from '../state/backend-selection.js';
 import { placementUiLabel } from '../ui/context-panel.js';
 
 function updateOperationsTwinUi() {
@@ -80,13 +80,14 @@ async function bootTwinViewer() {
     }
     const currentReady = readyRows.some((b) => b.backend_id === current);
     if (!currentReady) {
-        const fallback = readyRows[0]?.backend_id;
-        if (!fallback) {
+        if (!readyRows.length) {
             throw new Error(
                 'No ready backends available. Select a working backend (e.g. mock.default) once one is registered.',
             );
         }
-        setSelectedBackendId(fallback);
+        throw new Error(
+            'No ready backend selected. Choose one at the boot gate or Operations backend picker — silent fallback is disabled.',
+        );
     }
 
     const layoutRes = await fetch(withBackendQuery('/api/lab-layout'));

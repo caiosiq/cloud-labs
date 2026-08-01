@@ -84,10 +84,8 @@ function resolveMonitorBackendId(rows) {
     if (current && ready.some((b) => b.backend_id === current)) {
         return current;
     }
-    // Saved selection is missing or unavailable — fall back to first ready.
-    const fallback = ready[0]?.backend_id || null;
-    if (fallback) setSelectedBackendId(fallback);
-    return fallback;
+    // Fail-closed: do not silently bind the first ready backend.
+    return null;
 }
 
 function backendDetailHtml(selected) {

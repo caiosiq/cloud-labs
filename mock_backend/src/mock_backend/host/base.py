@@ -404,6 +404,35 @@ class LabCommunicator:
         """Trigger a fresh measurement â€” see :func:`lab_model.execution.orchestration.run_record_measurables`."""
         return await run_record_measurables(self, tag_id)
 
+    async def record_tunables(
+        self,
+        tag_ids: Optional[List[str]] = None,
+        tunable_paths: Optional[List[str]] = None,
+        force_rescan: bool = True,
+    ) -> Dict[str, Any]:
+        """RECORD_TUNABLES — overwrite recordable tunables from the world.
+
+        Backends that support ``features.runtime_sync`` / boot SYNC must
+        override this (mock and simulation do). Default refuses so the
+        primitive handler audit sees a wired method and HTTP edges fail
+        loudly instead of AttributeError.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__}.record_tunables is not implemented"
+        )
+
+    async def localize_components(
+        self,
+        tag_ids: Optional[List[str]] = None,
+        force_rescan: bool = True,
+    ) -> Dict[str, Any]:
+        """LOCALIZE_COMPONENTS — deprecated alias of RECORD(nominal_pose)."""
+        return await self.record_tunables(
+            tag_ids=tag_ids,
+            tunable_paths=["nominal_pose"],
+            force_rescan=force_rescan,
+        )
+
     async def eval_kernel_for_tag(
         self,
         tag_id: str,

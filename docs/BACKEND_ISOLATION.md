@@ -1,6 +1,6 @@
 # Backend isolation and coordinator vs edge ownership
 
-**Status:** Phases 0–3 + ownership split + edge catalog resolve  
+**Status:** Phases 0–4 (isolation, ownership, catalog, fail-closed, bench, remote commits)  
 **Last updated:** 2026-07-31  
 **Audience:** cloud-labs maintainers wiring multi-backend Twin / edge  
 
@@ -36,10 +36,12 @@
 ## 3. Twin merge + commits
 
 - Edge returns structured primitive results (e.g. `{holding: true}`).
-- After successful **remote** southbound, coordinator runs `commit_*` on that backend’s working lab-state.
+- After successful **remote** southbound, coordinator runs `commit_*` on that backend’s working lab-state for: pick / hover / place / confirm, move / store / place-from-storage, affirm-placed, scan-rotate.
 - Twin `GET /api/lab-state` **merges**:
   - **Coordinator wins:** `system_status`, `holding`, presence, commanded tunables
   - **Edge wins:** `runtime_sync`, stream URLs, live teleop samples
+- Twin `GET /api/lab-layout` resolves via edge `GET /bench` (HTTP) or teaching `cloudlabs_edge/bench/layout.json` / `lab_view/layout.json` — never `coordinator_data/` as layout SoT.
+- API middleware **fail-closed**: every `/api/*` call (except backends listing / job submit lease paths) requires `?backend_id=` or `X-CloudLabs-Backend`. Shared `lab_view` / `coordinator_data` paths fail boot unless `CLOUDLABS_STRICT_LAB_VIEW=0`.
 
 ---
 
@@ -74,3 +76,4 @@ Ownership mistakes log under `[backend]` or `[lab_state]` with an explicit reaso
 | **Ownership** | Thin `coordinator_data/`, skills, retire fat `backends/real.default` |
 | **Catalog** | Twin `/api/catalog*` / `/api/library` / `/api/inventory` via `resolve_edge_catalog` (HTTP edge or teaching `cloudlabs_edge/data/`) — never `coordinator_data/` |
 | **PR D** | `mock_edge` → `mock_backend` (folder, package, ops scripts) |
+| **Phase 4** | Fail-closed missing `backend_id`; doctor requires capabilities `backend_id`; layout via `resolve_edge_bench`; remote commits beyond in-air |

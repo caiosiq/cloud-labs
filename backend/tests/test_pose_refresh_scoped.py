@@ -46,6 +46,25 @@ class PoseRefreshSelectionTests(unittest.TestCase):
         self.assertEqual(plan.scan_tag_ids, ["tag_b"])
         self.assertIn("tag_a", plan.preserve_tag_ids)
 
+    def test_off_table_tag_ids_are_preserved_not_scanned(self) -> None:
+        """SYNC/RECORD on an off_table tag must not drop it from lab-state."""
+        # Full statecontrol+telemetry shape so ensure_component_shape does not
+        # rewrite presence back to the breadboard default.
+        components = {
+            "tag_a": {
+                "statecontrol": {"tunables": {"presence": "breadboard"}},
+                "telemetry": {},
+            },
+            "tag_c": {
+                "statecontrol": {"tunables": {"presence": "off_table"}},
+                "telemetry": {},
+            },
+        }
+        plan = resolve_pose_refresh_plan(components, tag_ids=["tag_c"])
+        self.assertEqual(plan.scan_tag_ids, [])
+        self.assertIn("tag_c", plan.preserve_tag_ids)
+        self.assertIn("tag_a", plan.preserve_tag_ids)
+
     def test_mock_scoped_refresh_updates_single_tag(self) -> None:
         from mock_backend.host.communicator import MockLabCommunicator
         from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths

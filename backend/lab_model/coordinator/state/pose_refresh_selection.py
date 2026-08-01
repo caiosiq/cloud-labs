@@ -61,9 +61,12 @@ def resolve_pose_refresh_plan(
     eligible = eligible_pose_refresh_tag_ids(components)
     all_known = set(components.keys()) if isinstance(components, dict) else set()
 
+    # Only on-table / storage tags are scannable. Off-table (and other
+    # ineligible) tags stay in ``all_known - apply_set`` and are preserved —
+    # never fall back to ``all_known``, or a single-tag RECORD on an
+    # off_table component would put it in apply, produce no pose, and
+    # drop the row from lab-state (SYNC_RUNTIME boot regression).
     scope = set(normalize_tag_id_list(tag_ids)) & eligible if tag_ids else set(eligible)
-    if not scope and tag_ids:
-        scope = set(normalize_tag_id_list(tag_ids)) & all_known
 
     apply_norm = normalize_tag_id_list(apply_tag_ids)
     if apply_norm:

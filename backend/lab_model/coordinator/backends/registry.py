@@ -36,11 +36,10 @@ def warn_shared_lab_view_paths(
     ``CLOUDLABS_STRICT_LAB_VIEW=1``), raises ``ValueError`` instead of only warning.
     """
     if strict is None:
-        strict = os.environ.get("CLOUDLABS_STRICT_LAB_VIEW", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        # Default fail-closed: shared teaching paths break isolation.
+        # Opt out with CLOUDLABS_STRICT_LAB_VIEW=0.
+        raw = os.environ.get("CLOUDLABS_STRICT_LAB_VIEW", "1").strip().lower()
+        strict = raw not in ("0", "false", "no", "off")
     by_root: Dict[str, List[str]] = {}
     for spec in specs:
         if not spec.enabled or not (spec.lab_view_path or "").strip():
@@ -57,8 +56,8 @@ def warn_shared_lab_view_paths(
         print(f"[backend] {msg}", flush=True)
     if messages and strict:
         raise ValueError(
-            "backends share lab_view_path (set unique paths or unset "
-            f"CLOUDLABS_STRICT_LAB_VIEW): {'; '.join(messages)}"
+            "backends share lab_view_path (set unique paths or "
+            f"CLOUDLABS_STRICT_LAB_VIEW=0): {'; '.join(messages)}"
         )
     return messages
 
@@ -75,11 +74,8 @@ def warn_shared_coordinator_data_paths(
     )
 
     if strict is None:
-        strict = os.environ.get("CLOUDLABS_STRICT_LAB_VIEW", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        raw = os.environ.get("CLOUDLABS_STRICT_LAB_VIEW", "1").strip().lower()
+        strict = raw not in ("0", "false", "no", "off")
     by_root: Dict[str, List[str]] = {}
     for spec in specs:
         if not spec.enabled:
@@ -97,8 +93,8 @@ def warn_shared_coordinator_data_paths(
         print(f"[backend] {msg}", flush=True)
     if messages and strict:
         raise ValueError(
-            "backends share coordinator_data (set unique paths or unset "
-            f"CLOUDLABS_STRICT_LAB_VIEW): {'; '.join(messages)}"
+            "backends share coordinator_data (set unique paths or "
+            f"CLOUDLABS_STRICT_LAB_VIEW=0): {'; '.join(messages)}"
         )
     return messages
 
@@ -300,27 +296,24 @@ class BackendRegistry:
                 f"availability={rt.availability!r}",
                 flush=True,
             )
-        # Restore geometry for the first ready backend that has a local layout.
+        # Seed process geometry from the first ready backend's edge bench
+        # (HTTP /bench or teaching disk). Per-request Twin still resolves
+        # layout via resolve_edge_bench for the selected backend_id.
         for bid in self.known_backend_ids():
             rt = self._runtimes.get(bid)
-            if (
-                rt is None
-                or rt.availability != "ready"
-                or not rt.paths.layout_json
-                or not os.path.isfile(rt.paths.layout_json)
-            ):
+            if rt is None or rt.availability != "ready":
                 continue
             try:
-                import json
+                from lab_model.coordinator.catalog.resolve_edge_bench import (
+                    resolve_edge_bench,
+                )
+                from lab_model.language.domain.storage_region import (
+                    configure_from_layout_document,
+                )
 
-                from lab_model.language.domain.storage_region import configure_from_layout_document
-
-                with open(rt.paths.layout_json, "r", encoding="utf-8") as fh:
-                    doc = json.load(fh)
-                if isinstance(doc, dict):
-                    configure_from_layout_document(doc)
+                configure_from_layout_document(resolve_edge_bench(rt).layout)
             except Exception:
-                pass
+                continue
             break
 
     def _probe_spec(self, spec: BackendSpec) -> BackendRuntime:

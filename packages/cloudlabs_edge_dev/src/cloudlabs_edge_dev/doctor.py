@@ -311,11 +311,12 @@ def run_doctor(edge_path: Optional[Path] = None) -> DoctorReport:
                 ),
             )
             backend_id = caps.get("backend_id")
+            has_backend_id = isinstance(backend_id, str) and bool(backend_id.strip())
             report.add(
                 "backend_id set",
-                isinstance(backend_id, str) and bool(backend_id.strip()),
+                has_backend_id,
                 repr(backend_id),
-                level="warn" if not backend_id else "info",
+                level="error" if not has_backend_id else "info",
             )
 
             wants_sync = capabilities_wants_runtime_sync(caps)
