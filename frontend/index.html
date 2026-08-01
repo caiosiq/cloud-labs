@@ -1625,6 +1625,20 @@
            able to dismiss a non-focused panel without first focusing it is
            less surprising. */
 
+        .component-panel .coord-field {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 0;
+        }
+        .component-panel .coord-field__label {
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #94a3b8;
+            line-height: 1.2;
+        }
         .component-panel .coord-input {
             background: #0f1115;
             border: 1px solid var(--border-color);
@@ -1633,6 +1647,7 @@
             border-radius: 4px;
             font-size: 11px;
             width: 100%;
+            box-sizing: border-box;
         }
 
         /* Context panel buttons: scoped overrides so secondary buttons stop

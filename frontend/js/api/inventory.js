@@ -1,10 +1,12 @@
 /**
  * Controlled-parts API — track / untrack without placing on the table.
  */
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
+
 export async function trackComponent(tagId) {
-    const response = await fetch('/api/components/track', {
+    const response = await fetch(withBackendQuery('/api/components/track'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: backendHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ tag_id: tagId }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -15,9 +17,9 @@ export async function trackComponent(tagId) {
 }
 
 export async function untrackComponent(tagId) {
-    const response = await fetch('/api/components/untrack', {
+    const response = await fetch(withBackendQuery('/api/components/untrack'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: backendHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ tag_id: tagId }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -29,9 +31,9 @@ export async function untrackComponent(tagId) {
 
 /** Place an OFF_TABLE part on the breadboard (physical layout). */
 export async function placeComponentFromInventory(tagId, { placementMode = 'breadboard' } = {}) {
-    const response = await fetch('/api/components/add', {
+    const response = await fetch(withBackendQuery('/api/components/add'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: backendHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
             tag_id: tagId,
             placement_mode: placementMode,

@@ -17,6 +17,7 @@ import {
     RECONCILE_STEP_TIMEOUT_MS,
 } from '../config.js';
 import { leaseHeaders } from '../api/session-lease.js';
+import { withBackendQuery } from '../state/backend-selection.js';
 import { runtimeEditableOrMessage } from './control-state.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -110,7 +111,7 @@ function clearAllHighlights() {
 }
 
 async function postPrimitive(envelope) {
-    const res = await fetch('/api/command', {
+    const res = await fetch(withBackendQuery('/api/command'), {
         method: 'POST',
         headers: leaseHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
@@ -174,7 +175,13 @@ export async function runReconcilePlan(
         applyOverlaysFirst = false,
     } = {},
 ) {
-    const blocked = runtimeEditableOrMessage();
+    // Apply / stash / pop are the VC paths that *intentionally* move the bench
+    // while a preview (or detached tip) may still be active. Only lease + lab
+    // init should gate them — not the "return before editing" preview message.
+    const blocked = runtimeEditableOrMessage({
+        allowPreview: true,
+        allowDetached: true,
+    });
     if (blocked) {
         log(blocked, 'warn');
         throw new Error(blocked);

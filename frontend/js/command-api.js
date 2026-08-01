@@ -6,6 +6,7 @@
  */
 
 import { formatHelp, parseCommandLine } from './command-parse.js';
+import { backendHeaders, withBackendQuery } from './state/backend-selection.js';
 
 /**
  * @param {string} line
@@ -80,9 +81,13 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
         const tagId = result.tagId;
         appendLine(`Record measurables (${tagId})…`, 'info');
         try {
-            const r = await fetch(`/api/components/${encodeURIComponent(tagId)}/measurables/record`, {
-                method: 'POST',
-            });
+            const r = await fetch(
+                withBackendQuery(`/api/components/${encodeURIComponent(tagId)}/measurables/record`),
+                {
+                    method: 'POST',
+                    headers: backendHeaders(),
+                },
+            );
             const text = await r.text();
             let body;
             try {

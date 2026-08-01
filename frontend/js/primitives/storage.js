@@ -27,9 +27,9 @@ export function renderPlaceFromStorage(ctx) {
     grid.style.display = 'grid';
     grid.style.gridTemplateColumns = '1fr 1fr 1fr';
     grid.style.gap = '6px';
-    const xInp = coordInput('X mm', p.x);
-    const yInp = coordInput('Y mm', p.y);
-    const rInp = coordInput('Rot °', p.rotation ?? 0);
+    const xInp = coordInput('X (mm)', p.x);
+    const yInp = coordInput('Y (mm)', p.y);
+    const rInp = coordInput('θ (°)', p.rotation ?? 0);
     grid.appendChild(xInp);
     grid.appendChild(yInp);
     grid.appendChild(rInp);

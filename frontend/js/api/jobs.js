@@ -6,7 +6,7 @@
  */
 import { store } from '../state/store.js';
 import { getClientHolder } from '../state/client-id.js';
-import { backendHeaders } from '../state/backend-selection.js';
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
 
 /** @param {unknown} detail */
 function formatApiDetail(detail) {
@@ -80,7 +80,9 @@ export async function submitClosedLoopJob(command, opts = {}) {
 
 /** @param {string} jobId */
 export async function fetchJob(jobId) {
-    const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+    const response = await fetch(withBackendQuery(`/api/jobs/${encodeURIComponent(jobId)}`), {
+        headers: backendHeaders(),
+    });
     if (!response.ok) {
         const result = await response.json().catch(() => ({}));
         throw new Error(formatApiDetail(result?.detail) || `HTTP ${response.status}`);

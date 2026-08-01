@@ -85,15 +85,45 @@ export function secondaryButton(label, iconName) {
     return btn;
 }
 
-export function coordInput(placeholder, value) {
+/**
+ * Labeled numeric field for pose / setpoint editors.
+ * Returns a ``<label>`` wrapper; ``.value`` proxies to the inner input so
+ * callers can keep using ``parseFloat(field.value)``.
+ *
+ * @param {string} label Always-visible caption (placeholders hide once filled).
+ * @param {unknown} [value]
+ * @returns {HTMLLabelElement & { value: string, input: HTMLInputElement }}
+ */
+export function coordInput(label, value) {
+    const field = document.createElement('label');
+    field.className = 'coord-field';
+
+    const caption = document.createElement('span');
+    caption.className = 'coord-field__label';
+    caption.textContent = label;
+
     const inp = document.createElement('input');
     inp.type = 'number';
     inp.className = 'coord-input';
-    inp.placeholder = placeholder;
+    inp.placeholder = label;
+    inp.setAttribute('aria-label', label);
     if (value !== undefined && value !== null && Number.isFinite(Number(value))) {
         inp.value = String(value);
     }
-    return inp;
+
+    field.appendChild(caption);
+    field.appendChild(inp);
+    Object.defineProperty(field, 'value', {
+        get() {
+            return inp.value;
+        },
+        set(v) {
+            inp.value = v == null ? '' : String(v);
+        },
+        enumerable: true,
+    });
+    field.input = inp;
+    return field;
 }
 
 export async function afterCommandDispatch(hooks, targetId, opts = {}) {

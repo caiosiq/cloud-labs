@@ -1,4 +1,5 @@
 /** Optimization compiler API (Phase E). */
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
 
 /**
  * Compile declarative objective graph → runtime ObjectiveSpec JSON.
@@ -11,9 +12,9 @@
  * }} body
  */
 export async function compileObjective(body) {
-    const response = await fetch('/api/optimization/compile', {
+    const response = await fetch(withBackendQuery('/api/optimization/compile'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: backendHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
     });
     const result = await response.json().catch(() => ({}));
@@ -31,7 +32,9 @@ export async function compileObjective(body) {
 /** @returns {Promise<{ ok: boolean, metrics?: string[], error?: string }>} */
 export async function fetchOptimizationMetrics() {
     try {
-        const response = await fetch('/api/optimization/metrics');
+        const response = await fetch(withBackendQuery('/api/optimization/metrics'), {
+            headers: backendHeaders(),
+        });
         if (!response.ok) {
             return { ok: false, error: `HTTP ${response.status}` };
         }

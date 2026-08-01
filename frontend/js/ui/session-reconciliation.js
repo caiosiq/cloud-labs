@@ -13,6 +13,7 @@
 import { store } from '../state/store.js';
 import { log } from './log.js';
 import { showErrorModal } from './modals.js';
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
 
 const SESSION_REC_STORAGE_DISMISS_KEY = 'optics-session-reconcile-dismiss';
 
@@ -41,7 +42,9 @@ export async function maybeTriggerSessionReconciliation() {
         /* ignore */
     }
     try {
-        const res = await fetch('/api/session-reconciliation/offers');
+        const res = await fetch(withBackendQuery('/api/session-reconciliation/offers'), {
+            headers: backendHeaders(),
+        });
         const data = await res.json();
         if (!res.ok) {
             console.warn('[session-reconcile] offers HTTP', res.status, data);
@@ -226,9 +229,9 @@ function openSessionReconciliationModal(payload) {
             return;
         }
         try {
-            const res = await fetch('/api/session-reconciliation/apply', {
+            const res = await fetch(withBackendQuery('/api/session-reconciliation/apply'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: backendHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ tag_ids: ids }),
             });
             const data = await res.json().catch(() => ({}));

@@ -22,9 +22,9 @@ export function renderScanRotate(ctx, { contextHint = 'placed' } = {}) {
     grid.style.display = 'grid';
     grid.style.gridTemplateColumns = '1fr 1fr 1fr';
     grid.style.gap = '6px';
-    const tMin = coordInput('θ min°', -45);
-    const tMax = coordInput('θ max°', 45);
-    const spd = coordInput('deg/s', 30);
+    const tMin = coordInput('θ min (°)', -45);
+    const tMax = coordInput('θ max (°)', 45);
+    const spd = coordInput('Speed (°/s)', 30);
     grid.appendChild(tMin);
     grid.appendChild(tMax);
     grid.appendChild(spd);

@@ -22,6 +22,7 @@ import { store } from '../state/store.js';
 import { runtimeEditableOrMessage } from '../control/control-state.js';
 import { log } from '../ui/log.js';
 import { leaseHeaders } from './session-lease.js';
+import { withBackendQuery } from '../state/backend-selection.js';
 import { showConfirmationModal } from '../ui/modals.js';
 import { drawPose, isBreadboardIntent } from '../component-model.js';
 import { updateRecipeEditorList } from '../ui/recipes.js';
@@ -144,7 +145,7 @@ export async function executeSendCommand(command) {
             _render();
         }
 
-        const response = await fetch('/api/command', {
+        const response = await fetch(withBackendQuery('/api/command'), {
             method: 'POST',
             headers: leaseHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(command),

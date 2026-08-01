@@ -17,6 +17,7 @@ import { log } from './log.js';
 import { twoPointsToLineModel } from '../geometry/lines.js';
 import { refreshAlignmentIntersectionCache } from '../canvas/alignment-snap.js';
 import { isBenchHeaderHovered, onBenchHeaderPointerLeave } from './bench-chrome-bar.js';
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
 
 let _render = () => {};
 let _refreshControlWorkingState = async () => {};
@@ -222,7 +223,9 @@ export function coeffsFromLaserLinesDoc(doc) {
 
 export async function fetchLaserLines() {
     try {
-        const response = await fetch('/api/laser-lines');
+        const response = await fetch(withBackendQuery('/api/laser-lines'), {
+            headers: backendHeaders(),
+        });
         if (response.ok) {
             store.laserLinesDoc = await response.json();
             store.laserLineCoeffs = coeffsFromLaserLinesDoc(store.laserLinesDoc);
@@ -296,9 +299,9 @@ async function applyLaserLineGeometryEdit() {
         return;
     }
     try {
-        const res = await fetch(`/api/laser-lines/${encodeURIComponent(lineId)}`, {
+        const res = await fetch(withBackendQuery(`/api/laser-lines/${encodeURIComponent(lineId)}`), {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ p1, p2, confirm: true }),
         });
         const data = await res.json().catch(() => ({}));
@@ -316,9 +319,9 @@ async function applyLaserLineGeometryEdit() {
 
 async function toggleLaserLineEnabled(id, nextEnabled) {
     try {
-        const res = await fetch(`/api/laser-lines/${encodeURIComponent(id)}`, {
+        const res = await fetch(withBackendQuery(`/api/laser-lines/${encodeURIComponent(id)}`), {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ enabled: !!nextEnabled }),
         });
         const data = await res.json().catch(() => ({}));

@@ -190,6 +190,18 @@ class MockLabCommunicator(LabCommunicator):
             self.set_runtime_sync_status("failed", errors=[str(exc)])
             print(f"{self.log_prefix} SYNC_RUNTIME boot failed: {exc}")
 
+    @staticmethod
+    def _has_active_holding_claim(state: Dict[str, Any]) -> bool:
+        """True when software still claims a mid-air part (tag or unconfirmed)."""
+        holding = get_holding(state)
+        return bool(holding.get("tag_id") or holding.get("requires_operator_confirm"))
+
+    def _status_after_transient_work(self, state: Dict[str, Any]) -> str:
+        """Return HOLDING when a claim remains; else IDLE after BUSY scan work."""
+        if self._has_active_holding_claim(state):
+            return SYSTEM_STATUS_HOLDING
+        return SYSTEM_STATUS_IDLE
+
     def _reconcile_holding_on_boot(self) -> None:
         """
         Mirror the RealLabCommunicator startup check in #6.3 of new_primitives.md.
@@ -197,8 +209,11 @@ class MockLabCommunicator(LabCommunicator):
         - If the hardware (mock) reports gripper closed and the snapshot does NOT
           already declare a confirmed HOLDING state, force HOLDING_UNCONFIRMED
           (``requires_operator_confirm: true``) regardless of file contents.
-        - Otherwise, leave any persisted HOLDING state as-is so mock survives
-          restarts mid-hover (simulates the "power outage" recovery).
+        - Otherwise, restore any persisted mid-air claim so mock survives
+          restarts mid-hover (teaching "power outage" recovery). A common
+          inconsistent disk shape is ``holding.tag_id`` set with
+          ``system_status: IDLE`` (e.g. after a pose refresh forced IDLE);
+          promote that back to HOLDING so PLACE_FROM_HOVER still works.
         """
         try:
             state = self._read_state()
@@ -238,11 +253,24 @@ class MockLabCommunicator(LabCommunicator):
         # Ensure the top-level ``holding`` field exists even on a clean IDLE boot
         # so the UI never sees ``undefined``.
         holding = get_holding(state)
-        if holding.get("tag_id") is None and not holding.get("requires_operator_confirm"):
+        if self._has_active_holding_claim(state):
+            if status_normalized != SYSTEM_STATUS_HOLDING:
+                held = holding.get("tag_id") or "<unconfirmed>"
+                print(
+                    f"[MOCK LAB] restoring HOLDING from persisted claim "
+                    f"(tag_id={held!r}; was system_status={status!r})"
+                )
+            state["system_status"] = SYSTEM_STATUS_HOLDING
+        else:
             state["holding"] = empty_holding()
-        # Normalize a bare status to IDLE if snapshot pre-dates the holding fields.
-        if status is None:
-            state["system_status"] = SYSTEM_STATUS_IDLE
+            # Normalize a bare status to IDLE if snapshot pre-dates the holding fields.
+            if status is None or status_normalized not in (
+                SYSTEM_STATUS_IDLE,
+                SYSTEM_STATUS_BUSY,
+                "OPTIMIZING",
+            ):
+                state["system_status"] = SYSTEM_STATUS_IDLE
+        state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
 
     def _ensure_state(self):
@@ -408,7 +436,9 @@ class MockLabCommunicator(LabCommunicator):
 
         state = self._read_state()
         state["components"] = merged_components
-        state["system_status"] = SYSTEM_STATUS_IDLE
+        # Pose refresh is transient BUSY work — do not drop a mid-air HOLDING
+        # claim (boot SYNC / RECORD would otherwise leave tag_id set + IDLE).
+        state["system_status"] = self._status_after_transient_work(state)
         state["last_updated"] = datetime.now().isoformat()
         self._write_state(state)
         print(

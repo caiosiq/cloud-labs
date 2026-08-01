@@ -2,7 +2,7 @@
  * Remote catalog API — approved pins and publish requests (Phase G.5).
  */
 import { getClientHolder } from '../state/client-id.js';
-import { backendHeaders } from '../state/backend-selection.js';
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
 
 
 async function parseJson(res) {
@@ -19,14 +19,14 @@ async function parseJson(res) {
 }
 
 export async function fetchCatalogPins() {
-    const res = await fetch('/api/catalog/pins', { headers: backendHeaders() });
+    const res = await fetch(withBackendQuery('/api/catalog/pins'), { headers: backendHeaders() });
     return parseJson(res);
 }
 
 export async function fetchPublishRequests(status = undefined) {
     let url = '/api/catalog/publish-requests';
     if (status) url += `?status=${encodeURIComponent(status)}`;
-    const res = await fetch(url, { headers: backendHeaders() });
+    const res = await fetch(withBackendQuery(url), { headers: backendHeaders() });
     return parseJson(res);
 }
 
@@ -42,7 +42,7 @@ export async function fetchPublishRequests(status = undefined) {
  * }} opts
  */
 export async function submitPublishRequest(opts) {
-    const res = await fetch('/api/catalog/publish-requests', {
+    const res = await fetch(withBackendQuery('/api/catalog/publish-requests'), {
         method: 'POST',
         headers: backendHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
@@ -59,25 +59,31 @@ export async function submitPublishRequest(opts) {
 }
 
 export async function approvePublishRequest(requestId, { approvedBy = 'owner', pinId } = {}) {
-    const res = await fetch(`/api/catalog/publish-requests/${encodeURIComponent(requestId)}/approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            approved_by: approvedBy,
-            pin_id: pinId || null,
-        }),
-    });
+    const res = await fetch(
+        withBackendQuery(`/api/catalog/publish-requests/${encodeURIComponent(requestId)}/approve`),
+        {
+            method: 'POST',
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                approved_by: approvedBy,
+                pin_id: pinId || null,
+            }),
+        },
+    );
     return parseJson(res);
 }
 
 export async function rejectPublishRequest(requestId, { rejectedBy = 'owner', reason = '' } = {}) {
-    const res = await fetch(`/api/catalog/publish-requests/${encodeURIComponent(requestId)}/reject`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            rejected_by: rejectedBy,
-            reason,
-        }),
-    });
+    const res = await fetch(
+        withBackendQuery(`/api/catalog/publish-requests/${encodeURIComponent(requestId)}/reject`),
+        {
+            method: 'POST',
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                rejected_by: rejectedBy,
+                reason,
+            }),
+        },
+    );
     return parseJson(res);
 }

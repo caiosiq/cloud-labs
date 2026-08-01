@@ -15,6 +15,7 @@ import { store } from '../state/store.js';
 import { log } from './log.js';
 import { fetchRecipes } from '../api/fetchers.js';
 import { getComponentIcon } from './icons.js';
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
 
 let _recipeList = null;
 let _recipeStepsContainer = null;
@@ -166,9 +167,9 @@ async function saveCurrentRecipe() {
     const recipe = { id, name, steps };
 
     try {
-        const res = await fetch('/api/recipes', {
+        const res = await fetch(withBackendQuery('/api/recipes'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(recipe),
         });
 
@@ -203,7 +204,10 @@ async function playRecipe(id) {
 
     try {
         log(`Playing recipe ${id}...`, 'info');
-        const res = await fetch(`/api/recipes/${id}/play`, { method: 'POST' });
+        const res = await fetch(withBackendQuery(`/api/recipes/${id}/play`), {
+            method: 'POST',
+            headers: backendHeaders(),
+        });
         if (res.ok) {
             log('Recipe execution started.', 'info');
         } else {
@@ -356,9 +360,9 @@ function showRecipeRequirementModal(recipeName, reqs) {
                 btn.textContent = 'Requesting...';
                 btn.disabled = true;
                 try {
-                    const res = await fetch('/api/components', {
+                    const res = await fetch(withBackendQuery('/api/components'), {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: backendHeaders({ 'Content-Type': 'application/json' }),
                         body: JSON.stringify(item),
                     });
                     if (res.ok) {

@@ -170,8 +170,21 @@ export function isRuntimeEditable() {
     return !isConfigViewMode() && !isDetached();
 }
 
-/** User-facing block reason, or null if edits are allowed. */
-export function runtimeEditableOrMessage() {
+/**
+ * User-facing block reason, or null if edits are allowed.
+ *
+ * @param {{
+ *   allowPreview?: boolean,
+ *   allowDetached?: boolean,
+ * }} [opts]
+ *   ``allowPreview`` — VC reconcile (Apply on bench / stash / pop) runs while a
+ *   node preview is still active; those flows must not be blocked by the
+ *   "return to bench before editing" gate.
+ *   ``allowDetached`` — same for intentional VC motion from a detached applied tip.
+ */
+export function runtimeEditableOrMessage(opts = {}) {
+    const allowPreview = Boolean(opts.allowPreview);
+    const allowDetached = Boolean(opts.allowDetached);
     if (otherHoldsSessionLease()) {
         const holder = store.labState?.session_lease?.holder || 'another client';
         return `Bench leased by ${holder}. Wait, or ask them to release control.`;
@@ -187,10 +200,10 @@ export function runtimeEditableOrMessage() {
         }
         return 'Lab is still initializing…';
     }
-    if (isConfigViewMode()) {
+    if (!allowPreview && isConfigViewMode()) {
         return 'You are viewing a configuration preview. Return to bench or apply on bench before editing.';
     }
-    if (isDetached()) {
+    if (!allowDetached && isDetached()) {
         return 'You are on an older commit (detached). Fork a new branch here before making changes.';
     }
     return null;

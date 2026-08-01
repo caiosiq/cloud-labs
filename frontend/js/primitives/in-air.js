@@ -14,9 +14,9 @@ function poseInputs(ctx) {
     grid.style.display = 'grid';
     grid.style.gridTemplateColumns = '1fr 1fr 1fr';
     grid.style.gap = '6px';
-    const xInp = coordInput('X mm', p.x);
-    const yInp = coordInput('Y mm', p.y);
-    const rInp = coordInput('Rot °', p.rotation ?? 0);
+    const xInp = coordInput('X (mm)', p.x);
+    const yInp = coordInput('Y (mm)', p.y);
+    const rInp = coordInput('θ (°)', p.rotation ?? 0);
     grid.appendChild(xInp);
     grid.appendChild(yInp);
     grid.appendChild(rInp);
@@ -80,7 +80,7 @@ export function renderHover(ctx) {
     const { section, body } = primitiveRegion('HOVER', 'HOVER');
     const { grid, xInp, yInp, rInp } = poseInputs(ctx);
     body.appendChild(grid);
-    const zInp = coordInput('Z mm', currentZ);
+    const zInp = coordInput('Z (mm)', currentZ);
     body.appendChild(zInp);
 
     const btn = runButton('Hover to X/Y/Rot/Z', 'open_with');

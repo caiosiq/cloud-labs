@@ -11,9 +11,9 @@ export function renderMoveComponent(ctx) {
     grid.style.gridTemplateColumns = '1fr 1fr 1fr';
     grid.style.gap = '6px';
 
-    const xInp = coordInput('X mm', pose.x);
-    const yInp = coordInput('Y mm', pose.y);
-    const rInp = coordInput('Rot °', pose.rotation ?? 0);
+    const xInp = coordInput('X (mm)', pose.x);
+    const yInp = coordInput('Y (mm)', pose.y);
+    const rInp = coordInput('θ (°)', pose.rotation ?? 0);
     grid.appendChild(xInp);
     grid.appendChild(yInp);
     grid.appendChild(rInp);

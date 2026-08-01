@@ -1,7 +1,10 @@
 /**
  * ControlManager API — configuration commits, branch graph, soft checkout.
+ *
+ * Every call must carry the selected backend (fail-closed middleware).
  */
 import { store } from '../state/store.js';
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
 
 const DEFAULT_REPO = 'default';
 
@@ -29,13 +32,18 @@ async function parseJson(res) {
     return data;
 }
 
+async function controlFetch(url, init = {}) {
+    const headers = backendHeaders(init.headers || {});
+    return fetch(withBackendQuery(url), { ...init, headers });
+}
+
 export async function fetchControlRepos() {
-    const res = await fetch('/api/control/repos');
+    const res = await controlFetch('/api/control/repos');
     return parseJson(res);
 }
 
 export async function createControlRepo({ repoId, displayName } = {}) {
-    const res = await fetch('/api/control/repos', {
+    const res = await controlFetch('/api/control/repos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -47,7 +55,7 @@ export async function createControlRepo({ repoId, displayName } = {}) {
 }
 
 export async function fetchControlStatus() {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/status`);
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/status`);
     return parseJson(res);
 }
 
@@ -59,7 +67,7 @@ export async function fetchControlHistory(branch = undefined) {
     } else if (branch !== null) {
         url += `?branch=${encodeURIComponent(branch)}`;
     }
-    const res = await fetch(url);
+    const res = await controlFetch(url);
     return parseJson(res);
 }
 
@@ -72,7 +80,7 @@ export async function fetchAllControlNodes() {
 export async function fetchControlStatusFor(explicitRepoId) {
     const rid = String(explicitRepoId || '').trim();
     if (!rid) throw new Error('repo id required');
-    const res = await fetch(`/api/control/${encodeURIComponent(rid)}/status`);
+    const res = await controlFetch(`/api/control/${encodeURIComponent(rid)}/status`);
     return parseJson(res);
 }
 
@@ -84,7 +92,7 @@ export async function fetchControlHistoryFor(explicitRepoId, branch = undefined)
     if (branch != null && branch !== '') {
         url += `?branch=${encodeURIComponent(branch)}`;
     }
-    const res = await fetch(url);
+    const res = await controlFetch(url);
     return parseJson(res);
 }
 
@@ -93,14 +101,14 @@ export async function fetchConfigurationDocument(explicitRepoId, configurationId
     const rid = String(explicitRepoId || '').trim();
     const cid = String(configurationId || '').trim();
     if (!rid || !cid) throw new Error('repo id and configuration id required');
-    const res = await fetch(
+    const res = await controlFetch(
         `/api/control/${encodeURIComponent(rid)}/configurations/${encodeURIComponent(cid)}`,
     );
     return parseJson(res);
 }
 
 export async function commitConfiguration({ message, branch, parentId } = {}) {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/configurations`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/configurations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -113,7 +121,7 @@ export async function commitConfiguration({ message, branch, parentId } = {}) {
 }
 
 export async function forkControlBranch({ branch, parentId }) {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/branches`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/branches`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ branch, parent_id: parentId }),
@@ -122,7 +130,7 @@ export async function forkControlBranch({ branch, parentId }) {
 }
 
 export async function softCheckoutConfiguration(configurationId) {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/checkout`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -135,7 +143,7 @@ export async function softCheckoutConfiguration(configurationId) {
 
 export async function previewHardCheckout(configurationId, explicitRepoId = undefined) {
     const rid = explicitRepoId || repoId();
-    const res = await fetch(`/api/control/${encodeURIComponent(rid)}/checkout`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(rid)}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -149,7 +157,7 @@ export async function previewHardCheckout(configurationId, explicitRepoId = unde
 
 /** "Set as node": adopt a commit as the current node without moving the bench. */
 export async function adoptConfiguration(configurationId) {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/checkout`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -161,7 +169,7 @@ export async function adoptConfiguration(configurationId) {
 }
 
 export async function hardCheckoutConfiguration(configurationId) {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/checkout`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -179,7 +187,7 @@ export async function hardCheckoutConfiguration(configurationId) {
  * server-side — this only moves the applied pointer + projection + bench claim.
  */
 export async function finalizeHardCheckout(configurationId) {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/checkout`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -192,7 +200,7 @@ export async function finalizeHardCheckout(configurationId) {
 }
 
 export async function stashChanges(message, { preview = false } = {}) {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/stash`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/stash`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: message ?? null, preview }),
@@ -201,7 +209,7 @@ export async function stashChanges(message, { preview = false } = {}) {
 }
 
 export async function popStash({ preview = false } = {}) {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/stash/pop`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/stash/pop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preview }),
@@ -216,7 +224,7 @@ export async function popStash({ preview = false } = {}) {
  * changes that were set aside — not the now-clean bench.
  */
 export async function finalizeStash(message, snapshot, metadata) {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/stash`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/stash`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -231,7 +239,7 @@ export async function finalizeStash(message, snapshot, metadata) {
 
 /** Record a step-by-step stash pop after the frontend restored the snapshot. */
 export async function finalizeStashPop() {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/stash/pop`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/stash/pop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ finalize: true }),
@@ -240,7 +248,7 @@ export async function finalizeStashPop() {
 }
 
 export async function dropStash() {
-    const res = await fetch(`/api/control/${encodeURIComponent(repoId())}/stash`, {
+    const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/stash`, {
         method: 'DELETE',
     });
     return parseJson(res);
@@ -248,7 +256,7 @@ export async function dropStash() {
 
 export async function fetchCheckoutCompatibilityReport(configurationId) {
     const q = new URLSearchParams({ configuration_id: configurationId });
-    const res = await fetch(
+    const res = await controlFetch(
         `/api/control/${encodeURIComponent(repoId())}/checkout-report?${q.toString()}`,
     );
     return parseJson(res);
@@ -256,7 +264,7 @@ export async function fetchCheckoutCompatibilityReport(configurationId) {
 
 export async function fetchConfigurationDiff(fromId, toId) {
     const q = new URLSearchParams({ from: fromId, to: toId });
-    const res = await fetch(
+    const res = await controlFetch(
         `/api/control/${encodeURIComponent(repoId())}/diff?${q.toString()}`,
     );
     return parseJson(res);

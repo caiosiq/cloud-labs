@@ -21,6 +21,8 @@ export const MEASURABLE_WIDGET_FALLBACK = {
 
 export const MEASURABLE_RECORD_PRIMITIVE_FALLBACK = 'RECORD_MEASURABLES';
 
+import { backendHeaders, withBackendQuery } from './state/backend-selection.js';
+
 /** @type {object|null} */
 let _cached = null;
 
@@ -48,7 +50,9 @@ function _fallbackPayload() {
 export async function loadPlatformRegistries() {
     if (_cached) return _cached;
     try {
-        const res = await fetch('/api/platform/registries');
+        const res = await fetch(withBackendQuery('/api/platform/registries'), {
+            headers: backendHeaders(),
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         _cached = await res.json();
         return _cached;

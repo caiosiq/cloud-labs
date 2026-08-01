@@ -14,6 +14,7 @@
 import { store } from '../state/store.js';
 import { log } from '../ui/log.js';
 import { showConfirmationModal } from '../ui/modals.js';
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
 import {
     ALIGNMENT_SHOW_INTERSECTION_MARKERS,
     constrainGuideEndWithShift,
@@ -98,9 +99,11 @@ export function syncGuidesFromLabState() {
 // ---- API helpers ----------------------------------------------------------
 
 async function _guidesApi(method, path, body) {
-    const res = await fetch(path, {
+    const res = await fetch(withBackendQuery(path), {
         method,
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        headers: body
+            ? backendHeaders({ 'Content-Type': 'application/json' })
+            : backendHeaders(),
         body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
@@ -641,17 +644,17 @@ export async function migrateLocalGuidesOnce() {
     try {
         if (local.length) {
             // Seed the live runtime with the browser's guides first…
-            await fetch('/api/guides', {
+            await fetch(withBackendQuery('/api/guides'), {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: backendHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ guides: local }),
             });
         }
         // …then backfill every existing commit (all repos) with today's lines so
         // history isn't retroactively "missing" the guides/laser lines.
-        await fetch('/api/control/backfill-lines', {
+        await fetch(withBackendQuery('/api/control/backfill-lines'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({}),
         });
         localStorage.setItem(GUIDE_MIGRATION_FLAG, '1');
