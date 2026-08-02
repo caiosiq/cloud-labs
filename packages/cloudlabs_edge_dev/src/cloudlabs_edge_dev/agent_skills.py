@@ -146,6 +146,17 @@ instruments.
 - Debug: `[lab_init]` = SYNC/READY; `[lab_state]` / `[control]` / `[backend]`
   are coordinator-side. See Cloud Labs `docs/BACKEND_ISOLATION.md`.
 
+## Teaching host import path (cloud-labs maintainers)
+
+In-tree teaching packages live at `mock_backend/src` and `simulation_edge/src`
+(folder name ≠ `backend_id`). The coordinator must put those dirs on
+`sys.path` (see `backend/main.py` bootstrap) or `PYTHONPATH` — otherwise Twin
+can show the mock as ready, then hang with `No module named 'mock_backend'`
+and almost no log. Registry probe must fail closed + log `[backend] … FAILED`
+when the in-process host cannot import. After renaming a teaching package,
+grep path bootstrap, ops scripts, and skills — do not leave “ready” without
+an import check.
+
 ## Full onboarding
 
 Longer scientist-facing narrative (with figures): Cloud Labs repo
@@ -210,12 +221,18 @@ description: >-
   exact JPEG from the latched capture so the URL is not a fresh live frame.
 - Open/close a latch around capture (`latch.py`); stamp `epoch_ms` + `latch_quality`.
 - Serve `GET /measurables/{tag}/camera_image.jpg` from that cache.
+- **Log the science path** with a stable `[measurables]` prefix: begin (tag, camera
+  class, cam_id, exposure), capture shape/dtype, jpeg byte length, envelope href,
+  epoch_ms / latch_quality, and failures with stage + traceback. Also log when the
+  registry falls back to `SyntheticCamera` and when the JPEG route misses (no latch).
 
 ## Do not
 
 - Do not invent axis labels, swap H/W, or claim `hardware_triggered_latch` without hardware.
 - Do not put full BGR arrays in lab-state JSON.
 - Do not let live-stream endpoints substitute for `RECORD_MEASURABLES` science.
+- Do not swallow capture errors silently — refuse/fail with a logged stage so Twin
+  and the edge terminal agree on what happened.
 
 ## Typical files
 
@@ -251,12 +268,18 @@ description: >-
 - Return HTTP 409 on stream URLs until the matching START primitive armed the channel.
 - Run long OPTIMIZE loops as **jobs** on the edge (progress stream), not a held HTTP body.
 - Stamp time on samples; never pretend live preview is a scientific record.
+- **START_TELEOP mode routing** (must match Twin `rz` vs `pose3d`):
+  - On table / not holding this tag → table Rz enter (`start_table_rotation` / equivalent).
+  - Holding this tag → held Cartesian enter (`start_held_cartesian` / equivalent).
+  - Log which enter path ran; refuse clearly if the arm holds a *different* tag.
 
 ## Do not
 
 - Do not closed-loop optimize by shipping every frame to a laptop.
 - Do not open teleop or video without the arming primitive.
 - Do not mix Tier A rates with deep schema validation on every frame.
+- Do **not** always call held-Cartesian on START_TELEOP — that breaks on-table Rz TeleOp
+  (`start_held_cartesian: not holding a part` while the Twin expected Rz).
 
 ## Typical files
 

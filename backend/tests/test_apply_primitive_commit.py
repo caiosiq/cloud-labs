@@ -49,6 +49,47 @@ class ApplyInAirCommitTests(unittest.TestCase):
             canonical_action({"action": "CONFIRM_HOLDING"}), "CONFIRM_HOLDING_TAG"
         )
 
+    def test_record_measurables_commits_lazy_envelope(self) -> None:
+        state = _seed_component("tag_22")
+        envelope = {
+            "tag_id": "tag_22",
+            "field": "camera_image",
+            "dtype": "uint8",
+            "shape": [480, 640, 3],
+            "data": {
+                "kind": "url",
+                "href": "/measurables/tag_22/camera_image.jpg",
+                "format": "jpeg",
+            },
+        }
+        ok = apply_in_air_commit(
+            state,
+            "RECORD_MEASURABLES",
+            {"action": "RECORD_MEASURABLES", "target_id": "tag_22"},
+            {"tag_id": "tag_22", "measurables": {"camera_image": envelope}},
+        )
+        self.assertTrue(ok)
+        stored = state["components"]["tag_22"]["statecontrol"]["measurables"][
+            "camera_image"
+        ]
+        self.assertEqual(stored["shape"], [480, 640, 3])
+        self.assertEqual(
+            stored["data"]["href"], "/measurables/tag_22/camera_image.jpg"
+        )
+
+    def test_record_measurables_skips_empty_result(self) -> None:
+        state = _seed_component("tag_22")
+        ok = apply_in_air_commit(
+            state,
+            "RECORD_MEASURABLES",
+            {"action": "RECORD_MEASURABLES", "target_id": "tag_22"},
+            {"tag_id": "tag_22"},
+        )
+        self.assertFalse(ok)
+        self.assertEqual(
+            state["components"]["tag_22"]["statecontrol"]["measurables"], {}
+        )
+
     def test_pick_sets_holding_from_deathray_shape(self) -> None:
         state = _seed_component()
         ok = apply_in_air_commit(

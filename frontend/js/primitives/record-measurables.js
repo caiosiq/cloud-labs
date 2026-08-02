@@ -1,6 +1,30 @@
 import { labClient } from '../cloudlabs/client.js';
 import { primitiveRegion, runButton, afterCommandDispatch } from './shared.js';
 
+function _captureSummary(data) {
+    const ci = data && data.measurables && data.measurables.camera_image;
+    if (!ci || typeof ci !== 'object') {
+        return {
+            status: data && data.status === 'ok' ? 'OK · no camera_image' : 'OK',
+            detail: `fields=${Object.keys((data && data.measurables) || {}).join(',') || '(none)'}`,
+        };
+    }
+    const path =
+        ci.path ||
+        (ci.data && typeof ci.data === 'object' && ci.data.href) ||
+        '';
+    const shape = Array.isArray(ci.shape) ? ci.shape.join('×') : '';
+    const leaf = path ? String(path).replace(/^.*[/\\]/, '') : '';
+    const bits = ['OK'];
+    if (leaf) bits.push(leaf);
+    if (shape) bits.push(shape);
+    if (data.epoch_ms != null) bits.push(`epoch=${data.epoch_ms}`);
+    return {
+        status: bits.join(' · '),
+        detail: `camera_image shape=${shape || '?'} href=${path || '(none)'} epoch_ms=${data.epoch_ms ?? '—'}`,
+    };
+}
+
 export function renderRecordMeasurables(ctx) {
     const { tagId } = ctx;
     const { section, body } = primitiveRegion('RECORD_MEASURABLES', 'RECORD MEASURABLES');
@@ -12,24 +36,23 @@ export function renderRecordMeasurables(ctx) {
     btn.onclick = async () => {
         status.textContent = '…';
         btn.disabled = true;
+        if (typeof ctx.hooks.log === 'function') {
+            ctx.hooks.log(`RECORD_MEASURABLES ${tagId}…`, 'info');
+        }
         try {
             // Same primitive as Python ``lab.capture_measurable`` / ``recordMeasurables``.
             const data = await labClient.recordMeasurables(tagId);
-            status.textContent = 'OK';
-            const ci = data.measurables && data.measurables.camera_image;
-            // Tensor-native: LazyRef under data.href; legacy wire still has .path.
-            const path =
-                ci && typeof ci === 'object'
-                    ? (ci.path ||
-                          (ci.data && typeof ci.data === 'object' && ci.data.href) ||
-                          '')
-                    : '';
-            if (path) {
-                status.textContent = `OK · ${String(path).replace(/^.*[/\\\\]/, '')}`;
+            const summary = _captureSummary(data);
+            status.textContent = summary.status;
+            if (typeof ctx.hooks.log === 'function') {
+                ctx.hooks.log(`RECORD_MEASURABLES ${tagId}: ${summary.detail}`, 'info');
             }
             await afterCommandDispatch(ctx.hooks, tagId);
         } catch (e) {
-            ctx.hooks.log(`Record error: ${e && e.message ? e.message : e}`, 'error');
+            const msg = e && e.message ? e.message : String(e);
+            if (typeof ctx.hooks.log === 'function') {
+                ctx.hooks.log(`Record error: ${msg}`, 'error');
+            }
             status.textContent = 'Error';
         } finally {
             btn.disabled = false;

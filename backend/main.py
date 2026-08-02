@@ -1293,6 +1293,13 @@ async def get_component_parameters(tag_id: str):
 async def post_component_record_measurables(tag_id: str):
     """Record fresh measurables (``RECORD_MEASURABLES``) via EdgeClient."""
     client = _edge_client_for()
+    bid = _active_backend_id()
+    logger.info(
+        "RECORD_MEASURABLES request tag=%s backend=%s transport=%s",
+        tag_id,
+        bid,
+        getattr(client.transport, "value", client.transport),
+    )
     if client.transport == EdgeTransport.IN_PROCESS:
         if lab is None:
             raise HTTPException(status_code=503, detail="Lab not initialized")
@@ -1312,6 +1319,24 @@ async def post_component_record_measurables(tag_id: str):
     else:
         raw = edge_result.result if isinstance(edge_result.result, dict) else {}
         meas = raw.get("measurables")
+    fields = sorted(meas.keys()) if isinstance(meas, dict) else []
+    cam = meas.get("camera_image") if isinstance(meas, dict) else None
+    shape = cam.get("shape") if isinstance(cam, dict) else None
+    href = None
+    if isinstance(cam, dict) and isinstance(cam.get("data"), dict):
+        href = cam["data"].get("href")
+    logger.info(
+        "RECORD_MEASURABLES response tag=%s backend=%s ok=%s fields=%s "
+        "shape=%s href=%s epoch_ms=%s latch_quality=%s",
+        tag_id,
+        bid,
+        edge_result.ok,
+        fields,
+        shape,
+        href,
+        edge_result.epoch_ms,
+        edge_result.latch_quality,
+    )
     return {
         "status": "ok",
         "measurables": meas,
@@ -2070,7 +2095,17 @@ async def get_component_camera_image(tag_id: str):
     if isinstance(client, HttpEdgeClient):
         data = client.fetch_bytes(f"/measurables/{tag_id}/camera_image.jpg")
         if not data:
+            logger.info(
+                "camera-image proxy miss tag=%s backend=%s (edge has no latched JPEG)",
+                tag_id,
+                _active_backend_id(),
+            )
             raise HTTPException(status_code=404, detail="No camera image recorded")
+        logger.debug(
+            "camera-image proxy ok tag=%s bytes=%s",
+            tag_id,
+            len(data),
+        )
         return Response(content=data, media_type="image/jpeg")
 
     if lab is None:

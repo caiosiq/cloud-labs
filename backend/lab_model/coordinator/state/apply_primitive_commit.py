@@ -13,6 +13,7 @@ from lab_model.coordinator.state.commits import (
     commit_hover,
     commit_move_to_breadboard,
     commit_move_to_storage,
+    commit_observed_measurables,
     commit_pick,
     commit_place_from_hover,
     commit_scan_rotation,
@@ -41,6 +42,7 @@ REMOTE_COMMIT_ACTIONS: Set[str] = {
     "PLACE_FROM_STORAGE",
     "AFFIRM_PLACED_AT_CURRENT",
     "SCAN_ROTATE_IN_PLACE",
+    "RECORD_MEASURABLES",
 }
 
 # Back-compat alias (Phase 3 name).
@@ -323,6 +325,36 @@ def apply_remote_commit(
             y=y,
             rotation=rotation,
             z=z_val,
+        )
+        return True
+
+    if action == "RECORD_MEASURABLES":
+        nested = result.get("measurables")
+        if isinstance(nested, dict) and nested:
+            patch = dict(nested)
+        elif result.get("path"):
+            patch = {
+                "camera_image": {
+                    "path": str(result["path"]),
+                    "source": str(result.get("source") or ""),
+                    "cam_id": int(result.get("cam_id") or 0),
+                    "format": str(result.get("format") or "png"),
+                }
+            }
+        else:
+            print(
+                f"[lab_state] source=edge_commit action=RECORD_MEASURABLES "
+                f"tag={tag_id!r} skipped: no measurables in edge result "
+                f"keys={sorted(result.keys())}",
+                flush=True,
+            )
+            return False
+        commit_observed_measurables(state, tag_id, patch)
+        fields = sorted(str(k) for k in patch.keys())
+        print(
+            f"[lab_state] source=edge_commit action=RECORD_MEASURABLES "
+            f"tag={tag_id!r} fields={fields}",
+            flush=True,
         )
         return True
 

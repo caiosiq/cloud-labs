@@ -1,0 +1,26 @@
+---
+description: RECORD_MEASURABLES must latch, commit, and show LazyRef images
+globs: "**/measurables*.py,**/observe.py,**/record-measurables.js,**/image-viewer.js,**/apply_primitive_commit.py,**/adapters/observe.py"
+alwaysApply: false
+---
+
+# Measurable record path (camera_image)
+
+Science capture is one primitive end-to-end — not a Twin-only shortcut:
+
+| Layer | What must happen |
+|-------|------------------|
+| Twin | `POST …/measurables/record` or `RECORD_MEASURABLES` via `/api/command` |
+| Edge | Latch → `capture_bgr` → encode JPEG → cache → canonical LazyRef envelope |
+| Coordinator (HTTP edge) | Commit edge `measurables` into working lab state (`REMOTE_COMMIT_ACTIONS`) |
+| Twin UI | ImageViewer accepts LazyRef (`data.href` / shape), not only legacy `.path` |
+
+## Rules
+
+- Remote HTTP success **must** call `commit_observed_measurables` (via `apply_edge_primitive_commit`). Returning the execute JSON alone leaves Twin lab state null after refresh.
+- Canonical envelope uses LazyRef: `data = {kind: "url", href: "/measurables/{tag}/camera_image.jpg", format: "jpeg"}`. Do not require legacy `path` for the widget to show a frame.
+- “Capture OK but null image / no terminal output” usually means wrong layer: missing edge logs, synthetic camera fallback, skipped remote commit, or ImageViewer ignoring LazyRef — not “cameras unsupported.”
+- Edge logs use a stable `[measurables]` prefix (begin, camera class/cam_id, shape, jpeg bytes, epoch, href, JPEG route miss). Coordinator logs request/response fields + shape.
+- Never swallow capture failures silently; refuse/fail with a logged stage so Twin and the edge terminal agree.
+- Live feed is not a substitute for `RECORD_MEASURABLES` science.
+- See edge skill `measurables-tensors`. Orchestration: `run_record_measurables`; remote commit: `apply_primitive_commit.py`.

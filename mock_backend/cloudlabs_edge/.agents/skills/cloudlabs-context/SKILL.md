@@ -93,6 +93,17 @@ instruments.
 - Debug: `[lab_init]` = SYNC/READY; `[lab_state]` / `[control]` / `[backend]`
   are coordinator-side. See Cloud Labs `docs/BACKEND_ISOLATION.md`.
 
+## Teaching host import path (cloud-labs maintainers)
+
+In-tree teaching packages live at `mock_backend/src` and `simulation_edge/src`
+(folder name ≠ `backend_id`). The coordinator must put those dirs on
+`sys.path` (see `backend/main.py` bootstrap) or `PYTHONPATH` — otherwise Twin
+can show the mock as ready, then hang with `No module named 'mock_backend'`
+and almost no log. Registry probe must fail closed + log `[backend] … FAILED`
+when the in-process host cannot import. After renaming a teaching package,
+grep path bootstrap, ops scripts, and skills — do not leave “ready” without
+an import check.
+
 ## Full onboarding
 
 Longer scientist-facing narrative (with figures): Cloud Labs repo

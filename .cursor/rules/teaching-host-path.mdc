@@ -1,0 +1,16 @@
+---
+description: Teaching host PYTHONPATH / rename fail-closed (mock_backend)
+alwaysApply: true
+---
+
+# Teaching host import path
+
+When changing `mock_backend/`, `simulation_edge/`, or how `backend/main.py` starts:
+
+- Teaching Python packages live under `<host>/src/<package>/` (e.g. `mock_backend/src/mock_backend`). Folder name is not `backend_id` (`mock.default`).
+- `python backend/main.py` must work without a hand-set `PYTHONPATH`: keep the `sys.path` bootstrap in `backend/main.py` in sync with package locations.
+- Ops script `scripts/ops/run_cloud_labs_backend.ps1` must list the same `*/src` entries.
+- Never mark an in-process teaching backend `availability=ready` if its host package cannot be imported. Probe must fail closed and log `[backend] … FAILED`.
+- After a teaching-package rename, update imports, bootstrap paths, docs, and add/keep a regression test (`backend/tests/test_teaching_host_path_bootstrap.py`).
+- Twin UI must not show “Idle — available” when `availability` is `error`; surface `unavailable_reason` / `init_error`.
+- After fail-closed `backend_id` middleware: every Twin `/api/*` fetch (control/VC, guides, laser-lines, etc.) must use `withBackendQuery` / `backendHeaders` from `frontend/js/state/backend-selection.js` — bare `fetch('/api/...')` will 400.

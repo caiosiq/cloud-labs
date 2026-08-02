@@ -1,0 +1,22 @@
+---
+description: START_TELEOP must route Rz (table) vs Cartesian (held)
+globs: "**/teleop*.py,**/teleop*.js,**/adapters/teleop.py"
+alwaysApply: false
+---
+
+# TeleOp mode routing (rz vs pose3d)
+
+Twin and coordinator already choose mode from bench state:
+
+| State | Twin channel / `teleop.mode` | Real edge enter API |
+|-------|------------------------------|---------------------|
+| On breadboard, not holding this tag | `rz` | `start_table_rotation` |
+| Holding this tag | `pose3d` | `start_held_cartesian` |
+
+## Rules
+
+- Edge `START_TELEOP` **must** branch on hardware holding (`is_physically_holding` + matching held tag/marker). Never assume Cartesian for every start.
+- A failure like `start_held_cartesian: not holding a part` on an on-table part means **wrong edge enter path**, not “Rz unsupported.”
+- Prefer clear refuse text: table Rz vs held Cartesian vs holding-a-different-tag.
+- Soft/mock edges without a live session may keep an in-memory pose model; still document the same mode contract.
+- See edge skill `latency-channels` (START_TELEOP mode routing). Coordinator mode resolution: `commit_teleop_start` / `_resolve_teleop_mode` in `lab_model/coordinator/state/commits.py`.
