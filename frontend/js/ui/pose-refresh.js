@@ -18,7 +18,11 @@ import { runtimeEditableOrMessage } from '../control/control-state.js';
 import { log } from './log.js';
 import { isOnTableComponent } from '../component-model.js';
 import { fetchLaserLines } from './laser-lines-panel.js';
-import { withBackendQuery } from '../state/backend-selection.js';
+import {
+    backendHeaders,
+    getSelectedBackendId,
+    withBackendQuery,
+} from '../state/backend-selection.js';
 import { executeSendCommand } from '../api/commands.js';
 
 let _fetchLabState = async () => {};
@@ -64,7 +68,10 @@ async function fetchRefreshPoseOffers(scopeTagIds = null) {
         scopeTagIds && scopeTagIds.length
             ? `?tag_ids=${encodeURIComponent(scopeTagIds.join(','))}`
             : '';
-    const res = await fetch(withBackendQuery(`/api/lab-state/refresh-pose/offers${qs}`));
+    const res = await fetch(
+        withBackendQuery(`/api/lab-state/refresh-pose/offers${qs}`),
+        { headers: backendHeaders() },
+    );
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
         throw new Error(data.detail || res.statusText || 'Refresh pose offers failed');
@@ -442,7 +449,9 @@ async function executePoseRefresh(selection) {
 
     const start = Date.now();
     while (Date.now() - start < 30000) {
-        const stateRes = await fetch(withBackendQuery('/api/lab-state'));
+        const stateRes = await fetch(withBackendQuery('/api/lab-state'), {
+            headers: backendHeaders(),
+        });
         const state = await stateRes.json();
         if (state && state.system_status === 'IDLE') break;
         await new Promise((r) => setTimeout(r, 500));
@@ -488,6 +497,41 @@ export async function runScopedPoseRefresh(tagIds, { skipModal = false } = {}) {
 }
 
 /** Refresh Pose button / Command Console: RECORD_TUNABLES → tunables.nominal_pose. */
+let _initialLocalizationPromise = null;
+
+export async function initializeUnlocalizedRealInventoryPoses() {
+    const backendId = getSelectedBackendId() || '';
+    if (!backendId.startsWith('real.')) return false;
+    if (_initialLocalizationPromise) return _initialLocalizationPromise;
+
+    const components = store.labState?.components || {};
+    const tagIds = Object.entries(components)
+        .filter(([, comp]) => {
+            if (!comp || !isOnTableComponent(comp)) return false;
+            if (comp.localization?.localized === true) return false;
+            const pose = comp.statecontrol?.measurables?.pose;
+            return !pose || !Number.isFinite(pose.x) || !Number.isFinite(pose.y);
+        })
+        .map(([tagId]) => tagId)
+        .sort();
+    if (!tagIds.length) return false;
+
+    _initialLocalizationPromise = (async () => {
+        log(
+            `Initializing real inventory poses from the top cameras (${tagIds.join(', ')})…`,
+            'warn',
+        );
+        const ok = await runScopedPoseRefresh(tagIds, { skipModal: true });
+        if (ok) log('Initial real inventory localization complete.', 'info');
+        return ok;
+    })();
+    try {
+        return await _initialLocalizationPromise;
+    } finally {
+        _initialLocalizationPromise = null;
+    }
+}
+
 export async function runLabPoseRefresh() {
     const blocked = runtimeEditableOrMessage();
     if (blocked) {

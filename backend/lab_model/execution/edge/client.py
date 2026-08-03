@@ -363,8 +363,9 @@ class HttpEdgeClient:
         return None
 
     def get_library(self) -> Optional[Dict[str, Any]]:
-        if self._library_cache is not None:
-            return self._library_cache
+        # Edge library/inventory are deliberately operator-editable files.
+        # Fetch them fresh so a lab user does not need to restart the
+        # coordinator after changing data/library.json.
         try:
             with httpx.Client(base_url=self.base_url, timeout=5.0) as client:
                 resp = client.get("/library")
@@ -374,13 +375,12 @@ class HttpEdgeClient:
             _LOG.warning("HttpEdgeClient library failed: %s", exc)
             return None
         if isinstance(data, dict):
-            self._library_cache = data
             return data
         return None
 
     def get_inventory(self) -> Optional[Dict[str, Any]]:
-        if self._inventory_cache is not None:
-            return self._inventory_cache
+        # See get_library: inventory membership is live edge-owned operator
+        # configuration, not immutable coordinator metadata.
         try:
             with httpx.Client(base_url=self.base_url, timeout=5.0) as client:
                 resp = client.get("/inventory")
@@ -390,7 +390,6 @@ class HttpEdgeClient:
             _LOG.warning("HttpEdgeClient inventory failed: %s", exc)
             return None
         if isinstance(data, dict):
-            self._inventory_cache = data
             return data
         return None
 

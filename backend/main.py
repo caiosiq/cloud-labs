@@ -716,6 +716,24 @@ class _ReservedBackgroundTasks:
 
 
 def _session_reconciliation_offers_dict() -> Dict[str, Any]:
+    client = _edge_client_for()
+    if client.transport != EdgeTransport.IN_PROCESS:
+        # Session checkpoint reconciliation belongs to an in-process lab host.
+        # An external edge owns its live state and is reconciled deliberately
+        # through edge primitives such as RECORD_TUNABLES / LOCALIZE_COMPONENTS.
+        return {
+            "enabled": False,
+            "skipped_reason": "external_edge",
+            "checkpoint_path": None,
+            "checkpoint_saved_at": None,
+            "checkpoint_lab_mode": None,
+            "age_hours": None,
+            "stale_warning_hours": None,
+            "stale_warning": False,
+            "thresholds": None,
+            "offers": [],
+        }
+
     from mock_backend.shared.session_checkpoint import (
         checkpoint_age_hours,
         checkpoint_lab_state,
@@ -2337,6 +2355,17 @@ def _schedule_pose_refresh(
 
 
 def _pose_refresh_offers_dict(scope_tag_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    client = _edge_client_for()
+    if client.transport != EdgeTransport.IN_PROCESS:
+        # Preview offers are a mock/in-process dry run. A physical HTTP edge
+        # cannot truthfully preview camera measurements without performing the
+        # scan, so the UI should use its deliberate refresh confirmation.
+        return {
+            "supported": False,
+            "skipped_reason": "external_edge",
+            "offers": [],
+        }
+
     from mock_backend.shared.session_checkpoint import reconciliation_thresholds_from_manifest
     from lab_model.coordinator.state.pose_refresh_offers import build_pose_refresh_offers
     from lab_model.coordinator.state.pose_refresh_selection import normalize_tag_id_list

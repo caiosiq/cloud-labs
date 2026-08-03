@@ -133,7 +133,14 @@ export function isChromeComponent(tagId) {
 
 /** Whether this in-lab component should be drawn on the optical table canvas. */
 export function shouldRenderOnCanvas(tagId, comp) {
-    return isOnTableComponent(comp) && catalogDeclaresTablePose(tagId);
+    const pose = drawPose(comp);
+    return (
+        isOnTableComponent(comp) &&
+        catalogDeclaresTablePose(tagId) &&
+        Number.isFinite(pose?.x) &&
+        Number.isFinite(pose?.y) &&
+        Number.isFinite(pose?.rotation)
+    );
 }
 
 /** Chrome-bar tags currently in lab state and under operator control. */

@@ -18,7 +18,7 @@
     },
     {
       "backend_id": "real.default",
-      "label": "Lab automation (real robot)",
+      "label": "Experiment (real robot)",
       "description": "Physical robot bench via the Edge Contract server in the sibling lab_automation/cloudlabs_edge package.",
       "image": "/static/wiki/backends/real-default.png",
       "coordinator_data_path": "coordinator_data/real.default",

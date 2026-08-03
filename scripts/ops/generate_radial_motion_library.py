@@ -38,6 +38,7 @@ def main() -> int:
     parser.add_argument("--max-radius-mm", type=float)
     parser.add_argument("--step-mm", type=float)
     parser.add_argument("--carry-z-m", type=float)
+    parser.add_argument("--min-vertical-z-m", type=float)
     parser.add_argument("--height-margin-mm", type=float)
     args = parser.parse_args()
 
@@ -46,6 +47,10 @@ def main() -> int:
     _set_optional_env("CLOUDLAB_RADIAL_MAX_RADIUS_MM", args.max_radius_mm)
     _set_optional_env("CLOUDLAB_RADIAL_STEP_MM", args.step_mm)
     _set_optional_env("CLOUDLAB_RADIAL_CARRY_Z_M", args.carry_z_m)
+    _set_optional_env(
+        "CLOUDLAB_RADIAL_MIN_VERTICAL_Z_M",
+        args.min_vertical_z_m,
+    )
     if args.height_margin_mm is not None:
         os.environ["CLOUDLAB_RADIAL_HEIGHT_ZONE_MARGIN_M"] = str(
             args.height_margin_mm / 1000.0
@@ -55,7 +60,7 @@ def main() -> int:
 
     from simulation_edge.bootstrap import bootstrap_host
     from simulation_edge.host.runtime import (
-        MUJOCO_PLANNER_RADIAL,
+        MUJOCO_PLANNER_CUSTOM_IK,
         MuJoCoRobotRuntime,
     )
     from simulation_edge.host.scene import build_scene_spec
@@ -70,7 +75,9 @@ def main() -> int:
         scene,
         show_viewer=False,
         realtime=False,
-        planner_backend=MUJOCO_PLANNER_RADIAL,
+        # Generation must not bootstrap from the existing radial library: a
+        # deliberate scene-geometry correction makes its old joints stale.
+        planner_backend=MUJOCO_PLANNER_CUSTOM_IK,
     )
     try:
         library = runtime.generate_radial_motion_library(write=True)
@@ -85,6 +92,11 @@ def main() -> int:
             "carry_z_m": library.carry_z_m,
             "grasp_z_m": library.grasp_z_m,
             "max_vertical_z_m": library.max_vertical_z_m,
+            "min_vertical_z_m": min(
+                pose.z_m
+                for sample in library.samples
+                for pose in sample.vertical_poses
+            ),
             "vertical_pose_count": sum(
                 len(sample.vertical_poses) for sample in library.samples
             ),

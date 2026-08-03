@@ -20,11 +20,19 @@ from lab_model.language.domain.component import (
 )
 
 
-# MuJoCo world-frame Z of both the tabletop surface and the xArm mounting
-# plane. This is not a height above the robot base: the xArm root in the
-# vendored model is also at world Z=0.12 m.
+# MuJoCo world-frame Z of the tabletop surface. The physical xArm is mounted
+# on a 3/8-inch plate, so its mounting plane is one plate thickness higher.
 TABLE_SURFACE_Z_M = 0.12
 INCH_TO_M = 0.0254
+ROBOT_MOUNTING_PLATE_X_M = 7.5 * INCH_TO_M
+ROBOT_MOUNTING_PLATE_Y_M = 6.0 * INCH_TO_M
+ROBOT_MOUNTING_PLATE_THICKNESS_M = (3.0 / 8.0) * INCH_TO_M
+ROBOT_MOUNTING_PLATE_CENTER_Z_M = (
+    TABLE_SURFACE_Z_M + ROBOT_MOUNTING_PLATE_THICKNESS_M / 2.0
+)
+ROBOT_MOUNTING_PLANE_Z_M = TABLE_SURFACE_Z_M + ROBOT_MOUNTING_PLATE_THICKNESS_M
+ROBOT_MOUNTING_PLATE_OBJECT_ID = "robot_mounting_plate"
+ROBOT_MOUNTING_PLATE_GEOM_NAME = "robot_mounting_plate"
 DEFAULT_WIDTH_MM = 62.0
 DEFAULT_DEPTH_MM = 62.0
 DEFAULT_HEIGHT_MM = 60.0
@@ -1017,6 +1025,21 @@ def build_scene_spec(
     half_x_m = (table_bounds["x_max"] - table_bounds["x_min"]) / 2000.0
     half_y_m = (table_bounds["y_max"] - table_bounds["y_min"]) / 2000.0
 
+    mounting_plate = StaticCollisionObjectSpec(
+        object_id=ROBOT_MOUNTING_PLATE_OBJECT_ID,
+        geom_name=ROBOT_MOUNTING_PLATE_GEOM_NAME,
+        position_m=(0.0, 0.0, ROBOT_MOUNTING_PLATE_CENTER_Z_M),
+        dimensions_m=(
+            ROBOT_MOUNTING_PLATE_X_M,
+            ROBOT_MOUNTING_PLATE_Y_M,
+            ROBOT_MOUNTING_PLATE_THICKNESS_M,
+        ),
+    )
+    scene_static_collision_objects = (
+        *profile.static_collision_objects,
+        mounting_plate,
+    )
+
     bodies: list[str] = []
     welds: list[str] = []
     for spec in specs.values():
@@ -1130,8 +1153,9 @@ def build_scene_spec(
     <geom name="{html.escape(obj.geom_name)}" type="box"
       pos="{obj.position_m[0]:.8f} {obj.position_m[1]:.8f} {obj.position_m[2]:.8f}"
       size="{obj.dimensions_m[0] / 2.0:.8f} {obj.dimensions_m[1] / 2.0:.8f} {obj.dimensions_m[2] / 2.0:.8f}"
-      rgba="0 0 0 0" friction="1 0.01 0.001"/>'''
-        for obj in profile.static_collision_objects
+      rgba="{('0.42 0.44 0.47 1' if obj.object_id == ROBOT_MOUNTING_PLATE_OBJECT_ID else '0 0 0 0')}"
+      friction="1 0.01 0.001"/>'''
+        for obj in scene_static_collision_objects
     )}
     {''.join(bodies)}
   </worldbody>
@@ -1148,6 +1172,6 @@ def build_scene_spec(
         profile_id=profile.profile_id,
         frame_safety_clearance_mm=frame_safety_clearance_mm,
         manual_motion_corner_cutoff_mm=manual_motion_corner_cutoff_mm,
-        static_collision_objects=profile.static_collision_objects,
+        static_collision_objects=scene_static_collision_objects,
         spawn_adjustments_mm=spawn_adjustments,
     )

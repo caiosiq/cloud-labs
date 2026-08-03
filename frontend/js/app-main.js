@@ -31,7 +31,11 @@ import {
     initLaserLinesPanel,
     initLaserLinesPanelDeps,
 } from './ui/laser-lines-panel.js';
-import { initPoseRefresh, runLabPoseRefresh } from './ui/pose-refresh.js';
+import {
+    initPoseRefresh,
+    initializeUnlocalizedRealInventoryPoses,
+    runLabPoseRefresh,
+} from './ui/pose-refresh.js';
 import { showLabInitPendingGate } from './ui/lab-init-overlay.js';
 import { runtimeEditableOrMessage } from './control/control-state.js';
 import { getTableCamExposureSeconds } from './camera-exposure.js';
@@ -117,6 +121,7 @@ initApiFetchers({
 void initRuntimeMode({
     fetchCatalogMap: () => fetchCatalogMap(),
     fetchLabState: () => fetchLabState(),
+        .then(() => initializeUnlocalizedRealInventoryPoses())
     log,
     showErrorModal,
 });

@@ -5,7 +5,15 @@ from pathlib import Path
 import mujoco
 
 from simulation_edge.bootstrap import _resolve_catalog_rows
-from simulation_edge.host.scene import build_scene_spec, load_simulation_profile
+from simulation_edge.host.scene import (
+    ROBOT_MOUNTING_PLANE_Z_M,
+    ROBOT_MOUNTING_PLATE_OBJECT_ID,
+    ROBOT_MOUNTING_PLATE_THICKNESS_M,
+    ROBOT_MOUNTING_PLATE_X_M,
+    ROBOT_MOUNTING_PLATE_Y_M,
+    build_scene_spec,
+    load_simulation_profile,
+)
 
 
 LAB_VIEW = Path(__file__).resolve().parents[1] / "lab_view"
@@ -43,6 +51,25 @@ class StorageGeometryTests(unittest.TestCase):
         )
         model = mujoco.MjModel.from_xml_string(scene.xml)
         self.assertGreater(model.ngeom, 0)
+
+        plate = next(
+            obj
+            for obj in scene.static_collision_objects
+            if obj.object_id == ROBOT_MOUNTING_PLATE_OBJECT_ID
+        )
+        self.assertEqual(
+            plate.dimensions_m,
+            (
+                ROBOT_MOUNTING_PLATE_X_M,
+                ROBOT_MOUNTING_PLATE_Y_M,
+                ROBOT_MOUNTING_PLATE_THICKNESS_M,
+            ),
+        )
+        self.assertAlmostEqual(
+            float(model.body("link_base").pos[2]),
+            ROBOT_MOUNTING_PLANE_Z_M,
+            places=9,
+        )
 
 
 if __name__ == "__main__":
