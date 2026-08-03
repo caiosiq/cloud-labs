@@ -31,7 +31,11 @@ import {
     initLaserLinesPanel,
     initLaserLinesPanelDeps,
 } from './ui/laser-lines-panel.js';
-import { initPoseRefresh, runLabPoseRefresh } from './ui/pose-refresh.js';
+import {
+    initPoseRefresh,
+    initializeUnlocalizedRealInventoryPoses,
+    runLabPoseRefresh,
+} from './ui/pose-refresh.js';
 import { runtimeEditableOrMessage } from './control/control-state.js';
 import { getTableCamExposureSeconds } from './camera-exposure.js';
 import {
@@ -268,6 +272,7 @@ function init() {
     // localStorage→server guide migration + backfill of existing commits, and
     // refresh once more so the canvas + control flags reflect the migrated set.
     fetchLabState()
+        .then(() => initializeUnlocalizedRealInventoryPoses())
         .then(() => migrateLocalGuidesOnce())
         .then(() => {
             fetchLabState();

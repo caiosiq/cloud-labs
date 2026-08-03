@@ -60,11 +60,10 @@ throttle cable directly to the passenger — it goes through the tower.
 
 ```powershell
 # Terminal 1 — coordinator (serves UI + API)
-$env:PYTHONPATH="backend"
-python backend/main.py
+.\scripts\ops\run_cloud_labs_backend.ps1
 
 # Optional Terminal 2 — mock edge (distributed path)
-$env:PYTHONPATH="backend"
+$env:PYTHONPATH="backend;mock_edge\src"
 python scripts/ops/mock_edge_agent.py
 
 # Terminal 3 — author script
@@ -84,6 +83,28 @@ Point **`LAB_VIEW_PATH`** in `.env` at a lab deployment bundle when **running
 the server** (catalog, layout, lasers, recipes). That is operator setup, not
 something script authors configure. Bundles and scaffolding are explained in
 [`mock_edge/README.md`](mock_edge/README.md) (teaching edge).
+
+### Real `lab_automation` robot
+
+Start the calibrated edge from the sibling repository first:
+
+```powershell
+cd ..\lab_automation\cloudlabs_edge
+.\start_real_edge.ps1
+```
+
+Then start Cloud Labs in a second terminal:
+
+```powershell
+cd ..\cloud-labs-radial-merge
+.\scripts\ops\run_cloud_labs_backend.ps1
+```
+
+Open `http://127.0.0.1:8000/`, choose **Experiment (real robot)**, and enter the
+Twin. Twin automatically localizes any real inventory rows whose pose is not
+yet initialized; **Refresh Pose** remains the explicit rescan action. The real
+edge owns `cloudlabs_edge/data/library.json` and `inventory.json`; see
+[`docs/EDGE_LIBRARY_AND_INVENTORY.md`](docs/EDGE_LIBRARY_AND_INVENTORY.md).
 
 ---
 

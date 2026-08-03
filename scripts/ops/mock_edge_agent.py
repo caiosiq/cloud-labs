@@ -9,11 +9,11 @@ process owns MockLabCommunicator and executes:
 
 Terminal 1 (coordinator)::
 
-    $env:PYTHONPATH="backend"; python backend/main.py
+    .\scripts\ops\run_cloud_labs_backend.ps1
 
 Terminal 2 (edge â€” start BEFORE submitting work)::
 
-    $env:PYTHONPATH="backend"; python scripts/ops/mock_edge_agent.py
+    $env:PYTHONPATH="backend;mock_edge\src"; python scripts/ops/mock_edge_agent.py
 
 Terminal 3 (client)::
 

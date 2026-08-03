@@ -173,7 +173,14 @@ export async function fetchLabState() {
             let errorMsg = `HTTP ${response.status}`;
             try {
                 const errData = await response.json();
-                if (errData.detail) errorMsg = errData.detail;
+                if (typeof errData.detail === 'string') {
+                    errorMsg = errData.detail;
+                } else if (errData.detail && typeof errData.detail === 'object') {
+                    errorMsg =
+                        errData.detail.message ||
+                        errData.detail.reason ||
+                        JSON.stringify(errData.detail);
+                }
             } catch (e) { /* ignore JSON parse error */ }
             console.error(`[${new Date().toLocaleTimeString()}] Error receiving Lab State: ${errorMsg}`);
             throw new Error(errorMsg);

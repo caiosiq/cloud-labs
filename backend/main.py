@@ -681,6 +681,24 @@ class _ReservedBackgroundTasks:
 
 
 def _session_reconciliation_offers_dict() -> Dict[str, Any]:
+    client = _edge_client_for()
+    if client.transport != EdgeTransport.IN_PROCESS:
+        # Session checkpoint reconciliation belongs to an in-process lab host.
+        # An external edge owns its live state and is reconciled deliberately
+        # through edge primitives such as LOCALIZE_COMPONENTS.
+        return {
+            "enabled": False,
+            "skipped_reason": "external_edge",
+            "checkpoint_path": None,
+            "checkpoint_saved_at": None,
+            "checkpoint_lab_mode": None,
+            "age_hours": None,
+            "stale_warning_hours": None,
+            "stale_warning": False,
+            "thresholds": None,
+            "offers": [],
+        }
+
     from mock_edge.shared.session_checkpoint import (
         checkpoint_age_hours,
         checkpoint_lab_state,
@@ -2197,7 +2215,7 @@ async def get_lab_state():
         logger.exception("GET /api/lab-state failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read Lab State: {str(e)}")
 
-def _schedule_pose_refresh(
+async def _schedule_pose_refresh(
     background_tasks: BackgroundTasks,
     payload: Optional[RefreshPoseBody] = None,
 ) -> Dict[str, Any]:
@@ -2210,28 +2228,36 @@ def _schedule_pose_refresh(
     scoped = kwargs["tag_ids"] or kwargs["apply_tag_ids"]
 
     # Prefer Edge Contract LOCALIZE_COMPONENTS when the active backend is HTTP.
-    try:
-        client = _edge_client_for()
-        if client.transport == EdgeTransport.HTTP:
-
-            async def _localize() -> None:
-                args: Dict[str, Any] = {"force_rescan": True}
-                if scoped:
-                    args["tag_ids"] = list(scoped)
-                await client.execute_command(
-                    {"action": "LOCALIZE_COMPONENTS", "parameters": args}
-                )
-
-            background_tasks.add_task(_localize)
-            scope_note = f" (scope: {', '.join(scoped)})" if scoped else ""
-            return {
-                "status": "accepted",
-                "message": f"LOCALIZE_COMPONENTS started{scope_note}",
-                "scan_tag_ids": kwargs["apply_tag_ids"] or kwargs["tag_ids"] or None,
-                "via": "LOCALIZE_COMPONENTS",
-            }
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("LOCALIZE_COMPONENTS path unavailable, falling back: %s", exc)
+    # Await deliberate localization: returning before the edge scan starts lets
+    # Twin observe an old IDLE snapshot and stop polling before poses change.
+    client = _edge_client_for()
+    if client.transport == EdgeTransport.HTTP:
+        args: Dict[str, Any] = {"force_rescan": True}
+        if scoped:
+            args["tag_ids"] = list(scoped)
+        try:
+            result = await client.execute_command(
+                {"action": "LOCALIZE_COMPONENTS", "parameters": args}
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("LOCALIZE_COMPONENTS failed: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Edge LOCALIZE_COMPONENTS failed: {exc}",
+            ) from exc
+        if not result.ok:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Edge LOCALIZE_COMPONENTS failed: {result.error or result.status}",
+            )
+        scope_note = f" (scope: {', '.join(scoped)})" if scoped else ""
+        return {
+            "status": "completed",
+            "message": f"LOCALIZE_COMPONENTS completed{scope_note}",
+            "scan_tag_ids": kwargs["apply_tag_ids"] or kwargs["tag_ids"] or None,
+            "via": "LOCALIZE_COMPONENTS",
+            "edge_result": result.as_api_dict(),
+        }
 
     if lab is None:
         raise HTTPException(status_code=500, detail="Lab Communicator not initialized")
@@ -2251,6 +2277,21 @@ def _schedule_pose_refresh(
 
 
 def _pose_refresh_offers_dict(scope_tag_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    client = _edge_client_for()
+    if client.transport != EdgeTransport.IN_PROCESS:
+        # Preview offers are a mock/in-process dry run. A physical HTTP edge
+        # cannot truthfully preview camera measurements without performing the
+        # scan, so the UI should use its deliberate refresh confirmation.
+        return {
+            "supported": False,
+            "skipped_reason": "external_edge_requires_live_scan",
+            "thresholds": None,
+            "offers": [],
+            "hardware_note": (
+                "Refresh Pose will execute LOCALIZE_COMPONENTS on the selected edge."
+            ),
+        }
+
     from mock_edge.shared.session_checkpoint import reconciliation_thresholds_from_manifest
     from lab_model.coordinator.state.pose_refresh_offers import build_pose_refresh_offers
     from lab_model.coordinator.state.pose_refresh_selection import normalize_tag_id_list
@@ -2325,16 +2366,18 @@ async def refresh_lab_pose_from_camera(
     Re-localize component poses from the overhead / table camera (real: full scan; mock: simulated noise).
   Supports scoped refresh via ``tag_ids`` / ``apply_tag_ids`` (preferred) or legacy ``preserve_tag_ids``.
     """
-    cur = getattr(lab, "get_lab_state", lambda: {})
-    try:
-        st = cur()
-    except Exception:  # noqa: BLE001
-        st = {}
-    if isinstance(st, dict):
-        cs = st.get("system_status")
-        if cs in ("BUSY", "OPTIMIZING"):
-            raise HTTPException(status_code=409, detail=f"System is {cs}. Please wait.")
-    return _schedule_pose_refresh(background_tasks, payload)
+    client = _edge_client_for()
+    if client.transport == EdgeTransport.IN_PROCESS:
+        cur = getattr(lab, "get_lab_state", lambda: {})
+        try:
+            st = cur()
+        except Exception:  # noqa: BLE001
+            st = {}
+        if isinstance(st, dict):
+            cs = st.get("system_status")
+            if cs in ("BUSY", "OPTIMIZING"):
+                raise HTTPException(status_code=409, detail=f"System is {cs}. Please wait.")
+    return await _schedule_pose_refresh(background_tasks, payload)
 
 
 @app.post("/api/lab-state/refresh")
@@ -2343,7 +2386,7 @@ async def refresh_lab_state_legacy(
     payload: Optional[RefreshPoseBody] = Body(None),
 ):
     """Deprecated: use ``POST /api/lab-state/refresh-pose`` (same behavior)."""
-    return _schedule_pose_refresh(background_tasks, payload)
+    return await _schedule_pose_refresh(background_tasks, payload)
 
 
 @app.get("/api/session-reconciliation/offers")

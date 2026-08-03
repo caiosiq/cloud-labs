@@ -18,8 +18,14 @@ import { runtimeEditableOrMessage } from '../control/control-state.js';
 import { log } from './log.js';
 import { isOnTableComponent } from '../component-model.js';
 import { fetchLaserLines } from './laser-lines-panel.js';
+import {
+    backendHeaders,
+    getSelectedBackendId,
+    withBackendQuery,
+} from '../state/backend-selection.js';
 
 let _fetchLabState = async () => {};
+let _initialLocalizationPromise = null;
 
 /**
  * @param {{ fetchLabState: () => Promise<void> }} deps
@@ -41,7 +47,10 @@ async function fetchRefreshPoseOffers(scopeTagIds = null) {
         scopeTagIds && scopeTagIds.length
             ? `?tag_ids=${encodeURIComponent(scopeTagIds.join(','))}`
             : '';
-    const res = await fetch(`/api/lab-state/refresh-pose/offers${qs}`);
+    const res = await fetch(
+        withBackendQuery(`/api/lab-state/refresh-pose/offers${qs}`),
+        { headers: backendHeaders() },
+    );
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
         throw new Error(data.detail || res.statusText || 'Refresh pose offers failed');
@@ -406,9 +415,9 @@ async function executePoseRefresh(selection) {
               : 'Refreshing poses from camera (re-localize)…',
         'warn',
     );
-    const res = await fetch('/api/lab-state/refresh-pose', {
+    const res = await fetch(withBackendQuery('/api/lab-state/refresh-pose'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: backendHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -418,7 +427,9 @@ async function executePoseRefresh(selection) {
 
     const start = Date.now();
     while (Date.now() - start < 30000) {
-        const stateRes = await fetch('/api/lab-state');
+        const stateRes = await fetch(withBackendQuery('/api/lab-state'), {
+            headers: backendHeaders(),
+        });
         const state = await stateRes.json();
         if (state && state.system_status === 'IDLE') break;
         await new Promise((r) => setTimeout(r, 500));
@@ -463,7 +474,45 @@ export async function runScopedPoseRefresh(tagIds, { skipModal = false } = {}) {
     }
 }
 
-/** Same behavior as the Refresh Pose button (shared with Command Console): camera pose pass → tunables.reported_pose. */
+/**
+ * On first entry to a physical Twin, establish poses for inventory rows that
+ * have never been localized by this edge process. This is a deliberate POST,
+ * never a mutation hidden behind GET /lab-state.
+ */
+export async function initializeUnlocalizedRealInventoryPoses() {
+    const backendId = getSelectedBackendId() || '';
+    if (!backendId.startsWith('real.')) return false;
+    if (_initialLocalizationPromise) return _initialLocalizationPromise;
+
+    const components = store.labState?.components || {};
+    const tagIds = Object.entries(components)
+        .filter(([, comp]) => {
+            if (!comp || !isOnTableComponent(comp)) return false;
+            if (comp.localization?.localized === true) return false;
+            const pose = comp.statecontrol?.measurables?.pose;
+            return !pose || !Number.isFinite(pose.x) || !Number.isFinite(pose.y);
+        })
+        .map(([tagId]) => tagId)
+        .sort();
+    if (!tagIds.length) return false;
+
+    _initialLocalizationPromise = (async () => {
+        log(
+            `Initializing real inventory poses from the top cameras (${tagIds.join(', ')})…`,
+            'warn',
+        );
+        const ok = await runScopedPoseRefresh(tagIds, { skipModal: true });
+        if (ok) log('Initial real inventory localization complete.', 'info');
+        return ok;
+    })();
+    try {
+        return await _initialLocalizationPromise;
+    } finally {
+        _initialLocalizationPromise = null;
+    }
+}
+
+/** Same behavior as the Refresh Pose button, shared with Command Console. */
 export async function runLabPoseRefresh() {
     const blocked = runtimeEditableOrMessage();
     if (blocked) {

@@ -26,6 +26,13 @@ cloudlabs_edge/data/
 On-disk documents omit `backend_id`. HTTP `GET /library` and `GET /inventory`
 may stamp `backend_id` like `/bench`.
 
+The real `lab_automation` edge reads both files when producing `/lab-state`.
+It also uses `library.json` to build the physical component registry at edge
+startup, so restart that edge after a library or hardware-binding edit.
+Inventory-only edits are read live. A pose is never copied from these
+declarations: it is added to `/lab-state` only after `LOCALIZE_COMPONENTS`
+measures the component (or after a successful motion reports its final pose).
+
 ---
 
 ## Decision: no separate `active_catalog.json` on the edge

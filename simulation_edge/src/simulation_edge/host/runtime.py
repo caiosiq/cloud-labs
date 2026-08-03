@@ -20,7 +20,12 @@ import mujoco.viewer
 import numpy as np
 
 from simulation_edge.host.ik import ARM_DOF, DampedLeastSquaresIK, IKError
-from simulation_edge.host.scene import TABLE_SURFACE_Z_M, ComponentSpec, SceneSpec
+from simulation_edge.host.scene import (
+    ROBOT_MOUNTING_PLATE_OBJECT_ID,
+    TABLE_SURFACE_Z_M,
+    ComponentSpec,
+    SceneSpec,
+)
 from simulation_edge.sim_xarm.wrapper import XArmAPI
 
 
@@ -79,6 +84,7 @@ RADIAL_MIN_RADIUS_MM_ENV_VAR = "CLOUDLAB_RADIAL_MIN_RADIUS_MM"
 RADIAL_MAX_RADIUS_MM_ENV_VAR = "CLOUDLAB_RADIAL_MAX_RADIUS_MM"
 RADIAL_STEP_MM_ENV_VAR = "CLOUDLAB_RADIAL_STEP_MM"
 RADIAL_CARRY_Z_M_ENV_VAR = "CLOUDLAB_RADIAL_CARRY_Z_M"
+RADIAL_MIN_VERTICAL_Z_M_ENV_VAR = "CLOUDLAB_RADIAL_MIN_VERTICAL_Z_M"
 RADIAL_HEIGHT_ZONE_MARGIN_M_ENV_VAR = "CLOUDLAB_RADIAL_HEIGHT_ZONE_MARGIN_M"
 RADIAL_HEIGHT_ZONE_MIN_RADIUS_MM_ENV_VAR = "CLOUDLAB_RADIAL_HEIGHT_ZONE_MIN_RADIUS_MM"
 RADIAL_DEFAULT_MIN_RADIUS_MM = 134.0
@@ -92,6 +98,7 @@ RADIAL_DEFAULT_STEP_MM = 5.0
 RADIAL_DEFAULT_CARRY_Z_M = 0.550
 RADIAL_DEFAULT_HEIGHT_ZONE_MARGIN_M = 0.0
 RADIAL_DEFAULT_GRASP_Z_M = 0.300
+RADIAL_DEFAULT_MIN_VERTICAL_Z_M = 0.290
 RADIAL_DEFAULT_MAX_VERTICAL_Z_M = 0.550
 RADIAL_VERTICAL_STEP_MM = 10.0
 RADIAL_BASE_ROTATION_STEP_DEG = 12.0
@@ -1040,6 +1047,14 @@ class MuJoCoRobotRuntime:
             maximum=1.00,
         )
 
+    def _radial_min_vertical_z_m(self) -> float:
+        return _env_float(
+            RADIAL_MIN_VERTICAL_Z_M_ENV_VAR,
+            RADIAL_DEFAULT_MIN_VERTICAL_Z_M,
+            minimum=0.10,
+            maximum=RADIAL_DEFAULT_MAX_VERTICAL_Z_M,
+        )
+
     def _radial_height_zone_margin_m(self) -> float:
         return _env_float(
             RADIAL_HEIGHT_ZONE_MARGIN_M_ENV_VAR,
@@ -1570,6 +1585,7 @@ class MuJoCoRobotRuntime:
 
     def _radial_vertical_levels_desc(self) -> tuple[float, ...]:
         grasp_z = self._radial_grasp_z_m()
+        min_z = min(grasp_z, self._radial_min_vertical_z_m())
         max_z = max(
             RADIAL_DEFAULT_MAX_VERTICAL_Z_M,
             self._radial_carry_z_m(),
@@ -1579,13 +1595,13 @@ class MuJoCoRobotRuntime:
             1,
             int(
                 math.ceil(
-                    (max_z - grasp_z) / (RADIAL_VERTICAL_STEP_MM / 1000.0)
+                    (max_z - min_z) / (RADIAL_VERTICAL_STEP_MM / 1000.0)
                 )
             ),
         )
         levels = {
             float(value)
-            for value in np.linspace(max_z, grasp_z, count + 1)
+            for value in np.linspace(max_z, min_z, count + 1)
         }
         levels.update(
             {
@@ -1594,6 +1610,7 @@ class MuJoCoRobotRuntime:
                 float(REAL_PICKUP_CAMERA_APPROACH_Z_M),
                 float(grasp_z + RELEASE_CLEARANCE_M),
                 float(grasp_z),
+                float(min_z),
             }
         )
         return tuple(sorted(levels, reverse=True))
@@ -2979,6 +2996,14 @@ class MuJoCoRobotRuntime:
                 if static_object_id is not None:
                     if self.model.geom_bodyid[static_geom] == moving_body:
                         continue
+                    # The fixed xArm base is intentionally seated on the
+                    # physical mounting plate. All other plate contacts remain
+                    # collision failures.
+                    if (
+                        static_object_id == ROBOT_MOUNTING_PLATE_OBJECT_ID
+                        and moving_name == "link_base"
+                    ):
+                        continue
                     if moving_name != "world":
                         raise CollisionPlanError(
                             f"planned robot path contacts {static_object_id} "
@@ -3573,14 +3598,34 @@ class MuJoCoRobotRuntime:
         )
         shortest_delta = self._shortest_angle_delta_rad(source_yaw, target_yaw)
         candidates: list[tuple[float, np.ndarray]] = []
+        rejected: list[str] = []
+        joint_id = self.model.joint("joint7").id
+        current_joint7_deg = math.degrees(float(current[6]))
+        joint7_limits_deg: tuple[float, float] | None = None
+        if self.model.jnt_limited[joint_id]:
+            lower, upper = self.model.jnt_range[joint_id]
+            joint7_limits_deg = (
+                math.degrees(float(lower)),
+                math.degrees(float(upper)),
+            )
         for turns in range(-1, 2):
             yaw_delta = shortest_delta + turns * 2.0 * math.pi
             target = np.asarray(current, dtype=float).copy()
             target[6] -= yaw_delta
-            joint_id = self.model.joint("joint7").id
+            yaw_delta_deg = math.degrees(float(yaw_delta))
+            target_joint7_deg = math.degrees(float(target[6]))
+            prefix = (
+                f"turns={turns}, yaw_delta={yaw_delta_deg:.3f} deg, "
+                f"target_joint7={target_joint7_deg:.3f} deg"
+            )
             if self.model.jnt_limited[joint_id]:
                 lower, upper = self.model.jnt_range[joint_id]
                 if not float(lower) <= float(target[6]) <= float(upper):
+                    rejected.append(
+                        f"{prefix}: joint7 limit "
+                        f"[{math.degrees(float(lower)):.3f}, "
+                        f"{math.degrees(float(upper)):.3f}] deg"
+                    )
                     continue
             try:
                 self._validate_outer_pose_target(
@@ -3589,12 +3634,25 @@ class MuJoCoRobotRuntime:
                     target_rotation,
                     stage=stage,
                 )
-            except Exception:
+            except Exception as exc:
+                rejected.append(f"{prefix}: {exc}")
                 continue
             candidates.append((abs(yaw_delta), target))
         if not candidates:
+            joint_limit_text = (
+                "unlimited"
+                if joint7_limits_deg is None
+                else f"[{joint7_limits_deg[0]:.3f}, {joint7_limits_deg[1]:.3f}] deg"
+            )
+            rejected_text = "; ".join(rejected) if rejected else "no candidates evaluated"
             raise CollisionPlanError(
-                f"{stage} has no wrist-only rotation inside joint limits"
+                f"{stage} has no validated wrist-only rotation. "
+                f"source_yaw={math.degrees(source_yaw):.3f} deg, "
+                f"target_yaw={math.degrees(target_yaw):.3f} deg, "
+                f"shortest_delta={math.degrees(shortest_delta):.3f} deg, "
+                f"current_joint7={current_joint7_deg:.3f} deg, "
+                f"joint7_limits={joint_limit_text}. "
+                f"Rejected candidates: {rejected_text}"
             )
         return min(candidates, key=lambda item: item[0])[1].copy()
 
