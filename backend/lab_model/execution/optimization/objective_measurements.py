@@ -213,11 +213,16 @@ def collect_objective_measurements(
     capture_bgr_for_tag: Callable[[str], Any],
     read_scalar: Optional[Callable[[str, str], Optional[float]]] = None,
     allow_image_scalar_fallback: bool = True,
+    allow_coordinator_torchscript: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Build per-term measurement dicts for :func:`evaluate_weighted_sum`.
 
     ``capture_bgr_for_tag`` is invoked once per distinct capture tag per eval.
+
+    When ``allow_coordinator_torchscript`` is False (remote / HTTP edges), TorchScript
+    terms refuse rather than calling :func:`run_torchscript_output` — kernels run on
+    the edge via the OPTIMIZE pipeline.
     """
     plans = plan_objective_terms(objective, catalog_map=catalog_map)
     capture_cache: Dict[str, Any] = {}
@@ -248,6 +253,12 @@ def collect_objective_measurements(
             continue
 
         if plan.kind in ("torchscript_scalar", "torchscript_features"):
+            if not allow_coordinator_torchscript:
+                raise RuntimeError(
+                    "coordinator torchscript execution disabled for remote backends; "
+                    "kernels run on the edge via the OPTIMIZE pipeline "
+                    f"(term={plan.term_id!r} kernel={plan.kernel_id!r})"
+                )
             capture_tag = plan.capture_tag_id or plan.source_tag_id
             bgr = _bgr_for(capture_tag)
             kernel_id = plan.kernel_id or ""

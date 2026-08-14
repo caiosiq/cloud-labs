@@ -119,6 +119,8 @@ export const store = {
     dragFromStorageTag: null,
     /** Ghost pose snapshot at mousedown when starting a drag-from-storage move (for cancel/revert). */
     dragFromStorageStartPose: null,
+    /** PLACED part id when "Store to cell…" mode is active — click a free storage cell on canvas. */
+    storeToSlotTag: null,
     /**
      * User-drawn alignment guides (client-side segments in lab mm). Persisted
      * to localStorage — same snap rules as laser line segments.

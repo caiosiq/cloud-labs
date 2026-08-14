@@ -4,9 +4,8 @@
  * Returns a complete ``.component-panel[data-tag-id=...]`` element for the
  * given tag. The panel-dock manager (``ui/context-panel.js``) mounts these
  * inside ``#panel-dock`` — one panel per open component. Multiple panels can
- * be open at once (Ctrl/Cmd+click on a component), only the focused panel
- * captures interactive clicks (CSS rule on ``.component-panel--focused``),
- * but every open panel keeps polling its live camera feeds / telemetry.
+ * be open at once (Ctrl/Cmd+click). The focused panel is full; companions use
+ * ``renderCompactComponentPanel``.
  *
  * The element exposes:
  *   - ``data-tag-id="<tagId>"`` on the root, so lab-state.js can find it.
@@ -84,6 +83,84 @@ export function renderComponentPanel(tagId, deps = {}) {
     );
 
     panel.appendChild(_renderBody(tagId, comp, catalogRow, { ...deps, placementState: placement }));
+
+    return panel;
+}
+
+/**
+ * Compact companion card for an open-but-unfocused panel in the Selected Part dock.
+ * Click focuses (expands to full); X closes.
+ *
+ * @param {string} tagId
+ * @param {{
+ *   placementState?: string,
+ *   closePanel?: (tagId: string) => void,
+ *   focusPanel?: (tagId: string) => void,
+ * }} deps
+ * @returns {HTMLDivElement}
+ */
+export function renderCompactComponentPanel(tagId, deps = {}) {
+    const panel = document.createElement('div');
+    panel.className = 'component-panel component-panel--compact';
+    panel.dataset.tagId = tagId;
+    panel.setAttribute('role', 'button');
+    panel.setAttribute('tabindex', '0');
+    panel.setAttribute('aria-label', `Focus panel for ${tagId}`);
+    panel.title = 'Click to expand · Ctrl+click another part to add a companion';
+
+    const catalogRow = (store.catalogMap || {})[tagId];
+    const comp =
+        (store.labState && store.labState.components && store.labState.components[tagId]) ||
+        null;
+    const displayName = (catalogRow && catalogRow.name) || tagId;
+    const placement = deps.placementState || placementUiLabel(comp);
+
+    const row = document.createElement('div');
+    row.className = 'component-panel__compact-row';
+
+    const text = document.createElement('div');
+    text.className = 'component-panel__compact-text';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'component-panel__compact-name';
+    nameEl.textContent = displayName;
+    const meta = document.createElement('div');
+    meta.className = 'component-panel__compact-meta';
+    meta.textContent = `${tagId} · ${placement}`;
+    text.appendChild(nameEl);
+    text.appendChild(meta);
+    row.appendChild(text);
+
+    const badge = document.createElement('span');
+    badge.className = 'component-panel__compact-badge';
+    badge.textContent = placement;
+    row.appendChild(badge);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'component-panel__close';
+    close.title = 'Close';
+    close.setAttribute('aria-label', `Close panel for ${tagId}`);
+    close.innerHTML = '<span class="material-icons-round" aria-hidden="true">close</span>';
+    close.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (typeof deps.closePanel === 'function') deps.closePanel(tagId);
+    });
+    row.appendChild(close);
+
+    panel.appendChild(row);
+
+    const hint = document.createElement('div');
+    hint.className = 'component-panel__compact-hint';
+    hint.textContent = 'Click to expand';
+    panel.appendChild(hint);
+
+    panel.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            if (typeof deps.focusPanel === 'function') deps.focusPanel(tagId);
+        }
+    });
 
     return panel;
 }
@@ -206,36 +283,11 @@ function _renderBody(tagId, comp, catalogRow, deps) {
 
     const isStored = comp ? isStoredComponent(comp) : false;
 
-    if (!isStored) {
-        wrap.appendChild(
-            renderReadOnlyPanel(tagId, comp, catalogRow, {
-                sendCommand,
-                fetchLabState,
-                updateMotorAngleLabels,
-                refreshPanel: deps.updateContextPanel
-                    ? (tid) => deps.updateContextPanel(tid || tagId)
-                    : undefined,
-                resetPanelSnapshot: () => {
-                    store.contextPanelSnapshots.delete(tagId);
-                },
-                render: deps.render,
-                log,
-            }),
-        );
-    }
-
-    if (isOptimizationVariableStage()) {
-        const optSlot = document.createElement('div');
-        optSlot.className = 'component-popup__optimization-vars';
-        renderOptimizationVariablePicker(optSlot, tagId, comp);
-        wrap.appendChild(optSlot);
-    }
-
+    // Actions first: primitives sit above read-only tunables / measurables / telemetry.
     const caps = catalogRow.capabilities;
     if (caps && Array.isArray(caps.primitives) && caps.primitives.length) {
         const primBlock = document.createElement('div');
         primBlock.className = 'component-popup__primitives';
-        primBlock.style.marginTop = '12px';
 
         const title = document.createElement('div');
         title.style.fontSize = '10px';
@@ -279,6 +331,35 @@ function _renderBody(tagId, comp, catalogRow, deps) {
 
         primBlock.appendChild(renderPrimitiveRegions(tagId, caps.primitives, ctx));
         wrap.appendChild(primBlock);
+    }
+
+    if (isOptimizationVariableStage()) {
+        const optSlot = document.createElement('div');
+        optSlot.className = 'component-popup__optimization-vars';
+        optSlot.style.marginTop = wrap.childElementCount ? '12px' : '0';
+        renderOptimizationVariablePicker(optSlot, tagId, comp);
+        wrap.appendChild(optSlot);
+    }
+
+    if (!isStored) {
+        const readonly = document.createElement('div');
+        readonly.style.marginTop = wrap.childElementCount ? '12px' : '0';
+        readonly.appendChild(
+            renderReadOnlyPanel(tagId, comp, catalogRow, {
+                sendCommand,
+                fetchLabState,
+                updateMotorAngleLabels,
+                refreshPanel: deps.updateContextPanel
+                    ? (tid) => deps.updateContextPanel(tid || tagId)
+                    : undefined,
+                resetPanelSnapshot: () => {
+                    store.contextPanelSnapshots.delete(tagId);
+                },
+                render: deps.render,
+                log,
+            }),
+        );
+        wrap.appendChild(readonly);
     }
 
     if (PRIMITIVE_DEV_HINTS) {

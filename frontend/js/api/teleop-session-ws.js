@@ -8,6 +8,7 @@
  */
 import { store } from '../state/store.js';
 import { log } from '../ui/log.js';
+import { withBackendQuery } from '../state/backend-selection.js';
 
 const _sessions = new Map();
 const GOTO_INTERVAL_MS = 50; // ~20 Hz coalesce cap
@@ -20,7 +21,10 @@ function wsUrl(tagId, descriptor) {
     if (path.startsWith('https://')) return `wss://${path.slice(8)}`;
     const proto = (typeof location !== 'undefined' && location.protocol === 'https:') ? 'wss:' : 'ws:';
     const host = typeof location !== 'undefined' ? location.host : 'localhost';
-    return `${proto}//${host}${path.startsWith('/') ? path : `/${path}`}`;
+    const httpPath = path.startsWith('/') ? path : `/${path}`;
+    // backend_id must be on the WS URL — HTTP middleware does not bind websockets.
+    const withBackend = withBackendQuery(httpPath);
+    return `${proto}//${host}${withBackend}`;
 }
 
 /**

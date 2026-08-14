@@ -121,7 +121,6 @@ initApiFetchers({
 void initRuntimeMode({
     fetchCatalogMap: () => fetchCatalogMap(),
     fetchLabState: () => fetchLabState(),
-        .then(() => initializeUnlocalizedRealInventoryPoses())
     log,
     showErrorModal,
 });
@@ -160,6 +159,7 @@ initPoseRefresh({
 initCommands({
     render: () => render(),
     updateContextPanel: (tagId) => updateContextPanel(tagId),
+    refreshControlWorkingState: () => refreshControlWorkingState(),
 });
 initLabState({
     placementUiLabel,
@@ -188,6 +188,8 @@ initUpdateUI({
     updateHoldingBanner: () => updateHoldingBanner(),
     render: () => render(),
     openPanel: (tagId, opts) => openPanel(tagId, opts || {}),
+    fetchLabState: () => fetchLabState(),
+    log,
 });
 initComponentSidebarInteraction();
 initContextPanel({
@@ -277,6 +279,7 @@ function init() {
     // localStorage→server guide migration + backfill of existing commits, and
     // refresh once more so the canvas + control flags reflect the migrated set.
     fetchLabState()
+        .then(() => initializeUnlocalizedRealInventoryPoses())
         .then(() => migrateLocalGuidesOnce())
         .then(() => {
             fetchLabState();

@@ -22,10 +22,11 @@
       "description": "Physical robot bench via the Edge Contract server in the sibling lab_automation/cloudlabs_edge package.",
       "image": "/static/wiki/backends/real-default.png",
       "coordinator_data_path": "coordinator_data/real.default",
+      "coordinator_seed_path": "schemas/coordinator_seeds/real.default",
       "communicator": "real",
       "lab_mode": "REAL",
       "enabled": true,
-      "notes": "Start the lab_automation edge on port 8200 before connecting. Coordinator store is auto-created under coordinator_data/real.default (VC + working state only). Library, inventory, and layout come from the edge.",
+      "notes": "Start the lab_automation edge on port 8200 before connecting. Coordinator store is auto-created under coordinator_data/real.default (VC + working state only). Library, inventory, and layout come from the edge. Twin laser lines seed from schemas/coordinator_seeds/real.default (historical diode + Ne–He geometry).",
       "edge": {
         "base_url": "http://127.0.0.1:8200",
         "contract_version": "1.0.0",

@@ -156,6 +156,7 @@ class SceneSpec:
     table_bounds_mm: Dict[str, float]
     profile_id: str
     frame_safety_clearance_mm: float = 0.0
+    tcp_tool_envelope_radius_mm: float = 0.0
     manual_motion_corner_cutoff_mm: float = 0.0
     static_collision_objects: tuple["StaticCollisionObjectSpec", ...] = ()
     spawn_adjustments_mm: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -857,13 +858,20 @@ def build_scene_spec(
 
     frame_safety = layout.get("frame_safety")
     frame_safety_clearance_mm = 0.0
+    tcp_tool_envelope_radius_mm = 0.0
     if isinstance(frame_safety, Mapping):
         frame_safety_clearance_mm = _finite_float(
             frame_safety.get("clearance_mm", 0.0),
             label="frame_safety.clearance_mm",
         )
+        tcp_tool_envelope_radius_mm = _finite_float(
+            frame_safety.get("tcp_tool_envelope_radius_mm", 0.0),
+            label="frame_safety.tcp_tool_envelope_radius_mm",
+        )
     if frame_safety_clearance_mm < 0:
         raise SceneValidationError("frame safety clearance must be non-negative")
+    if tcp_tool_envelope_radius_mm < 0:
+        raise SceneValidationError("TCP tool envelope radius must be non-negative")
     manual_workspace = layout.get("manual_motion_workspace")
     manual_motion_corner_cutoff_mm = 0.0
     if isinstance(manual_workspace, Mapping):
@@ -1171,6 +1179,7 @@ def build_scene_spec(
         table_bounds_mm=table_bounds,
         profile_id=profile.profile_id,
         frame_safety_clearance_mm=frame_safety_clearance_mm,
+        tcp_tool_envelope_radius_mm=tcp_tool_envelope_radius_mm,
         manual_motion_corner_cutoff_mm=manual_motion_corner_cutoff_mm,
         static_collision_objects=scene_static_collision_objects,
         spawn_adjustments_mm=spawn_adjustments,

@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/optimization_pipeline.schema.json",
+  "title": "EdgeContractOptimizationPipelineV1",
+  "description": "Self-contained edge optimization pipeline (compiled from ensemble OPTIMIZE IR). Executed entirely on the edge; coordinator ships once at job submit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "variables", "capture", "objective", "solver"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "session_label": {
+      "type": "string"
+    },
+    "variables": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/variable" }
+    },
+    "capture": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capture" }
+    },
+    "objective": { "$ref": "#/$defs/objective" },
+    "solver": { "$ref": "#/$defs/solver" },
+    "kernel_packages": {
+      "type": "array",
+      "description": "Session kernel artifacts only (session.*). Premade catalog kernels live on the edge.",
+      "items": { "$ref": "#/$defs/kernel_package" }
+    }
+  },
+  "$defs": {
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max"],
+      "properties": {
+        "min": { "type": "number" },
+        "max": { "type": "number" }
+      }
+    },
+    "actuator_motor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "controller", "motor_id"],
+      "properties": {
+        "kind": { "const": "motor" },
+        "controller": { "type": "string", "minLength": 1 },
+        "motor_id": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "string", "pattern": "^[0-9]+$" }
+          ]
+        }
+      }
+    },
+    "actuator_pose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "axis"],
+      "properties": {
+        "kind": { "const": "pose" },
+        "axis": { "type": "string", "enum": ["x", "y", "rotation"] }
+      }
+    },
+    "touch_and_go": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "measure_only_while_released": { "type": "boolean" },
+        "settle_ms_after_release": { "type": "integer", "minimum": 0 },
+        "settle_ms_after_move": { "type": "integer", "minimum": 0 },
+        "settle_ms_after_reengage": { "type": "integer", "minimum": 0 },
+        "gripper_tag": { "type": "string", "minLength": 1 },
+        "safe_home_tag": { "type": ["string", "null"] },
+        "re_engage_on_demand": { "type": "boolean" },
+        "re_engage_after_measure": { "type": "boolean" },
+        "required": { "type": "boolean" }
+      }
+    },
+    "variable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "tag_id", "actuator", "physical_type", "unit", "bounds"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "tag_id": { "type": "string", "minLength": 1 },
+        "actuator": {
+          "oneOf": [
+            { "$ref": "#/$defs/actuator_motor" },
+            { "$ref": "#/$defs/actuator_pose" }
+          ]
+        },
+        "physical_type": {
+          "type": "string",
+          "enum": ["continuous", "invasive_discrete"]
+        },
+        "unit": { "type": "string", "minLength": 1 },
+        "bounds": { "$ref": "#/$defs/bounds" },
+        "delta": { "type": "boolean", "default": true },
+        "step_hint": { "type": ["number", "null"] },
+        "touch_and_go": { "$ref": "#/$defs/touch_and_go" }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "tag_id", "field"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "tag_id": { "type": "string", "minLength": 1 },
+        "field": { "type": "string", "minLength": 1 },
+        "exposure_s": { "type": ["number", "null"], "exclusiveMinimum": 0 }
+      }
+    },
+    "objective_term": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "weight", "metric"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "weight": { "type": "number" },
+        "metric": { "type": "string", "minLength": 1 },
+        "capture_id": { "type": "string", "minLength": 1 },
+        "kernel_id": { "type": "string", "minLength": 1 },
+        "measurable_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Transitional: state measurable without a TorchScript kernel (e.g. measurables.last_optimization_score)."
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "anyOf": [
+        { "required": ["kernel_id", "capture_id"] },
+        { "required": ["measurable_path"] }
+      ]
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "terms"],
+      "properties": {
+        "type": { "const": "weighted_sum" },
+        "minimize": { "type": "boolean", "default": true },
+        "terms": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/objective_term" }
+        }
+      }
+    },
+    "solver_block": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "variable_ids"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "variable_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "max_evals": { "type": "integer", "minimum": 1 },
+        "trust_region_u": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "rhobeg_u": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "rhoend_u": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "passes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "solver": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "blocks"],
+      "properties": {
+        "type": { "const": "block_cobyla" },
+        "max_total_evals": { "type": "integer", "minimum": 1 },
+        "keep_best": { "type": "boolean" },
+        "rollback_on_fail": { "type": "boolean" },
+        "settle_ms": { "type": "integer", "minimum": 0 },
+        "stop_loss": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Early-stop when total normalized loss ≤ this (e.g. 0.1 ≈ 10% FOV for align)."
+        },
+        "normalization": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/solver_block" }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "e.g. max_delta_from_start"
+              },
+              "enabled": { "type": "boolean" },
+              "limits": {
+                "type": "object",
+                "additionalProperties": { "type": "number" },
+                "description": "Physical caps vs applied x0, keyed by unit family (deg, mm)."
+              }
+            }
+          }
+        }
+      }
+    },
+    "kernel_package": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["kernel_id", "digest"],
+      "properties": {
+        "kernel_id": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "minLength": 1 },
+        "artifact_b64": { "type": "string" },
+        "output_kind": { "type": "string", "enum": ["scalar", "features"] },
+        "feature_names": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "label": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    }
+  }
+}

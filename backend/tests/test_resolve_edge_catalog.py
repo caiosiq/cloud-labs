@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 from lab_model.coordinator.catalog.resolve_edge_catalog import (
     EdgeCatalogUnavailable,
+    catalog_map_from_resolved,
     resolve_edge_catalog,
 )
 
@@ -126,6 +127,33 @@ class ResolveEdgeCatalogTests(unittest.TestCase):
         self.assertTrue(cat.active_tag_ids())
         # Must not be reading coordinator_data as library SoT.
         self.assertNotIn("coordinator_data", cat.source)
+
+    def test_catalog_map_from_resolved_keys_by_tag_id(self) -> None:
+        from lab_model.coordinator.catalog.resolve_edge_catalog import ResolvedEdgeCatalog
+        from lab_model.execution.optimization.objective_measurements import (
+            is_camera_capable_row,
+        )
+
+        cat = ResolvedEdgeCatalog(
+            backend_id="real.default",
+            source="test",
+            library={
+                "components": {
+                    "tag_22": {
+                        "id": "cam_gripper_1",
+                        "tag_id": "tag_22",
+                        "type": "OPTICAL_CAMERA",
+                    }
+                }
+            },
+            inventory={
+                "entries": {"tag_22": {"placement": "table", "localize": True}}
+            },
+        )
+        cmap = catalog_map_from_resolved(cat)
+        self.assertIn("tag_22", cmap)
+        self.assertNotIn("cam_gripper_1", cmap)
+        self.assertTrue(is_camera_capable_row(cmap["tag_22"]))
 
 
 if __name__ == "__main__":

@@ -38,11 +38,12 @@ as system status. When you move a mirror or jog a motor, runtime updates. That
 live document is **not** itself a version-control node.
 
 **Configuration** is the slice of commanded intent taken from runtime: per-tag
-tunables plus holding intent. A **commit** in a control repository is a
-configuration document on a branch graph. Checking out a commit projects that
-intent back into runtime (and, for a hard checkout, through primitives onto
-hardware). Telemetry is ephemeral; it rides along in runtime but is not what
-commits remember.
+tunables (breadboard pose **and** storage **slot**) plus holding intent. Stored
+parts do not version XY/rotation — the cell center is derived from the slot when
+you preview or apply. A **commit** in a control repository is a configuration
+document on a branch graph. Checking out a commit projects that intent back into
+runtime (and, for a hard checkout, through primitives onto hardware). Telemetry
+is ephemeral; it rides along in runtime but is not what commits remember.
 
 **Observations** are the ensemble of measurables—camera frames, scores, and
 other receipts. You may pin them next to a configuration as a **setup** (a
@@ -75,19 +76,22 @@ commit nodes for the repo you select. Creating a **commit** freezes the current
 configuration with a message; **fork** starts a new branch from a chosen parent
 so parallel ideas do not overwrite each other.
 
-While you work on top of an applied node, the HEAD pill describes whether the
-runtime is clean, carrying **uncommitted** changes, sitting in a **detached**
-view of an older commit, or **adopted** (the graph pointer moved without moving
-hardware). Those labels are the same ideas as dirty trees and detached HEAD in
-git, expressed for a physical bench.
+While you work on top of an applied **reference** node, the HEAD pill describes
+whether the runtime is clean, carrying **uncommitted** changes, sitting in a
+**detached** view of an older commit, or freshly **adopted** (the graph pointer
+moved without moving hardware). Entering a repo soft-points at ``main`` HEAD as
+that reference (no robot motion). Preview another node and use **Set as
+reference** to retarget the base for branching without stashing; use **Apply on
+bench** only when you want hardware to move.
 
 | Familiar git idea | In Cloud Labs |
 |-------------------|---------------|
 | Working tree | Runtime (live lab state) |
 | Commit | Configuration commit on a control-repo branch |
 | Branch / fork | Named line of commits; fork creates a new branch tip |
-| Dirty tree | Runtime configuration ≠ applied (or ≠ empty baseline) |
+| Dirty tree | Runtime configuration ≠ applied reference |
 | Stash | Single-slot stash of uncommitted layout, then reconcile back |
+| Soft reset | **Set as reference** (adopt) — retarget base, no motion |
 | Checkout | Soft preview, hard apply-on-bench, or adopt-without-motion |
 | Remote | Catalog **pins** (owner-approved snapshots), not auto-push |
 
@@ -99,20 +103,22 @@ browses frozen pins and local graphs in a read-oriented way.
 
 ![Soft preview, hard checkout, and adopt](/static/wiki/guides/figures/vc-checkout.svg)
 
-*Soft checkout previews; hard checkout reconciles with primitives; adopt only
-moves the graph pointer.*
+*Soft checkout previews; hard checkout reconciles with primitives; Set as
+reference (adopt) only moves the graph pointer.*
 
 A **diff** between two configurations is a field-level map of what changed:
-poses, motor setpoints, holding, and related intent. When you ask the lab to
-**apply** a saved layout on the bench, that diff becomes a **reconcile plan**:
-an ordered list of primitives (move, store, set motor, and so on) that walk the
-hardware from the current configuration toward the target.
+poses, storage slots, motor setpoints, holding, and related intent. When you
+ask the lab to **apply** a saved layout on the bench, that diff becomes a
+**reconcile plan**: an ordered list of primitives (move, store-to-cell, place
+from storage, recenter in cell, set motor, and so on) that walk the hardware
+from the current configuration toward the target.
 
-**Soft checkout** (preview) lets Twin show the target layout without insisting
-the robots move yet. **Hard checkout** runs the reconcile plan for real, then
-marks that commit as applied. **Adopt** updates which node the repo treats as
-current without commanding motion—useful when the bench already matches and
-you only need the graph to agree.
+**Soft checkout** (preview) lets Twin show the target layout—including where
+parts sit in the storage grid—without insisting the robots move yet. **Hard
+checkout** runs the reconcile plan for real, then marks that commit as applied.
+**Adopt** updates which node the repo treats as current without commanding
+motion—useful when the bench already matches and you only need the graph to
+agree.
 
 **Stash** sets uncommitted work aside, reconciles the bench back to the applied
 baseline (or the empty baseline when appropriate), and keeps a single slot you
@@ -146,10 +152,14 @@ see [Connecting and backends](#) for leases and multi-lab choice.
 
 Several nearby features sound like version control and are not the same system.
 
-A **session checkpoint** (`session_last_lab_state.json`) is crash or restart
-recovery for the last live runtime. It may offer to restore poses after a
-reboot when measurements still match within noise. It is not a branch graph and
-not something you fork.
+A **session checkpoint** (`session_last_lab_state.json`) is restart recovery for
+the last Twin working copy. When you open Twin and the lab goes IDLE, Twin
+compares the live state to that file; if poses still match within noise it may
+offer to restore **software** tunables/measurables only (the robot is never
+re-commanded). After you apply or dismiss — or when there is nothing to offer —
+Twin saves the current state as the new checkpoint (first visit seeds it). The
+file lives under that backend’s `coordinator_data/` (HTTP real edge) or lab_view
+bundle (in-process mock). It is not a branch graph and not something you fork.
 
 **Recipe golden** files are a legacy recipe-replay baseline. Prefer control-repo
 commits and setups for new work.

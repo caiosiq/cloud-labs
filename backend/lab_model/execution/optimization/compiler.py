@@ -1,6 +1,7 @@
 """Objective graph compiler — authoring IR → ensemble ObjectiveSpec (Phase E)."""
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Mapping, Optional, Union
 
 from pydantic import ValidationError
@@ -13,6 +14,36 @@ from .graph import (
     ObjectiveGraphTermSpec,
 )
 from .spec import BoundsSpec, ObjectiveSpec, ObjectiveSourceSpec, ObjectiveTermSpec
+
+
+def _log_compile_failure(message: str, *, errors: Any = None, payload: Any = None) -> None:
+    """Print compile failures to the coordinator terminal (flush for Windows)."""
+    print(f"[optimize.compile] FAIL {message}", flush=True)
+    if errors is not None:
+        try:
+            print(
+                f"[optimize.compile] errors={json.dumps(errors, default=str)[:4000]}",
+                flush=True,
+            )
+        except Exception:  # noqa: BLE001
+            print(f"[optimize.compile] errors={errors!r}", flush=True)
+    if isinstance(payload, Mapping):
+        terms = payload.get("terms")
+        if isinstance(terms, list):
+            for i, term in enumerate(terms[:8]):
+                if not isinstance(term, dict):
+                    continue
+                keys = sorted(term.keys())
+                src = term.get("source")
+                kid = term.get("kernel_id")
+                if kid is None and isinstance(src, dict):
+                    kid = src.get("kernel_id")
+                print(
+                    f"[optimize.compile] term[{i}] keys={keys} "
+                    f"id={term.get('id')!r} field={term.get('field')!r} "
+                    f"kernel_id={kid!r} has_source={isinstance(src, dict)}",
+                    flush=True,
+                )
 
 
 class ObjectiveCompileError(ValueError):
@@ -118,13 +149,20 @@ def lower_graph_term(term: ObjectiveGraphTermSpec) -> ObjectiveTermSpec:
 
 def compile_objective_graph(graph: Union[ObjectiveGraphSpec, Mapping[str, Any]]) -> ObjectiveSpec:
     """Compile authoring graph JSON to runtime :class:`ObjectiveSpec`."""
+    raw_payload = graph if isinstance(graph, Mapping) else None
     if not isinstance(graph, ObjectiveGraphSpec):
         try:
             graph = ObjectiveGraphSpec.model_validate(graph)
         except ValidationError as exc:
+            errors = list(exc.errors(include_url=False))
+            _log_compile_failure(
+                "objective graph failed schema validation",
+                errors=errors,
+                payload=raw_payload,
+            )
             raise EnsemblePreflightError(
                 message="objective graph failed schema validation",
-                errors=list(exc.errors(include_url=False)),
+                errors=errors,
             ) from exc
 
     terms: list[ObjectiveTermSpec] = []
@@ -136,6 +174,11 @@ def compile_objective_graph(graph: Union[ObjectiveGraphSpec, Mapping[str, Any]])
             errors.append(exc.as_dict())
 
     if errors:
+        _log_compile_failure(
+            "objective graph compilation failed",
+            errors=errors,
+            payload=raw_payload,
+        )
         raise EnsemblePreflightError(
             message="objective graph compilation failed",
             errors=errors,
@@ -165,6 +208,7 @@ def compile_objective_payload(raw: Mapping[str, Any]) -> Dict[str, Any]:
     Returns ``objective`` as a plain dict suitable for ``OptimizeEnsembleParameters``.
     """
     if not isinstance(raw, Mapping):
+        _log_compile_failure("objective payload must be an object")
         raise EnsemblePreflightError(
             message="objective payload must be an object",
             errors=[],
@@ -178,9 +222,15 @@ def compile_objective_payload(raw: Mapping[str, Any]) -> Dict[str, Any]:
     try:
         spec = ObjectiveSpec.model_validate(data)
     except ValidationError as exc:
+        errors = list(exc.errors(include_url=False))
+        _log_compile_failure(
+            "objective failed schema validation",
+            errors=errors,
+            payload=data,
+        )
         raise EnsemblePreflightError(
             message="objective failed schema validation",
-            errors=list(exc.errors(include_url=False)),
+            errors=errors,
         ) from exc
     return spec.model_dump(by_alias=True)
 

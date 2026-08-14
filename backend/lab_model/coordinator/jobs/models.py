@@ -40,6 +40,7 @@ class JobRecord:
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     cancel_requested: bool = False
+    accept_requested: bool = False
 
     def to_api_dict(self) -> Dict[str, Any]:
         return {
@@ -58,6 +59,7 @@ class JobRecord:
             "result": self.result,
             "error": self.error,
             "cancel_requested": self.cancel_requested,
+            "accept_requested": self.accept_requested,
         }
 
 

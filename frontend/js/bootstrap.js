@@ -9,6 +9,7 @@ import {
     setSelectedBackendId,
     withBackendQuery,
 } from './state/backend-selection.js';
+import { store } from './state/store.js';
 
 function showGate(backends) {
     return new Promise((resolve) => {
@@ -126,7 +127,11 @@ async function start() {
                   : `HTTP ${r.status}`;
         throw new Error(msg);
     }
-    applyLabLayoutFromApiDoc(await r.json());
+    const layoutDoc = await r.json();
+    applyLabLayoutFromApiDoc(layoutDoc);
+    if (layoutDoc && layoutDoc.storage_grid && typeof layoutDoc.storage_grid === 'object') {
+        store.storageGridSpec = layoutDoc.storage_grid;
+    }
     const buildV =
         new URL(import.meta.url).searchParams.get('v') ?? String(Date.now());
     await import(`./app-main.js?v=${buildV}`);

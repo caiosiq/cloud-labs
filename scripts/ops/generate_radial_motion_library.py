@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -40,6 +41,38 @@ def main() -> int:
     parser.add_argument("--carry-z-m", type=float)
     parser.add_argument("--min-vertical-z-m", type=float)
     parser.add_argument("--height-margin-mm", type=float)
+    parser.add_argument(
+        "--output-file",
+        type=Path,
+        help=(
+            "Write to this radial-library JSON instead of replacing the "
+            "profile's default library."
+        ),
+    )
+    parser.add_argument(
+        "--seed-joints-deg",
+        type=float,
+        nargs=7,
+        metavar=("J1", "J2", "J3", "J4", "J5", "J6", "J7"),
+        help=(
+            "Use this xArm joint posture as the IK seed/posture reference. "
+            "The target TCP orientation and all normal safety checks remain unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--branch-name",
+        help="Optional descriptive name recorded in generation metadata.",
+    )
+    parser.add_argument(
+        "--reference-home-joints-deg",
+        type=float,
+        nargs=7,
+        metavar=("J1", "J2", "J3", "J4", "J5", "J6", "J7"),
+        help=(
+            "Optional physical home posture recorded as provenance. This does "
+            "not alter the IK seed or generated task orientation."
+        ),
+    )
     args = parser.parse_args()
 
     os.environ["CLOUDLAB_SIM_PROFILE"] = args.profile
@@ -54,6 +87,10 @@ def main() -> int:
     if args.height_margin_mm is not None:
         os.environ["CLOUDLAB_RADIAL_HEIGHT_ZONE_MARGIN_M"] = str(
             args.height_margin_mm / 1000.0
+        )
+    if args.output_file is not None:
+        os.environ["CLOUDLAB_RADIAL_LIBRARY_FILE"] = str(
+            args.output_file.expanduser().resolve()
         )
 
     _ensure_paths()
@@ -80,12 +117,63 @@ def main() -> int:
         planner_backend=MUJOCO_PLANNER_CUSTOM_IK,
     )
     try:
+        if args.seed_joints_deg is not None:
+            import numpy as np
+
+            # Keep the existing radial TCP orientation; only change the
+            # deterministic IK seed/posture family. This lets a caller select
+            # the legacy shoulder/elbow branch without changing the task pose.
+            runtime.home = np.asarray(
+                [math.radians(value) for value in args.seed_joints_deg],
+                dtype=float,
+            )
         library = runtime.generate_radial_motion_library(write=True)
+        output_path = runtime._radial_library_path()
+        if (
+            args.seed_joints_deg is not None
+            or args.reference_home_joints_deg is not None
+            or args.branch_name
+        ):
+            document = json.loads(output_path.read_text(encoding="utf-8"))
+            document["generation"] = {
+                "branch_name": args.branch_name,
+                "ik_seed_xarm_deg": (
+                    [float(value) for value in args.seed_joints_deg]
+                    if args.seed_joints_deg is not None
+                    else None
+                ),
+                "reference_home_xarm_deg": (
+                    [float(value) for value in args.reference_home_joints_deg]
+                    if args.reference_home_joints_deg is not None
+                    else None
+                ),
+                "tcp_orientation_source": "existing radial reference",
+            }
+            output_path.write_text(
+                json.dumps(document, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
         low, high = library.radius_bounds_m
+        all_joint_rows = [
+            pose.joints
+            for sample in library.samples
+            for pose in sample.vertical_poses
+        ]
+        joint_min_deg = None
+        joint_max_deg = None
+        if all_joint_rows:
+            import numpy as np
+
+            all_joints = np.asarray(all_joint_rows, dtype=float)
+            joint_min_deg = np.degrees(all_joints).min(axis=0).tolist()
+            joint_max_deg = np.degrees(all_joints).max(axis=0).tolist()
         summary = {
             "ok": True,
-            "path": str(runtime._radial_library_path()),
+            "path": str(output_path),
             "profile_id": library.profile_id,
+            "branch_name": args.branch_name,
+            "ik_seed_xarm_deg": args.seed_joints_deg,
+            "reference_home_xarm_deg": args.reference_home_joints_deg,
             "sample_count": len(library.samples),
             "unsafe_count": len(library.unsafe),
             "radius_range_mm": [low * 1000.0, high * 1000.0],
@@ -108,6 +196,8 @@ def main() -> int:
             * 1000.0,
             "max_tcp_error_mm": max(sample.tcp_error_m for sample in library.samples)
             * 1000.0,
+            "joint_min_deg": joint_min_deg,
+            "joint_max_deg": joint_max_deg,
         }
         print(json.dumps(summary, indent=2, sort_keys=True))
         return 0 if not library.unsafe else 1

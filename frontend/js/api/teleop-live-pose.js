@@ -3,6 +3,7 @@
  * is unavailable (see ``api/teleop-session-ws.js``).
  */
 import { store } from '../state/store.js';
+import { withBackendQuery } from '../state/backend-selection.js';
 
 const _pollers = new Map();
 
@@ -13,7 +14,9 @@ function defaultFps(descriptor) {
 
 function pollUrl(tagId, descriptor) {
     const raw = (descriptor && descriptor.url) || '/api/components/{tag_id}/telemetry/live-pose';
-    return raw.replace('{tag_id}', encodeURIComponent(tagId));
+    const path = raw.replace('{tag_id}', encodeURIComponent(tagId));
+    // Multi-backend Twin requires backend_id on every /api/* call.
+    return withBackendQuery(path);
 }
 
 /**
@@ -29,7 +32,8 @@ export function startTeleopLivePosePoll(tagId, opts = {}) {
 
     const tick = async () => {
         try {
-            const r = await fetch(`${url}?_=${Date.now()}`);
+            const sep = url.includes('?') ? '&' : '?';
+            const r = await fetch(`${url}${sep}_=${Date.now()}`);
             if (!r.ok) return;
             const body = await r.json();
             const pose = body && body.pose;

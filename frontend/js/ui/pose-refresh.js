@@ -24,6 +24,7 @@ import {
     withBackendQuery,
 } from '../state/backend-selection.js';
 import { executeSendCommand } from '../api/commands.js';
+import { isLabInitReady } from '../state/lab-state.js';
 
 let _fetchLabState = async () => {};
 
@@ -122,11 +123,17 @@ function promptRefreshPoseOffersModal(payload) {
         const sub = document.createElement('p');
         sub.style.cssText = 'margin:0 0 8px 0;color:#94a3b8;font-size:13px;line-height:1.5;';
         sub.textContent =
-            'Checked components will be overwritten via RECORD_TUNABLES → tunables.nominal_pose. Unchecked rows stay frozen. Applying runs a camera scan on the bench.';
+            'Checked components will be overwritten via RECORD_TUNABLES → tunables.nominal_pose (top/ceiling camera scan). Unchecked rows stay frozen.';
 
         const meta = document.createElement('p');
         meta.style.cssText = 'margin:0 0 12px 0;color:#64748b;font-size:12px;';
-        meta.textContent = `Tolerance ±${posMm} mm, ±${yawDeg}° yaw (same as session reconciliation). Small deltas are unchecked by default.`;
+        const selectionOnly = !!payload.selection_only;
+        if (selectionOnly) {
+            meta.textContent =
+                'Real bench: no dry-run preview — applying scans checked tags from the top camera, same path as lab init / SYNC RECORD.';
+        } else {
+            meta.textContent = `Tolerance ±${posMm} mm, ±${yawDeg}° yaw (same as session reconciliation). Small deltas are unchecked by default.`;
+        }
 
         const listHost = document.createElement('div');
         listHost.style.cssText =
@@ -153,10 +160,21 @@ function promptRefreshPoseOffersModal(payload) {
             const deltaMm = offer.delta_mm != null ? Number(offer.delta_mm).toFixed(2) : '?';
             const deltaYaw =
                 offer.delta_yaw_deg != null ? Number(offer.delta_yaw_deg).toFixed(2) : '?';
-            const note = offer.within_tolerance
-                ? `Δ ${deltaMm} mm, ${deltaYaw}° — within tolerance (skip unless you check)`
-                : `Δ ${deltaMm} mm, ${deltaYaw}° — exceeds tolerance`;
-            detail.innerHTML = `${note}<br>Current ${formatPose(offer.current_pose)} → scan ${formatPose(offer.proposed_pose)}`;
+            let note;
+            if (offer.proposed_pose == null) {
+                note =
+                    offer.note ||
+                    'Will scan from top/ceiling camera on apply (no dry-run preview)';
+            } else if (offer.within_tolerance) {
+                note = `Δ ${deltaMm} mm, ${deltaYaw}° — within tolerance (skip unless you check)`;
+            } else {
+                note = `Δ ${deltaMm} mm, ${deltaYaw}° — exceeds tolerance`;
+            }
+            const scanLine =
+                offer.proposed_pose == null
+                    ? `Current ${formatPose(offer.current_pose)} → scan on apply`
+                    : `Current ${formatPose(offer.current_pose)} → scan ${formatPose(offer.proposed_pose)}`;
+            detail.innerHTML = `${note}<br>${scanLine}`;
             body.appendChild(name);
             body.appendChild(detail);
             head.appendChild(cb);
@@ -503,6 +521,8 @@ export async function initializeUnlocalizedRealInventoryPoses() {
     const backendId = getSelectedBackendId() || '';
     if (!backendId.startsWith('real.')) return false;
     if (_initialLocalizationPromise) return _initialLocalizationPromise;
+    // Wait until SYNC/READY so we do not stack RECORD on top of boot init.
+    if (!isLabInitReady(store.labState)) return false;
 
     const components = store.labState?.components || {};
     const tagIds = Object.entries(components)

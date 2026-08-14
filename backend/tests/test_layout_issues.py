@@ -144,5 +144,91 @@ class TestExplicitStorageBounds(unittest.TestCase):
         )
 
 
+class TestCenteredNegYStorage(unittest.TestCase):
+    """Real-bench style: 3×3 strip centered on x=0 in the southern half-plane."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        layout = dict(LAYOUT)
+        layout["storage"] = {
+            "rule": "negative_xy",
+            "grid_nx": 3,
+            "grid_ny": 3,
+            "bounds_mm": {
+                "x_min": -135.0,
+                "x_max": 135.0,
+                "y_min": -370.0,
+                "y_max": -100.0,
+            },
+        }
+        configure_from_layout_document(layout)
+
+    def test_pitch_and_centers_straddle_x0(self) -> None:
+        self.assertEqual(cell_dimensions_mm(), (90.0, 90.0))
+        self.assertEqual(cell_center(0, 0), (-90.0, -325.0))
+        self.assertEqual(cell_center(1, 2), (0.0, -145.0))
+        self.assertEqual(cell_center(2, 2), (90.0, -145.0))
+
+    def test_positive_x_inside_storage_negative_y_outside_north(self) -> None:
+        self.assertTrue(is_storage_region(90.0, -145.0))
+        self.assertTrue(is_storage_region(0.0, -145.0))
+        self.assertFalse(is_storage_region(0.0, -50.0))  # north of y_max
+        self.assertFalse(is_storage_region(200.0, -145.0))
+
+    def test_rejects_bounds_with_positive_y_max(self) -> None:
+        layout = dict(LAYOUT)
+        layout["storage"] = {
+            "rule": "negative_xy",
+            "grid_nx": 2,
+            "grid_ny": 2,
+            "bounds_mm": {
+                "x_min": -50.0,
+                "x_max": 50.0,
+                "y_min": -50.0,
+                "y_max": 10.0,
+            },
+        }
+        with self.assertRaises(ValueError):
+            configure_from_layout_document(layout)
+
+    def test_nine_clear_housing_slots(self) -> None:
+        components = {}
+        for index in range(9):
+            tag_id = f"tag_{index}"
+            allocation = find_storage_slot_and_center(
+                components,
+                tag_id,
+                72.0,
+                64.2883,
+                lambda _tid: (72.0, 64.2883),
+            )
+            self.assertIsNotNone(allocation, msg=f"failed to allocate slot {index}")
+            cx, cy, i, j = allocation
+            # Closest center (0, -145) must clear danger 90+5 + footprint radius.
+            self.assertGreaterEqual(
+                (cx * cx + cy * cy) ** 0.5,
+                95.0,
+            )
+            components[tag_id] = new_component_entry(
+                tag_id,
+                "OPTICAL_HOUSING",
+                presence=PRESENCE_STORAGE,
+                nominal_pose={"x": cx, "y": cy, "rotation": 0.0},
+                meas_pose={"x": cx, "y": cy, "rotation": 0.0},
+                placement_mode="STORAGE",
+                in_storage=True,
+                slot={"i": i, "j": j},
+            )
+        self.assertIsNone(
+            find_storage_slot_and_center(
+                components,
+                "tag_full",
+                72.0,
+                64.2883,
+                lambda _tid: (72.0, 64.2883),
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

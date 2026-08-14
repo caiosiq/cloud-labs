@@ -17,6 +17,8 @@ description: >-
   exact JPEG from the latched capture so the URL is not a fresh live frame.
 - Open/close a latch around capture (`latch.py`); stamp `epoch_ms` + `latch_quality`.
 - Serve `GET /measurables/{tag}/camera_image.jpg` from that cache.
+- When capture needs a hardware setting (exposure, …), resolve it from **current lab
+  tunables** — see [`tunables-hold-for-measure`](../tunables-hold-for-measure/SKILL.md).
 - **Log the science path** with a stable `[measurables]` prefix: begin (tag, camera
   class, cam_id, exposure), capture shape/dtype, jpeg byte length, envelope href,
   epoch_ms / latch_quality, and failures with stage + traceback. Also log when the
@@ -29,6 +31,8 @@ description: >-
 - Do not let live-stream endpoints substitute for `RECORD_MEASURABLES` science.
 - Do not swallow capture errors silently — refuse/fail with a logged stage so Twin
   and the edge terminal agree on what happened.
+- Do not invent OPTIMIZE-only defaults for tunables that already exist on the lab
+  (e.g. hard-coded CAP exposure while `exposure_time_ms` is set).
 
 ## Typical files
 
@@ -37,3 +41,8 @@ description: >-
 ## Check
 
 Certify must pass the measurable-envelope conformance check after changes.
+
+## Related
+
+- [`camera-bringup`](../camera-bringup/SKILL.md) — get the physical camera live
+  before RECORD (exclusive USB, boot order, resolution vs calibration).

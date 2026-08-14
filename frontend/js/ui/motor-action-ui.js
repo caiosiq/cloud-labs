@@ -1,8 +1,8 @@
 /**
  * Motor command feedback — spinner / checkmark for setpoint apply and relative jogs.
  *
- * Uses `dispatchPrimitive` with `refreshPanel: false` so optimistic UI survives
- * BUSY polls (see `primitives/shared.js`).
+ * Completes on HTTP success (does not wait for BUSY→IDLE). Refreshes setpoint
+ * inputs from ``nominal_motor_positions`` so jog/home/zero keep the field in sync.
  */
 import { dispatchPrimitive } from '../primitives/shared.js';
 import { store } from '../state/store.js';
@@ -150,12 +150,85 @@ function failMotorAction(kind, tagId, motorId) {
     paintMotorActionStatus(kind, tagId, motorId);
 }
 
+function completeMotorAction(kind, tagId, motorId) {
+    const key = motorActionKey(kind, tagId, motorId);
+    const rec = store.motorActionApply[key];
+    if (!rec || rec.status !== 'loading') return;
+    rec.status = 'done';
+    paintMotorActionStatus(kind, tagId, motorId);
+    scheduleDoneClear(key, kind, tagId, motorId);
+}
+
+/**
+ * Keep SET MOTOR SETPOINT inputs aligned with committed Twin angles.
+ * @param {string} tagId
+ */
+export function syncSetpointInputsFromLabState(tagId) {
+    if (!tagId) return;
+    const comp = store.labState?.components?.[tagId];
+    if (!comp) return;
+    const nmp = tunableValue(comp, 'nominal_motor_positions');
+    if (!nmp || typeof nmp !== 'object') return;
+
+    document.querySelectorAll(`input[data-motor-setpoint-tag="${CSS.escape(tagId)}"]`).forEach((inp) => {
+        const mid = inp.getAttribute('data-motor-setpoint-id');
+        if (mid == null) return;
+        const rec = getMotorAction(MOTOR_ACTION.SETPOINT, tagId, mid);
+        // Don't clobber an in-flight / just-applied setpoint the operator typed.
+        if (rec && (rec.status === 'loading' || rec.status === 'done')) return;
+        const nom = nmp[String(mid)];
+        if (!Number.isFinite(Number(nom))) return;
+        inp.value = String(Number(nom));
+    });
+}
+
 export function resolveMotorSetpointInputValue(tagId, motorId, nominalValue) {
     const rec = getMotorAction(MOTOR_ACTION.SETPOINT, tagId, motorId);
-    if (rec && (rec.status === 'loading' || rec.status === 'done')) {
-        return rec.value;
+    if (rec && (rec.status === 'loading' || rec.status === 'done') && Number.isFinite(Number(rec.value))) {
+        return Number(rec.value);
     }
     return Number.isFinite(Number(nominalValue)) ? Number(nominalValue) : 0;
+}
+
+/**
+ * If Twin has no finite motor angle yet, RECORD_TUNABLES → nominal_motor_positions
+ * so Setpoint shows the hardware reading (not a silent 0).
+ * @param {string} tagId
+ */
+export async function maybeRefreshMotorAnglesFromEdge(tagId) {
+    if (!tagId) return false;
+    const catalogRow = store.catalogMap?.[tagId];
+    const mids = catalogRow?.motor_ids;
+    if (!Array.isArray(mids) || !mids.length) return false;
+    const comp = store.labState?.components?.[tagId];
+    const nmp = tunableValue(comp, 'nominal_motor_positions');
+    const missing = mids.some((mid) => !Number.isFinite(Number(nmp?.[String(mid)])));
+    if (!missing) return false;
+    if (!store._motorAngleRefresh) store._motorAngleRefresh = {};
+    if (store._motorAngleRefresh[tagId]) return false;
+    store._motorAngleRefresh[tagId] = true;
+    try {
+        const { sendCommand } = await import('../api/commands.js');
+        const { fetchLabState } = await import('../state/lab-state.js');
+        const result = await sendCommand({
+            action: 'RECORD_TUNABLES',
+            target_id: tagId,
+            parameters: {
+                tag_ids: [tagId],
+                tunable_paths: ['nominal_motor_positions'],
+            },
+        });
+        if (result?.ok === false) {
+            delete store._motorAngleRefresh[tagId];
+            return false;
+        }
+        await fetchLabState();
+        syncSetpointInputsFromLabState(tagId);
+        return true;
+    } catch (_err) {
+        delete store._motorAngleRefresh[tagId];
+        return false;
+    }
 }
 
 function parseActionKey(key) {
@@ -178,11 +251,16 @@ function scheduleDoneClear(key, kind, tagId, motorId) {
         if (cur?.status === 'done') {
             delete store.motorActionApply[key];
             paintMotorActionStatus(kind, tagId, motorId);
+            // After checkmark clears, show the committed angle in the setpoint field.
+            syncSetpointInputsFromLabState(tagId);
         }
     }, 2500);
 }
 
-/** Mark in-flight motor actions complete once the lab settles. */
+/**
+ * Poll / settle path: finish any leftover loading actions once the lab is idle.
+ * Primary completion is {@link completeMotorAction} on HTTP success.
+ */
 export function syncMotorActionStatuses() {
     if (!store.labState?.components) return;
 
@@ -201,7 +279,9 @@ export function syncMotorActionStatuses() {
             const comp = store.labState.components[tagId];
             if (!comp) return;
             const nom = tunableValue(comp, 'nominal_motor_positions')?.[String(motorId)];
-            if (!Number.isFinite(Number(nom)) || Number(nom) !== Number(rec.value)) return;
+            if (!Number.isFinite(Number(nom))) return;
+            // Tolerant compare — avoid stuck spinner on float noise.
+            if (Math.abs(Number(nom) - Number(rec.value)) > 1e-3) return;
         }
 
         rec.status = 'done';
@@ -216,6 +296,9 @@ export function syncMotorActionStatuses() {
             paintMotorActionStatus(parsed.kind, parsed.tagId, parsed.motorId);
         });
     }
+
+    // Keep open setpoint fields current when tunables change via poll.
+    store.openPanels.forEach((tagId) => syncSetpointInputsFromLabState(tagId));
 }
 
 export async function dispatchMotorCommand(hooks, command, kind, tagId, motorId, beginExtra = {}) {
@@ -233,7 +316,18 @@ export async function dispatchMotorCommand(hooks, command, kind, tagId, motorId,
             store.pendingCommands.delete(tagId);
             store.pendingActions.delete(tagId);
         }
-        syncMotorActionStatuses();
+        // Finish spinner on command success — do not wait for BUSY→IDLE.
+        completeMotorAction(kind, tagId, motorId);
+        syncSetpointInputsFromLabState(tagId);
+        // Rebuild panel so JsonInspector / setpoint defaults show committed angles.
+        if (typeof hooks.resetPanelSnapshot === 'function') {
+            hooks.resetPanelSnapshot();
+        }
+        if (typeof hooks.refreshPanel === 'function') {
+            hooks.refreshPanel(tagId);
+        }
+        paintMotorActionStatus(kind, tagId, motorId);
+        syncSetpointInputsFromLabState(tagId);
     }
     return result;
 }
@@ -260,4 +354,5 @@ export function updateMotorActionStatuses(tagId) {
         if (!parsed || parsed.tagId !== tagId) return;
         paintMotorActionStatus(parsed.kind, parsed.tagId, parsed.motorId);
     });
+    syncSetpointInputsFromLabState(tagId);
 }

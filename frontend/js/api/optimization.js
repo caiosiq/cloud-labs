@@ -18,15 +18,41 @@ export async function compileObjective(body) {
         body: JSON.stringify(body),
     });
     const result = await response.json().catch(() => ({}));
+
+    const formatDetailErrors = (detail) => {
+        if (!detail || typeof detail !== 'object') return null;
+        const errors = detail.errors;
+        if (!Array.isArray(errors) || !errors.length) return null;
+        return errors.slice(0, 5).map((e) => {
+            if (typeof e === 'string') return e;
+            if (e?.msg) return `${(e.loc || []).join('.')}: ${e.msg}`;
+            if (e?.reason) return `${e.term_id || e.path || '?'}: ${e.reason}`;
+            return JSON.stringify(e);
+        }).join('; ');
+    };
+
     if (!response.ok) {
         const detail = result?.detail;
         const message =
             (typeof detail === 'object' && detail?.message) ||
             (typeof detail === 'string' && detail) ||
             `HTTP ${response.status}`;
-        return { ok: false, error: message, detail };
+        const bits = formatDetailErrors(typeof detail === 'object' ? detail : null);
+        const error = bits ? `${message} — ${bits}` : message;
+        console.warn('[optimize.compile] HTTP fail', { status: response.status, detail, graph: body?.graph });
+        return { ok: false, error, detail };
     }
-    return { ok: result.ok !== false, ...result };
+
+    if (result.ok === false) {
+        const pf = result.preflight || result.detail || {};
+        const message = pf.message || result.error || 'Objective compile/preflight failed';
+        const bits = formatDetailErrors(pf);
+        const error = bits ? `${message} — ${bits}` : message;
+        console.warn('[optimize.compile] preflight fail', { preflight: pf, graph: body?.graph });
+        return { ok: false, error, detail: pf, ...result };
+    }
+
+    return { ok: true, ...result };
 }
 
 /** @returns {Promise<{ ok: boolean, metrics?: string[], error?: string }>} */
@@ -42,5 +68,29 @@ export async function fetchOptimizationMetrics() {
         return { ok: true, metrics: result.metrics || [] };
     } catch (error) {
         return { ok: false, error: error.message || String(error) };
+    }
+}
+
+/**
+ * Active-edge kernel catalog (proxied Twin ``GET /api/kernels``).
+ * @returns {Promise<{ ok: boolean, kernels?: object[], error?: string }>}
+ */
+export async function fetchEdgeKernels() {
+    try {
+        const response = await fetch(withBackendQuery('/api/kernels'), {
+            headers: backendHeaders(),
+        });
+        if (!response.ok) {
+            return { ok: false, error: `HTTP ${response.status}`, kernels: [] };
+        }
+        const result = await response.json();
+        const kernels = Array.isArray(result)
+            ? result
+            : Array.isArray(result?.kernels)
+              ? result.kernels
+              : [];
+        return { ok: true, kernels };
+    } catch (error) {
+        return { ok: false, error: error.message || String(error), kernels: [] };
     }
 }

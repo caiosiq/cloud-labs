@@ -2,8 +2,8 @@
  * `StorageSlot` — tunable widget for ``storage`` intent (§14.1).
  *
  * Read-only display of inventory slot bookkeeping:
- * ``{ in_storage, slot: { i, j } }``. Slot picking is handled by
- * storage primitives (STORE / PLACE) until a full grid editor ships.
+ * ``{ in_storage, slot: { i, j } }``. Explicit cell pick uses canvas
+ * STORE choose-slot mode; autopack leaves slot assignment to the edge.
  */
 import { widgetCard, widgetTitle, row, nullPlaceholder } from './common.js';
 

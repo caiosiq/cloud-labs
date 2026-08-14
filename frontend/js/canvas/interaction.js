@@ -43,7 +43,7 @@ import {
     shouldRenderOnCanvas,
 } from '../component-model.js';
 import { isTeleopActive, isTeleopReady } from '../component-state.js';
-import { isPlacedRegion, regionMoveBlocked } from '../storage-region.js';
+import { isPlacedRegion, labXyToStorageSlot, occupiedStorageSlots, regionMoveBlocked } from '../storage-region.js';
 import {
     beginGuideDrag,
     beginGuideEndpointDrag,
@@ -355,6 +355,48 @@ function onMouseDown(canvas, e) {
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
+    // Store-to-cell: click a free storage square for the active tag.
+    if (store.storeToSlotTag && !labBusy) {
+        const labPick = pxToMm(mouseX, mouseY);
+        const slot = labXyToStorageSlot(labPick.x, labPick.y);
+        if (slot) {
+            const tagId = store.storeToSlotTag;
+            const occ = occupiedStorageSlots(tagId);
+            const key = `${slot.i},${slot.j}`;
+            if (occ.has(key)) {
+                log(`Cell (${slot.i}, ${slot.j}) is occupied — pick a free square.`, 'warn');
+                return;
+            }
+            if (isDetached()) {
+                log('You are on an older commit (detached). Fork a branch before storing.', 'warn');
+                return;
+            }
+            store.storeToSlotTag = null;
+            _render();
+            void (async () => {
+                log(`Storing ${tagId} to cell (${slot.i}, ${slot.j})…`, 'info');
+                const result = await sendCommand({
+                    action: 'STORE_COMPONENT',
+                    target_id: tagId,
+                    parameters: { slot_i: slot.i, slot_j: slot.j },
+                });
+                if (result && result.ok === false) {
+                    log(result.error || 'STORE_COMPONENT failed', 'error');
+                }
+                updateContextPanel(tagId);
+                _render();
+            })();
+            return;
+        }
+        // Click outside grid while choosing — leave mode only if not on a component.
+        if (!getComponentAtPosition(mouseX, mouseY)) {
+            store.storeToSlotTag = null;
+            log('Store-to-cell cancelled (click outside storage grid).', 'info');
+            _render();
+            return;
+        }
+    }
+
     const hit = getComponentAtPosition(mouseX, mouseY);
     if (hit) {
         // Drag-from-storage is "sticky" to a single tag. If the user clicks any other component
@@ -366,13 +408,26 @@ function onMouseDown(canvas, e) {
             log('Drag from storage cancelled (another part was selected).', 'info');
             return;
         }
+        if (store.storeToSlotTag && hit.name !== store.storeToSlotTag) {
+            store.storeToSlotTag = null;
+            openPanel(hit.name);
+            log('Store-to-cell cancelled (another part was selected).', 'info');
+            _render();
+            return;
+        }
         // Two-stage interaction (preserved from single-panel UX):
         //   1. First click on a component that is not currently the focused
         //      one: open / focus its panel and stop. No drag.
         //   2. Second click on the same (already-focused) component: drag.
-        // Ctrl+click is always pure panel-management — never starts a drag.
+        // Ctrl/Cmd+click adds a companion panel (never starts a drag).
+        const add = !!(e.ctrlKey || e.metaKey);
         const alreadyFocused =
             store.focusedPanel === hit.name && store.openPanels.includes(hit.name);
+        if (add) {
+            openPanel(hit.name, { add: true });
+            log(`Panel: ${hit.name}${alreadyFocused ? '' : ' (companion)'}`, 'info');
+            return;
+        }
         if (!alreadyFocused) {
             openPanel(hit.name);
             log(`Selected ${hit.name}`, 'info');

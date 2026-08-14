@@ -422,6 +422,7 @@ def run_mock_ensemble_session(
     progress_callback: Optional[Callable[..., None]] = None,
     state_lock: Any = None,
     should_abort: Optional[Callable[[], bool]] = None,
+    should_accept: Optional[Callable[[], bool]] = None,
 ) -> EnsembleOptimizationResult:
     backend = build_mock_ensemble_backend(
         state, spec, x0, state_lock=state_lock,
@@ -433,6 +434,7 @@ def run_mock_ensemble_session(
         session_id=session_id,
         progress_callback=progress_callback,
         should_abort=should_abort,
+        should_accept=should_accept,
     )
 
 

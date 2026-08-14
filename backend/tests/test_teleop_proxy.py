@@ -19,6 +19,7 @@ from lab_model.execution.orchestration import teleop_session_ws
 from lab_model.execution.orchestration.teleop_session_ws import (
     _edge_to_browser,
     _flat_pose_fields,
+    _flat_speed_fields,
     run_teleop_session_proxy,
 )
 
@@ -38,6 +39,27 @@ class FlatPoseFieldsTests(unittest.TestCase):
     def test_non_numeric_and_nested_axes_dropped(self) -> None:
         out = _flat_pose_fields({"x": "nope", "y": {"bad": 1}, "z": 4})
         self.assertEqual(out, {"z": 4.0})
+
+
+class FlatSpeedFieldsTests(unittest.TestCase):
+    def test_nested_speed_is_flattened(self) -> None:
+        out = _flat_speed_fields(
+            {"speed": {"linear_mm_s": 2.5, "angular_deg_s": 1.5}}
+        )
+        self.assertEqual(out, {"linear_mm_s": 2.5, "angular_deg_s": 1.5})
+
+    def test_scalar_speed_maps_to_linear(self) -> None:
+        self.assertEqual(_flat_speed_fields({"speed": 10}), {"linear_mm_s": 10.0})
+
+    def test_top_level_speed_keys(self) -> None:
+        out = _flat_speed_fields({"linear_mm_s": 3, "angular_deg_s": 4})
+        self.assertEqual(out, {"linear_mm_s": 3.0, "angular_deg_s": 4.0})
+
+    def test_nested_speed_dict_not_forwarded_as_speed_key(self) -> None:
+        """Edge rejects any dict value — proxy must never emit ``speed: {...}``."""
+        out = _flat_speed_fields({"speed": {"linear_mm_s": 2.5}})
+        self.assertNotIn("speed", out)
+        self.assertTrue(all(not isinstance(v, (dict, list)) for v in out.values()))
 
 
 class EdgeToBrowserTests(unittest.TestCase):
@@ -153,6 +175,19 @@ async def _edge_handler(ws: Any) -> None:
 
     async for raw in ws:
         msg = json.loads(raw)
+        # Mirror real edge: reject nested values (e.g. speed: {...}).
+        if any(isinstance(v, (dict, list)) for v in msg.values()) or "payload" in msg:
+            await ws.send(
+                json.dumps(
+                    {
+                        "epoch_ms": 1,
+                        "tag_id": str(msg.get("tag_id") or ""),
+                        "kind": "error",
+                        "error_code": "NESTED_ENVELOPE",
+                    }
+                )
+            )
+            continue
         tag = str(msg.get("tag_id") or "")
         cmd = msg.get("cmd")
         if cmd == "PING":
@@ -216,12 +251,29 @@ class TeleopProxyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("x", pose_msg["pose"])
 
         # 3) goto is flattened, forwarded, and reflected back in subsequent poses.
-        browser.client_send({"type": "goto", "target_pose": {"x": 12.5, "y": -3.0}})
+        # Nested Twin ``speed`` must become flat scalars (else edge NESTED_ENVELOPE).
+        browser.client_send(
+            {
+                "type": "goto",
+                "target_pose": {"x": 12.5, "y": -3.0},
+                "speed": {"linear_mm_s": 2.5, "angular_deg_s": 1.5},
+            }
+        )
         reflected = await _drain_until(
             browser,
             lambda m: m.get("type") == "pose" and m["pose"].get("x") == 12.5,
         )
         self.assertEqual(reflected["pose"]["y"], -3.0)
+
+        # Nested speed must not surface as an edge error to the browser.
+        await asyncio.sleep(0.05)
+        while not browser.outgoing.empty():
+            extra = browser.outgoing.get_nowait()
+            self.assertNotEqual(
+                (extra.get("type"), extra.get("message")),
+                ("error", "NESTED_ENVELOPE"),
+                msg=f"unexpected nested-envelope error: {extra}",
+            )
 
         # 4) ping is answered locally.
         browser.client_send({"type": "ping", "ts_ms": 99})

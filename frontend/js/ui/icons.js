@@ -12,6 +12,10 @@ export function getComponentIcon(type) {
             return 'dashboard';
         case 'OPTICAL_CAMERA':
             return 'videocam';
+        case 'OPTICAL_FILTER':
+            return 'filter_frames';
+        case 'OPTICAL_POLARIZER':
+            return 'tonality';
         default:
             return 'help_outline';
     }

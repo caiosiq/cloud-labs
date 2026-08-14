@@ -124,7 +124,10 @@ export function updateLayoutConflictModal() {
     } else if (kind === 'STORED_OUTSIDE_Q3' || kind === 'STORED_OFF_SLOT') {
         bodyHtml += `<div style="display:flex;flex-direction:column;gap:8px;">`;
         bodyHtml += `<button type="button" id="lconf-affirm" class="btn btn-primary" style="width:100%;justify-content:center;">Mark as PLACED (keep current pose)</button>`;
-        bodyHtml += `<button type="button" id="lconf-repack" class="btn btn-secondary" style="width:100%;justify-content:center;">Repack into storage (grid)</button>`;
+        // Off-slot / outside-rect with a stored assignment → re-center on the
+        // assigned cell (same as panel "Re-center in cell"). REPACK would move
+        // to a *different* free cell and was still a stub on real edge.
+        bodyHtml += `<button type="button" id="lconf-recenter" class="btn btn-secondary" style="width:100%;justify-content:center;">Re-center in cell (0°)</button>`;
         bodyHtml += `<button type="button" id="lconf-dismiss" class="btn btn-secondary" style="width:100%;opacity:0.85;">Dismiss</button>`;
         bodyHtml += `</div>`;
     } else {
@@ -171,9 +174,14 @@ export function updateLayoutConflictModal() {
         await _executeSendCommand({ action: 'AFFIRM_PLACED_AT_CURRENT', target_id: tid, parameters: {} });
     });
 
-    overlay.querySelector('#lconf-repack')?.addEventListener('click', async () => {
+    overlay.querySelector('#lconf-recenter')?.addEventListener('click', async () => {
         dismissedLayoutIssueKeys.add(key);
         removeLayoutConflictModal();
-        await _executeSendCommand({ action: 'REPACK_STORAGE', target_id: tid, parameters: {} });
+        store.forceGhostSync = true;
+        await _executeSendCommand({
+            action: 'RECENTER_IN_STORAGE',
+            target_id: tid,
+            parameters: {},
+        });
     });
 }

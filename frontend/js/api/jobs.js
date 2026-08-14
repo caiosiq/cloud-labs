@@ -91,6 +91,50 @@ export async function fetchJob(jobId) {
 }
 
 /**
+ * Operator good-enough: finish a running closed-loop job as success (keep best).
+ * @param {string} jobId
+ */
+export async function acceptJob(jobId) {
+    const response = await fetch(
+        withBackendQuery(`/api/jobs/${encodeURIComponent(jobId)}/accept`),
+        {
+            method: 'POST',
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
+        },
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        return {
+            ok: false,
+            error: formatApiDetail(result?.detail) || `HTTP ${response.status}`,
+        };
+    }
+    return { ok: true, job: result };
+}
+
+/**
+ * Abort a queued/running job (not the good-enough path).
+ * @param {string} jobId
+ */
+export async function cancelJob(jobId) {
+    const response = await fetch(
+        withBackendQuery(`/api/jobs/${encodeURIComponent(jobId)}/cancel`),
+        {
+            method: 'POST',
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
+        },
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        return {
+            ok: false,
+            error: formatApiDetail(result?.detail) || `HTTP ${response.status}`,
+        };
+    }
+    return { ok: true, job: result };
+}
+
+/**
  * Submit a compiled DAG job (reconcile plan steps).
  *
  * @param {{

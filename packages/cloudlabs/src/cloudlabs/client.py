@@ -893,6 +893,8 @@ class CloudLabsClient:
 
         - ``tunables.nominal_motor_positions.<motor_id>`` → ``SET_MOTOR_SETPOINT``
         - ``tunables.nominal_pose.x|y|rotation`` → ``MOVE_COMPONENT`` (full pose)
+
+        For multi-axis table moves prefer :meth:`move_pose` (one primitive).
         """
         self._require_lease()
         tag_id = tag_id.strip()
@@ -925,9 +927,44 @@ class CloudLabsClient:
             )
 
         assert parsed.axis is not None
+        return self.move_pose(tag_id, **{parsed.axis: numeric})
+
+    def move_pose(
+        self,
+        tag_id: str,
+        *,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        rotation: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """One ``MOVE_COMPONENT`` to a full breadboard pose.
+
+        Unspecified axes keep the current ``nominal_pose`` from lab-state.
+        At least one of ``x`` / ``y`` / ``rotation`` is required.
+        """
+        self._require_lease()
+        tag_id = tag_id.strip()
+        if x is None and y is None and rotation is None:
+            raise CloudLabsCommandError(
+                "move_pose requires at least one of x, y, rotation",
+                action=primitive_action(PrimitiveId.MOVE_COMPONENT),
+                target_id=tag_id,
+            )
         state = self.get_lab_state()
         pose = _read_nominal_pose(state, tag_id)
-        pose[parsed.axis] = numeric
+        if x is not None:
+            pose["x"] = float(x)
+        if y is not None:
+            pose["y"] = float(y)
+        if rotation is not None:
+            pose["rotation"] = float(rotation)
+        self._vlog(
+            "MOVE_COMPONENT tag=%s target=(%.3f, %.3f, rot=%.3f)",
+            tag_id,
+            pose["x"],
+            pose["y"],
+            pose.get("rotation", 0.0),
+        )
         return self._post_command(
             {
                 "action": primitive_action(PrimitiveId.MOVE_COMPONENT),

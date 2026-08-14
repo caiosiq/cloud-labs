@@ -7,10 +7,14 @@
  * reflected immediately; ``onerror`` collapses the element so a 404
  * (no record yet) doesn't leave a broken-image icon in the panel.
  *
+ * ``backend_id`` must be on the query string (``<img>`` cannot send
+ * ``X-CloudLabs-Backend``); without it the coordinator returns 400.
+ *
  * Accepts both legacy ``{path, source}`` wire and canonical
  * MeasurableTensor LazyRef (``data.kind=url``, ``data.href``).
  */
 import { widgetCard, widgetTitle, nullPlaceholder } from './common.js';
+import { withBackendQuery } from '../state/backend-selection.js';
 
 function _hasRecordedImage(value) {
     if (!value || typeof value !== 'object') return false;
@@ -60,8 +64,17 @@ export default function ImageViewer({ tagId, fieldName, descriptor, value }) {
     meta.textContent = _caption(value);
     card.appendChild(meta);
 
+    const stage = document.createElement('div');
+    stage.className = 'meas-kernel-stage';
+    stage.style.position = 'relative';
+    stage.style.display = 'inline-block';
+    stage.style.maxWidth = '100%';
+    stage.style.lineHeight = '0';
+
     const img = document.createElement('img');
-    img.src = `/api/components/${encodeURIComponent(tagId)}/camera-image?t=${Date.now()}`;
+    img.src = withBackendQuery(
+        `/api/components/${encodeURIComponent(tagId)}/camera-image?t=${Date.now()}`,
+    );
     img.alt = `${fieldName} of ${tagId}`;
     img.style.maxWidth = '100%';
     img.style.maxHeight = '160px';
@@ -70,10 +83,21 @@ export default function ImageViewer({ tagId, fieldName, descriptor, value }) {
     img.style.border = '1px solid #2a2e36';
     img.style.background = '#000';
     img.style.display = 'block';
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'meas-kernel-overlay';
+    canvas.style.position = 'absolute';
+    canvas.style.left = '0';
+    canvas.style.top = '0';
+    canvas.style.pointerEvents = 'none';
+
     img.onerror = () => {
         img.style.display = 'none';
+        canvas.style.display = 'none';
         meta.textContent = `${meta.textContent} · image fetch failed`;
     };
-    card.appendChild(img);
+    stage.appendChild(img);
+    stage.appendChild(canvas);
+    card.appendChild(stage);
     return card;
 }

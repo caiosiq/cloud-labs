@@ -22,12 +22,17 @@ class MeasurableHandle:
     field: str
 
     def resolve(self, *, record: bool = False) -> MeasurableTensor:
-        """Fetch tensor metadata and materialize lazy image payloads client-side."""
+        """Fetch tensor metadata and materialize lazy image payloads client-side.
+
+        Images stay as a :class:`~cloudlabs.tensor.LazyRef` on the wire (JPEG /
+        PNG URL). Passing ``resolve=true`` to the coordinator would force a
+        full HxWx3 array into JSON — fatal for real cameras (multi‑MP).
+        """
         field = _normalize_measurable_path(self.field)
         params: Dict[str, Any] = {}
         if record:
             params["record"] = "true"
-        params["resolve"] = "true"
+        # Intentionally omit resolve=true — decode JPEG/PNG on the client.
         path = (
             f"/api/components/{self.tag_id}/measurables/{field}/tensor"
         )
@@ -87,8 +92,17 @@ def _resolve_lazy_on_client(
         )
 
     url = href if href.startswith("http") else f"{client.base_url}{href}"
+    # Coordinator fail-closed middleware expects backend on every Twin API fetch.
+    params = {}
+    if "backend_id=" not in url and hasattr(client, "_backend_params"):
+        params = dict(client._backend_params())
     try:
-        resp = client._session.get(url, timeout=client.timeout_s)
+        resp = client._session.get(
+            url,
+            params=params or None,
+            headers=client._lease_headers() if hasattr(client, "_lease_headers") else None,
+            timeout=client.timeout_s,
+        )
     except Exception as exc:  # noqa: BLE001
         raise CloudLabsCommandError(
             f"Failed to fetch camera image: {exc}",

@@ -35,6 +35,7 @@ _SCHEMA_FILES = (
     "teleop_ws_client.schema.json",
     "teleop_ws_server.schema.json",
     "epoch_packet.schema.json",
+    "optimization_pipeline.schema.json",
 )
 
 _RUNTIME_SYNC_PRIMITIVES = frozenset({"RECORD_TUNABLES", "SYNC_RUNTIME"})

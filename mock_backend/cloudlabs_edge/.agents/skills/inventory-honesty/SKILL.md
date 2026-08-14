@@ -43,6 +43,9 @@ description: >-
 - Do not invent slot maps or AprilTag locations without a source of truth.
 - Do not silently no-op STORE/PLACE — refusal is better than a lie.
 - Do not keep a separate edge `active_catalog.json`; active tags are inventory keys.
+- Do not put fixed overview / stereo / scan cameras in inventory merely so they
+  “initialize” — scene localization cameras are usually bench infrastructure
+  (see `camera-bringup`), not science-camera inventory bring-up.
 - Do not push library/inventory/layout into the coordinator’s
   `coordinator_data/` tree — that store is VC + working FSM only; lab people
   author library/inventory here on the edge.

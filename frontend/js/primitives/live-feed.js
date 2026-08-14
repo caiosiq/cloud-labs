@@ -1,5 +1,22 @@
 import { primitiveRegion, sessionStartButton, sessionEndButton, afterCommandDispatch } from './shared.js';
 import { startLiveFeed, endLiveFeed } from '../api/live-feed.js';
+import { openLiveFeedPopout } from '../ui/live-feed-popout.js';
+
+function _popOutButton(tagId, hooks) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'live-feed-pop-btn';
+    btn.innerHTML =
+        '<span class="material-icons-round" style="font-size:14px" aria-hidden="true">open_in_new</span> Pop out live preview';
+    btn.title = 'Detach preview so you can teleop other components while watching';
+    btn.onclick = () => {
+        openLiveFeedPopout(tagId, {
+            fetchLabState: hooks?.fetchLabState,
+        });
+        hooks?.log?.(`Live feed pop-out opened for ${tagId}`, 'info');
+    };
+    return btn;
+}
 
 export function renderStartLiveFeed(ctx) {
     const { tagId, hooks } = ctx;
@@ -11,6 +28,7 @@ export function renderStartLiveFeed(ctx) {
         void startLiveFeed(tagId, channel)
             .then(async () => {
                 await afterCommandDispatch(hooks, tagId, { fetchLabState: true });
+                openLiveFeedPopout(tagId, { fetchLabState: hooks?.fetchLabState });
             })
             .catch((e) => {
                 hooks.log(`Live feed start failed: ${e.message || e}`, 'error');
@@ -41,5 +59,6 @@ export function renderEndLiveFeed(ctx) {
             });
     };
     body.appendChild(btn);
+    body.appendChild(_popOutButton(tagId, hooks));
     return section;
 }

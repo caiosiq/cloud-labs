@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "backend_id": "mock.default",
   "features": {
     "torchscript_execution": true,

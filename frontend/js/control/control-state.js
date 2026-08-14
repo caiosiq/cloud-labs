@@ -134,7 +134,7 @@ export function hasStash() {
 
 /**
  * Repo entered but no current node established yet: the bench is not diffed
- * against anything. The user must "Set as node" an existing commit (or commit
+ * against anything. The user must "Set as reference" an existing commit (or commit
  * the current bench in a fresh repo) before stash/fork/commit-child apply.
  */
 export function isUnadopted() {

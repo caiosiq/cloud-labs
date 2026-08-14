@@ -37,6 +37,30 @@ class RadialCarryHeightTests(unittest.TestCase):
             3.0,
         )
 
+    def test_layout_uses_cad_derived_inner_frame_opening(self):
+        bounds = self.layout["lab_bounds_mm"]
+        self.assertEqual(bounds["x_min"], -590.55)
+        self.assertEqual(bounds["x_max"], 590.55)
+        self.assertEqual(bounds["y_min"], -609.6)
+        self.assertEqual(bounds["y_max"], 609.6)
+        self.assertAlmostEqual(
+            bounds["x_max"] - bounds["x_min"],
+            46.5 * 25.4,
+            places=9,
+        )
+        self.assertAlmostEqual(
+            bounds["y_max"] - bounds["y_min"],
+            48.0 * 25.4,
+            places=9,
+        )
+
+    def test_tcp_tool_envelope_radius_is_three_and_a_half_inches(self):
+        self.assertAlmostEqual(
+            self.layout["frame_safety"]["tcp_tool_envelope_radius_mm"],
+            3.5 * 25.4,
+            places=9,
+        )
+
     def test_runtime_and_library_use_550_mm_world_tcp_height(self):
         self.assertEqual(RADIAL_DEFAULT_CARRY_Z_M, 0.550)
         self.assertEqual(self.library["carry_z_m"], 0.550)

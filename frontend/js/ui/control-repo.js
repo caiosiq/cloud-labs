@@ -164,8 +164,9 @@ export async function promptStartVersionControl(deps) {
     let html =
         '<h3 style="margin:0 0 6px 0;color:#e2e8f0;font-size:16px;">Start version control</h3>' +
         '<p style="margin:0 0 14px 0;color:#94a3b8;font-size:12px;line-height:1.45;">' +
-        'Pick a repo to enter. Your physical bench is left untouched — you start with ' +
-        'no current node and Set one (or Commit) to establish a base.</p>' +
+        'Pick a repo to enter. Your physical bench is left untouched — Twin soft-points ' +
+        'at <code>main</code> HEAD as the reference (no motion). Preview another node and ' +
+        'Set as reference to branch from it, or Apply on bench to move hardware.</p>' +
         '<div style="display:flex;flex-direction:column;gap:8px;">';
     if (repos.length) {
         for (const r of repos) {

@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "kernels": [
+    {
+      "id": "demo.image_mean_score",
+      "label": "Demo image mean score",
+      "artifact": "demo_image_mean_score.pt",
+      "runtime": "torchscript",
+      "output_kind": "scalar",
+      "description": "Teaching scalar: mean intensity after RGB float normalize."
+    },
+    {
+      "id": "demo.roi_mean_score",
+      "label": "Demo center ROI mean",
+      "artifact": "demo_roi_mean_score.pt",
+      "runtime": "torchscript",
+      "output_kind": "scalar",
+      "description": "Mean intensity over the center-half ROI."
+    },
+    {
+      "id": "builtin.roi_centroid",
+      "label": "ROI centroid (center half)",
+      "artifact": "builtin_roi_centroid.pt",
+      "runtime": "torchscript",
+      "output_kind": "features",
+      "feature_names": [
+        "cx",
+        "cy",
+        "peak"
+      ],
+      "description": "Sub-pixel intensity-weighted centroid in the center-half ROI, plus full-frame peak for beam-presence latching."
+    },
+    {
+      "id": "builtin.beam_power",
+      "label": "Beam power features",
+      "artifact": "builtin_beam_power.pt",
+      "runtime": "torchscript",
+      "output_kind": "features",
+      "feature_names": [
+        "flux_above_background",
+        "peak",
+        "saturated_fraction"
+      ],
+      "description": "Power proxy; saturation channel mandatory for closed loop."
+    },
+    {
+      "id": "builtin.gaussian_beam_fit",
+      "label": "Gaussian beam moments",
+      "artifact": "builtin_gaussian_beam_fit.pt",
+      "runtime": "torchscript",
+      "output_kind": "features",
+      "feature_names": [
+        "amplitude",
+        "cx",
+        "cy",
+        "sigma_x",
+        "sigma_y"
+      ],
+      "description": "Moment-based Gaussian beam estimate."
+    },
+    {
+      "id": "builtin.beam_shift",
+      "label": "Beam shift from FOV center",
+      "artifact": "builtin_beam_shift.pt",
+      "runtime": "torchscript",
+      "output_kind": "features",
+      "feature_names": [
+        "dx",
+        "dy",
+        "magnitude"
+      ],
+      "description": "Intensity CoM offset from this frame's geometric center (W/2, H/2) as [dx, dy, magnitude] in px \u2014 resolution-agnostic, no reference capture. Maximize shift with weight=-1 on minimize_value(feature_index=2)."
+    }
+  ]
+}

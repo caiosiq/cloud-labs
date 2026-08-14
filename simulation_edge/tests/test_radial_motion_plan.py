@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,15 +15,254 @@ from simulation_edge.host.runtime import (
     RadialJointStageAction,
     RadialJointStagePlan,
     RadialMotionPlan,
+    RadialMotionLibrary,
+    RadialPoseSample,
     RadialRebaseAction,
     RadialSettleAction,
     RadialValidateGraspAction,
     RadialWorldSnapshot,
+    RadialVerticalPose,
     SimulatorError,
 )
 
 
 class RadialMotionPlanTests(unittest.TestCase):
+    @staticmethod
+    def _analytical_runtime():
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.scene = SimpleNamespace(
+            lab_bounds_mm={
+                "x_min": -590.55,
+                "x_max": 590.55,
+                "y_min": -609.6,
+                "y_max": 609.6,
+            },
+            frame_safety_clearance_mm=76.2,
+            tcp_tool_envelope_radius_mm=88.9,
+        )
+        runtime._radial_kinematic_radius_bounds_m = lambda: (0.134, 0.550)
+        return runtime
+
+    def test_analytical_radius_uses_corrected_asymmetric_frame(self):
+        runtime = self._analytical_runtime()
+
+        self.assertAlmostEqual(runtime._radial_max_radius_at_theta_m(0.0), 0.42545)
+        self.assertAlmostEqual(
+            runtime._radial_max_radius_at_theta_m(np.deg2rad(45.0)),
+            0.550,
+        )
+        self.assertAlmostEqual(
+            runtime._radial_max_radius_at_theta_m(np.deg2rad(90.0)),
+            0.4445,
+        )
+
+    def test_rotation_sweep_uses_tightest_crossed_axis(self):
+        runtime = self._analytical_runtime()
+
+        self.assertAlmostEqual(
+            runtime._radial_rotation_sweep_max_radius_m(
+                np.deg2rad(45.0),
+                np.deg2rad(135.0),
+            ),
+            0.4445,
+        )
+
+    def test_diagnostic_unsafe_poses_are_kinematic_only_candidates(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        safe_pose = RadialVerticalPose(0.55, np.zeros(7), 0.1, 0.0)
+        safe_sample = RadialPoseSample(
+            0.348,
+            np.zeros(7),
+            0.1,
+            0.0,
+            (safe_pose,),
+        )
+        library = RadialMotionLibrary(
+            version=3,
+            profile_id="test",
+            carry_z_m=0.55,
+            grasp_z_m=0.30,
+            max_vertical_z_m=0.55,
+            min_radius_m=0.134,
+            max_radius_m=0.55,
+            step_m=0.005,
+            component_height_limit_m=0.34,
+            height_zone_min_radius_m=0.134,
+            height_zone_margin_m=0.0,
+            samples=(safe_sample,),
+            unsafe=(
+                {
+                    "diagnostic_only": True,
+                    "radius_m": 0.55,
+                    "joints": [0.1] * 7,
+                    "vertical_poses": [
+                        {"z_m": 0.55, "joints": [0.1] * 7}
+                    ],
+                },
+                {"radius_m": 0.56, "vertical_poses": []},
+            ),
+        )
+        runtime._load_radial_motion_library = lambda: library
+
+        candidates = runtime._radial_kinematic_samples()
+
+        self.assertEqual([sample.radius_m for sample in candidates], [0.348, 0.55])
+        self.assertEqual([sample.radius_m for sample in library.samples], [0.348])
+
+    def test_transfer_orders_rotate_before_extension_and_after_retraction(self):
+        runtime = self._analytical_runtime()
+        runtime.current_joint_target = np.zeros(7)
+        runtime._log = lambda *args, **kwargs: None
+        runtime._target_yaw_from_rotation = lambda rotation: 0.0
+        runtime._radial_rotation_sweep_max_radius_m = lambda source, target: 0.55
+
+        def pose(radius, theta, rotation, *, seed, stage):
+            del rotation, seed, stage
+            result = np.zeros(7)
+            result[0] = theta
+            result[1] = radius
+            return result
+
+        def rotation_stage(**kwargs):
+            current = kwargs["current"]
+            target = current.copy()
+            target[0] = kwargs["target_theta"]
+            return RadialJointStagePlan(
+                kwargs["name"],
+                (current.copy(), target),
+                kwargs["tag_id"],
+            )
+
+        runtime._radial_carry_pose_joints = pose
+        runtime._plan_radial_coordinated_rotation = rotation_stage
+        identity = np.eye(3)
+
+        outward = runtime._plan_radial_transfer(
+            "tag_1",
+            source_xy=np.array((0.30, 0.0)),
+            target_xy=np.array((0.55 / np.sqrt(2.0),) * 2),
+            source_rotation=identity,
+            target_rotation=identity,
+        )
+        inward = runtime._plan_radial_transfer(
+            "tag_1",
+            source_xy=np.array((0.55 / np.sqrt(2.0),) * 2),
+            target_xy=np.array((0.30, 0.0)),
+            source_rotation=identity,
+            target_rotation=identity,
+        )
+
+        self.assertEqual(
+            [stage.name for stage in outward],
+            ["radial source carry", "radial coordinated rotate", "outer transfer radial extend"],
+        )
+        self.assertEqual(
+            [stage.name for stage in inward],
+            ["radial source carry", "outer transfer radial retract", "radial coordinated rotate"],
+        )
+
+    def test_mujoco_playback_rate_scales_wall_clock_not_simulation_step(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = SimpleNamespace(opt=SimpleNamespace(timestep=0.002))
+        runtime.data = object()
+        runtime.realtime = True
+        runtime.playback_rate = 2.0
+        runtime._viewer_sync_interval_s = 1.0
+        runtime._last_viewer_sync_perf_s = 10.0
+        runtime._viewer_entered = mock.Mock()
+        runtime._viewer_entered.is_running.return_value = True
+
+        with (
+            mock.patch.object(runtime_module.mujoco, "mj_step") as mj_step,
+            mock.patch.object(
+                runtime_module.time,
+                "perf_counter",
+                side_effect=(10.0, 10.0, 10.0),
+            ),
+            mock.patch.object(runtime_module.time, "sleep") as sleep,
+        ):
+            runtime._step()
+
+        mj_step.assert_called_once_with(runtime.model, runtime.data)
+        self.assertAlmostEqual(sleep.call_args.args[0], 0.001)
+
+    def test_viewer_frame_interval_starts_after_blocking_sync_returns(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = SimpleNamespace(opt=SimpleNamespace(timestep=0.002))
+        runtime.data = object()
+        runtime.realtime = False
+        runtime.playback_rate = 1.0
+        runtime._viewer_sync_interval_s = 1.0 / 30.0
+        runtime._last_viewer_sync_perf_s = 9.0
+        runtime._viewer_entered = mock.Mock()
+        runtime._viewer_entered.is_running.return_value = True
+
+        with (
+            mock.patch.object(runtime_module.mujoco, "mj_step"),
+            mock.patch.object(
+                runtime_module.time,
+                "perf_counter",
+                # start, frame-due check, time after blocking viewer sync
+                side_effect=(10.0, 10.0, 10.02),
+            ),
+        ):
+            runtime._step()
+
+        runtime._viewer_entered.sync.assert_called_once_with()
+        self.assertEqual(runtime._last_viewer_sync_perf_s, 10.02)
+
+    def test_radial_joint_speed_is_configurable_in_degrees_per_second(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        start = np.zeros(7)
+        end = np.zeros(7)
+        end[0] = np.deg2rad(180.0)
+
+        with mock.patch.dict(
+            "os.environ",
+            {"CLOUDLAB_RADIAL_JOINT_SPEED_DEG_PER_S": "30"},
+        ):
+            duration_s = runtime._radial_joint_duration_s(start, end)
+
+        # Long moves must not be shortened past the requested 30 deg/s.
+        self.assertAlmostEqual(duration_s, 6.0)
+
+    def test_joint_speed_scales_short_and_long_radial_segments_uniformly(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        start = np.zeros(7)
+        segment_deltas_deg = (1.0, 10.0, 90.0)
+
+        def durations_at(speed_deg_s):
+            with mock.patch.dict(
+                "os.environ",
+                {
+                    "CLOUDLAB_RADIAL_JOINT_SPEED_DEG_PER_S": str(
+                        speed_deg_s
+                    )
+                },
+            ):
+                return [
+                    runtime._radial_joint_duration_s(
+                        start,
+                        np.array(
+                            (
+                                np.deg2rad(delta_deg),
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0,
+                            )
+                        ),
+                    )
+                    for delta_deg in segment_deltas_deg
+                ]
+
+        durations_30 = durations_at(30.0)
+        durations_80 = durations_at(80.0)
+        for duration_30, duration_80 in zip(durations_30, durations_80):
+            self.assertAlmostEqual(duration_30 / duration_80, 80.0 / 30.0)
+
     def test_world_snapshot_normalizes_backend_component_pose(self):
         observation = RadialComponentObservation(
             tag_id="tag_1",

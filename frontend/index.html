@@ -1518,6 +1518,169 @@
         #bench-chrome-bar[hidden] {
             display: none !important;
         }
+        .live-feed-session-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            margin: 0 0 4px;
+            border-radius: 8px;
+            border: 1px solid rgba(34, 211, 238, 0.45);
+            background: rgba(8, 47, 73, 0.55);
+            font-size: 11px;
+            color: #e0f2fe;
+        }
+        .live-feed-session-bar[hidden] { display: none !important; }
+        .live-feed-session-bar__label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            font-size: 10px;
+            color: #67e8f9;
+        }
+        .live-feed-session-bar__label .material-icons-round { font-size: 14px; }
+        .live-feed-session-bar__chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 6px;
+            border-radius: 999px;
+            border: 1px solid rgba(34, 211, 238, 0.35);
+            background: rgba(15, 23, 42, 0.55);
+        }
+        .live-feed-session-bar__chip code {
+            font-size: 10px;
+            color: #a5f3fc;
+        }
+        .live-feed-session-bar__chip button {
+            border: none;
+            background: rgba(34, 211, 238, 0.18);
+            color: #ecfeff;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 10px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .live-feed-session-bar__chip button:hover {
+            background: rgba(34, 211, 238, 0.35);
+        }
+        .live-feed-session-bar__note {
+            color: #94a3b8;
+            font-size: 10px;
+        }
+        .live-feed-popout {
+            position: fixed;
+            z-index: 12000;
+            width: min(420px, 92vw);
+            min-width: 240px;
+            min-height: 180px;
+            resize: both;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            border-radius: 10px;
+            border: 1px solid rgba(34, 211, 238, 0.55);
+            background: rgba(2, 6, 23, 0.96);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+        }
+        .live-feed-popout--flash {
+            outline: 2px solid #22d3ee;
+        }
+        .live-feed-popout__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 6px 8px;
+            cursor: grab;
+            background: rgba(8, 47, 73, 0.9);
+            border-bottom: 1px solid rgba(34, 211, 238, 0.25);
+            user-select: none;
+        }
+        .live-feed-popout__header:active { cursor: grabbing; }
+        .live-feed-popout__title {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #a5f3fc;
+        }
+        .live-feed-popout__title .material-icons-round { font-size: 14px; }
+        .live-feed-popout__actions { display: inline-flex; gap: 4px; }
+        .live-feed-popout__btn {
+            border: 1px solid rgba(52, 211, 153, 0.45);
+            background: rgba(6, 78, 59, 0.45);
+            color: #a7f3d0;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-size: 10px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .live-feed-popout__btn--ghost {
+            border-color: #475569;
+            background: transparent;
+            color: #cbd5e1;
+        }
+        .live-feed-popout__hint {
+            padding: 4px 8px;
+            font-size: 9px;
+            color: #94a3b8;
+            border-bottom: 1px solid #1e293b;
+        }
+        .live-feed-popout__frame {
+            flex: 1;
+            min-height: 140px;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .live-feed-popout__img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+        .live-feed-popout__err {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fca5a5;
+            font-size: 11px;
+            padding: 12px;
+            text-align: center;
+            background: rgba(0,0,0,0.7);
+        }
+        .live-feed-pop-btn {
+            margin-top: 6px;
+            width: 100%;
+            border: 1px solid rgba(34, 211, 238, 0.45);
+            background: rgba(8, 47, 73, 0.5);
+            color: #a5f3fc;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            font-family: inherit;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        .live-feed-pop-btn:hover {
+            background: rgba(8, 47, 73, 0.85);
+            border-color: #22d3ee;
+        }
 
         #bench-tools-strip {
             display: flex;
@@ -1594,36 +1757,186 @@
             flex-shrink: 0;
         }
 
-        /* --- Component controls (floating multi-panel dock over canvas) ---
-           Holds one or more ``.component-panel`` children. row-reverse makes
-           additional panels (Ctrl/Cmd+click) stack to the LEFT of the first
-           one opened, matching the operator request "add another window to
-           the left". When more panels than fit are open, the dock scrolls
-           horizontally. ``pointer-events: none`` on the dock itself lets
-           canvas drags pass through the gaps between panels; each panel
-           re-enables pointer events on itself. */
+        /* --- Selected Part dock (right sidebar): full focused + compact companions --- */
         #panel-dock {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
             min-height: 0;
+            padding: 8px 10px 12px;
         }
-        /* When no panels are open we render nothing — `.component-panel`
-           children are mounted dynamically by ui/context-panel.js. */
         #panel-dock:empty { display: none; }
 
         .component-panel {
             padding: 14px 16px 16px;
             background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            max-height: min(70vh, 900px);
+            overflow-y: auto;
         }
         .component-panel--focused {
             opacity: 1;
+            border-color: rgba(59, 130, 246, 0.55);
+            box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
         }
-        /* Live camera feeds keep streaming on every open panel regardless of
-           focus, but interactive controls (buttons, inputs, selects, textareas,
-           the Move/Position fields) only respond on the focused panel. The
-           panel root remains clickable so one click focuses it; on the next
-           click the underlying control activates. */
-        /* The close-this-panel "X" is allowed even on unfocused panels — being
-           able to dismiss a non-focused panel without first focusing it is
-           less surprising. */
+        .component-panel--compact {
+            padding: 10px 12px;
+            max-height: none;
+            overflow: visible;
+            cursor: pointer;
+            opacity: 0.92;
+            background: rgba(15, 17, 21, 0.92);
+            border-color: rgba(59, 130, 246, 0.28);
+        }
+        .component-panel--compact:hover {
+            opacity: 1;
+            border-color: rgba(59, 130, 246, 0.5);
+            background: rgba(30, 41, 59, 0.55);
+        }
+        .component-panel__compact-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .component-panel__compact-text {
+            flex: 1;
+            min-width: 0;
+        }
+        .component-panel__compact-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--primary-accent, #60a5fa);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .component-panel__compact-meta {
+            font-size: 10px;
+            color: #94a3b8;
+            margin-top: 2px;
+            font-family: ui-monospace, monospace;
+        }
+        .component-panel__compact-badge {
+            flex-shrink: 0;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #cbd5e1;
+            background: rgba(148, 163, 184, 0.12);
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            border-radius: 4px;
+            padding: 3px 6px;
+        }
+        .component-panel__compact-hint {
+            margin-top: 6px;
+            font-size: 10px;
+            color: #64748b;
+        }
+
+        /* Measurable premade kernel probes (EVAL_KERNEL under ImageViewer). */
+        .meas-kernel-strip {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #2a2e36;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .meas-kernel-strip__title {
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: #64748b;
+        }
+        .meas-kernel-strip__chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .meas-kernel-chip {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1px;
+            max-width: 100%;
+            padding: 5px 8px;
+            border-radius: 4px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            background: rgba(148, 163, 184, 0.08);
+            color: var(--text-primary, #e2e8f0);
+            cursor: pointer;
+            text-align: left;
+            font: inherit;
+        }
+        .meas-kernel-chip:hover:not(:disabled) {
+            background: rgba(56, 189, 248, 0.12);
+            border-color: rgba(56, 189, 248, 0.45);
+        }
+        .meas-kernel-chip:disabled {
+            opacity: 0.55;
+            cursor: wait;
+        }
+        .meas-kernel-chip__label {
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+        .meas-kernel-chip__id {
+            font-size: 9px;
+            font-family: ui-monospace, monospace;
+            color: #94a3b8;
+            word-break: break-all;
+        }
+        .meas-kernel-strip__status {
+            font-size: 10px;
+            color: #64748b;
+        }
+        .meas-kernel-strip__status--err {
+            color: #fca5a5;
+        }
+        .meas-kernel-strip__result {
+            font-size: 11px;
+            font-family: ui-monospace, monospace;
+            color: #cbd5e1;
+            word-break: break-word;
+            line-height: 1.35;
+        }
+        .meas-kernel-strip__hint {
+            font-size: 9px;
+            color: #64748b;
+            margin-top: 4px;
+            line-height: 1.3;
+        }
+        .meas-kernel-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            font-size: 10px;
+            color: #94a3b8;
+        }
+        .meas-kernel-legend .osd-overlay-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+        .meas-kernel-legend .osd-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .meas-kernel-legend .osd-dot--detected { background: #fbbf24; }
+        .meas-kernel-legend .osd-dot--target { background: #38bdf8; }
+        .meas-kernel-stage canvas.meas-kernel-overlay {
+            border-radius: 4px;
+        }
+        /* Companion cards stay clickable (focus / close). Full panel is the
+           focused inspector in the Selected Part tab. */
 
         .component-panel .coord-field {
             display: flex;
@@ -1971,13 +2284,14 @@
             </div>
             <div id="control-adopt-notice" class="control-adopt-notice" hidden>
                 <span class="material-icons-round" aria-hidden="true">touch_app</span>
-                <span>No current node yet — click a node above to set where your bench is.</span>
+                <span>No reference yet — Twin will soft-point at main HEAD when available, or preview a node and Set as reference.</span>
             </div>
             <div id="control-plan-preview" class="control-plan-preview" hidden></div>
         </div>
         <div id="canvas-stage" class="canvas-stage">
             <div id="bench-header" class="bench-header">
                 <div id="bench-chrome-bar" role="toolbar" aria-label="Fixed bench components" hidden></div>
+                <div id="live-feed-session-bar" class="live-feed-session-bar" role="status" hidden aria-label="Active live feeds"></div>
                 <div id="bench-tools-strip" class="bench-tools-strip">
                     <span class="bench-tools-strip__label">Lines</span>
                     <div id="laser-lines-dock" role="toolbar" aria-label="Alignment and laser lines">
@@ -2004,7 +2318,8 @@
                         <span id="config-view-source" class="config-view-badge__source" hidden></span>
                         <code id="config-view-commit-id" class="config-view-badge__id">—</code>
                         <div class="config-view-badge__actions">
-                            <button id="config-view-apply-btn" type="button" class="config-view-badge__btn config-view-badge__btn--primary">Apply on bench</button>
+                            <button id="config-view-set-ref-btn" type="button" class="config-view-badge__btn config-view-badge__btn--primary">Set as reference</button>
+                            <button id="config-view-apply-btn" type="button" class="config-view-badge__btn">Apply on bench</button>
                             <button id="config-view-return-btn" type="button" class="config-view-badge__btn">Return to bench</button>
                         </div>
                     </div>
@@ -2019,15 +2334,9 @@
         </div>
 
         <!--
-            Component controls: floating multi-panel dock over the table.
-            Each open component gets its own ``.component-panel`` child
-            mounted dynamically by ``ui/context-panel.js`` (the panel-dock
-            manager). Plain click on a component (canvas / sidebar /
-            chrome bar) replaces the open panels with just that one;
-            Ctrl/Cmd+click adds a new panel to the left of the existing
-            ones. Clicking a panel focuses it (only the focused panel
-            captures interactive clicks; others stay visible so live
-            camera feeds keep streaming).
+            Component controls live in the right sidebar Selected Part tab
+            (``#panel-dock``). Plain click replaces; Ctrl/Cmd+click adds a
+            companion (max 3). Focused panel is full; others are compact cards.
         -->
     </div>
 
@@ -2173,6 +2482,7 @@
             }
             .opt-telemetry-head {
                 display: flex;
+                flex-wrap: wrap;
                 justify-content: space-between;
                 align-items: center;
                 gap: 8px;
@@ -2190,6 +2500,144 @@
                 font-size: 9px;
                 color: #64748b;
                 margin-bottom: 6px;
+            }
+            .opt-session-link {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                margin-top: 4px;
+                padding: 8px 10px;
+                min-height: 32px;
+                border-radius: 6px;
+                border: 1px solid rgba(34, 211, 238, 0.35);
+                background: rgba(8, 47, 73, 0.35);
+                color: #a5f3fc;
+                text-decoration: none;
+                font-size: 11px;
+                font-weight: 600;
+                position: relative;
+                z-index: 2;
+                cursor: pointer;
+            }
+            .opt-session-link:hover {
+                border-color: rgba(34, 211, 238, 0.7);
+                color: #ecfeff;
+            }
+            .opt-session-link-hint {
+                margin: 4px 0 0;
+                font-size: 9px;
+                color: #64748b;
+            }
+            .opt-telemetry-tunables {
+                margin: 8px 0;
+                padding: 8px;
+                border-radius: 6px;
+                border: 1px solid #334155;
+                background: #0f172a;
+            }
+            .opt-telemetry-tunables--idle {
+                color: #64748b;
+                font-size: 9px;
+            }
+            .opt-telemetry-tunables__head {
+                display: flex;
+                justify-content: space-between;
+                gap: 8px;
+                margin-bottom: 6px;
+                font-size: 9px;
+            }
+            .opt-telemetry-tunables__head strong { color: #e2e8f0; }
+            .opt-telemetry-tunables__head span { color: #64748b; }
+            .opt-telemetry-tunables__grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+                gap: 6px;
+            }
+            .opt-tunable-chip {
+                padding: 6px 7px;
+                border-radius: 5px;
+                border: 1px solid #1e293b;
+                background: #020617;
+                min-width: 0;
+            }
+            .opt-tunable-chip__label {
+                display: flex;
+                justify-content: space-between;
+                gap: 4px;
+                margin-bottom: 2px;
+                font-size: 8px;
+                color: #94a3b8;
+            }
+            .opt-tunable-chip__label strong {
+                color: #cbd5e1;
+                font-weight: 600;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .opt-tunable-chip__label span {
+                color: #64748b;
+                flex-shrink: 0;
+            }
+            .opt-tunable-chip__value {
+                font-size: 12px;
+                font-weight: 650;
+                color: #f8fafc;
+                font-variant-numeric: tabular-nums;
+                letter-spacing: -0.01em;
+            }
+            .opt-tunable-unit {
+                margin-left: 3px;
+                font-size: 9px;
+                font-weight: 500;
+                color: #94a3b8;
+            }
+            .opt-tunable-delta {
+                display: block;
+                margin-top: 2px;
+                font-size: 8px;
+                font-variant-numeric: tabular-nums;
+            }
+            .opt-tunable-delta--up { color: #38bdf8; }
+            .opt-tunable-delta--down { color: #fb923c; }
+            .opt-tunable-delta--flat { color: #475569; }
+            .opt-telemetry-history-label {
+                margin: 8px 0 2px;
+                font-size: 9px;
+                font-weight: 600;
+                color: #94a3b8;
+                letter-spacing: 0.03em;
+                text-transform: uppercase;
+            }
+            .opt-telemetry-camera {
+                margin: 8px 0;
+                padding: 8px;
+                border-radius: 6px;
+                border: 1px solid #334155;
+                background: #0b1220;
+            }
+            .opt-telemetry-camera--idle {
+                color: #64748b;
+                font-size: 9px;
+                line-height: 1.35;
+            }
+            .opt-telemetry-camera__head {
+                display: flex;
+                justify-content: space-between;
+                gap: 8px;
+                margin-bottom: 6px;
+                font-size: 9px;
+            }
+            .opt-telemetry-camera__head strong { color: #e2e8f0; }
+            .opt-telemetry-camera__head span { color: #64748b; }
+            .opt-telemetry-camera__img {
+                display: block;
+                width: 100%;
+                max-height: 180px;
+                object-fit: contain;
+                border-radius: 4px;
+                background: #000;
+                border: 1px solid #1e293b;
             }
             .opt-telemetry-progress {
                 height: 6px;
@@ -2212,10 +2660,140 @@
                 border: 1px solid rgba(34, 211, 238, 0.35);
                 font-size: 9px;
             }
+            .opt-stage-debug {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                margin: 8px 0;
+                align-items: flex-start;
+            }
+            .opt-stage-debug--idle {
+                display: block;
+                font-size: 10px;
+                color: #94a3b8;
+                padding: 6px 8px;
+                border: 1px dashed #334155;
+                border-radius: 6px;
+            }
+            .opt-stage-debug--chips {
+                position: relative;
+                z-index: 2;
+            }
+            .opt-stage-chip {
+                position: relative;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                padding: 4px 8px;
+                border-radius: 999px;
+                border: 1px solid #334155;
+                background: rgba(15, 23, 42, 0.85);
+                color: #e2e8f0;
+                font-size: 10px;
+                line-height: 1.2;
+                cursor: pointer;
+                font-family: inherit;
+            }
+            .opt-stage-chip__mark {
+                font-weight: 700;
+                width: 0.9em;
+                text-align: center;
+            }
+            .opt-stage-chip__name {
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                font-size: 9px;
+                color: #cbd5e1;
+            }
+            .opt-stage-chip--ok { border-color: rgba(52, 211, 153, 0.65); }
+            .opt-stage-chip--ok .opt-stage-chip__mark { color: #34d399; }
+            .opt-stage-chip--fail {
+                border-color: rgba(248, 113, 113, 0.75);
+                background: rgba(127, 29, 29, 0.3);
+            }
+            .opt-stage-chip--fail .opt-stage-chip__mark { color: #f87171; }
+            .opt-stage-chip--unknown { border-color: #475569; }
+            .opt-stage-chip__panel {
+                display: none;
+                position: absolute;
+                left: 0;
+                top: calc(100% + 6px);
+                z-index: 40;
+                min-width: 220px;
+                max-width: min(360px, 70vw);
+                padding: 8px 10px;
+                border-radius: 8px;
+                border: 1px solid #334155;
+                background: rgba(2, 6, 23, 0.96);
+                box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+                text-align: left;
+                white-space: normal;
+            }
+            .opt-stage-chip__panel strong {
+                display: block;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                font-size: 9px;
+                margin-bottom: 2px;
+                color: #f8fafc;
+            }
+            .opt-stage-chip__status {
+                display: block;
+                font-size: 10px;
+                color: #94a3b8;
+                margin-bottom: 4px;
+            }
+            .opt-stage-chip__detail {
+                color: #cbd5e1;
+                font-size: 10px;
+                line-height: 1.4;
+                word-break: break-word;
+            }
+            .opt-stage-chip__detail--empty { color: #64748b; }
+            .opt-stage-chip:hover,
+            .opt-stage-chip:focus-visible,
+            .opt-stage-chip.is-pinned {
+                border-color: rgba(34, 211, 238, 0.7);
+                outline: none;
+            }
+            .opt-stage-chip:hover .opt-stage-chip__panel,
+            .opt-stage-chip:focus-visible .opt-stage-chip__panel,
+            .opt-stage-chip.is-pinned .opt-stage-chip__panel {
+                display: block;
+            }
+            .opt-stage-chip.is-pinned {
+                box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35);
+            }
+            .opt-accept-btn {
+                margin-left: auto;
+                padding: 8px 12px;
+                min-height: 32px;
+                border-radius: 6px;
+                border: 1px solid rgba(52, 211, 153, 0.55);
+                background: rgba(6, 78, 59, 0.45);
+                color: #a7f3d0;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                font-family: inherit;
+                white-space: nowrap;
+                position: relative;
+                z-index: 2;
+            }
+            .opt-accept-btn:hover:not(:disabled) {
+                background: rgba(6, 95, 70, 0.7);
+                border-color: #34d399;
+            }
+            .opt-accept-btn:disabled {
+                opacity: 0.6;
+                cursor: wait;
+            }
+            .opt-telemetry-stages { font-family: ui-monospace, monospace; white-space: nowrap; }
             .opt-telemetry-table { width: 100%; border-collapse: collapse; font-size: 9px; margin-top: 6px; }
+            .opt-telemetry-table--wide { min-width: 100%; }
             .opt-telemetry-table-wrap {
-                max-height: 120px;
-                overflow-y: auto;
+                max-height: 200px;
+                overflow: auto;
                 border-radius: 6px;
                 border: 1px solid #1f2937;
             }
@@ -2223,8 +2801,32 @@
                 padding: 3px 4px;
                 border-bottom: 1px solid #27272a;
                 text-align: left;
+                vertical-align: top;
             }
-            .opt-telemetry-table th { color: #94a3b8; font-weight: 600; }
+            .opt-telemetry-table th { color: #94a3b8; font-weight: 600; white-space: nowrap; }
+            .opt-telemetry-var {
+                font-variant-numeric: tabular-nums;
+                white-space: nowrap;
+                color: #e2e8f0;
+            }
+            .opt-telemetry-var-delta {
+                display: block;
+                color: #64748b;
+                font-size: 8px;
+            }
+            .opt-telemetry-row--new-best td { background: rgba(52, 211, 153, 0.08); }
+            .opt-telemetry-row--best td { box-shadow: inset 2px 0 0 #34d399; }
+            .opt-best-pill {
+                display: inline-block;
+                margin-left: 3px;
+                padding: 0 4px;
+                border-radius: 3px;
+                background: rgba(52, 211, 153, 0.2);
+                color: #6ee7b7;
+                font-size: 8px;
+                font-weight: 700;
+                text-transform: uppercase;
+            }
             .opt-results-grid {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
@@ -2846,10 +3448,19 @@
             }
             #opt-mode-loss-chart {
                 width: 100%;
-                height: 88px;
+                height: 148px;
                 display: block;
-                border-radius: 6px;
+                border-radius: 8px;
                 margin-bottom: 8px;
+                background: #0f141b;
+                border: 1px solid #1f2937;
+                --osd-chart-bg: #0f141b;
+                --osd-chart-grid: #1e293b;
+                --osd-chart-axis: #64748b;
+                --osd-chart-ink: #e2e8f0;
+                --osd-chart-line: #a78bfa;
+                --osd-chart-best: #34d399;
+                --osd-chart-dot: #c4b5fd;
             }
             #opt-mode-run-status {
                 font-size: 10px;
@@ -2938,7 +3549,7 @@
                 <div id="opt-mode-stage-nav"></div>
                 <div id="opt-mode-stage-hint"></div>
                 <div id="opt-mode-live-panel" class="opt-live-panel">
-                    <canvas id="opt-mode-loss-chart" width="320" height="88" aria-label="Optimization loss"></canvas>
+                    <canvas id="opt-mode-loss-chart" width="320" height="148" aria-label="Optimization loss"></canvas>
                     <div id="opt-mode-telemetry" hidden aria-live="polite"></div>
                     <div id="opt-mode-run-status"></div>
                 </div>

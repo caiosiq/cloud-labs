@@ -63,6 +63,11 @@ def require_backend(
             },
         )
     if init and rt.lab is None:
+        # HTTP Edge Contract backends intentionally have no in-process lab host;
+        # the edge URL owns hardware. Only fail when neither path exists.
+        edge = getattr(getattr(rt, "spec", None), "edge", None)
+        if edge is not None and getattr(edge, "configured", False):
+            return rt
         raise HTTPException(
             status_code=503,
             detail=f"backend {backend_id!r} communicator not initialized",
@@ -80,6 +85,17 @@ class BackendSession:
     def __enter__(self) -> BackendRuntime:
         self._ctx = backend_context(self.runtime.paths, self.runtime.manifest)
         self._ctx.__enter__()
+        # Prefer edge GET /bench (or teaching edge bench disk) over any teaching
+        # layout.json that bind_backend_context may have loaded — HTTP real edges
+        # have no local layout file and would otherwise keep mock's storage grid.
+        try:
+            from lab_model.coordinator.catalog.resolve_edge_bench import (
+                bind_storage_geometry,
+            )
+
+            bind_storage_geometry(self.runtime)
+        except Exception:  # noqa: BLE001
+            pass
         return self.runtime
 
     def __exit__(self, exc_type, exc, tb) -> None:

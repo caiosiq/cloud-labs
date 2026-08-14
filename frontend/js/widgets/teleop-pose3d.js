@@ -150,7 +150,14 @@ export default function TeleopPose3d({
 
             const fn = active ? endTeleop : startTeleop;
 
-            const result = await fn(tagId);
+            const pending = fn(tagId);
+
+            if (!active) {
+                await Promise.resolve();
+                await refresh();
+            }
+
+            const result = await pending;
 
             toggle.disabled = false;
 

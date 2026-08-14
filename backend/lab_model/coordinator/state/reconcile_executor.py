@@ -21,6 +21,7 @@ RECONCILE_ACTIONS: frozenset[str] = frozenset(
         PrimitiveId.SET_MOTOR_SETPOINT,
         PrimitiveId.STORE_COMPONENT,
         PrimitiveId.PLACE_FROM_STORAGE,
+        PrimitiveId.RECENTER_IN_STORAGE,
     }
 )
 

@@ -3,7 +3,7 @@ Domain layer — pure lab semantics (no hardware, no HTTP).
 
 - :mod:`component` — per-tag tunables/measurables shapes and accessors
 - :mod:`holding` — top-level ``holding`` block and system status constants
-- :mod:`storage_region` — Q3 inventory grid from ``layout.json``
+- :mod:`storage_region` — inventory grid from ``layout.json`` (southern half-plane)
 - :mod:`motor_rotation_store` — cumulative motor angles JSON persistence
 """
 

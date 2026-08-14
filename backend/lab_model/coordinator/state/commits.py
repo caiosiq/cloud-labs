@@ -540,8 +540,16 @@ def commit_observed_camera_image(
 # ---------------------------------------------------------------------------
 
 def _sync_system_status_for_teleop(state: Dict[str, Any]) -> None:
-    from lab_model.language.domain.component import is_teleop_active
+    """Align top-level ``system_status`` with TeleOp session readiness.
+
+    - ``TELEOP`` only when some component is ``active && ready`` (jog allowed).
+    - ``BUSY`` while any session is acquiring (``active && !ready``) so the
+      system monitor matches the TeleOp board Loading state.
+    - Otherwise HOLDING / IDLE as usual.
+    """
+    from lab_model.language.domain.component import is_teleop_active, is_teleop_ready
     from lab_model.language.domain.holding import (
+        SYSTEM_STATUS_BUSY,
         SYSTEM_STATUS_HOLDING,
         SYSTEM_STATUS_IDLE,
         SYSTEM_STATUS_TELEOP,
@@ -549,13 +557,21 @@ def _sync_system_status_for_teleop(state: Dict[str, Any]) -> None:
     )
 
     components = state.get("components") or {}
-    any_teleop = False
+    any_ready = False
+    any_acquiring = False
     if isinstance(components, dict):
-        any_teleop = any(
-            isinstance(e, dict) and is_teleop_active(e) for e in components.values()
-        )
-    if any_teleop:
+        for entry in components.values():
+            if not isinstance(entry, dict):
+                continue
+            if is_teleop_ready(entry):
+                any_ready = True
+                break
+            if is_teleop_active(entry):
+                any_acquiring = True
+    if any_ready:
         state["system_status"] = SYSTEM_STATUS_TELEOP
+    elif any_acquiring:
+        state["system_status"] = SYSTEM_STATUS_BUSY
     elif held_tag(state):
         state["system_status"] = SYSTEM_STATUS_HOLDING
     else:
@@ -625,6 +641,8 @@ def commit_teleop_ready(
     top["ready"] = True
     top["lease_ts"] = float(now_ms)
     top["last_error"] = None
+    # Promote system_status BUSY (acquiring) → TELEOP (ready).
+    _sync_system_status_for_teleop(state)
     return True
 
 

@@ -16,8 +16,23 @@ async def start_teleop(tag_id: str) -> dict[str, Any]:
 
 async def end_teleop(tag_id: str) -> dict[str, Any]:
     tag = tag_id or "tag_22"
+    final_pose = None
+    try:
+        sample = read_pose_sample(tag)
+        if isinstance(sample, dict):
+            final_pose = {
+                k: float(sample[k])
+                for k in ("x", "y", "z", "rotation")
+                if sample.get(k) is not None
+            }
+    except Exception:  # noqa: BLE001
+        final_pose = None
     context.teleop_active.discard(tag)
-    return {"tag_id": tag, "active": False}
+    out: dict[str, Any] = {"tag_id": tag, "active": False}
+    if final_pose:
+        out["pose"] = dict(final_pose)
+        out["final_pose"] = dict(final_pose)
+    return out
 
 
 async def teleop_jog(args: dict[str, Any]) -> dict[str, Any]:

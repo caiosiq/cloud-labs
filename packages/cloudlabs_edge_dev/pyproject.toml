@@ -18,6 +18,9 @@ dependencies = [
   "uvicorn[standard]>=0.27.0",
   "websockets>=12.0",
   "httpx>=0.27.0",
+  "pydantic>=2.0.0",
+  "numpy>=1.24.0",
+  "scipy>=1.10.0",
 ]
 
 [project.optional-dependencies]
@@ -33,4 +36,4 @@ Homepage = "https://github.com/cloud-labs"
 where = ["src"]
 
 [tool.setuptools.package-data]
-cloudlabs_edge_dev = ["py.typed", "scaffold/templates/**/*"]
+cloudlabs_edge_dev = ["py.typed", "scaffold/templates/**/*", "scaffold_fixtures/**/*"]

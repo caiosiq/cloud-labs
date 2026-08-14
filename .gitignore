@@ -19,11 +19,17 @@ coordinator_data/**
 !coordinator_data/README.md
 !coordinator_data/**/.gitkeep
 
+# Tracked Twin overlay seeds for HTTP-edge backends (real) live under
+# schemas/coordinator_seeds/ — not under gitignored coordinator_data/.
+
 # Legacy laser-line helper output (scripts/generate_laser_line_fit.py)
 laser_line_fit.npy
 
 # Mock lab table-cam snapshots written by observe (paths stored in measurables)
 backend/lab_communicator/mock/lab_view/camera_captures/
+
+# Bench cheat-sheet capture dumps (npy/png)
+scripts/bench/captures/
 
 # Local MuJoCo diagnostics, screenshots, and observer captures
 /simulation_edge/logs/

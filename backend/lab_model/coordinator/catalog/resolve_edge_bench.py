@@ -125,9 +125,34 @@ def resolve_edge_bench(rt: Any) -> ResolvedEdgeBench:
     )
 
 
+def bind_storage_geometry(rt: Any) -> Dict[str, Any]:
+    """Configure process ``storage_region`` from this backend's edge bench.
+
+    Twin keeps one process-global layout snapshot for packing / overlays. HTTP
+    edges have no local ``layout.json`` on ``paths``, so binding only the
+    teaching/coordinator paths leaves storage stuck on whatever backend was
+    probed first (often mock's full Q3). Always rebind from
+    :func:`resolve_edge_bench` for the active ``rt``.
+    """
+    from lab_model.language.domain.storage_region import configure_from_layout_document
+
+    cached = getattr(rt, "edge_layout_cache", None)
+    if isinstance(cached, dict) and isinstance(cached.get("lab_bounds_mm"), dict):
+        layout = cached
+    else:
+        layout = resolve_edge_bench(rt).layout
+        try:
+            setattr(rt, "edge_layout_cache", layout)
+        except Exception:  # noqa: BLE001
+            pass
+    configure_from_layout_document(layout)
+    return layout
+
+
 __all__ = [
     "EdgeBenchUnavailable",
     "ResolvedEdgeBench",
     "resolve_edge_bench",
     "unwrap_bench_layout",
+    "bind_storage_geometry",
 ]

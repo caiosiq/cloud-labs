@@ -12,10 +12,11 @@
 import { widgetCard, widgetTitle, resolveTokens, nullPlaceholder } from './common.js';
 import { isLiveFeedActive } from '../component-state.js';
 import { registerJpegPollStop } from './jpeg-poll-registry.js';
+import { openLiveFeedPopout } from '../ui/live-feed-popout.js';
 
 export { stopJpegPollForTag } from './jpeg-poll-registry.js';
 
-export default function JPEGPoll({ tagId, fieldName, descriptor, comp }) {
+export default function JPEGPoll({ tagId, fieldName, descriptor, comp, hooks }) {
     const card = widgetCard();
     card.appendChild(widgetTitle(fieldName, descriptor));
 
@@ -92,6 +93,16 @@ export default function JPEGPoll({ tagId, fieldName, descriptor, comp }) {
 
     card.appendChild(img);
     card.appendChild(errHint);
+
+    const pop = document.createElement('button');
+    pop.type = 'button';
+    pop.className = 'live-feed-pop-btn';
+    pop.innerHTML =
+        '<span class="material-icons-round" style="font-size:14px" aria-hidden="true">open_in_new</span> Pop out';
+    pop.onclick = () => {
+        openLiveFeedPopout(tagId, { fetchLabState: hooks?.fetchLabState });
+    };
+    card.appendChild(pop);
 
     const meta = document.createElement('div');
     meta.style.color = '#475569';

@@ -7,17 +7,22 @@ export function renderStartTeleop(ctx) {
     const btn = sessionStartButton('teleop', 'Acquire teleop lease', 'gamepad');
     btn.onclick = () => {
         btn.disabled = true;
-        void startTeleop(tagId)
-            .then(async (result) => {
-                if (!result.ok) {
-                    hooks.log(`Teleop start failed: ${result.error || 'unknown'}`, 'error');
-                    return;
-                }
-                await afterCommandDispatch(hooks, tagId);
-            })
-            .finally(() => {
-                btn.disabled = false;
-            });
+        // Rebuild panel immediately after optimistic pending patch inside startTeleop.
+        void (async () => {
+            const startPromise = startTeleop(tagId);
+            // Yield so optimistic active/!ready is applied, then show Loading UI.
+            await Promise.resolve();
+            if (typeof hooks.resetPanelSnapshot === 'function') hooks.resetPanelSnapshot();
+            if (typeof hooks.refreshPanel === 'function') hooks.refreshPanel(tagId);
+            if (typeof hooks.render === 'function') hooks.render();
+            const result = await startPromise;
+            if (!result.ok) {
+                hooks.log(`Teleop start failed: ${result.error || 'unknown'}`, 'error');
+            }
+            await afterCommandDispatch(hooks, tagId);
+        })().finally(() => {
+            btn.disabled = false;
+        });
     };
     body.appendChild(btn);
     return section;

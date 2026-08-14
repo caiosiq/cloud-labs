@@ -36,10 +36,23 @@
 ## 3. Twin merge + commits
 
 - Edge returns structured primitive results (e.g. `{holding: true}`).
-- After successful **remote** southbound, coordinator runs `commit_*` on that backend’s working lab-state for: pick / hover / place / confirm, move / store / place-from-storage, affirm-placed, scan-rotate.
+- After successful **remote** southbound, coordinator runs `commit_*` on that backend’s working lab-state for: pick / hover / place / confirm, move / store / place-from-storage, affirm-placed, scan-rotate, **START_TELEOP / END_TELEOP**, **START_LIVE_FEED / END_LIVE_FEED**.
+- **Coordinator owns Twin `system_status` for remote edges:** around each southbound execute the working store flips `IDLE → BUSY →` quiescent (`IDLE` or `HOLDING` from commits). Edges must **not** invent Twin FSM writers or “busy” side APIs so the Stash/dirty UI works — Twin merge already prefers coordinator status over edge `lab_state`.
+- **Coordinator owns Twin live-feed session flags** (`telemetry.live_feed.*.live|connected`) the same way as teleop. Twin UI sends catalog channel `stream`; southbound remap arms edge `{tag}.camera_image`. Edge `/lab-state` that hardcodes `live: false` must not clobber an armed Twin session.- Soft checkout / control status / commit / stash / checkout-report read the working store (`LabStateStore`) and resolve catalog tags via **edge inventory** (`resolve_edge_catalog`), not an in-process communicator or `active_catalog.json` on HTTP backends.
 - Twin `GET /api/lab-state` **merges**:
-  - **Coordinator wins:** `system_status`, `holding`, presence, commanded tunables
-  - **Edge wins:** `runtime_sync`, stream URLs, live teleop samples
+  - **Coordinator wins:** `system_status`, `holding`, presence, commanded tunables,
+    `telemetry.teleop` session flags (`active` / `ready` / mode / command) after
+    remote `START_TELEOP` / `END_TELEOP`
+  - **Edge wins:** `runtime_sync`, stream URLs / `live_feed`, live teleop *samples*
+    (not session lease flags — real edges often hardcode `teleop.active=false`)
+- After successful remote southbound, coordinator also commits teleop start/end
+  (edge already finished hardware arming; Twin marks `active`+`ready` together).
+- **Once per edge process session** (sim + real HTTP): when the edge advertises a
+  new `edge_session_id` and `runtime_sync.status == ready`, Twin replaces the
+  working lab-state from that edge snapshot (`LabStateStore.reset_from_new_edge_session`)
+  so commanded poses match the physical RECORD/SYNC. Twin-only overlays
+  (`alignment_guides`, `laser_lines`) are preserved. Until READY, only
+  seed-if-empty + inventory membership reconcile run.
 - Twin `GET /api/lab-layout` resolves via edge `GET /bench` (HTTP) or teaching `cloudlabs_edge/bench/layout.json` / `lab_view/layout.json` — never `coordinator_data/` as layout SoT.
 - API middleware **fail-closed**: every `/api/*` call (except backends listing / job submit lease paths) requires `?backend_id=` or `X-CloudLabs-Backend`. Shared `lab_view` / `coordinator_data` paths fail boot unless `CLOUDLABS_STRICT_LAB_VIEW=0`.
 
@@ -47,7 +60,7 @@
 
 ## 4. Explicit non-goals
 
-- Teaching the real edge to hand-write `HOLDING` into edge `lab_state.json`
+- Teaching the real edge to hand-write `HOLDING` / `BUSY` into edge `lab_state.json` for Twin
 - Sharing one `coordinator_data` tree across backends
 - Storing camera frames in coordinator lab-state
 - Hand-authoring `backends/<id>/lab_view` clones (removed; use `coordinator_data/`)

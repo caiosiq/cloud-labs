@@ -69,7 +69,7 @@ const TUNABLE_WRITER_PRIMITIVES = new Set([
 ]);
 
 /** Blocked while live feed is streaming (use the feed instead of one-shot capture). */
-const MEASURABLE_WRITER_PRIMITIVES = new Set(['RECORD_MEASURABLES']);
+const MEASURABLE_WRITER_PRIMITIVES = new Set(['RECORD_MEASURABLES', 'OPTIMIZE']);
 
 /** Primitives with no dedicated form yet (read-only GET_* only). */
 const SILENT_PRIMITIVES = new Set([
@@ -172,7 +172,11 @@ export function renderPrimitiveRegions(tagId, allowList, ctx) {
         root.appendChild(sessionHint('Tunable writes hidden while TeleOp is active.'));
     }
     if (!storedOnly && liveFeedActive) {
-        root.appendChild(sessionHint('Record measurables hidden while live feed is on.'));
+        root.appendChild(
+            sessionHint(
+                'Record / Optimize hidden while live feed is on — End live feed (or use Pop out to watch while working elsewhere).',
+            ),
+        );
     }
 
     list.forEach((prim) => {

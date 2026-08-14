@@ -78,11 +78,25 @@ Each call is one **primitive** round-trip: you decide, the edge acts, you
 observe, you decide again.
 
 ```python
+lab.wait_until_lab_ready()  # after edge boot / SYNC_RUNTIME
 lab.components.tag_20.move(x=12.5).wait_until_idle()
 lab.components.tag_20.motor(1, 0.5).wait_until_idle()
+lab.components.tag_20.record_pose()  # RECORD_TUNABLES → nominal_pose
 image = lab.capture_measurable("tag_22", "camera_image")
 score = lab.probe_kernel("tag_22", "camera_image", kernel_id="demo.image_mean_score")
 ```
+
+**Runtime sync helpers** (same language plane as Twin):
+
+| Helper | Primitive |
+|--------|-----------|
+| `lab.sync_runtime()` | `SYNC_RUNTIME` (SET + RECORD boot gate) |
+| `lab.record_tunables(tags, paths)` | `RECORD_TUNABLES` |
+| `lab.record_nominal_poses(tags)` | RECORD `nominal_pose` (Refresh Pose) |
+| `lab.wait_until_lab_ready()` | poll `lab_initialization` |
+| `lab.components.tag_X.record_pose()` | per-tag RECORD pose |
+
+`lab.refresh_pose(tag)` remains a **read** of live `nominal_pose` from lab-state, not a camera re-measure.
 
 | Trait | Meaning |
 |-------|---------|

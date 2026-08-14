@@ -1,14 +1,19 @@
 /**
- * Session-reconciliation modal: on boot, ask backend if any tags still match the last
- * graceful-shutdown checkpoint within tolerance, and offer to reload tunables/measurables
- * for the user-chosen subset.
+ * Session-reconciliation modal: on first IDLE lab poll, compare current Twin
+ * state to the last session checkpoint and offer to restore tunables/measurables
+ * when measured poses still match within noise.
+ *
+ * After the operator applies or dismisses (or when there is nothing to offer),
+ * the current Twin state is written as the new checkpoint — so the next visit
+ * always has a baseline without relying on graceful shutdown.
  *
  * Endpoints:
  *   GET  /api/session-reconciliation/offers
  *   POST /api/session-reconciliation/apply  {tag_ids: string[]}
+ *   POST /api/session-reconciliation/save
  *
- * Hardware is never re-commanded — we only restore software state. After apply, the caller
- * is responsible for refreshing lab state (wired via {@link initSessionReconciliation}).
+ * Hardware is never re-commanded — we only restore software state. After apply,
+ * the caller refreshes lab state (wired via {@link initSessionReconciliation}).
  */
 import { store } from '../state/store.js';
 import { log } from './log.js';
@@ -18,6 +23,8 @@ import { backendHeaders, withBackendQuery } from '../state/backend-selection.js'
 const SESSION_REC_STORAGE_DISMISS_KEY = 'optics-session-reconcile-dismiss';
 
 let _fetchLabState = async () => {};
+/** One save per Twin session after offers settle (apply / dismiss / no offers). */
+let _baselineSaved = false;
 
 /**
  * @param {{ fetchLabState: () => Promise<void> }} deps
@@ -25,6 +32,32 @@ let _fetchLabState = async () => {};
 export function initSessionReconciliation(deps) {
     if (deps && typeof deps.fetchLabState === 'function') {
         _fetchLabState = deps.fetchLabState;
+    }
+}
+
+/**
+ * Persist current Twin lab state as the session checkpoint baseline.
+ * Idempotent for a single browser tab session.
+ */
+async function saveSessionCheckpointBaseline(reason) {
+    if (_baselineSaved) return;
+    try {
+        const res = await fetch(withBackendQuery('/api/session-reconciliation/save'), {
+            method: 'POST',
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            console.warn('[session-reconcile] baseline save failed', res.status, data, reason);
+            return;
+        }
+        _baselineSaved = true;
+        console.info('[session-reconcile] baseline checkpoint saved', {
+            reason: reason || null,
+            checkpoint_path: data.checkpoint_path || null,
+        });
+    } catch (e) {
+        console.warn('[session-reconcile] baseline save unavailable:', e);
     }
 }
 
@@ -36,6 +69,8 @@ export async function maybeTriggerSessionReconciliation() {
             sessionStorage.getItem(SESSION_REC_STORAGE_DISMISS_KEY) === '1'
         ) {
             store.sessionReconciliationFetched = true;
+            // Still refresh baseline so the next restart has a checkpoint.
+            void saveSessionCheckpointBaseline('session_dismissed');
             return;
         }
     } catch (_) {
@@ -64,10 +99,24 @@ export async function maybeTriggerSessionReconciliation() {
         if (/^busy:/i.test(skipReason)) return;
 
         store.sessionReconciliationFetched = true;
-        if (!data || document.getElementById('session-reconcile-modal')) return;
-        if (!data.offers || !data.offers.length) return;
 
-        openSessionReconciliationModal(data);
+        if (!data.enabled || skipReason === 'feature_disabled') {
+            return;
+        }
+        if (skipReason === 'lab_unavailable') {
+            return;
+        }
+
+        if (!data || document.getElementById('session-reconcile-modal')) return;
+
+        if (data.offers && data.offers.length) {
+            openSessionReconciliationModal(data);
+            return;
+        }
+
+        // No offers (first run, already synced, or poses too far): current state
+        // becomes the checkpoint for next time.
+        await saveSessionCheckpointBaseline(skipReason || 'no_offers');
     } catch (e) {
         console.warn('session reconciliation offers unavailable:', e);
     }
@@ -161,7 +210,8 @@ function openSessionReconciliationModal(payload) {
     sub.style.lineHeight = '1.5';
     sub.textContent =
         'Measured poses still match within tolerance for these tags; you can reload saved ' +
-        'tunables and measurables from the last graceful shutdown checkpoint. Hardware is not commanded.';
+        'tunables and measurables from the previous session checkpoint. Hardware is not commanded. ' +
+        'After you apply or dismiss, Twin saves the current state as the new checkpoint.';
 
     const meta = document.createElement('div');
     meta.style.fontSize = '11px';
@@ -188,6 +238,7 @@ function openSessionReconciliationModal(payload) {
             /* ignore */
         }
         closeSessionReconciliationModal();
+        void saveSessionCheckpointBaseline('dismiss');
     };
 
     const selAllBtn = document.createElement('button');
@@ -243,6 +294,8 @@ function openSessionReconciliationModal(payload) {
             store.forceGhostSync = true;
             closeSessionReconciliationModal();
             await _fetchLabState();
+            // Post-restore (or partial restore) becomes the new baseline.
+            await saveSessionCheckpointBaseline('apply');
         } catch (e) {
             console.error(e);
             showErrorModal('Session Restore Failed', e.message || String(e));

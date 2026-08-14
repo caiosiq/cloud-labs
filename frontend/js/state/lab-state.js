@@ -25,7 +25,7 @@
  */
 import { store } from './store.js';
 import { log } from '../ui/log.js';
-import { POLLING_INTERVAL } from '../config.js';
+import { POLLING_INTERVAL, BUSY_POLLING_INTERVAL } from '../config.js';
 import {
     drawPose,
     getHolding,
@@ -33,6 +33,7 @@ import {
     isHeldTag,
     isHoldingState,
     isOnTableComponent,
+    isStoredComponent,
     shouldRenderOnCanvas,
 } from '../component-model.js';
 import { isTeleopReady, componentDataSnapshot } from '../component-state.js';
@@ -49,11 +50,13 @@ import { syncMotorActionStatuses } from '../ui/motor-action-ui.js';
 import { syncGuidesFromLabState } from '../canvas/guides.js';
 import { syncLaserLinesFromLabState } from '../ui/laser-lines-panel.js';
 import { refreshSessionLeaseBanner } from '../control/control-state.js';
-import { withBackendQuery, ensureBackendSelected } from './backend-selection.js';
+import { withBackendQuery, ensureBackendSelected, backendHeaders } from './backend-selection.js';
 import { updateLabInitOverlay } from '../ui/lab-init-overlay.js';
 const OPTIMIZING_POLL_MS = 100;
 let _pollTimerId = null;
 let _pollIntervalMs = POLLING_INTERVAL;
+/** Serialize lab-state polls so a slow HTTP edge cannot stack GETs. */
+let _labStateInFlight = null;
 /** Last lab-init key logged to the console (status-change only). */
 let _lastLabInitKey = null;
 
@@ -220,6 +223,9 @@ function pruneOrphanRuntimeUiState() {
         store.dragFromStorageTag = null;
         store.dragFromStorageStartPose = null;
     }
+    if (store.storeToSlotTag && !runtimeTags.has(store.storeToSlotTag)) {
+        store.storeToSlotTag = null;
+    }
 }
 
 /**
@@ -235,8 +241,10 @@ export function initLabState(deps) {
 }
 
 function syncLabStatePollingInterval() {
-    const want =
-        store.labState?.system_status === 'OPTIMIZING' ? OPTIMIZING_POLL_MS : POLLING_INTERVAL;
+    const status = String(store.labState?.system_status || '').toUpperCase();
+    let want = POLLING_INTERVAL;
+    if (status === 'OPTIMIZING') want = OPTIMIZING_POLL_MS;
+    else if (status === 'BUSY' || status === 'HOLDING') want = BUSY_POLLING_INTERVAL;
     if (_pollIntervalMs === want && _pollTimerId != null) return;
     _pollIntervalMs = want;
     if (_pollTimerId != null) clearInterval(_pollTimerId);
@@ -251,10 +259,19 @@ export function startLabStatePolling() {
 }
 
 export async function fetchLabState() {
+    if (_labStateInFlight) return _labStateInFlight;
+    _labStateInFlight = _fetchLabStateBody().finally(() => {
+        _labStateInFlight = null;
+    });
+    return _labStateInFlight;
+}
+
+async function _fetchLabStateBody() {
     try {
         await ensureBackendSelected();
-        console.log(`[${new Date().toLocaleTimeString()}] Requesting Lab State...`);
-        const response = await fetch(withBackendQuery('/api/lab-state'));
+        const response = await fetch(withBackendQuery('/api/lab-state'), {
+            headers: backendHeaders(),
+        });
         if (!response.ok) {
             // Surface the backend's error detail when available — it usually carries a
             // human-readable reason (e.g. "controller in safe mode").
@@ -324,6 +341,16 @@ export async function fetchLabState() {
         ) {
             store.dragFromStorageTag = null;
             store.dragFromStorageStartPose = null;
+        }
+
+        const _sts = store.storeToSlotTag;
+        if (
+            _sts &&
+            store.labState.components &&
+            store.labState.components[_sts] &&
+            isStoredComponent(store.labState.components[_sts])
+        ) {
+            store.storeToSlotTag = null;
         }
 
         // Recovery: a previously displayed connection-error modal becomes stale once we successfully

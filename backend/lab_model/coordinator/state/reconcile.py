@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from lab_model.language.domain.component import PRESENCE_BREADBOARD, PRESENCE_STORAGE
 from lab_model.language.primitives.ids import PrimitiveId
@@ -21,10 +21,51 @@ def _target_nominal_pose(
     return pose if isinstance(pose, dict) else {}
 
 
-def _target_tunables(target_cfg: Mapping[str, Any], tag_id: str) -> Dict[str, Any]:
-    comp = (target_cfg.get("components") or {}).get(tag_id) or {}
+def _entry_tunables(cfg: Mapping[str, Any], tag_id: str) -> Dict[str, Any]:
+    comp = (cfg.get("components") or {}).get(tag_id) or {}
     tun = (comp.get("statecontrol") or {}).get("tunables") or {}
     return tun if isinstance(tun, dict) else {}
+
+
+def _target_tunables(target_cfg: Mapping[str, Any], tag_id: str) -> Dict[str, Any]:
+    return _entry_tunables(target_cfg, tag_id)
+
+
+def _cfg_presence(cfg: Mapping[str, Any], tag_id: str) -> str:
+    tun = _entry_tunables(cfg, tag_id)
+    presence = tun.get("presence", PRESENCE_BREADBOARD)
+    if presence == PRESENCE_STORAGE:
+        return PRESENCE_STORAGE
+    storage = tun.get("storage") or {}
+    if isinstance(storage, dict) and storage.get("in_storage"):
+        return PRESENCE_STORAGE
+    return PRESENCE_BREADBOARD
+
+
+def _slot_ij(storage_val: Any) -> Optional[Tuple[int, int]]:
+    if not isinstance(storage_val, dict):
+        return None
+    slot = storage_val.get("slot")
+    if not isinstance(slot, dict):
+        return None
+    if slot.get("i") is None or slot.get("j") is None:
+        return None
+    try:
+        return int(slot["i"]), int(slot["j"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _store_params_from_storage(storage_val: Any) -> Dict[str, Any]:
+    """Optional explicit cell for STORE_COMPONENT (empty → edge autopack)."""
+    ij = _slot_ij(storage_val)
+    if ij is None:
+        return {}
+    return {"slot_i": ij[0], "slot_j": ij[1]}
+
+
+def _store_params_for_tag(target_cfg: Mapping[str, Any], tag_id: str) -> Dict[str, Any]:
+    return _store_params_from_storage(_target_tunables(target_cfg, tag_id).get("storage"))
 
 
 def _place_extras(target_cfg: Mapping[str, Any], tag_id: str) -> List[Dict[str, Any]]:
@@ -86,21 +127,38 @@ def plan_reconcile(
 
     Optimizer history is collapsed: only target tunables matter. Each envelope
     matches ``POST /api/command`` shape: ``action``, ``target_id``, ``parameters``.
+
+    Storage inventory is versioned when present in the configs: STORE uses
+    explicit ``slot_i``/``slot_j`` when known; same-slot pose drift recenters.
     """
     commands: List[Dict[str, Any]] = []
     changes = configuration_diff(current_cfg, target_cfg)
 
     # Tags whose presence is changing this reconcile: STORE_COMPONENT /
     # PLACE_FROM_STORAGE own the (re)positioning for these parts, so we must
-    # suppress the standalone MOVE_COMPONENT / STORE that the per-field loop
-    # would otherwise emit (a MOVE on a STORED part is refused, and an empty
-    # PLACE_FROM_STORAGE fails schema validation).
+    # suppress the standalone MOVE_COMPONENT / STORE / RECENTER that the
+    # per-field loop would otherwise emit.
     presence_transition: Dict[str, Any] = {
         str(c.get("tag_id")): c.get("to")
         for c in changes
         if str(c.get("path") or "") == "tunables.presence"
         and c.get("tag_id") != "<holding>"
     }
+
+    # Slot moves (same presence=storage) are owned by STORE with explicit cell.
+    storage_slot_transition: set[str] = set()
+    for c in changes:
+        if str(c.get("path") or "") != "tunables.storage":
+            continue
+        tag = c.get("tag_id")
+        if not isinstance(tag, str) or tag.startswith("<"):
+            continue
+        if tag in presence_transition:
+            continue
+        old_ij = _slot_ij(c.get("from"))
+        new_ij = _slot_ij(c.get("to"))
+        if new_ij is not None and new_ij != old_ij:
+            storage_slot_transition.add(tag)
 
     for change in changes:
         tag_id = change.get("tag_id")
@@ -115,24 +173,33 @@ def plan_reconcile(
             continue
 
         if path == "component":
-            # Membership transitions. A component that appears in the target but
-            # not the current config must be brought onto the table from storage
-            # (PLACE_FROM_STORAGE; the executor errors if it is not in storage).
-            # A component dropped from the target is packed back into storage
-            # (STORE_COMPONENT). This is how version control realizes "add" /
-            # "remove" component across commits and across repos.
+            # Membership transitions across the full lab layout (table + storage).
             if new_val == "added":
-                commands.append(
-                    {
-                        "action": PrimitiveId.PLACE_FROM_STORAGE,
-                        "target_id": tag_id,
-                        "parameters": _pose_params(
-                            _target_nominal_pose(target_cfg, str(tag_id))
-                        ),
-                    }
-                )
-                commands.extend(_place_extras(target_cfg, str(tag_id)))
+                if _cfg_presence(target_cfg, str(tag_id)) == PRESENCE_STORAGE:
+                    commands.append(
+                        {
+                            "action": PrimitiveId.STORE_COMPONENT,
+                            "target_id": tag_id,
+                            "parameters": _store_params_for_tag(target_cfg, str(tag_id)),
+                        }
+                    )
+                else:
+                    commands.append(
+                        {
+                            "action": PrimitiveId.PLACE_FROM_STORAGE,
+                            "target_id": tag_id,
+                            "parameters": _pose_params(
+                                _target_nominal_pose(target_cfg, str(tag_id))
+                            ),
+                        }
+                    )
+                    commands.extend(_place_extras(target_cfg, str(tag_id)))
             elif change.get("from") == "present" and new_val is None:
+                # Dropped from target entirely. Table → autopack store. Already
+                # stored inventory not listed in the target (legacy nodes) stays
+                # put — no hardware step.
+                if _cfg_presence(current_cfg, str(tag_id)) == PRESENCE_STORAGE:
+                    continue
                 commands.append(
                     {
                         "action": PrimitiveId.STORE_COMPONENT,
@@ -144,16 +211,14 @@ def plan_reconcile(
 
         if path == "tunables.presence":
             if new_val == PRESENCE_STORAGE:
-                # STORE_COMPONENT packs the part into a free inventory slot.
                 commands.append(
                     {
                         "action": PrimitiveId.STORE_COMPONENT,
                         "target_id": tag_id,
-                        "parameters": {},
+                        "parameters": _store_params_for_tag(target_cfg, str(tag_id)),
                     }
                 )
             elif new_val == PRESENCE_BREADBOARD:
-                # PLACE_FROM_STORAGE needs the destination breadboard pose.
                 commands.append(
                     {
                         "action": PrimitiveId.PLACE_FROM_STORAGE,
@@ -194,10 +259,12 @@ def plan_reconcile(
             continue
 
         if path == "tunables.nominal_pose" and isinstance(new_val, dict):
-            # A part whose presence is changing is (re)placed by STORE /
-            # PLACE_FROM_STORAGE, which already carries the destination pose —
-            # skip the standalone move to avoid a refusal / double placement.
-            if tag_id in presence_transition:
+            # Presence / slot transitions already carry destination pose.
+            # Stored inventory is slot-only in VC — never MOVE/RECENTER from a
+            # pose field on a storage entry (legacy commits may still embed one).
+            if tag_id in presence_transition or tag_id in storage_slot_transition:
+                continue
+            if _cfg_presence(target_cfg, str(tag_id)) == PRESENCE_STORAGE:
                 continue
             commands.append(
                 {
@@ -209,16 +276,19 @@ def plan_reconcile(
             continue
 
         if path == "tunables.storage" and isinstance(new_val, dict):
-            # Presence-driven STORE already handled this part; only emit a
-            # storage-driven STORE when presence itself did not change.
             if tag_id in presence_transition:
                 continue
-            if new_val.get("in_storage"):
+            if not new_val.get("in_storage"):
+                continue
+            # Same storage presence, new cell (or first-time slot assignment).
+            old_ij = _slot_ij(change.get("from"))
+            new_ij = _slot_ij(new_val)
+            if new_ij is not None and new_ij != old_ij:
                 commands.append(
                     {
                         "action": PrimitiveId.STORE_COMPONENT,
                         "target_id": tag_id,
-                        "parameters": {},
+                        "parameters": _store_params_from_storage(new_val),
                     }
                 )
             continue

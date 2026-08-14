@@ -37,15 +37,44 @@ EMPTY_CONFIGURATION: Dict[str, Any] = {
 # Tunable keys that annotate how a pose was reached but do not affect reconcile.
 NON_RECONCILE_TUNABLE_KEYS = frozenset({"placement"})
 
+# Pose fields are breadboard intent only; storage cells are versioned by slot.
+_STORED_NON_VERSIONED_TUNABLE_KEYS = frozenset({"nominal_pose", "reported_pose"})
+
 # Placement modes that are not optimization-sourced (mirrors frontend component-model).
 NON_OPTIMIZATION_PLACEMENT_MODES = frozenset({"MANUAL", "STORAGE", "HOVER", "PICK"})
 
 
-def _tunables_for_configuration_slice(tunables: Mapping[str, Any]) -> Dict[str, Any]:
-    """Copy tunables for versioned configuration, omitting non-reconcile keys."""
+def _normalize_storage_blob(storage: Any) -> Dict[str, Any]:
+    """Canonical ``{in_storage, slot:{i,j}|None}`` for versioned inventory."""
+    src = storage if isinstance(storage, dict) else {}
+    slot_out = None
+    slot = src.get("slot")
+    if isinstance(slot, dict) and slot.get("i") is not None and slot.get("j") is not None:
+        try:
+            slot_out = {"i": int(slot["i"]), "j": int(slot["j"])}
+        except (TypeError, ValueError):
+            slot_out = None
+    return {"in_storage": True, "slot": slot_out}
+
+
+def _tunables_for_configuration_slice(
+    tunables: Mapping[str, Any],
+    *,
+    stored: bool = False,
+) -> Dict[str, Any]:
+    """Copy tunables for versioned configuration, omitting non-reconcile keys.
+
+    Stored inventory versions **slot only** — cell-center XY/rot is derived at
+    apply / preview / hardware time from the lab storage grid.
+    """
     out = copy.deepcopy(dict(tunables))
     for key in NON_RECONCILE_TUNABLE_KEYS:
         out.pop(key, None)
+    if stored:
+        for key in _STORED_NON_VERSIONED_TUNABLE_KEYS:
+            out.pop(key, None)
+        out["presence"] = PRESENCE_STORAGE
+        out["storage"] = _normalize_storage_blob(out.get("storage"))
     return out
 
 
@@ -218,6 +247,28 @@ def strip_non_reconcile_tunables_from_configuration(configuration: Dict[str, Any
     return changed
 
 
+def normalize_stored_slot_only_in_configuration(configuration: Dict[str, Any]) -> bool:
+    """Strip XY/rot from stored inventory entries (slot-only VC). Returns True if changed."""
+    comps = configuration.get("components")
+    if not isinstance(comps, dict):
+        return False
+    changed = False
+    for entry in comps.values():
+        if not isinstance(entry, dict) or not _config_entry_is_stored(entry):
+            continue
+        sc = entry.get("statecontrol")
+        if not isinstance(sc, dict):
+            continue
+        tun = sc.get("tunables")
+        if not isinstance(tun, dict):
+            continue
+        normalized = _tunables_for_configuration_slice(tun, stored=True)
+        if normalized != tun:
+            sc["tunables"] = normalized
+            changed = True
+    return changed
+
+
 def apply_configuration_metadata(
     runtime: Dict[str, Any],
     metadata: Mapping[str, Any] | None,
@@ -260,29 +311,63 @@ def apply_configuration_metadata(
                 pass
 
 
-def _config_entry_on_table(entry: Mapping[str, Any]) -> bool:
-    """True when a *configuration-shaped* component entry is an active table part.
-
-    Stored and off-table components are inventory, not active lab parts, so they
-    are excluded from the versioned configuration (membership model). Table
-    membership is realized through STORE_COMPONENT / PLACE_FROM_STORAGE.
-    """
+def _config_entry_is_stored(entry: Mapping[str, Any]) -> bool:
+    """True when a configuration-shaped entry is inventory (storage), not breadboard."""
     tun = (entry.get("statecontrol") or {}).get("tunables") or {}
-    presence = tun.get("presence", PRESENCE_BREADBOARD)
-    if presence in (PRESENCE_STORAGE, PRESENCE_OFF_TABLE):
+    if not isinstance(tun, dict):
         return False
+    presence = tun.get("presence", PRESENCE_BREADBOARD)
+    if presence == PRESENCE_STORAGE:
+        return True
     storage = tun.get("storage") or {}
-    if isinstance(storage, dict) and storage.get("in_storage"):
+    return isinstance(storage, dict) and bool(storage.get("in_storage"))
+
+
+def _config_entry_is_off_table(entry: Mapping[str, Any]) -> bool:
+    tun = (entry.get("statecontrol") or {}).get("tunables") or {}
+    if not isinstance(tun, dict):
+        return False
+    return tun.get("presence") == PRESENCE_OFF_TABLE
+
+
+def _config_entry_on_breadboard(entry: Mapping[str, Any]) -> bool:
+    """True for breadboard-only entries (excludes storage and off-table)."""
+    if not isinstance(entry, dict):
+        return False
+    if _config_entry_is_off_table(entry) or _config_entry_is_stored(entry):
         return False
     return True
 
 
-def table_configuration(configuration: Mapping[str, Any]) -> Dict[str, Any]:
-    """Return a copy of ``configuration`` keeping only active table components.
+def _config_entry_in_lab(entry: Mapping[str, Any]) -> bool:
+    """True for versioned lab layout entries: breadboard or storage (not off-table)."""
+    if not isinstance(entry, dict):
+        return False
+    return not _config_entry_is_off_table(entry)
 
-    Used to normalize legacy node documents (which embed stored components with
-    ``presence: storage``) before diff/reconcile so they read the same way as
-    membership-based configurations produced by the current ``extract_*``.
+
+def configuration_versions_storage(configuration: Mapping[str, Any]) -> bool:
+    """True when ``configuration`` records at least one stored inventory entry.
+
+    Legacy commits (and the empty baseline) omit storage; dirtiness against those
+    bases ignores ambient inventory. New commits that capture slots use full
+    lab-layout diffs.
+    """
+    comps = (configuration or {}).get("components") or {}
+    if not isinstance(comps, dict):
+        return False
+    return any(
+        isinstance(entry, dict) and _config_entry_is_stored(entry)
+        for entry in comps.values()
+    )
+
+
+def table_configuration(configuration: Mapping[str, Any]) -> Dict[str, Any]:
+    """Copy keeping only breadboard components (strip storage + off-table).
+
+    Used for empty-baseline / legacy dirty checks where inventory layout is not
+    part of the versioned contract. Prefer :func:`lab_configuration` for
+    reconcile and for commits that version storage slots.
     """
     cfg = dict(configuration or {})
     out = copy.deepcopy(cfg)
@@ -291,8 +376,34 @@ def table_configuration(configuration: Mapping[str, Any]) -> Dict[str, Any]:
         out["components"] = {
             tag_id: entry
             for tag_id, entry in comps.items()
-            if isinstance(entry, dict) and _config_entry_on_table(entry)
+            if isinstance(entry, dict) and _config_entry_on_breadboard(entry)
         }
+    return out
+
+
+def lab_configuration(configuration: Mapping[str, Any]) -> Dict[str, Any]:
+    """Copy keeping breadboard + storage inventory (strip off-table only).
+
+    Stored entries are normalized to slot-only (no ``nominal_pose``) so legacy
+    commits that embedded cell XY compare cleanly against current extracts.
+    """
+    cfg = dict(configuration or {})
+    out = copy.deepcopy(cfg)
+    comps = out.get("components")
+    if isinstance(comps, dict):
+        cleaned: Dict[str, Any] = {}
+        for tag_id, entry in comps.items():
+            if not isinstance(entry, dict) or not _config_entry_in_lab(entry):
+                continue
+            if _config_entry_is_stored(entry):
+                sc = entry.setdefault("statecontrol", {})
+                if not isinstance(sc, dict):
+                    sc = {}
+                    entry["statecontrol"] = sc
+                tun = sc.get("tunables") if isinstance(sc.get("tunables"), dict) else {}
+                sc["tunables"] = _tunables_for_configuration_slice(tun, stored=True)
+            cleaned[tag_id] = entry
+        out["components"] = cleaned
     return out
 
 
@@ -309,7 +420,12 @@ def holding_for_configuration(runtime: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def extract_configuration(runtime: Mapping[str, Any]) -> Dict[str, Any]:
-    """Extract the configuration slice from a runtime document."""
+    """Extract the configuration slice from a runtime document.
+
+    Versioned layout includes breadboard parts (with pose) and storage
+    inventory (**slot only**). Off-table tags remain unversioned. Cell-center
+    pose for stored parts is derived from the slot at apply / reconcile time.
+    """
     runtime_copy = dict(runtime)
     components_in = runtime_copy.get("components") or {}
     if not isinstance(components_in, dict):
@@ -318,15 +434,17 @@ def extract_configuration(runtime: Mapping[str, Any]) -> Dict[str, Any]:
     for tag_id, entry in components_in.items():
         if not isinstance(tag_id, str) or not isinstance(entry, dict):
             continue
-        # Membership model: stored / off-table parts are inventory, not active
-        # lab components, so they are omitted from the versioned configuration.
-        if is_stored(entry) or is_off_table(entry):
+        # Off-table stays outside VC; storage is part of commanded lab layout.
+        if is_off_table(entry):
             continue
+        stored = is_stored(entry)
         components_out[tag_id] = {
             "id": entry.get("id", tag_id),
             "type": entry.get("type"),
             "statecontrol": {
-                "tunables": _tunables_for_configuration_slice(get_tunables(entry)),
+                "tunables": _tunables_for_configuration_slice(
+                    get_tunables(entry), stored=stored
+                ),
             },
         }
     out: Dict[str, Any] = {
@@ -474,17 +592,35 @@ def apply_configuration_to_components(
         tun = sc.get("tunables") if isinstance(sc, dict) else None
         if isinstance(tun, dict):
             from lab_model.language.domain.component import tunables_bucket
+            from lab_model.language.domain.storage_region import (
+                STORAGE_NOMINAL_ROTATION_DEG,
+                cell_center,
+            )
 
             bucket = tunables_bucket(entry)
             bucket.clear()
             bucket.update(copy.deepcopy(tun))
+            # Slot-only configs: derive commanded cell-center pose for Twin UI.
+            if _config_entry_is_stored(cfg_entry) or is_stored(entry):
+                slot = storage_slot(entry)
+                if slot is not None:
+                    cx, cy = cell_center(int(slot["i"]), int(slot["j"]))
+                    bucket["nominal_pose"] = {
+                        "x": float(cx),
+                        "y": float(cy),
+                        "rotation": float(STORAGE_NOMINAL_ROTATION_DEG),
+                    }
+                    bucket["presence"] = PRESENCE_STORAGE
+                    bucket["storage"] = {
+                        "in_storage": True,
+                        "slot": {"i": int(slot["i"]), "j": int(slot["j"])},
+                    }
 
-    # Membership reconciliation: a part currently on the breadboard but absent
-    # from this configuration is, by definition, NOT on the table here — move it
-    # to storage. Stored parts are omitted from the versioned config, so without
-    # this, soft-checkout previewing a node where a stored part is placed (and
-    # then returning) would leave that part stranded on the breadboard. Already
-    # stored / off-table inventory is left untouched.
+    # Membership reconciliation: a breadboard part absent from this configuration
+    # is not on the table here — move it to storage. Inventory already stored (or
+    # off-table) and absent from a legacy breadboard-only config is left alone;
+    # when the config versions storage slots, those entries are applied above via
+    # tunables (presence + slot; pose derived from the grid).
     cfg_tags = set(cfg_components.keys())
     for tag_id, entry in list(runtime_components.items()):
         if not isinstance(entry, dict) or tag_id in cfg_tags:

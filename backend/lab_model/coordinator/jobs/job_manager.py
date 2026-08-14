@@ -178,6 +178,23 @@ class JobManager:
             record = self._by_id.get(job_id)
             return bool(record and record.cancel_requested)
 
+    def request_accept(self, job_id: str) -> JobRecord:
+        """Ask a running closed-loop job to finish as success (good enough)."""
+        with self._lock:
+            record = self._require(job_id)
+            if record.status in _TERMINAL:
+                return record
+            if record.status == "queued":
+                # Queued accept is meaningless — leave queued (caller can cancel).
+                return record
+            record.accept_requested = True
+            return record
+
+    def is_accept_requested(self, job_id: str) -> bool:
+        with self._lock:
+            record = self._by_id.get(job_id)
+            return bool(record and record.accept_requested)
+
     def note_runner_scheduled(self, scheduled: bool) -> None:
         with self._lock:
             self._runner_scheduled = scheduled

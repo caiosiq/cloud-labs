@@ -3,6 +3,8 @@
  */
 import { getStatecontrol, getTelemetry, isLiveFeedActive, measurableValue, normalizeCapabilities, tunableValue } from '../component-state.js';
 import { getWidget } from '../widgets/index.js';
+import { isImageMeasurableField } from '../api/kernels.js';
+import { mountMeasurableKernelStrip } from './measurable-kernels.js';
 
 const LIVE_VIEW_WIDGETS = new Set(['MJPEGViewer', 'JPEGPoll']);
 const TELEOP_CONTROL_WIDGETS = new Set(['TeleopRz', 'TeleopPose3d']);
@@ -88,7 +90,19 @@ function renderScope(scope, declaration, comp, tagId, hooks, { gateLiveFeed = fa
             card.style.fontSize = '10px';
             card.textContent = `${scope}.${fieldName}: widget failed (${e && e.message ? e.message : e})`;
         }
-        if (card instanceof HTMLElement) wrap.appendChild(card);
+        if (card instanceof HTMLElement) {
+            wrap.appendChild(card);
+            // Premade kernel probes under image measurables (EVAL_KERNEL, not OPTIMIZE).
+            if (scope === 'measurables' && isImageMeasurableField(fieldName, descriptor || {})) {
+                mountMeasurableKernelStrip({
+                    tagId,
+                    fieldName,
+                    descriptor: descriptor || {},
+                    value,
+                    card,
+                });
+            }
+        }
     });
     if (!wrap.childElementCount) {
         wrap.appendChild(renderEmptyHint(`\u2014 no read-only ${scope} fields`));

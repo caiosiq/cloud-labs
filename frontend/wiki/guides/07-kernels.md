@@ -8,28 +8,34 @@ still perform actuation; kernels help **OPTIMIZE** (and authoring probes)
 
 A kernel is not another kind of lab command.
 
-## Three shelves
+## Where the catalog lives
 
-Naming overlaps; keep these distinct:
+For remote / teaching / real backends, the **authoritative premade list** is the
+active edge’s `cloudlabs_edge/kernels/` tree (`manifest.json` + `.pt` files).
+
+Twin **Wiki → Backends → Kernels** and Optimization mode presets call
+`GET /api/kernels`, which **proxies that edge**. Coordinator
+`schemas/kernels/` is a CI / fixture shelf only — not what the real bench runs.
+
+## Three shelves
 
 | Kind | Definition | Where it appears |
 |------|------------|------------------|
-| **Catalog TorchScript** | Shipped `.pt` + manifest (`demo.*`, `builtin.roi_centroid`, …) | Wiki **Backends → Kernels** |
+| **Catalog TorchScript** | Edge-owned `.pt` + manifest (`builtin.*`, `demo.*`) | Wiki **Backends → Kernels**; Twin Optimization presets |
 | **Session kernels** | Author an `nn.Module`, `register_kernel` for this lease | Scripts such as `04_session_kernels.py` |
 | **Runtime “builtin” hooks** | Python ensemble plumbing (`ensemble.eval.*`) | Listed under Backends → Kernels; not image models |
 
-Ids such as `builtin.roi_centroid` are **TorchScript catalog** entries
-(“builtin” = product-shipped). A Wiki badge `builtin` on `ensemble.*` denotes
-internal hooks—a different shelf.
+## Premades this lab ships
 
-## Physical examples
+| Id | Output | Typical objective |
+|----|--------|-------------------|
+| `builtin.roi_centroid` | `[cx, cy]` | Align CoM to a pixel target (`rms_distance`) |
+| `builtin.beam_power` | `[flux, peak, sat]` | Maximize flux (`one_minus_normalized` on flux); watch saturation |
+| `builtin.gaussian_beam_fit` | `[amp, cx, cy, σx, σy]` | Minimize σₓ (`minimize_value`) |
+| `builtin.beam_shift` | `[dx, dy, magnitude]` | **Maximize** ‖Δ‖ from **this frame’s** `(W/2, H/2)` — weight −1 on magnitude. No reference capture; resolution-agnostic |
 
-- **`builtin.roi_centroid`** — `(cx, cy)` of the spot in a central ROI;
-  alignment error in pixels.
-- **`demo.image_mean_score`** — approximate frame brightness; a teaching
-  scalar, not a calibrated power meter.
-- **Session kernel** — optics math encoded by the author (within TorchScript
-  limits).
+If a preset button is disabled in Optimization mode, the edge listed the id but
+`artifact_present` is false — seed/rebuild that edge’s `kernels/` tree.
 
 ## Attachment to actions
 
@@ -43,10 +49,9 @@ move because OPTIMIZE or MOVE (or another actuation primitive) said so.
 
 ## Practice
 
-1. Wiki → **Backends** → **Kernels** → `builtin.roi_centroid` → **Physical
-   interpretation**.
-2. Run `scripts/language/02_kernels_and_match.py`.
-3. Compare with `04_session_kernels.py`—catalog shelf versus session-authored
-   measurement.
+1. Select the backend (e.g. `real.default`) → Wiki **Backends → Kernels** — confirm
+   builtins match that machine’s edge files.
+2. Twin **Optimization mode** → Edge kernel presets (same catalog).
+3. Scripts: `02_kernels_and_match.py`, `04_session_kernels.py` for session shelf.
 
 Next: [Imperative vs closed-loop](#)—where the control loop runs.

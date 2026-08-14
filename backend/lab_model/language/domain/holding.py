@@ -29,14 +29,11 @@ SYSTEM_STATUS_OPTIMIZING = "OPTIMIZING"
 SYSTEM_STATUS_HOLDING = "HOLDING"
 #: Phase 8 per-component TELEOP.
 #:
-#: Informational status reported at the top level when *any* component
-#: in ``state['components']`` has ``tunables.teleop_active == True``.
-#: Per §16.5 of ``universal_component_architecture.md`` per-component
-#: concurrency is allowed by default -- TELEOP does *not* block
-#: optimization on a different component -- so the actual gate is the
-#: per-component ``teleop_active`` field, not this status. The status
-#: exists only so the UI / API consumers can spot "something is being
-#: teleoped somewhere" at a glance.
+#: Informational status when *any* component has a **ready** TeleOp session
+#: (``telemetry.teleop.active && ready``). While TeleOp is still acquiring
+#: (``active && !ready``), ``system_status`` is ``BUSY`` instead so the monitor
+#: matches the Loading board. Per §16.5, TeleOp does *not* block optimization
+#: on a different component — the gate is the per-component teleop field.
 SYSTEM_STATUS_TELEOP = "TELEOP"
 
 BREADBOARD_SURFACE_Z_LAB_MM = 215.0

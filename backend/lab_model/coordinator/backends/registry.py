@@ -107,6 +107,8 @@ class BackendSpec:
     lab_view_path: str = ""
     #: Thin coordinator store (VC + working FSM + Twin overlays). Auto-created.
     coordinator_data_path: str = ""
+    #: Tracked Twin overlay seeds (laser lines) when there is no lab_view_path.
+    coordinator_seed_path: str = ""
     communicator: str = ""
     lab_mode: str = ""
     enabled: bool = True
@@ -128,6 +130,8 @@ class BackendRuntime:
     control_managers: Dict[str, Any] = field(default_factory=dict)
     #: Per-backend coordinator working lab-state (Phase 2). None until probe/init.
     lab_state_store: Any = None
+    #: Cached flat edge bench layout (``lab_bounds_mm`` at top) for storage_region.
+    edge_layout_cache: Optional[Dict[str, Any]] = field(default=None, repr=False)
     availability: str = "unknown"  # ready | unavailable | error
     unavailable_reason: Optional[str] = None
     init_error: Optional[str] = None
@@ -226,12 +230,14 @@ class BackendRegistry:
             cdp = str(raw.get("coordinator_data_path") or "").strip()
             if not cdp:
                 cdp = default_coordinator_data_path(bid)
+            csp = str(raw.get("coordinator_seed_path") or "").strip()
             specs.append(
                 BackendSpec(
                     backend_id=bid,
                     label=str(raw.get("label") or bid).strip() or bid,
                     lab_view_path=lvp,
                     coordinator_data_path=cdp,
+                    coordinator_seed_path=csp,
                     communicator=communicator,
                     lab_mode=str(raw.get("lab_mode") or "").strip().upper(),
                     enabled=bool(raw.get("enabled", True)),
@@ -338,6 +344,7 @@ class BackendRegistry:
                 spec.backend_id,
                 coordinator_data_path=spec.coordinator_data_path,
                 migrate_from_lab_view=spec.lab_view_path,
+                coordinator_seed_path=spec.coordinator_seed_path,
             )
         except BaseException as exc:
             return BackendRuntime(
@@ -363,13 +370,38 @@ class BackendRegistry:
             paths = apply_coordinator_overrides(paths, coord)
         else:
             # HTTP-edge only: no local edge lab_view (library/layout on edge).
+            # Session checkpoint is Twin-owned under coordinator_data (restore
+            # software tunables after noisy re-localize — no robot motion).
             paths = coordinator_only_paths(coord)
             comm = (spec.communicator or "real").strip().lower() or "real"
             mode = (spec.lab_mode or comm.upper()).strip().upper() or "REAL"
+            session_checkpoint = True
+            pos_mm, yaw_deg = 8.0, 10.0
+            stale_h = 168.0
+            if paths.lab_manifest_json and os.path.isfile(paths.lab_manifest_json):
+                try:
+                    with open(paths.lab_manifest_json, "r", encoding="utf-8-sig") as fh:
+                        raw_m = json.load(fh)
+                    if isinstance(raw_m, dict):
+                        if "session_checkpoint" in raw_m:
+                            session_checkpoint = bool(raw_m.get("session_checkpoint"))
+                        block = raw_m.get("session_reconciliation")
+                        if isinstance(block, dict):
+                            if block.get("position_mm") is not None:
+                                pos_mm = float(block["position_mm"])
+                            if block.get("yaw_deg") is not None:
+                                yaw_deg = float(block["yaw_deg"])
+                            if block.get("stale_warning_hours") is not None:
+                                stale_h = float(block["stale_warning_hours"])
+                except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                    pass
             manifest = LabViewManifest(
                 communicator=comm,
                 lab_mode=mode,
-                session_checkpoint=False,
+                session_checkpoint=session_checkpoint,
+                reconciliation_position_mm=pos_mm,
+                reconciliation_yaw_deg=yaw_deg,
+                reconciliation_stale_warning_hours=stale_h,
             )
             os.makedirs(paths.states_dir, exist_ok=True)
             os.makedirs(paths.camera_captures_dir, exist_ok=True)
@@ -403,6 +435,7 @@ class BackendRegistry:
         store_dir = os.path.join(coord.root_dir, "catalog_store")
         os.makedirs(store_dir, exist_ok=True)
         lab_state_store = LabStateStore.from_disk(spec.backend_id, paths.lab_state_json)
+        lab_state_store.ensure_laser_lines_from_bundle(paths.laser_lines_json)
         return BackendRuntime(
             spec=spec,
             paths=paths,
@@ -419,17 +452,49 @@ class BackendRegistry:
         with self._lock:
             if rt.lab is not None:
                 return
-            # External Edge Contract URL — no in-process host.
+            # External Edge Contract URL — HTTP OptimizeHost over Twin lab-state store.
             if rt.spec.edge.configured:
-                rt.lab = None
-                rt.runtime_manager = None
-                rt.init_error = None
-                if rt.lab_state_store is None:
-                    from lab_model.coordinator.state.lab_state_store import LabStateStore
+                from lab_model.coordinator.state.lab_state_store import LabStateStore
+                from lab_model.execution.edge.ensemble_host import HttpEdgeEnsembleHost
 
+                if rt.lab_state_store is None:
                     rt.lab_state_store = LabStateStore.from_disk(
                         rt.backend_id, rt.paths.lab_state_json
                     )
+                base = rt.spec.edge.normalized_base_url() or ""
+                catalog: dict = {}
+                try:
+                    from lab_model.coordinator.catalog.resolve_edge_catalog import (
+                        resolve_edge_catalog,
+                    )
+
+                    cat = resolve_edge_catalog(rt)
+                    from lab_model.coordinator.catalog.resolve_edge_catalog import (
+                        catalog_map_from_resolved,
+                    )
+
+                    catalog = catalog_map_from_resolved(cat)
+                    print(
+                        f"[backend] edge catalog for ensemble host "
+                        f"backend={rt.backend_id!r} source={cat.source} "
+                        f"active_tags={len(catalog)}",
+                        flush=True,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(
+                        f"[backend] edge catalog for ensemble host skipped: {exc}",
+                        flush=True,
+                    )
+                rt.lab = HttpEdgeEnsembleHost(
+                    backend_id=rt.backend_id,
+                    base_url=base,
+                    state_store=rt.lab_state_store,
+                    contract_version=getattr(rt.spec.edge, "contract_version", None)
+                    or "1.1.0",
+                    catalog_map=catalog,
+                )
+                rt.runtime_manager = None
+                rt.init_error = None
                 return
             # real.* without edge URL already marked unavailable in probe.
             if (rt.manifest.communicator or "").lower() == "real":

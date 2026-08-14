@@ -11,7 +11,6 @@ import {
 } from './teleop-pose.js';
 import { startTeleopLivePosePoll, stopTeleopLivePosePoll } from './api/teleop-live-pose.js';
 import {
-    shouldUseWebSocketTransport,
     startTeleopWsSession,
     stopTeleopWsSession,
 } from './api/teleop-session-ws.js';
@@ -29,21 +28,28 @@ function onLivePoseUpdate(tagId) {
 }
 
 function startLiveTransport(tagId, descriptor) {
-    const opts = {
-        descriptor,
-        onUpdate: () => onLivePoseUpdate(tagId),
+    // Twin always owns `/teleop/session` (in-process push or HTTP-edge proxy).
+    // Catalog often lists HTTP `…/live-pose` only — that disabled WS and left
+    // CURRENT blank when polls lacked backend_id. Prefer WS; fall back to poll.
+    const twinWsDesc = {
+        ...(descriptor || {}),
+        url: '/api/components/{tag_id}/teleop/session',
+        transport: 'websocket',
     };
-    if (shouldUseWebSocketTransport(descriptor)) {
-        opts.onFallback = () => {
+    const httpDesc = descriptor && String(descriptor.url || '').includes('live-pose')
+        ? descriptor
+        : { url: '/api/components/{tag_id}/telemetry/live-pose', default_fps: 20 };
+    const opts = {
+        descriptor: twinWsDesc,
+        onUpdate: () => onLivePoseUpdate(tagId),
+        onFallback: () => {
             startTeleopLivePosePoll(tagId, {
-                descriptor,
+                descriptor: httpDesc,
                 onUpdate: () => onLivePoseUpdate(tagId),
             });
-        };
-        startTeleopWsSession(tagId, opts);
-    } else {
-        startTeleopLivePosePoll(tagId, opts);
-    }
+        },
+    };
+    startTeleopWsSession(tagId, opts);
 }
 
 function stopLiveTransport(tagId) {
@@ -59,8 +65,13 @@ export function syncTeleopLivePosePolls() {
         if (!isTeleopReady(comp)) return;
         const row = getCatalogRow(tagId);
         const caps = normalizeCapabilities(row?.capabilities);
-        const desc = caps.telemetry?.teleop?.live_pose;
-        if (!desc) return;
+        // Start transport whenever TeleOp is ready — do not require a catalog
+        // live_pose descriptor (Twin has a default session URL).
+        const desc = caps.telemetry?.teleop?.live_pose || {
+            url: '/api/components/{tag_id}/teleop/session',
+            transport: 'websocket',
+            default_fps: 20,
+        };
         shouldRun.add(tagId);
         if (!_activeTags.has(tagId)) {
             startLiveTransport(tagId, desc);

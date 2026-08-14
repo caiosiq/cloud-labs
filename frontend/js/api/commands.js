@@ -30,14 +30,23 @@ import { fetchLabState } from '../state/lab-state.js';
 
 let _render = () => {};
 let _updateContextPanel = () => {};
+/** @type {() => Promise<void>} */
+let _refreshControlWorkingState = async () => {};
 
 /**
  * Inject the renderer and selection-panel refresher so we can roll back ghost state on cancel.
- * @param {{ render: () => void, updateContextPanel: (tagId: string) => void }} deps
+ * @param {{
+ *   render: () => void,
+ *   updateContextPanel: (tagId: string) => void,
+ *   refreshControlWorkingState?: () => Promise<void>,
+ * }} deps
  */
 export function initCommands(deps) {
     if (deps.render) _render = deps.render;
     if (deps.updateContextPanel) _updateContextPanel = deps.updateContextPanel;
+    if (typeof deps.refreshControlWorkingState === 'function') {
+        _refreshControlWorkingState = deps.refreshControlWorkingState;
+    }
 }
 
 export async function sendCommand(command) {
@@ -204,6 +213,10 @@ export async function executeSendCommand(command) {
                 // RECORD_TUNABLES).
                 await fetchLabState();
                 _render();
+                // HTTP edges often stay IDLE on the coordinator until southbound
+                // finishes in one request — refresh dirty/stash without waiting
+                // for a separate BUSY→IDLE poll edge.
+                void _refreshControlWorkingState();
             } catch (syncError) {
                 log(`Command completed, but refresh failed: ${syncError.message || syncError}`, 'warn');
             }

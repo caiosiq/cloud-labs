@@ -357,6 +357,8 @@ expire(lease_id)
 | `HOLDING` | Robot holding part | Requires lease; refusals for conflicting moves |
 | `TELEOP` | Per-component live control | **Policy TBD:** teleop may require lease or per-tag grant |
 
+**Remote (HTTP/poll) edges:** the coordinator working store drives Twin `IDLE → BUSY → IDLE|HOLDING` around `_southbound_execute`. Edge authors do **not** write Twin `system_status` so dirty/stash UI and busy gates stay consistent. Concurrent Twin commands while BUSY/OPTIMIZING still return HTTP 409 (single-flight); a future job handler may queue multi-component work without changing edge adapters.
+
 **Refusal order (target):**
 
 1. Valid `lease_id` for this `backend_id`?

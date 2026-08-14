@@ -45,6 +45,10 @@ export function renderSetMotorSetpoint(ctx) {
         const inp = coordInput('setpoint °', defaultAngle);
         inp.style.flex = '1';
         inp.style.minWidth = '72px';
+        if (inp.input) {
+            inp.input.dataset.motorSetpointTag = tagId;
+            inp.input.dataset.motorSetpointId = String(mid);
+        }
 
         const btn = runButton('Apply', 'adjust');
         btn.style.width = 'auto';

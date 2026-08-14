@@ -127,8 +127,40 @@ def resolve_edge_catalog(rt: Any) -> ResolvedEdgeCatalog:
     )
 
 
+def catalog_map_from_resolved(cat: ResolvedEdgeCatalog) -> Dict[str, Any]:
+    """``tag_id`` → library row for preflight / ensemble (active inventory only)."""
+    out: Dict[str, Any] = {}
+    for row in cat.active_rows():
+        if not isinstance(row, dict):
+            continue
+        tid = str(row.get("tag_id") or row.get("id") or "").strip()
+        if tid:
+            out[tid] = dict(row)
+    return out
+
+
+def refresh_catalog_map(rt: Any, host: Any = None) -> Dict[str, Any]:
+    """Live edge library/inventory → catalog_map; optionally stamp onto ``host``.
+
+    HttpEdgeEnsembleHost snapshots catalog once at communicator init; if the edge
+    was down then, ``catalog_map`` stays ``{}`` and real-bench TorchScript preflight
+    falsely reports ``no camera-capable catalog row``. Always prefer a fresh resolve
+    before ``strict_real_objectives`` checks.
+    """
+    cat = resolve_edge_catalog(rt)
+    cmap = catalog_map_from_resolved(cat)
+    if host is not None and hasattr(host, "catalog_map"):
+        try:
+            host.catalog_map = dict(cmap)
+        except Exception:  # noqa: BLE001
+            pass
+    return cmap
+
+
 __all__ = [
     "EdgeCatalogUnavailable",
     "ResolvedEdgeCatalog",
+    "catalog_map_from_resolved",
+    "refresh_catalog_map",
     "resolve_edge_catalog",
 ]

@@ -1,10 +1,11 @@
 """Pre-flight validation for ensemble OPTIMIZE before session lock."""
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Set
 
 from pydantic import ValidationError
 
+from lab_model.language.domain.component import is_live_feed_active
 from .errors import EnsemblePreflightError, PathResolveError
 from .metrics.registry import METRIC_REGISTRY
 from .objective_measurements import (
@@ -18,7 +19,8 @@ from .spec import ObjectiveSpec, ObjectiveTermSpec, OptimizeEnsembleParameters
 
 # ``OptimizeParameters`` (legacy OPTIMIZE body) defaults ``strategy`` to
 # ``NEWTON``; that key must not reach ``OptimizeEnsembleParameters`` (extra=forbid).
-_LEGACY_ENSEMBLE_NOISE_KEYS = frozenset({"strategy"})
+# ``pipeline`` / ``kernel_packages`` are edge-facing extras compiled alongside the IR.
+_LEGACY_ENSEMBLE_NOISE_KEYS = frozenset({"strategy", "pipeline", "kernel_packages"})
 
 
 def strip_legacy_optimize_fields(raw: Mapping[str, Any]) -> Dict[str, Any]:
@@ -51,8 +53,13 @@ def preflight_objective_term(
     *,
     catalog_map: Optional[Mapping[str, Any]] = None,
     strict_real_objectives: bool = False,
+    edge_kernel_ids: Optional[Set[str]] = None,
 ) -> None:
-    """Validate one compiled objective term against live state and metric registry."""
+    """Validate one compiled objective term against live state and metric registry.
+
+    When ``edge_kernel_ids`` is set (remote edge catalog), TorchScript terms are
+    checked against that set and coordinator ``ensure_torchscript_ready`` is skipped.
+    """
     if term.metric not in METRIC_REGISTRY:
         raise EnsemblePreflightError(
             message="objective term references unknown metric",
@@ -226,6 +233,28 @@ def preflight_objective_term(
             from lab_model.execution.optimization.kernels import ensure_torchscript_ready
             from lab_model.execution.optimization.kernels.torchscript_runtime import get_manifest_entry
 
+            if edge_kernel_ids is not None:
+                # Remote edge: id must appear in the edge catalog (or be session.*).
+                if kernel_id not in edge_kernel_ids and not (
+                    kernel_id.startswith("session.") and kernel_id in edge_kernel_ids
+                ):
+                    if kernel_id not in edge_kernel_ids:
+                        raise EnsemblePreflightError(
+                            message="unknown TorchScript kernel on edge catalog",
+                            errors=[
+                                {
+                                    "term_id": term.id,
+                                    "kernel_id": kernel_id,
+                                    "reason": (
+                                        f"kernel {kernel_id!r} not listed by active edge "
+                                        f"GET /kernels (known: {sorted(edge_kernel_ids)[:20]})"
+                                    ),
+                                }
+                            ],
+                        )
+                # Skip coordinator ensure_torchscript_ready — artifacts live on the edge.
+                return
+
             ensure_torchscript_ready(kernel_id)
             entry = get_manifest_entry(kernel_id) or {}
             declared = str(entry.get("output_kind") or "scalar").lower()
@@ -313,6 +342,7 @@ def preflight_objective_sources(
     *,
     catalog_map: Optional[Mapping[str, Any]] = None,
     strict_real_objectives: bool = False,
+    edge_kernel_ids: Optional[Set[str]] = None,
 ) -> None:
     """Validate every compiled objective term."""
     for term in objective.terms:
@@ -321,6 +351,52 @@ def preflight_objective_sources(
             term,
             catalog_map=catalog_map,
             strict_real_objectives=strict_real_objectives,
+            edge_kernel_ids=edge_kernel_ids,
+        )
+
+
+def preflight_live_feed_conflicts(
+    state: Mapping[str, Any],
+    spec: OptimizeEnsembleParameters,
+    *,
+    catalog_map: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Refuse OPTIMIZE when a capture / camera objective tag still has live feed on.
+
+    Live feed and one-shot / in-loop RECORD capture share the camera path —
+    operators must End live feed (pop-out Hide is not enough) before optimize.
+    """
+    check_tags: set[str] = set()
+    if spec.capture is not None:
+        for step in spec.capture.before_each_eval or []:
+            check_tags.add(str(step.tag_id))
+    for term in spec.objective.terms:
+        check_tags.add(str(term.source.tag_id))
+
+    conflicts: list[Dict[str, Any]] = []
+    for tid in sorted(check_tags):
+        entry = component_entry(state, tid)
+        if entry is None or not is_live_feed_active(entry):
+            continue
+        row = None
+        if isinstance(catalog_map, Mapping):
+            row = catalog_map.get(tid)
+        # Without catalog, still refuse any live-scoped objective/capture tag.
+        if row is not None and not is_camera_capable_row(row):
+            continue
+        conflicts.append(
+            {
+                "tag_id": tid,
+                "reason": (
+                    f"{tid} has live feed on — End live feed before OPTIMIZE "
+                    f"(RECORD/capture blocked while streaming)"
+                ),
+            }
+        )
+    if conflicts:
+        raise EnsemblePreflightError(
+            message="live feed is active on an OPTIMIZE capture/camera tag",
+            errors=conflicts,
         )
 
 
@@ -330,6 +406,7 @@ def preflight_ensemble(
     *,
     catalog_map: Optional[Mapping[str, Any]] = None,
     strict_real_objectives: bool = False,
+    edge_kernel_ids: Optional[Set[str]] = None,
 ) -> tuple[OptimizeEnsembleParameters, VariablePathResolver, Dict[str, float]]:
     """
     Parse spec and dry-run resolve every variable path on ``state``.
@@ -358,7 +435,9 @@ def preflight_ensemble(
         spec.objective,
         catalog_map=catalog_map,
         strict_real_objectives=strict_real_objectives,
+        edge_kernel_ids=edge_kernel_ids,
     )
+    preflight_live_feed_conflicts(state, spec, catalog_map=catalog_map)
 
     x0 = resolver.snapshot_x0()
     return spec, resolver, x0
@@ -385,6 +464,7 @@ __all__ = [
     "ensemble_scope_tag_ids",
     "parse_ensemble_parameters",
     "preflight_ensemble",
+    "preflight_live_feed_conflicts",
     "preflight_objective_sources",
     "preflight_objective_term",
     "strip_legacy_optimize_fields",

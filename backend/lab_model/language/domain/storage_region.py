@@ -1,9 +1,11 @@
 """
-Inventory storage in the negative-x / negative-y corner of the lab frame (origin at table center).
+Inventory storage rectangle in the lab frame (origin at table center).
 
-Rule ``negative_xy`` tiles a rectangle in the negative-X / negative-Y quadrant. By default the
-rectangle reaches the axes. ``storage.bounds_mm`` may provide all four edges explicitly; legacy
-``storage.extent_from_origin_mm`` remains supported for layouts whose inner edges are the axes.
+Rule ``negative_xy`` keeps storage in the **southern** half-plane (``y < 0``).
+By default the rectangle fills the full negative-X / negative-Y quadrant.
+``storage.bounds_mm`` may set all four edges explicitly — including a strip
+**centered on ``x = 0``** that spans into +X — as long as ``y_max ≤ 0``.
+Legacy ``storage.extent_from_origin_mm`` remains supported for Q3 corner layouts.
 
 Geometry is loaded from lab_view ``layout.json`` via :func:`configure_from_layout_document`.
 """
@@ -117,11 +119,12 @@ def configure_from_layout_document(document: Dict[str, Any]) -> LabLayoutSnapsho
         storage_rect_y_min = max(lab_y_min, -abs(eh))
 
     if not (
-        lab_x_min <= storage_rect_x_min < storage_rect_x_max <= min(0.0, lab_x_max)
+        lab_x_min <= storage_rect_x_min < storage_rect_x_max <= lab_x_max
         and lab_y_min <= storage_rect_y_min < storage_rect_y_max <= min(0.0, lab_y_max)
     ):
         raise ValueError(
-            "storage bounds must have positive area inside the negative-X / negative-Y lab quadrant"
+            "storage bounds must have positive area inside lab bounds with "
+            "y_max ≤ 0 (southern half-plane); x may straddle 0 when using bounds_mm"
         )
 
     snapshot = LabLayoutSnapshot(

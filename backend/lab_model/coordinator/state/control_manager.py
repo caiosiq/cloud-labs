@@ -20,10 +20,13 @@ from lab_model.coordinator.state.diff import configuration_diff, observation_dif
 from lab_model.coordinator.state.projections import (
     EMPTY_CONFIGURATION,
     build_setup,
+    configuration_versions_storage,
     extract_configuration,
     extract_configuration_metadata,
     extract_observations,
     infer_configuration_metadata_from_document,
+    lab_configuration,
+    normalize_stored_slot_only_in_configuration,
     strip_non_reconcile_tunables_from_configuration,
     table_configuration,
 )
@@ -66,9 +69,15 @@ def _control_capabilities(
 
     ``unadopted`` means the repo has been entered but no current node has been
     established yet (the bench is not diffed against anything). In that state the
-    only ways forward are to *Set as node* an existing commit (``can_set_node``)
-    or, for a fresh repo with no history, to commit the current bench as the
-    root node.
+    only ways forward are to *Set as reference* an existing commit
+    (``can_set_node``) or, for a fresh repo with no history, to commit the
+    current bench as the root node.
+
+    ``can_set_node`` stays true whenever history exists — retargeting the
+    applied pointer is a soft ``git reset --soft`` (no robot motion) and must
+    work even while dirty so operators can branch from another base without
+    stashing first. Soft preview is also always allowed; only hard apply-on-bench
+    / branch switches stay dirty-gated.
     """
     if unadopted:
         return {
@@ -81,10 +90,12 @@ def _control_capabilities(
             "can_pop_stash": False,
             "can_drop_stash": has_stash,
             "can_fork": False,
-            "can_checkout_other": False,
+            # Soft preview is always fine; hard checkout stays gated elsewhere.
+            "can_checkout_other": True,
         }
     return {
-        "can_set_node": False,
+        # Soft retarget of the applied pointer (no motion) — allowed while dirty.
+        "can_set_node": has_commits,
         # Commit is allowed unless you are on a detached (older) commit; forking
         # is the escape hatch from detached.
         "can_commit": not detached,
@@ -98,8 +109,9 @@ def _control_capabilities(
         "can_drop_stash": has_stash,
         # Forking requires a parent commit to branch from.
         "can_fork": has_commits,
-        # Navigating to another node requires a clean bench (commit/stash first).
-        "can_checkout_other": not dirty,
+        # Soft preview of another node is always allowed; hard apply stays
+        # dirty-gated in the checkout endpoint / UI.
+        "can_checkout_other": True,
     }
 
 
@@ -409,6 +421,32 @@ class ControlManager:
             updated += 1
         return updated
 
+    def backfill_storage_slot_only(self) -> int:
+        """Strip stored ``nominal_pose`` / ``reported_pose``; keep slot only.
+
+        Idempotent. Rewrites configuration commits and the stash in place
+        (commit ids are UUIDs, not content hashes).
+        """
+        updated = 0
+        for cid in self.list_configuration_ids():
+            try:
+                doc = self.get_configuration(cid)
+            except (FileNotFoundError, ValueError):
+                continue
+            cfg = doc.get("configuration")
+            if not isinstance(cfg, dict):
+                continue
+            if normalize_stored_slot_only_in_configuration(cfg):
+                self.save_configuration_document(doc)
+                updated += 1
+        stash = self.get_stash()
+        if isinstance(stash, dict):
+            cfg = stash.get("configuration")
+            if isinstance(cfg, dict) and normalize_stored_slot_only_in_configuration(cfg):
+                _atomic_write_json(self.stash_path, stash)
+                updated += 1
+        return updated
+
     def commit_configuration(
         self,
         configuration: Mapping[str, Any],
@@ -531,16 +569,16 @@ class ControlManager:
         from_doc = self.get_configuration(from_id)
         to_doc = self.get_configuration(to_id)
         return configuration_diff(
-            table_configuration(from_doc.get("configuration") or {}),
-            table_configuration(to_doc.get("configuration") or {}),
+            lab_configuration(from_doc.get("configuration") or {}),
+            lab_configuration(to_doc.get("configuration") or {}),
         )
 
     def plan_checkout(self, from_id: str, to_id: str) -> List[Dict[str, Any]]:
         from_doc = self.get_configuration(from_id)
         to_doc = self.get_configuration(to_id)
         return plan_reconcile(
-            table_configuration(from_doc.get("configuration") or {}),
-            table_configuration(to_doc.get("configuration") or {}),
+            lab_configuration(from_doc.get("configuration") or {}),
+            lab_configuration(to_doc.get("configuration") or {}),
         )
 
     def plan_checkout_from_runtime(
@@ -560,7 +598,7 @@ class ControlManager:
         to_doc = self.get_configuration(to_id)
         return plan_reconcile(
             extract_configuration(runtime),
-            table_configuration(to_doc.get("configuration") or {}),
+            lab_configuration(to_doc.get("configuration") or {}),
         )
 
     def plan_runtime_to_configuration(
@@ -575,7 +613,7 @@ class ControlManager:
         """
         return plan_reconcile(
             extract_configuration(runtime),
-            table_configuration(target_configuration or {}),
+            lab_configuration(target_configuration or {}),
         )
 
     def checkout_compatibility_report(
@@ -778,18 +816,24 @@ class ControlManager:
         applied_id = self.get_applied().get("configuration_id") if owns_bench else None
         if not applied_id:
             # No applied node: the bench is uncommitted work on top of the
-            # shared empty (zeroth) state. Any active component therefore counts
-            # as a real, commit-able change (e.g. right after switching into a
-            # repo whose applied was cleared, or a brand-new repo).
+            # shared empty (zeroth) state. Ambient storage inventory does not
+            # dirty an empty baseline — only breadboard (active table) parts.
             base_cfg = EMPTY_CONFIGURATION
+            live_cfg = table_configuration(extract_configuration(runtime))
         else:
             try:
-                base_cfg = table_configuration(
+                base_cfg = lab_configuration(
                     self.get_configuration(applied_id).get("configuration") or {}
                 )
             except FileNotFoundError:
                 return False
-        changes = configuration_diff(base_cfg, extract_configuration(runtime))
+            live_cfg = extract_configuration(runtime)
+            # Legacy commits omit storage: ignore ambient inventory so old
+            # nodes do not permanently read dirty against a filled rack.
+            if not configuration_versions_storage(base_cfg):
+                base_cfg = table_configuration(base_cfg)
+                live_cfg = table_configuration(live_cfg)
+        changes = configuration_diff(base_cfg, live_cfg)
         return len(changes) > 0
 
     def working_state(

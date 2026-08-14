@@ -30,6 +30,10 @@ REQUIRED_EDGE_FILES: tuple[str, ...] = (
     "bench/layout.json",
     "data/library.json",
     "data/inventory.json",
+    "kernels/manifest.json",
+    "optimization/__init__.py",
+    "optimization/router_impl.py",
+    "optimization/capture_impl.py",
     "adapters/__init__.py",
     "adapters/motion.py",
     "adapters/motors.py",
@@ -89,7 +93,7 @@ app = create_app(
 # Full UC write surface the lab edge intends to host (macros expand on coordinator).
 CAPABILITIES_JSON = """\
 {{
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "backend_id": "{backend_id}",
   "features": {{
     "torchscript_execution": false,
@@ -274,7 +278,7 @@ from __future__ import annotations
 
 from typing import Any
 
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.1.0"
 
 
 def completed(
@@ -469,6 +473,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 import re
 import threading
@@ -500,10 +505,31 @@ def _kernels_dir() -> Path:
     return Path(__file__).resolve().parent / "kernels"
 
 
+def _load_manifest_map() -> Dict[str, Dict[str, Any]]:
+    """Map kernel_id → manifest row from ``kernels/manifest.json`` (edge-owned catalog)."""
+    manifest_path = _kernels_dir() / "manifest.json"
+    if not manifest_path.is_file():
+        return {}
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for raw in payload.get("kernels") or []:
+        if isinstance(raw, dict) and raw.get("id"):
+            out[str(raw["id"])] = dict(raw)
+    return out
+
+
 def _resolve_path(kernel_id: str) -> Path:
     p = Path(kernel_id)
     if p.suffix == ".pt" and p.is_absolute():
         return p
+    entry = _load_manifest_map().get(kernel_id)
+    if entry is not None:
+        artifact = str(entry.get("artifact") or f"{kernel_id}.pt")
+        if not os.path.isabs(artifact) and ".." not in Path(artifact).parts:
+            return _kernels_dir() / artifact
     return _kernels_dir() / f"{kernel_id}.pt"
 
 
@@ -1366,6 +1392,11 @@ TELEOP_JOG / TELEOP_GOTO move while held, and END_TELEOP releases it.
 WebSocket payloads on the hot path are flat (``cmd``, ``tag_id``, ``axis``,
 ``val``, …) — nested ``payload`` envelopes must be rejected. Pose samples
 published to the client should include ``epoch_ms`` from the edge clock.
+
+This edge owns **hardware** arming and the WS path. Twin UI
+``telemetry.teleop.active`` / ``ready`` are committed by the **coordinator**
+after a successful remote START/END — do not invent Twin FSM writers here.
+A flat ``{tag_id, active: true, ws_path}`` result is the contract shape.
 """
 
 from __future__ import annotations
@@ -1387,7 +1418,8 @@ def start_teleop(tag_id: str) -> dict[str, Any]:
         ``{"tag_id": str, "active": true, "ws_path": "/ws/teleop"}`` (path must
         match ``capabilities.telemetry_channels.teleop.path``). Refuse when
         the lab is busy, the tag is in storage, or another teleop is active,
-        per lab safety policy.
+        per lab safety policy. Twin UI session flags are committed by the
+        coordinator after this returns successfully.
     """
     raise NotImplementedError(f"Phase 6: LiveControlSession start for {tag_id!r}")
 
@@ -1650,7 +1682,7 @@ cloudlabs_edge/
     observe.py         # RECORD_MEASURABLES, EVAL_KERNEL
   .agents/             # tool-agnostic coaching for Phase 6 (humans + AI)
     README.md          # skill index
-    skills/*/SKILL.md  # contract, tensors, latency, kernels, frames, inventory
+    skills/*/SKILL.md  # contract, tensors, camera-bringup, latency, kernels, frames, inventory
 ```
 
 ## Phase 6 coaching (`.agents/skills`)
@@ -1658,7 +1690,8 @@ cloudlabs_edge/
 Before filling an adapter, open the matching skill under `.agents/skills/` —
 or point any assistant at that file. Skills are not a second API; they remind
 you how to honor the contract (one mutation door, canonical measurables,
-fail-loud frames, honest inventory). Start from [`.agents/README.md`](.agents/README.md).
+fail-loud frames, honest inventory, real-lab camera bring-up). Start from
+[`.agents/README.md`](.agents/README.md).
 
 ## Suggested deathray targets
 
@@ -1720,6 +1753,98 @@ on local BGR); customize only how a kernel's raw output maps to result fields.
 `kernel_host.torch_available()`.
 """
 
+OPTIMIZATION_INIT = '''\
+"""Lab seams for edge optimization (capture + actuator router).
+
+The general engine lives in ``cloudlabs_edge_dev.optimization`` (tensors, kernels,
+metrics, stepper, session). Fill ``capture_impl`` and ``router_impl`` for this bench.
+See ``docs/EDGE_OPTIMIZATION_PIPELINE.md`` Phase 2.
+"""
+'''
+
+OPTIMIZATION_ROUTER_IMPL = '''\
+"""Actuator router for closed-loop OPTIMIZE on this bench.
+
+Wire continuous variables to ``adapters.motors.set_motor_setpoint`` and invasive
+pose variables to a block-scoped motion helper. Bookkeeping is per block, not
+per eval — see ``docs/EDGE_OPTIMIZATION_PIPELINE.md`` Phase 2.
+"""
+
+from __future__ import annotations
+
+from typing import Mapping, Sequence
+
+from cloudlabs_edge_dev.optimization import ActuatorRouter
+
+
+class EdgeActuatorRouter(ActuatorRouter):
+    def enter_continuous_block(self, variable_ids: Sequence[str]) -> None:
+        raise NotImplementedError(
+            "Phase 2: enter_continuous_block — clear path, no per-eval state churn"
+        )
+
+    def assert_optical_path_clear(self) -> None:
+        """Phase 6: raise ClearanceError when the arm occludes the beam."""
+        return None
+
+    def enter_invasive_block(self, variable_ids: Sequence[str]) -> None:
+        raise NotImplementedError(
+            "Phase 2: enter_invasive_block — prepare touch-and-go for pose vars"
+        )
+
+    def apply_eval(
+        self,
+        physical_values: Mapping[str, float],
+        *,
+        block_id: str,
+    ) -> None:
+        raise NotImplementedError(
+            f"Phase 2: apply_eval block={block_id!r} values={dict(physical_values)!r}"
+        )
+
+    def exit_block(self, block_id: str) -> None:
+        raise NotImplementedError(f"Phase 2: exit_block {block_id!r}")
+'''
+
+OPTIMIZATION_CAPTURE_IMPL = '''\
+"""Capture source for closed-loop OPTIMIZE on this bench.
+
+Implement latched in-process reads (no JPEG / LazyRef per eval). See
+``docs/EDGE_OPTIMIZATION_PIPELINE.md`` Phase 2.
+"""
+
+from __future__ import annotations
+
+from cloudlabs_edge_dev.optimization import CaptureSource, EdgeTensor
+
+
+class EdgeCaptureSource:
+    """``CaptureSource`` over ``adapters.observe.capture_tensor`` (Phase 2)."""
+
+    def capture(self, capture_id: str) -> EdgeTensor:
+        raise NotImplementedError(
+            f"Phase 2: capture({capture_id!r}) — latch + in-process BGR, no JPEG"
+        )
+
+    def read_measurable(self, path: str, *, tag_id: str) -> float:
+        raise NotImplementedError(
+            f"Phase 2: read_measurable({path!r}, tag_id={tag_id!r})"
+        )
+
+
+# Typing alias for Protocol checkers.
+_: type[CaptureSource] = EdgeCaptureSource  # type: ignore[misc,assignment]
+'''
+
+
+def _starter_kernels_manifest() -> str:
+    fixtures = Path(__file__).resolve().parent / "scaffold_fixtures" / "kernels" / "manifest.json"
+    if fixtures.is_file():
+        return fixtures.read_text(encoding="utf-8")
+    return (
+        '{\n  "schema_version": 1,\n  "kernels": []\n}\n'
+    )
+
 
 def init_edge(dest: Path, backend_id: str = "stub.default", force: bool = False) -> Path:
     dest = dest.resolve()
@@ -1731,6 +1856,8 @@ def init_edge(dest: Path, backend_id: str = "stub.default", force: bool = False)
     (dest / "adapters").mkdir(exist_ok=True)
     (dest / "bench").mkdir(exist_ok=True)
     (dest / "data").mkdir(exist_ok=True)
+    (dest / "kernels").mkdir(exist_ok=True)
+    (dest / "optimization").mkdir(exist_ok=True)
 
     files = {
         dest / "main.py": MAIN_PY,
@@ -1738,7 +1865,7 @@ def init_edge(dest: Path, backend_id: str = "stub.default", force: bool = False)
         dest / "bench" / "layout.json": BENCH_JSON.format(backend_id=backend_id),
         dest / "data" / "library.json": LIBRARY_JSON,
         dest / "data" / "inventory.json": INVENTORY_JSON,
-        dest / "contract_version.txt": "1.0.0\n",
+        dest / "contract_version.txt": "1.1.0\n",
         dest / "contract.py": CONTRACT_PY,
         dest / "latch.py": LATCH_PY,
         dest / "kernel_host.py": KERNEL_HOST_PY,
@@ -1753,9 +1880,20 @@ def init_edge(dest: Path, backend_id: str = "stub.default", force: bool = False)
         dest / "adapters" / "tunables.py": ADAPTERS_TUNABLES,
         dest / "adapters" / "optimize.py": ADAPTERS_OPTIMIZE,
         dest / "adapters" / "observe.py": ADAPTERS_OBSERVE,
+        dest / "optimization" / "__init__.py": OPTIMIZATION_INIT,
+        dest / "optimization" / "router_impl.py": OPTIMIZATION_ROUTER_IMPL,
+        dest / "optimization" / "capture_impl.py": OPTIMIZATION_CAPTURE_IMPL,
+        dest / "kernels" / "manifest.json": _starter_kernels_manifest(),
         dest / "README.md": README.format(backend_id=backend_id),
     }
     for path, content in files.items():
         path.write_text(content, encoding="utf-8", newline="\n")
+    # Copy starter TorchScript artifacts from scaffold_fixtures (Phase 5).
+    fixtures = Path(__file__).resolve().parent / "scaffold_fixtures" / "kernels"
+    if fixtures.is_dir():
+        import shutil
+
+        for pt in fixtures.glob("*.pt"):
+            shutil.copy2(pt, dest / "kernels" / pt.name)
     write_agent_skills(dest)
     return dest

@@ -200,6 +200,23 @@ async def _invoke_atomic(
         params = opt.model_dump()
         if params.get("mode") == "ensemble":
             strategy = params.get("session_label") or "ensemble"
+            # Phase 0: compile edge pipeline document into the OPTIMIZE payload
+            # (remote edges read ``parameters.pipeline``; mock may ignore until Phase 2).
+            try:
+                from lab_model.execution.optimization.pipeline import (
+                    PipelineCompileError,
+                    attach_pipeline,
+                    optional_catalog_map,
+                )
+
+                attach_pipeline(params, catalog=optional_catalog_map(lab))
+            except PipelineCompileError as exc:
+                _LOG.warning(
+                    "OPTIMIZE ensemble pipeline compile failed for %s: %s",
+                    cmd.target_id,
+                    exc,
+                )
+                raise
         else:
             strategy = opt.strategy
         await lab.optimize_component(cmd.target_id, strategy, params)
@@ -304,11 +321,12 @@ async def execute_validated_command(
 
     action = str(getattr(cmd, "action", "") or "")
     state = lab.get_lab_state() if hasattr(lab, "get_lab_state") else None
-    backend_id = ""
+    backend_id = str(getattr(lab, "backend_id", "") or "").strip()
     edge_attached = None
     edge_offline = None
     if isinstance(state, dict):
-        backend_id = str(state.get("active_backend_id") or "")
+        if not backend_id:
+            backend_id = str(state.get("active_backend_id") or "")
         if "edge_attached" in state:
             edge_attached = bool(state.get("edge_attached"))
         if "edge_offline" in state:
@@ -359,11 +377,12 @@ def schedule_validated_command(
 
     action = str(getattr(cmd, "action", "") or "")
     state = lab.get_lab_state() if hasattr(lab, "get_lab_state") else None
-    backend_id = ""
+    backend_id = str(getattr(lab, "backend_id", "") or "").strip()
     edge_attached = None
     edge_offline = None
     if isinstance(state, dict):
-        backend_id = str(state.get("active_backend_id") or "")
+        if not backend_id:
+            backend_id = str(state.get("active_backend_id") or "")
         if "edge_attached" in state:
             edge_attached = bool(state.get("edge_attached"))
         if "edge_offline" in state:

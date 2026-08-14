@@ -24,6 +24,10 @@ description: >-
 - Do not merge bench geometry into capabilities (or the reverse).
 - Do not invent success for missing hardware — refuse or fail honestly.
 - Do not import coordinator / SDK packages from the edge process.
+- Do not add Twin-only status endpoints or write Twin `system_status` /
+  dirty/stash / `telemetry.teleop.active` to “fix” the UI — the coordinator
+  owns BUSY/HOLDING/IDLE/TELEOP around southbound execute (see
+  `cloudlabs-context`, `latency-channels`, BACKEND_ISOLATION).
 
 ## Check
 

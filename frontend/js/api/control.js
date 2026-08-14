@@ -155,7 +155,7 @@ export async function previewHardCheckout(configurationId, explicitRepoId = unde
     return parseJson(res);
 }
 
-/** "Set as node": adopt a commit as the current node without moving the bench. */
+/** "Set as reference": adopt a commit as the current node without moving the bench. */
 export async function adoptConfiguration(configurationId) {
     const res = await controlFetch(`/api/control/${encodeURIComponent(repoId())}/checkout`, {
         method: 'POST',

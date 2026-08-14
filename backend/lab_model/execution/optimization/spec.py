@@ -125,6 +125,10 @@ class SolverSpec(BaseModel):
     keep_best: bool = True
     rollback_on_fail: bool = False
     settle_ms: int = Field(default=120, ge=0)
+    #: Stop when total loss ≤ this (normalized ~0–2 scale; 0.1 ≈ 10% of FOV for align).
+    stop_loss: Optional[float] = Field(default=None, ge=0.0)
+    #: Extra weight on ||Δu|| when presence fails (edge session restore-on-absent).
+    absent_step_barrier: Optional[float] = Field(default=None, ge=0.0)
     normalization: NormalizationSpec = Field(default_factory=NormalizationSpec)
     blocks: List[SolverBlockSpec] = Field(..., min_length=1)
     constraints: List[SolverConstraintSpec] = Field(default_factory=list)
@@ -143,8 +147,14 @@ class CaptureSpec(BaseModel):
 
 
 class TelemetrySpec(BaseModel):
+    """Side-band OPTIMIZE telemetry (not on the closed-loop critical path)."""
+
     stream: str = "optimization-ensemble"
     include: List[str] = Field(default_factory=list)
+    #: Sparse camera JPEG on progress: first eval, new-best, and every Nth.
+    camera_every_n: int = Field(default=5, ge=1)
+    camera_jpeg_quality: int = Field(default=70, ge=1, le=95)
+    camera_jpeg_scale: float = Field(default=0.25, gt=0.0, le=1.0)
 
 
 class OptimizeEnsembleParameters(BaseModel):

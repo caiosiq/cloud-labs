@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cloudlabs.local/schemas/edge_contract/v1/kernels.schema.json",
+  "title": "EdgeContractKernelsV1",
+  "description": "GET /kernels — edge-owned premade + session catalog (not EVAL_KERNEL).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["backend_id", "kernels"],
+  "properties": {
+    "backend_id": { "type": "string", "minLength": 1 },
+    "kernels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "label": { "type": "string" },
+          "description": { "type": "string" },
+          "runtime": { "type": "string" },
+          "artifact": { "type": "string" },
+          "artifact_present": { "type": "boolean" },
+          "output_kind": { "type": "string" },
+          "feature_names": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "digest": { "type": "string" },
+          "scope": { "type": "string" }
+        }
+      }
+    }
+  }
+}

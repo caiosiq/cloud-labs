@@ -11,11 +11,20 @@ def arm_live_feed(channel: str, profile: str | None = None) -> dict:
     """Arm Tier B wire for ``channel`` (mock in-memory arm bit)."""
     _ = profile
     ch = channel or "tag_22.camera_image"
+    # Twin may still send ``stream`` on older coordinators — treat as camera.
+    if ch in ("stream", "preview", "all"):
+        ch = "tag_22.camera_image"
     context.live_active.add(ch)
     context.live_active.add("tag_22")
-    if ch.startswith("tag_22"):
-        context.live_active.add("tag_22.camera_image")
-        context.live_active.add("tag_22.camera_image.mjpeg")
+    if ch.startswith("tag_22") or ch.endswith(".camera_image"):
+        # Prefer the concrete measurable key when Twin remaps to {tag}.camera_image.
+        base = ch if ch.endswith(".camera_image") else "tag_22.camera_image"
+        if ch.endswith(".camera_image"):
+            base = ch
+        context.live_active.add(base)
+        context.live_active.add(f"{base}.mjpeg")
+        if base.startswith("tag_"):
+            context.live_active.add(base.split(".", 1)[0])
     return {"channel": ch, "active": True}
 
 

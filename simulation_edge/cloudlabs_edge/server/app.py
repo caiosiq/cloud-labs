@@ -84,6 +84,12 @@ def create_app(*, lab: Any = None, backend_id: str = "sim.default") -> FastAPI:
     async def get_bench() -> Dict[str, Any]:
         return bench_body
 
+    @app.get("/kernels")
+    async def get_kernels() -> Dict[str, Any]:
+        from cloudlabs_edge_dev.optimization import kernels_http_catalog
+
+        return kernels_http_catalog(backend_id, _edge_root() / "kernels")
+
     @app.get("/library")
     async def get_library() -> Dict[str, Any]:
         from cloudlabs_edge_dev.edge_data import load_library, stamp_backend
@@ -101,7 +107,7 @@ def create_app(*, lab: Any = None, backend_id: str = "sim.default") -> FastAPI:
         return context.get_lab().get_lab_state()
 
     @app.post("/simulator/restart")
-    async def restart_simulator() -> JSONResponse:
+    async def restart_simulator(body: Dict[str, Any] | None = None) -> JSONResponse:
         lab_host = context.get_lab()
         restart = getattr(lab_host, "restart_mujoco", None)
         if not callable(restart):
@@ -113,7 +119,20 @@ def create_app(*, lab: Any = None, backend_id: str = "sim.default") -> FastAPI:
                 ),
             )
         try:
-            status = await asyncio.to_thread(restart)
+            requested_state = (
+                body.get("lab_state") if isinstance(body, dict) else None
+            )
+            if requested_state is not None and not isinstance(requested_state, dict):
+                return JSONResponse(
+                    status_code=400,
+                    content=contract.failed(
+                        "BAD_REQUEST", "lab_state must be an object"
+                    ),
+                )
+            status = await asyncio.to_thread(
+                restart,
+                lab_state=requested_state,
+            )
         except Exception as exc:  # noqa: BLE001
             return JSONResponse(
                 status_code=500,

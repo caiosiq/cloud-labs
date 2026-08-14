@@ -59,6 +59,8 @@ MOTION_TIME_SCALE_ENV_VAR = "CLOUDLAB_MOTION_TIME_SCALE"
 MOTION_TIME_SCALE = 1.0
 MUJOCO_VIEWER_SYNC_HZ_ENV_VAR = "CLOUDLAB_MUJOCO_VIEWER_SYNC_HZ"
 MUJOCO_VIEWER_SYNC_HZ = 60.0
+MUJOCO_PLAYBACK_RATE_ENV_VAR = "CLOUDLAB_MUJOCO_PLAYBACK_RATE"
+MUJOCO_PLAYBACK_RATE = 1.0
 ARM_SERVO_STIFFNESS_SCALE = 2.0
 GRIPPER_FORCE_LIMIT_N = 65.0
 GRIPPER_PAD_SLIDING_FRICTION = 3.0
@@ -123,8 +125,10 @@ RADIAL_JOINT_PATH_MIN_SAMPLE_COUNT = 3
 RADIAL_JOINT_PATH_MAX_SAMPLE_COUNT = 24
 RADIAL_JOINT_PATH_MAX_STEP_RAD = math.radians(3.0)
 RADIAL_JOINT_SPEED_RAD_PER_S = 0.65
-RADIAL_MIN_SEGMENT_DURATION_S = 0.20
-RADIAL_MAX_SEGMENT_DURATION_S = 2.0
+RADIAL_JOINT_SPEED_DEG_PER_S_ENV_VAR = (
+    "CLOUDLAB_RADIAL_JOINT_SPEED_DEG_PER_S"
+)
+RADIAL_MIN_SEGMENT_DURATION_AT_BASE_SPEED_S = 0.20
 RADIAL_TCP_POSITION_TOLERANCE_M = 0.0005
 RADIAL_TCP_ROTATION_TOLERANCE_DEG = 0.25
 RADIAL_FIXED_JOINT_TOLERANCE_RAD = 1e-8
@@ -708,6 +712,12 @@ class MuJoCoRobotRuntime:
             scene=scene,
             planner_backend=self.planner_backend,
         )
+        self.playback_rate = _env_float(
+            MUJOCO_PLAYBACK_RATE_ENV_VAR,
+            MUJOCO_PLAYBACK_RATE,
+            minimum=0.1,
+            maximum=32.0,
+        )
         self.active_request_id: str | None = None
         if self.planner_backend not in {
             MUJOCO_PLANNER_CUSTOM_IK,
@@ -718,6 +728,7 @@ class MuJoCoRobotRuntime:
             "runtime_init_start",
             show_viewer=bool(show_viewer),
             realtime=bool(realtime),
+            playback_rate=self.playback_rate,
         )
         self.model = mujoco.MjModel.from_xml_string(scene.xml)
         self.model.actuator_gainprm[:ARM_DOF, 0] *= ARM_SERVO_STIFFNESS_SCALE
@@ -817,6 +828,7 @@ class MuJoCoRobotRuntime:
             gripper_force_limit_n=GRIPPER_FORCE_LIMIT_N,
             gripper_pad_sliding_friction=GRIPPER_PAD_SLIDING_FRICTION,
             gripper_force_range_n=self.model.actuator_forcerange[ARM_DOF].copy(),
+            playback_rate=self.playback_rate,
         )
 
     def _log(self, event: str, **payload: Any) -> None:
@@ -866,9 +878,14 @@ class MuJoCoRobotRuntime:
         now = time.perf_counter()
         if now - self._last_viewer_sync_perf_s >= self._viewer_sync_interval_s:
             self._viewer_entered.sync()
-            self._last_viewer_sync_perf_s = now
+            # Measure the next frame interval from the end of rendering. Some
+            # viewer/driver combinations block in sync(); recording `now`
+            # before that block made every following 2-ms physics step render
+            # another frame and reduced an 8x request to about 0.26x realtime.
+            self._last_viewer_sync_perf_s = time.perf_counter()
         if self.realtime:
-            remaining = self.model.opt.timestep - (time.perf_counter() - started)
+            wall_step_s = self.model.opt.timestep / self.playback_rate
+            remaining = wall_step_s - (time.perf_counter() - started)
             if remaining > 0:
                 time.sleep(remaining)
 
@@ -1260,48 +1277,35 @@ class MuJoCoRobotRuntime:
         data: mujoco.MjData,
     ) -> RadialFrameBoundaryReport:
         bounds = self.scene.lab_bounds_mm
-        margin_m = float(self.scene.frame_safety_clearance_mm) / 1000.0
+        # The gripper-mounted camera rotates with the downward-pointing TCP.
+        # Model that complete tool as a yaw-invariant cylinder centered on the
+        # TCP axis, then add the independently configurable frame clearance.
+        margin_m = (
+            float(self.scene.frame_safety_clearance_mm)
+            + float(self.scene.tcp_tool_envelope_radius_mm)
+        ) / 1000.0
         limits = {
             "left": bounds["x_min"] / 1000.0 + margin_m,
             "right": bounds["x_max"] / 1000.0 - margin_m,
             "front": bounds["y_min"] / 1000.0 + margin_m,
             "back": bounds["y_max"] / 1000.0 - margin_m,
         }
-        best_clearance = math.inf
-        best_body: str | None = None
-        best_geom: str | None = None
-        best_side: str | None = None
-        best_point: np.ndarray | None = None
-
-        for geom_id in self._radial_frame_boundary_geom_ids:
-            points = self._geom_frame_boundary_world_points(data, geom_id)
-            candidates = (
-                (points[:, 0] - limits["left"], "left"),
-                (limits["right"] - points[:, 0], "right"),
-                (points[:, 1] - limits["front"], "front"),
-                (limits["back"] - points[:, 1], "back"),
-            )
-            for clearances, side in candidates:
-                index = int(np.argmin(clearances))
-                clearance = float(clearances[index])
-                if clearance < best_clearance:
-                    best_clearance = clearance
-                    best_body = str(
-                        self.model.body(
-                            int(self.model.geom_bodyid[geom_id])
-                        ).name
-                    )
-                    best_geom = str(self.model.geom(geom_id).name)
-                    best_side = side
-                    best_point = points[index].copy()
+        tcp = data.site("link_tcp").xpos.copy()
+        candidates = (
+            (float(tcp[0]) - limits["left"], "left"),
+            (limits["right"] - float(tcp[0]), "right"),
+            (float(tcp[1]) - limits["front"], "front"),
+            (limits["back"] - float(tcp[1]), "back"),
+        )
+        best_clearance, best_side = min(candidates, key=lambda item: item[0])
 
         return RadialFrameBoundaryReport(
             ok=best_clearance >= 0.0,
             min_clearance_m=float(best_clearance),
-            body=best_body,
-            geom=best_geom,
+            body="link_tcp_axis",
+            geom="tcp_tool_envelope",
             side=best_side,
-            point_m=best_point,
+            point_m=tcp,
         )
 
     def _radial_frame_boundary_error(
@@ -1315,11 +1319,16 @@ class MuJoCoRobotRuntime:
             if report.point_m is not None
             else None
         )
-        margin_mm = float(self.scene.frame_safety_clearance_mm)
+        clearance_mm = float(self.scene.frame_safety_clearance_mm)
+        tool_radius_mm = float(self.scene.tcp_tool_envelope_radius_mm)
+        axis_inset_mm = clearance_mm + tool_radius_mm
         return (
-            f"{stage} enters the {margin_mm / 25.4:.2f} in "
-            f"({margin_mm:.1f} mm) frame safety boundary: "
-            f"{report.body or 'unknown link'} at {report.side or 'unknown'} "
+            f"{stage} places the TCP axis inside the frame envelope: "
+            f"tool radius={tool_radius_mm / 25.4:.2f} in, "
+            f"frame clearance={clearance_mm / 25.4:.2f} in, "
+            f"required axis inset={axis_inset_mm / 25.4:.2f} in "
+            f"({axis_inset_mm:.1f} mm); "
+            f"{report.body or 'TCP axis'} at {report.side or 'unknown'} "
             f"boundary, clearance={report.min_clearance_m * 1000.0:.1f} mm, "
             f"point={point}"
         )
@@ -1800,7 +1809,11 @@ class MuJoCoRobotRuntime:
         radius_m: float,
     ) -> np.ndarray:
         library = self._load_radial_motion_library()
-        lower_bound, upper_bound = library.radius_bounds_m
+        samples = self._radial_kinematic_samples()
+        lower_bound, upper_bound = (
+            float(samples[0].radius_m),
+            float(samples[-1].radius_m),
+        )
         if radius_m < lower_bound - 1e-6 or radius_m > upper_bound + 1e-6:
             raise CollisionPlanError(
                 "radial target radius "
@@ -1808,7 +1821,6 @@ class MuJoCoRobotRuntime:
                 f"{lower_bound * 1000.0:.1f}-"
                 f"{upper_bound * 1000.0:.1f} mm"
             )
-        samples = library.samples
         for sample in samples:
             if abs(sample.radius_m - radius_m) <= 1e-9:
                 return sample.joints.copy()
@@ -1871,7 +1883,11 @@ class MuJoCoRobotRuntime:
         z_m: float,
     ) -> np.ndarray:
         library = self._load_radial_motion_library()
-        lower_bound, upper_bound = library.radius_bounds_m
+        samples = self._radial_kinematic_samples()
+        lower_bound, upper_bound = (
+            float(samples[0].radius_m),
+            float(samples[-1].radius_m),
+        )
         if radius_m < lower_bound - 1e-6 or radius_m > upper_bound + 1e-6:
             raise CollisionPlanError(
                 "radial target radius "
@@ -1879,7 +1895,6 @@ class MuJoCoRobotRuntime:
                 f"{lower_bound * 1000.0:.1f}-"
                 f"{upper_bound * 1000.0:.1f} mm"
             )
-        samples = library.samples
         for sample in samples:
             if abs(sample.radius_m - radius_m) <= 1e-9:
                 return self._interpolate_vertical_pose_joints(sample, z_m)
@@ -1904,6 +1919,71 @@ class MuJoCoRobotRuntime:
         raise CollisionPlanError(
             f"radial target radius {radius_m * 1000.0:.1f} mm is not covered"
         )
+
+    def _radial_kinematic_samples(self) -> tuple[RadialPoseSample, ...]:
+        """Return 1-D radial postures, including diagnostic-only outer poses.
+
+        Records under ``unsafe`` never become globally safe samples. They are
+        used only as kinematic postures; every realized (radius, theta, Z) pose
+        and every interpolated path sample still passes runtime safety checks.
+        """
+
+        library = self._load_radial_motion_library()
+        by_radius = {
+            round(float(sample.radius_m), 9): sample
+            for sample in library.samples
+        }
+        for item in library.unsafe:
+            if not bool(item.get("diagnostic_only")):
+                continue
+            poses_raw = item.get("vertical_poses")
+            if not isinstance(poses_raw, AbcSequence) or not poses_raw:
+                continue
+            vertical_poses = tuple(
+                RadialVerticalPose(
+                    z_m=float(pose["z_m"]),
+                    joints=np.asarray(pose["joints"], dtype=float),
+                    min_clearance_m=float(
+                        pose.get(
+                            "height_clearance_m",
+                            pose.get("min_clearance_m", math.inf),
+                        )
+                    ),
+                    tcp_error_m=float(pose.get("tcp_error_m", 0.0)),
+                )
+                for pose in poses_raw
+                if isinstance(pose, Mapping)
+                and pose.get("z_m") is not None
+                and pose.get("joints") is not None
+            )
+            if not vertical_poses:
+                continue
+            radius_m = float(item["radius_m"])
+            carry_pose = min(
+                vertical_poses,
+                key=lambda pose: abs(float(pose.z_m) - library.carry_z_m),
+            )
+            by_radius[round(radius_m, 9)] = RadialPoseSample(
+                radius_m=radius_m,
+                joints=np.asarray(
+                    item.get("joints", carry_pose.joints),
+                    dtype=float,
+                ),
+                min_clearance_m=float(
+                    item.get("min_frame_clearance_m", -math.inf)
+                ),
+                tcp_error_m=float(item.get("max_tcp_error_m", 0.0)),
+                vertical_poses=tuple(
+                    sorted(vertical_poses, key=lambda pose: pose.z_m)
+                ),
+            )
+        return tuple(
+            sorted(by_radius.values(), key=lambda sample: sample.radius_m)
+        )
+
+    def _radial_kinematic_radius_bounds_m(self) -> tuple[float, float]:
+        samples = self._radial_kinematic_samples()
+        return float(samples[0].radius_m), float(samples[-1].radius_m)
 
     def _radial_carry_pose_joints(
         self,
@@ -2011,12 +2091,27 @@ class MuJoCoRobotRuntime:
         end: np.ndarray,
     ) -> float:
         max_delta = float(np.max(np.abs(np.asarray(end) - np.asarray(start))))
-        return float(
-            np.clip(
-                max_delta / RADIAL_JOINT_SPEED_RAD_PER_S,
-                RADIAL_MIN_SEGMENT_DURATION_S,
-                RADIAL_MAX_SEGMENT_DURATION_S,
+        speed_rad_per_s = math.radians(
+            _env_float(
+                RADIAL_JOINT_SPEED_DEG_PER_S_ENV_VAR,
+                math.degrees(RADIAL_JOINT_SPEED_RAD_PER_S),
+                minimum=1.0,
+                maximum=80.0,
             )
+        )
+        # Keep short stages gentle, but scale their minimum duration with the
+        # requested joint speed. A fixed 0.20-s floor made small radial/Z moves
+        # stay slow while only large theta moves responded to the speed option.
+        minimum_duration_s = (
+            RADIAL_MIN_SEGMENT_DURATION_AT_BASE_SPEED_S
+            * RADIAL_JOINT_SPEED_RAD_PER_S
+            / speed_rad_per_s
+        )
+        # Do not cap maximum duration: doing so would force long joint moves to
+        # exceed the requested angular speed.
+        return max(
+            max_delta / speed_rad_per_s,
+            minimum_duration_s,
         )
 
     def _validate_radial_wrist_travel(
@@ -3490,7 +3585,7 @@ class MuJoCoRobotRuntime:
         radius = float(np.linalg.norm(xy))
         if radius <= 1e-9:
             raise CollisionPlanError("outer radial route cannot use zero radius")
-        portal_radius = self._load_radial_motion_library().radius_bounds_m[1]
+        portal_radius = self._radial_kinematic_radius_bounds_m()[1]
         return xy * (portal_radius / radius)
 
     def _radial_outer_portal_candidates(
@@ -3500,7 +3595,7 @@ class MuJoCoRobotRuntime:
         xy = np.asarray(xy_m, dtype=float)[:2]
         if float(np.linalg.norm(xy)) <= 1e-9:
             raise CollisionPlanError("outer portal search cannot use zero radius")
-        portal_radius = self._load_radial_motion_library().radius_bounds_m[1]
+        portal_radius = self._radial_kinematic_radius_bounds_m()[1]
         base_theta = math.atan2(float(xy[1]), float(xy[0]))
         offsets_deg = [0.0]
         offset_deg = RADIAL_OUTER_PORTAL_ANGLE_STEP_DEG
@@ -3665,7 +3760,7 @@ class MuJoCoRobotRuntime:
         RadialJointStagePlan,
     ]:
         library = self._load_radial_motion_library()
-        portal_radius = library.radius_bounds_m[1]
+        portal_radius = self._radial_kinematic_radius_bounds_m()[1]
         camera_radius = float(np.linalg.norm(adapter.camera_xy))
         aligned_camera_radius = float(
             np.linalg.norm(adapter.aligned_camera_xy)
@@ -4150,7 +4245,7 @@ class MuJoCoRobotRuntime:
         RadialJointStagePlan,
     ]:
         library = self._load_radial_motion_library()
-        portal_radius = library.radius_bounds_m[1]
+        portal_radius = self._radial_kinematic_radius_bounds_m()[1]
         if max(
             float(np.linalg.norm(adapter.camera_xy)),
             float(np.linalg.norm(adapter.aligned_camera_xy)),
@@ -4337,6 +4432,64 @@ class MuJoCoRobotRuntime:
     def _shortest_angle_delta_rad(start: float, end: float) -> float:
         return math.atan2(math.sin(float(end) - float(start)), math.cos(float(end) - float(start)))
 
+    def _radial_tcp_axis_limits_m(self) -> dict[str, float]:
+        bounds = self.scene.lab_bounds_mm
+        inset_m = (
+            float(self.scene.frame_safety_clearance_mm)
+            + float(self.scene.tcp_tool_envelope_radius_mm)
+        ) / 1000.0
+        limits = {
+            "x_min": float(bounds["x_min"]) / 1000.0 + inset_m,
+            "x_max": float(bounds["x_max"]) / 1000.0 - inset_m,
+            "y_min": float(bounds["y_min"]) / 1000.0 + inset_m,
+            "y_max": float(bounds["y_max"]) / 1000.0 - inset_m,
+        }
+        if not (
+            limits["x_min"] < 0.0 < limits["x_max"]
+            and limits["y_min"] < 0.0 < limits["y_max"]
+        ):
+            raise CollisionPlanError(
+                "TCP tool envelope and frame clearance exclude the robot origin"
+            )
+        return limits
+
+    def _radial_max_radius_at_theta_m(self, theta_rad: float) -> float:
+        """Analytical ray/rectangle intersection for the TCP-axis envelope."""
+
+        limits = self._radial_tcp_axis_limits_m()
+        cosine = math.cos(float(theta_rad))
+        sine = math.sin(float(theta_rad))
+        candidates = [self._radial_kinematic_radius_bounds_m()[1]]
+        if cosine > 1e-12:
+            candidates.append(limits["x_max"] / cosine)
+        elif cosine < -1e-12:
+            candidates.append(limits["x_min"] / cosine)
+        if sine > 1e-12:
+            candidates.append(limits["y_max"] / sine)
+        elif sine < -1e-12:
+            candidates.append(limits["y_min"] / sine)
+        return float(min(candidates))
+
+    def _radial_rotation_sweep_max_radius_m(
+        self,
+        source_theta: float,
+        target_theta: float,
+    ) -> float:
+        """Tightest analytical radius along the shortest theta rotation."""
+
+        delta = self._shortest_angle_delta_rad(source_theta, target_theta)
+        end = float(source_theta) + delta
+        low, high = sorted((float(source_theta), end))
+        angles = [float(source_theta), end]
+        quarter_turn = math.pi / 2.0
+        first = int(math.floor(low / quarter_turn)) - 1
+        last = int(math.ceil(high / quarter_turn)) + 1
+        for index in range(first, last + 1):
+            angle = index * quarter_turn
+            if low - 1e-12 <= angle <= high + 1e-12:
+                angles.append(angle)
+        return min(self._radial_max_radius_at_theta_m(angle) for angle in angles)
+
     @staticmethod
     def _intermediate_scalar_values(
         start: float,
@@ -4497,7 +4650,7 @@ class MuJoCoRobotRuntime:
         source_rotation: np.ndarray,
         target_rotation: np.ndarray,
     ) -> tuple[RadialJointStagePlan, ...]:
-        self._load_radial_motion_library()
+        lower_radius, upper_radius = self._radial_kinematic_radius_bounds_m()
         source_radius = float(np.linalg.norm(np.asarray(source_xy, dtype=float)))
         target_radius = float(np.linalg.norm(np.asarray(target_xy, dtype=float)))
         if source_radius <= 1e-6 or target_radius <= 1e-6:
@@ -4523,7 +4676,6 @@ class MuJoCoRobotRuntime:
         )
         current = source_carry
 
-        library = self._load_radial_motion_library()
         source_yaw = math.radians(
             self._target_yaw_from_rotation(source_rotation)
         )
@@ -4536,20 +4688,16 @@ class MuJoCoRobotRuntime:
             or abs(self._shortest_angle_delta_rad(source_yaw, target_yaw))
             > 1e-8
         )
-        safe_radius_transfer = bool(
-            needs_rotation
-            and max(source_radius, target_radius)
-            > RADIAL_OUTER_ROTATION_RADIUS_M + 1e-6
-        )
-        if safe_radius_transfer:
+        if needs_rotation:
+            sweep_limit = self._radial_rotation_sweep_max_radius_m(
+                source_theta,
+                target_theta,
+            )
             rotation_radius = float(
                 np.clip(
-                    min(
-                        source_radius,
-                        target_radius,
-                        RADIAL_OUTER_ROTATION_RADIUS_M,
-                    ),
-                    *library.radius_bounds_m,
+                    min(source_radius, target_radius, sweep_limit),
+                    lower_radius,
+                    upper_radius,
                 )
             )
             retract_radii = self._intermediate_scalar_values(
@@ -4621,6 +4769,7 @@ class MuJoCoRobotRuntime:
                 rotation_radius_m=rotation_radius,
                 source_theta_deg=math.degrees(source_theta),
                 target_theta_deg=math.degrees(target_theta),
+                analytical_sweep_limit_m=sweep_limit,
                 safe_radius_transfer=True,
                 stages=[
                     {"name": stage.name, "waypoints": len(stage.waypoints)}
@@ -4652,20 +4801,6 @@ class MuJoCoRobotRuntime:
                     tag_id,
                 )
             )
-
-        coordinated_rotation = self._plan_radial_coordinated_rotation(
-            name="radial coordinated rotate",
-            tag_id=tag_id,
-            radius_m=target_radius,
-            source_theta=source_theta,
-            target_theta=target_theta,
-            source_rotation=source_rotation,
-            target_rotation=target_rotation,
-            current=current,
-        )
-        if coordinated_rotation is not None:
-            stages.append(coordinated_rotation)
-            current = coordinated_rotation.waypoints[-1].copy()
 
         self._log(
             "radial_transfer_plan_success",
@@ -5085,7 +5220,7 @@ class MuJoCoRobotRuntime:
             target_rotation_deg,
         )
         library = self._load_radial_motion_library()
-        portal_radius = library.radius_bounds_m[1]
+        portal_radius = self._radial_kinematic_radius_bounds_m()[1]
         source_outer = (
             float(np.linalg.norm(pickup_adapter.gripper_xy))
             > portal_radius + 1e-6

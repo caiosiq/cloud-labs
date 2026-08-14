@@ -2,6 +2,7 @@ import copy
 import json
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from simulation_edge.bootstrap import _resolve_catalog_rows
 from simulation_edge.host.simulation_host import SimulationHost
@@ -14,6 +15,10 @@ class FakeMuJoCoClient:
     def __init__(self, *, fail: bool = False):
         self.fail = fail
         self.calls = []
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
 
     def move_component(self, tag_id, **kwargs):
         self.calls.append((tag_id, dict(kwargs)))
@@ -42,6 +47,32 @@ def tunables(host: SimulationHost, tag_id: str):
 
 
 class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
+    def test_restart_adopts_coordinator_state_without_changing_edge_session(self):
+        host = make_host()
+        original_session = host.edge_session_id
+        requested = host.get_lab_state()
+        requested["components"]["tag_18"]["statecontrol"]["tunables"][
+            "nominal_pose"
+        ] = {"x": 217.0, "y": -173.0, "rotation": 180.0}
+        requested["active_backend_id"] = "sim.default"
+        requested["simulator"] = {"pid": 12345}
+        client = FakeMuJoCoClient()
+        host._client = client
+
+        with mock.patch.object(host, "_start_mujoco") as start_mujoco:
+            host.restart_mujoco(lab_state=requested)
+
+        self.assertTrue(client.stopped)
+        start_mujoco.assert_called_once_with(show_viewer=None, realtime=None)
+        self.assertEqual(host.edge_session_id, original_session)
+        self.assertEqual(
+            tunables(host, "tag_18")["nominal_pose"],
+            {"x": 217.0, "y": -173.0, "rotation": 180.0},
+        )
+        self.assertEqual(host._poses["tag_18"]["x"], 217.0)
+        self.assertNotIn("active_backend_id", host.current_state)
+        self.assertNotIn("simulator", host.current_state)
+
     async def test_move_component_uses_short_edge_grasp(self):
         host = make_host()
         client = FakeMuJoCoClient()

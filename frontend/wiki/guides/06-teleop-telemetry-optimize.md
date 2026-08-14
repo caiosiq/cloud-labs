@@ -29,19 +29,44 @@ system records that the current session owns that optic. Primitives include
 Safety constraints typically include lab idle, part not in storage, and no
 concurrent TeleOp on the same component by another session.
 
-## Optimize — closed-loop actuation
+## Optimize — closed-loop on the edge
 
-**OPTIMIZE** starts a closed-loop (or legacy) session: propose actuator steps,
-measure, update the objective, repeat. The preferred path is **ensemble**
-optimization: variables, an objective graph, and optional **kernels**.
+**OPTIMIZE** (ensemble) ships a **pipeline** once: variables, objective terms
+(usually **edge kernels**), solver. The edge runs capture → kernel → loss →
+actuate locally; Twin subscribes to the job stream (loss curve + stage debug).
 
-The author defines what may move (variables) and what constitutes improvement
-(objective). The edge walks that landscape. Unless the imperative path is
-chosen deliberately, each millidegree step does not require a separate HTTP
-round-trip from the laptop.
+### Twin Optimization mode (operator path)
 
-Kernels (next chapter) supply custom camera math as **inputs** to OPTIMIZE—not
-as a second command language.
+1. **Objective** — prefer **edge kernel presets** (active catalog). Legacy
+   measurables (derived centroid / power readback) are fallbacks.
+2. **Variables** — motors / pose axes to move.
+3. **Tune** — weights and targets (negative weight allowed, e.g. maximize beam shift).
+4. **Solver** — eval budget, trust region, **max Δ from start** (deg/mm),
+   **keep best** / **rollback to x0 on abort**, stage-debug toggle.
+5. **Run** — plan summary (capture → kernel → actuate) + optional VC reconcile/commit.
+6. **Results** — best loss, setpoints, and **per-stage debug** for the last eval.
+
+### Stage debug (catch failures early)
+
+Each eval reports three health cards:
+
+| Stage | Means | Typical failure |
+|-------|--------|-----------------|
+| **capture** | Frame / measurable latch | Camera offline, empty tensor, wrong tag |
+| **kernel** | TorchScript features / scalar | Missing `.pt`, torch error, empty features |
+| **actuate** | Apply + clearance + max-delta | Arm still holding, step > max Δ, motor error |
+
+Live panel and Results show `c✓ k✓ a✓` marks; refused steps (max-delta) do not
+move hardware.
+
+### Safety defaults
+
+- Continuous blocks require **optical path clear** (arm not holding).
+- **Max Δ from start** refuses oversized candidates vs the applied x0 / VC node.
+- Abort: **keep best** (default) or **rollback to x0**.
+
+Kernels (next chapter) supply camera math as **inputs** to OPTIMIZE—not as a
+second command language.
 
 ## How the three fit together
 
@@ -49,14 +74,13 @@ as a second command language.
 |------|-----------|
 | Observe the beam continuously | Telemetry / live feed |
 | Align manually | TeleOp |
-| Align overnight or at frame rate | Optimize (+ kernels) |
+| Align overnight or at frame rate | Optimize (+ edge kernels) |
 | Scripted setup between steps | Imperative primitives |
 
 ## Practice
 
-- Twin: start a live feed on a camera-capable tag.
-- Backends → Kernels: open a kernel and read **Physical interpretation**—that score is
-  what OPTIMIZE can target.
+- Twin: Optimization mode on `real.default` with a kernel preset + one motor ±0.5°.
+- Backends → Kernels: confirm `artifact_present` for the presets you need.
 - Scripts: `03_closed_loop_catalog.py` for a minimal OPTIMIZE.
 
 Next: [Kernels](#)—measurement functions that guide actions.

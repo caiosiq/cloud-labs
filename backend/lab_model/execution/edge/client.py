@@ -79,6 +79,8 @@ class EdgeClient(Protocol):
 
     def get_bench(self) -> Optional[Dict[str, Any]]: ...
 
+    def get_kernels(self) -> Optional[Dict[str, Any]]: ...
+
     def get_library(self) -> Optional[Dict[str, Any]]: ...
 
     def get_inventory(self) -> Optional[Dict[str, Any]]: ...
@@ -88,6 +90,25 @@ class EdgeClient(Protocol):
     def absolute_stream_url(self, path: str) -> Optional[str]: ...
 
     def fetch_bytes(self, path: str) -> Optional[bytes]: ...
+
+
+def _edge_live_feed_channel(tag_id: str, twin_channel: Optional[str]) -> str:
+    """Map Twin ``live_feed.stream`` names onto Edge Contract telemetry keys.
+
+    Twin language uses catalog channels ``stream`` / ``preview`` / ``all``.
+    Edge ``capabilities.telemetry_channels`` and ``arm_live_feed`` use
+    ``{tag}.camera_image`` (see Edge Contract Tier B). Passing ``stream``
+    through literally arms a nonexistent key — START succeeds but JPEG/MJPEG
+    still return LIVE_NOT_STARTED.
+    """
+    tag = str(tag_id or "").strip()
+    ch = str(twin_channel or "").strip()
+    if not tag:
+        return ch or "stream"
+    if not ch or ch in ("stream", "preview", "all"):
+        return f"{tag}.camera_image"
+    # Already an edge measurable / channel id (e.g. tag_22.camera_image).
+    return ch
 
 
 def command_to_execute_body(command: Dict[str, Any]) -> Dict[str, Any]:
@@ -106,6 +127,13 @@ def command_to_execute_body(command: Dict[str, Any]) -> Dict[str, Any]:
     # Twin live-feed bodies put channel at top level.
     if command.get("channel") is not None and "channel" not in args:
         args["channel"] = command["channel"]
+    if primitive in ("START_LIVE_FEED", "END_LIVE_FEED"):
+        tag = str(args.get("tag_id") or args.get("target_id") or target or "").strip()
+        twin_ch = args.get("channel")
+        edge_ch = _edge_live_feed_channel(tag, twin_ch if twin_ch is not None else None)
+        args["channel"] = edge_ch
+        args.setdefault("measurable_id", edge_ch)
+        args.setdefault("live_channel", edge_ch)
     body: Dict[str, Any] = {"primitive": primitive, "args": args}
     if command.get("idempotency_key"):
         body["idempotency_key"] = command["idempotency_key"]
@@ -169,6 +197,9 @@ class InProcessEdgeClient:
         return None
 
     def get_bench(self) -> Optional[Dict[str, Any]]:
+        return None
+
+    def get_kernels(self) -> Optional[Dict[str, Any]]:
         return None
 
     def get_library(self) -> Optional[Dict[str, Any]]:
@@ -245,6 +276,9 @@ class PollEdgeClient:
         return None
 
     def get_bench(self) -> Optional[Dict[str, Any]]:
+        return None
+
+    def get_kernels(self) -> Optional[Dict[str, Any]]:
         return None
 
     def get_library(self) -> Optional[Dict[str, Any]]:
@@ -359,6 +393,20 @@ class HttpEdgeClient:
             return None
         if isinstance(data, dict):
             self._bench_cache = data
+            return data
+        return None
+
+    def get_kernels(self) -> Optional[Dict[str, Any]]:
+        """Edge-owned kernel catalog (``GET /kernels``). Not cached — session rows change."""
+        try:
+            with httpx.Client(base_url=self.base_url, timeout=5.0) as client:
+                resp = client.get("/kernels")
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("HttpEdgeClient kernels failed: %s", exc)
+            return None
+        if isinstance(data, dict):
             return data
         return None
 

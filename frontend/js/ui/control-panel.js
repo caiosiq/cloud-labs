@@ -142,7 +142,7 @@ function updateHeadLabel({ uncommitted = false, headId = null, detached = false,
         if (tag) tag.textContent = 'No node';
         if (id) id.textContent = 'pick';
         _els.headLabel.title =
-            'No current node — preview a node and "Set as node", or Commit the current bench';
+            'No current reference — preview a node and "Set as reference", or Commit the current bench';
         return;
     }
     if (uncommitted) {
@@ -226,6 +226,11 @@ export function initControlPanel(deps = {}) {
 
         onApply: () => onApplyOnBench(),
 
+        onSetReference: () => {
+            const id = store.control.selectedCommitId || store.control.viewingCommitId;
+            if (id) onSetAsReference(id);
+        },
+
         onReturn: () => returnToLiveHead(),
 
     });
@@ -248,7 +253,10 @@ export function initControlPanel(deps = {}) {
 
     const startVcDeps = () => ({
         onEnter: (repoId) => enterRepo(repoId),
-        onRefresh: () => refreshControlPanel(),
+        onRefresh: async () => {
+            await refreshControlPanel();
+            await softDefaultMainHeadReference();
+        },
         onRuntimeRefresh: async () => {
             await _deps.fetchLabState();
             _deps.render();
@@ -298,7 +306,10 @@ export function initControlPanel(deps = {}) {
 
         handleRepoSelectChange(_els.repoSelect, newRepo, previousRepo, {
 
-            onRefresh: () => refreshControlPanel(),
+            onRefresh: async () => {
+                await refreshControlPanel();
+                await softDefaultMainHeadReference();
+            },
 
             onRuntimeRefresh: async () => {
 
@@ -369,8 +380,7 @@ function setVcActive(active) {
 function enterRepo(repoId) {
     if (!repoId) return;
     store.control.repoId = repoId;
-    // Leave the branch unresolved so refreshControlPanel follows the branch the
-    // bench is actually applied to (not a hardcoded 'main').
+    // Leave the branch unresolved until soft-default points at main HEAD.
     store.control.branch = null;
     clearPreviewOverlay();
     store.control.viewingCommitId = null;
@@ -379,13 +389,13 @@ function enterRepo(repoId) {
     store.control.liveHeadId = null;
     store.control.working = null;
     setVcActive(true);
-    void refreshControlPanel();
     void (async () => {
+        await refreshControlPanel();
+        await softDefaultMainHeadReference();
         await _deps.fetchLabState();
         _deps.render();
         updateConfigViewUi();
     })();
-    log(`Entered repo "${repoId}" — no current node yet (Set as node or Commit)`, 'info');
 }
 
 /** Leave version control: hide the panel. Bench and ownership are untouched. */
@@ -692,13 +702,8 @@ function renderCommitGraph() {
 
 
 function selectCommitNode(commitId, node) {
-
-    // Git-like guard: cannot navigate away from a dirty working table.
-    if (commitId !== getAppliedCommitId() && isDirty()) {
-        promptResolveDirty('checking out another configuration');
-        return;
-    }
-
+    // Soft preview is always allowed while dirty — Set as reference can retarget
+    // the base without motion. Hard Apply on bench still prompts to stash/commit.
     store.control.selectedCommitId = commitId;
     store.control.snapshotSource = {
         source: 'local',
@@ -708,7 +713,6 @@ function selectCommitNode(commitId, node) {
     };
 
     void viewConfiguration(commitId, node);
-
 }
 
 /**
@@ -959,20 +963,25 @@ function updateStashUi() {
 
 
 
-/** "Set as node": adopt a previewed node as the current base, no robot motion. */
-function onSetAsNode(commitId) {
+/** "Set as reference": adopt a previewed node as the diff base, no robot motion. */
+function onSetAsReference(commitId) {
     showConfirmationModal(
-        `Set <code>${shortCommitId(commitId)}</code> as your current node?<br><br>` +
+        `Set <code>${shortCommitId(commitId)}</code> as your reference?<br><br>` +
             'No robot motion runs — the bench stays exactly as it is. Your current ' +
             'table becomes uncommitted changes relative to this node, which you can ' +
             'then Commit, Stash, or Fork.',
-        () => { void executeSetAsNode(commitId); },
+        () => { void executeSetAsReference(commitId); },
         () => {},
-        { confirmLabel: 'Set as node', cancelLabel: 'Cancel' },
+        { confirmLabel: 'Set as reference', cancelLabel: 'Cancel' },
     );
 }
 
-async function executeSetAsNode(commitId) {
+/** @deprecated alias — older call sites */
+function onSetAsNode(commitId) {
+    onSetAsReference(commitId);
+}
+
+async function executeSetAsReference(commitId) {
     try {
         const res = await adoptConfiguration(commitId);
         clearPreviewOverlay();
@@ -982,10 +991,53 @@ async function executeSetAsNode(commitId) {
         if (res?.branch) store.control.branch = res.branch;
         _deps.render();
         await refreshControlPanel();
-        log(`Set current node to ${shortCommitId(commitId)} (no bench motion)`, 'info');
+        updateConfigViewUi();
+        log(`Set reference to ${shortCommitId(commitId)} (no bench motion)`, 'info');
     } catch (e) {
-        console.error('[control-panel] set as node failed', e);
-        showErrorModal('Set as node failed', e.message || String(e), { kind: 'dismissible' });
+        console.error('[control-panel] set as reference failed', e);
+        showErrorModal('Set as reference failed', e.message || String(e), { kind: 'dismissible' });
+    }
+}
+
+/**
+ * On enter / repo switch: soft-point the applied pointer at ``main`` HEAD
+ * without moving the bench. Empty repos stay unadopted until the first Commit.
+ */
+async function softDefaultMainHeadReference() {
+    const heads = store.control.heads || {};
+    const mainHead = heads.main;
+    if (!mainHead) {
+        log(
+            `Repo "${store.control.repoId}" has no main HEAD yet — Commit to create a root, ` +
+                'or Set as reference on another branch tip.',
+            'info',
+        );
+        return;
+    }
+    if (!isUnadopted() && getAppliedCommitId() === mainHead) {
+        store.control.branch = 'main';
+        return;
+    }
+    try {
+        const res = await adoptConfiguration(mainHead);
+        if (res?.applied) setAppliedPointer(res.applied);
+        store.control.branch = 'main';
+        store.control.selectedCommitId = mainHead;
+        store.control.viewingCommitId = null;
+        clearPreviewOverlay();
+        await refreshControlPanel();
+        log(
+            `Reference set to main HEAD ${shortCommitId(mainHead)} (bench unchanged). ` +
+                'Preview another node and Set as reference to branch from it.',
+            'info',
+        );
+    } catch (e) {
+        console.warn('[control-panel] soft-default main HEAD failed', e);
+        log(
+            `Could not set main HEAD as reference: ${e.message || e}. ` +
+                'Preview a node and use Set as reference.',
+            'warn',
+        );
     }
 }
 
@@ -1005,7 +1057,7 @@ async function onApplyOnBench() {
 
     if (isUnadopted()) {
 
-        onSetAsNode(commitId);
+        onSetAsReference(commitId);
 
         return;
 
@@ -1013,10 +1065,16 @@ async function onApplyOnBench() {
 
     if (commitId === getAppliedCommitId()) {
 
-        showErrorModal('Apply on bench', 'Selected commit is already applied on the bench.', { kind: 'dismissible' });
+        showErrorModal('Apply on bench', 'Selected commit is already the applied reference. Use Set as reference only if retargeting.', { kind: 'dismissible' });
 
         return;
 
+    }
+
+    // Hard apply moves hardware — dirty bench must be resolved first.
+    if (isDirty()) {
+        promptResolveDirty('applying another configuration on the bench');
+        return;
     }
 
 

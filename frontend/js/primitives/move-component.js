@@ -1,8 +1,12 @@
 import { coordInput, dispatchPrimitive, primitiveRegion, runButton } from './shared.js';
 import { store } from '../state/store.js';
+import { isHeldTag } from '../component-model.js';
 
 export function renderMoveComponent(ctx) {
     const { tagId, hooks, checkCollision, render } = ctx;
+    // In-air only HOVER / PLACE_FROM_HOVER (and related) apply; table MOVE is invalid while held.
+    if (isHeldTag(tagId, store.labState || {})) return null;
+
     const pose = (store.ghostState && store.ghostState[tagId]) || ctx.getPose?.() || {};
 
     const { section, body } = primitiveRegion('MOVE_COMPONENT', 'MOVE COMPONENT');

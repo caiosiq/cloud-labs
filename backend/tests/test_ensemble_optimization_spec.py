@@ -292,6 +292,61 @@ class EnsembleOptimizationSpecTests(unittest.TestCase):
         ]
         self.assertAlmostEqual(float(motors["1"]), new_val)
 
+    def test_progress_camera_image_commits_measurable(self) -> None:
+        state = copy.deepcopy(self.fixture_runtime)
+        state["system_status"] = SYSTEM_STATUS_IDLE
+        lock = __import__("threading").RLock()
+        cam_tag = "tag_22"
+        if cam_tag not in state["components"]:
+            state["components"][cam_tag] = {
+                "id": cam_tag,
+                "statecontrol": {"tunables": {}, "measurables": {"camera_image": None}},
+            }
+
+        host = MagicMock()
+        host.log_prefix = "[TEST]"
+        host.base_url = None
+        host._state_lock = lock
+        host.current_state = state
+        host._catalog_meta_for_tag = lambda tag: {"tag": tag}
+        host._persist_state = MagicMock()
+        host._primitive_prepare_optimization_run = MagicMock(return_value="run_dir")
+        host._primitive_finalize_optimization_run = MagicMock()
+
+        envelope = {
+            "tag_id": cam_tag,
+            "field": "camera_image",
+            "dtype": "uint8",
+            "shape": [4, 4, 3],
+            "provenance": {"epoch_ms": 12345, "path": "optimize_telemetry"},
+            "data": {"kind": "url", "href": f"/measurables/{cam_tag}/camera_image.jpg"},
+        }
+
+        async def _with_progress(**kwargs: Any) -> Dict[str, Any]:
+            cb = kwargs["progress_callback"]
+            cb(
+                step=1,
+                loss=0.5,
+                best_loss=0.5,
+                camera_image=envelope,
+                values={"v_m1": 0.0},
+            )
+            return {
+                "session_id": kwargs["session_id"],
+                "best_loss": 0.5,
+                "final_values": {},
+                "evals": 1,
+                "trace": [],
+            }
+
+        host._primitive_run_ensemble_optimization = AsyncMock(side_effect=_with_progress)
+        asyncio.run(run_optimize_ensemble(host, "tag_20", _minimal_ensemble_payload()))
+
+        meas = state["components"][cam_tag]["statecontrol"]["measurables"]["camera_image"]
+        self.assertIsInstance(meas, dict)
+        self.assertEqual(meas.get("tag_id"), cam_tag)
+        self.assertEqual(meas.get("provenance", {}).get("epoch_ms"), 12345)
+
     def test_parse_variable_path_invalid_raises(self) -> None:
         with self.assertRaises(PathResolveError):
             parse_variable_path("components.foo.bar")

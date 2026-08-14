@@ -25,6 +25,30 @@ COORDINATOR_TOP_LEVEL_KEYS: Set[str] = {
 }
 
 
+def _merge_component_telemetry(
+    working_tel: Optional[Mapping[str, Any]],
+    edge_tel: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Overlay edge telemetry without clobbering Twin session flags.
+
+    Coordinator owns ``telemetry.teleop`` and ``telemetry.live_feed`` session
+    fields after remote ``START_*`` / ``END_*`` commits. Real edges often
+    hardcode ``teleop.active=false`` / ``live_feed.stream.live=false`` in
+    ``/lab-state``; replacing those blobs would hide an active Twin session.
+    """
+    if not isinstance(working_tel, Mapping):
+        return copy.deepcopy(dict(edge_tel))
+    out: Dict[str, Any] = copy.deepcopy(dict(working_tel))
+    for key, value in edge_tel.items():
+        if key in ("teleop", "live_feed"):
+            # Seed structure from edge only when coordinator has none yet.
+            if key not in out or not out[key]:
+                out[key] = copy.deepcopy(value)
+            continue
+        out[key] = copy.deepcopy(value)
+    return out
+
+
 def merge_lab_state_for_twin(
     working: Mapping[str, Any],
     edge: Optional[Mapping[str, Any]],
@@ -34,9 +58,10 @@ def merge_lab_state_for_twin(
     """Deep-copy ``working``, then overlay edge-owned slices.
 
     - **Coordinator wins:** ``system_status``, ``holding``, presence / placement /
-      commanded tunables (``statecontrol``), guides, optimization fields.
-    - **Edge wins:** ``runtime_sync``, per-component ``telemetry`` (teleop /
-      live_feed), and tags that exist only on the edge (read-time inventory).
+      commanded tunables (``statecontrol``), guides, optimization fields,
+      ``telemetry.teleop`` and ``telemetry.live_feed`` session flags.
+    - **Edge wins:** ``runtime_sync``, and tags that exist only on the edge
+      (read-time inventory).
     """
     out: Dict[str, Any] = copy.deepcopy(dict(working))
     if not isinstance(edge, Mapping):
@@ -63,7 +88,11 @@ def merge_lab_state_for_twin(
                 continue
             e_tel = e_comp.get("telemetry")
             if isinstance(e_tel, dict):
-                w_comp["telemetry"] = copy.deepcopy(e_tel)
+                w_tel = w_comp.get("telemetry")
+                w_comp["telemetry"] = _merge_component_telemetry(
+                    w_tel if isinstance(w_tel, dict) else None,
+                    e_tel,
+                )
 
     for key in COORDINATOR_TOP_LEVEL_KEYS:
         if key in working:

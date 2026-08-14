@@ -38,6 +38,7 @@ class LabStateStore:
         # When a host is aliased, that host owns durability (mock _persist_state).
         self._host_owns_disk = host is not None
         self._seeded = False
+        self._last_edge_session_id: Optional[str] = None
         self._persist_lock = threading.RLock()
 
     @classmethod
@@ -99,6 +100,65 @@ class LabStateStore:
         )
         return True
 
+    def ensure_laser_lines_from_bundle(self, laser_lines_json: str) -> bool:
+        """Seed Twin laser overlay from ``laser_lines.json`` when needed.
+
+        Seeds when the overlay is absent/invalid, or when the working copy is
+        still the auto-created empty placeholder (``lines: []``, null snap)
+        while the bundle file has lines. Once an operator sets a snap id or
+        any line entry, emptiness is preserved.
+        """
+        if self._host_owns_disk or not (laser_lines_json or "").strip():
+            return False
+        if not os.path.isfile(laser_lines_json):
+            return False
+        try:
+            with open(laser_lines_json, "r", encoding="utf-8-sig") as fh:
+                seed = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(seed, dict):
+            return False
+        seed_lines = seed.get("lines")
+        if not isinstance(seed_lines, list) or not seed_lines:
+            return False
+
+        with self._runtime.lock:
+            ll = self._runtime.state.get("laser_lines")
+            lines = ll.get("lines") if isinstance(ll, dict) else None
+            missing = not isinstance(ll, dict) or not isinstance(lines, list)
+            empty_placeholder = (
+                isinstance(ll, dict)
+                and isinstance(lines, list)
+                and len(lines) == 0
+                and ll.get("snap_line_id") in (None, "")
+            )
+            if not missing and not empty_placeholder:
+                return False
+
+        payload = {
+            "version": int(seed.get("version") or 1),
+            "snap_line_id": seed.get("snap_line_id"),
+            "lines": copy.deepcopy(seed_lines),
+        }
+
+        def _mut(state: Dict[str, Any]) -> None:
+            state["laser_lines"] = copy.deepcopy(payload)
+
+        self.mutate(
+            _mut,
+            kind=MutationKind.BOOT_HYDRATE,
+            source="laser_lines_bundle",
+            persist=True,
+        )
+        print(
+            f"[lab_state] backend={self.backend_id!r} "
+            f"source=laser_lines_bundle lines={len(seed_lines)} "
+            f"path={laser_lines_json!r}",
+            flush=True,
+        )
+        return True
+
     def ensure_seeded_from_edge(self, edge: Mapping[str, Any]) -> bool:
         """Seed once from an edge snapshot when working has no components.
 
@@ -128,6 +188,140 @@ class LabStateStore:
         self.persist()
         print(
             f"[lab_state] backend={self.backend_id!r} source=edge_seed "
+            f"components={len(edge_comps)}",
+            flush=True,
+        )
+        return True
+
+    def reconcile_membership_from_edge(self, edge: Mapping[str, Any]) -> bool:
+        """Align working-copy component keys with edge inventory membership.
+
+        Edge ``components`` are built from ``inventory.json`` (plus live poses).
+        The library may still list parts that are not on the table; those must
+        not linger in the Twin working state after inventory edits / edge boot.
+
+        - Drop working tags absent from the edge snapshot.
+        - Insert missing edge tags (deep copy).
+        - Leave existing shared tags' coordinator FSM / commanded poses intact
+          (Twin merge still overlays edge telemetry at read time).
+
+        Returns True when membership changed.
+        """
+        if self._host_owns_disk or not isinstance(edge, Mapping):
+            return False
+        edge_comps = edge.get("components")
+        if not isinstance(edge_comps, dict):
+            return False
+        edge_tags = {str(t) for t in edge_comps.keys()}
+        removed: list[str] = []
+        added: list[str] = []
+
+        with self._runtime.lock:
+            comps_now = self._runtime.state.get("components")
+            if not isinstance(comps_now, dict):
+                comps_now = {}
+            stale = [str(t) for t in comps_now.keys() if str(t) not in edge_tags]
+            missing = [
+                str(t)
+                for t, e in edge_comps.items()
+                if str(t) not in comps_now and isinstance(e, dict)
+            ]
+            if not stale and not missing:
+                if comps_now or edge_tags:
+                    self._seeded = True
+                return False
+
+        def _mut(state: Dict[str, Any]) -> None:
+            comps = state.get("components")
+            if not isinstance(comps, dict):
+                comps = {}
+                state["components"] = comps
+            for tag in list(comps.keys()):
+                tid = str(tag)
+                if tid not in edge_tags:
+                    comps.pop(tag, None)
+                    removed.append(tid)
+            for tag, e_comp in edge_comps.items():
+                tid = str(tag)
+                if tid in comps:
+                    continue
+                if isinstance(e_comp, dict):
+                    comps[tid] = copy.deepcopy(e_comp)
+                    added.append(tid)
+
+        self.mutate(
+            _mut,
+            kind=MutationKind.BOOT_HYDRATE,
+            source="edge_inventory_reconcile",
+            persist=True,
+        )
+        self._seeded = True
+        print(
+            f"[lab_state] backend={self.backend_id!r} "
+            f"source=edge_inventory_reconcile "
+            f"removed={removed} added={added} "
+            f"components={len(edge_tags)}",
+            flush=True,
+        )
+        return True
+
+    def reset_from_new_edge_session(self, edge: Mapping[str, Any]) -> bool:
+        """Replace working lab-state once per edge process session.
+
+        Used for simulation *and* real HTTP edges: when Terminal 1 (edge)
+        restarts it advertises a new ``edge_session_id``. After
+        ``runtime_sync.status == ready`` (SYNC_RUNTIME finished — including
+        RECORD of physical poses), Twin hydrates ``coordinator_data`` from
+        that edge snapshot exactly once so ghosts match the table.
+
+        Twin-only overlays (``alignment_guides``, ``laser_lines``) on the
+        prior working copy are preserved across the replace.
+        """
+        if self._host_owns_disk or not isinstance(edge, Mapping):
+            return False
+        edge_comps = edge.get("components")
+        if not isinstance(edge_comps, dict) or not edge_comps:
+            return False
+
+        # Wait for SYNC when the edge advertises runtime_sync — otherwise we
+        # would hydrate null/stale poses from a still-booting real edge.
+        rs = edge.get("runtime_sync")
+        if isinstance(rs, Mapping):
+            status = str(rs.get("status") or "").strip().lower()
+            if status and status != "ready":
+                return False
+
+        simulator = edge.get("simulator")
+        session_id = str(
+            edge.get("edge_session_id")
+            or (
+                simulator.get("edge_session_id")
+                if isinstance(simulator, Mapping)
+                else ""
+            )
+            or "legacy-edge-session"
+        )
+        with self._runtime.lock:
+            if session_id == self._last_edge_session_id:
+                return False
+            prior = self._runtime.snapshot_raw()
+            seed = copy.deepcopy(dict(edge))
+            seed.pop("runtime_sync", None)
+            # Keep Twin-authored overlays that the edge does not own.
+            for key in ("alignment_guides", "laser_lines"):
+                if key in prior and prior[key] is not None:
+                    seed[key] = copy.deepcopy(prior[key])
+            self._runtime.replace_state(
+                seed,
+                kind=MutationKind.BOOT_HYDRATE,
+                source="edge_session_reset",
+            )
+            self._seeded = True
+            self._last_edge_session_id = session_id
+        self.persist()
+        print(
+            f"[lab_state] backend={self.backend_id!r} "
+            f"source=edge_session_reset session_id={session_id!r} "
             f"components={len(edge_comps)}",
             flush=True,
         )

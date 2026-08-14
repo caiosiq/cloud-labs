@@ -32,6 +32,11 @@ function updateOperationsTwinUi() {
         badgeColor = 'placed';
         badgeStyle =
             'background-color: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);';
+    } else if (status === 'TELEOP') {
+        badgeClass = '';
+        badgeColor = '';
+        badgeStyle =
+            'background-color: #0891b2; box-shadow: 0 0 8px rgba(34, 211, 238, 0.45);';
     } else if (status === 'HOLDING') {
         badgeClass = '';
         badgeColor = '';

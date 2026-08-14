@@ -274,6 +274,15 @@ def create_app(
     async def bench() -> dict[str, Any]:
         return state["bench"]
 
+    @app.get("/kernels")
+    async def kernels() -> dict[str, Any]:
+        from cloudlabs_edge_dev.optimization import kernels_http_catalog
+        from pathlib import Path
+
+        root = Path(state.get("edge_root") or Path.cwd())
+        bid = str((state.get("capabilities") or {}).get("backend_id") or "stub")
+        return kernels_http_catalog(bid, root / "kernels")
+
     @app.get("/library")
     async def library() -> dict[str, Any]:
         return state["library"]

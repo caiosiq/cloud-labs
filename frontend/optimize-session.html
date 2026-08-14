@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Labs | Optimization session</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b0f14;
+            --panel: #141a22;
+            --border: #2a3340;
+            --text: #e8eef6;
+            --muted: #94a3b8;
+            --accent: #22d3ee;
+            --ok: #34d399;
+            --fail: #f87171;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Inter, system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 14px 22px;
+            border-bottom: 1px solid var(--border);
+            background: var(--panel);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+        header nav a {
+            color: var(--muted);
+            text-decoration: none;
+            margin-left: 14px;
+            font-size: 13px;
+        }
+        header nav a:hover, header nav a.active { color: var(--accent); }
+        .header-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+        .header-meta select {
+            background: #0f141b;
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 4px 8px;
+        }
+        main { padding: 20px 22px 48px; max-width: 1400px; margin: 0 auto; }
+        .osd-empty { padding: 48px 12px; text-align: center; color: var(--muted); }
+        .osd-hero {
+            display: grid;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding: 16px 18px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: linear-gradient(180deg, #15202b, #121820);
+        }
+        .osd-kicker {
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 11px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .osd-hero h1 { margin: 4px 0 0; font-size: 22px; }
+        .osd-sub { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+        .osd-sub code { color: #a5f3fc; }
+        .osd-progress {
+            height: 8px;
+            border-radius: 999px;
+            background: #1e293b;
+            overflow: hidden;
+        }
+        .osd-progress > span {
+            display: block;
+            height: 100%;
+            background: linear-gradient(90deg, #0891b2, #22d3ee);
+        }
+        .osd-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+        @media (max-width: 960px) {
+            .osd-grid { grid-template-columns: 1fr; }
+        }
+        .osd-panel {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--panel);
+            padding: 14px 16px;
+            min-height: 120px;
+        }
+        .osd-panel--wide { grid-column: 1 / -1; }
+        .osd-loss-panel {
+            margin-bottom: 14px;
+            min-height: 0;
+        }
+        .osd-loss-chart-wrap {
+            width: 100%;
+            height: 280px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            background: #0f141b;
+        }
+        #osd-loss-chart {
+            width: 100%;
+            height: 100%;
+            display: block;
+            --osd-chart-bg: #0f141b;
+            --osd-chart-grid: #1e293b;
+            --osd-chart-axis: #64748b;
+            --osd-chart-ink: #e2e8f0;
+            --osd-chart-line: #a78bfa;
+            --osd-chart-best: #34d399;
+            --osd-chart-dot: #c4b5fd;
+        }
+        .osd-panel h2 {
+            margin: 0 0 10px;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--muted);
+        }
+        .osd-section-title {
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+        .osd-idle { color: var(--muted); font-size: 13px; }
+        .osd-chip-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 8px;
+        }
+        .osd-chip {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            background: #0f141b;
+        }
+        .osd-chip strong { font-size: 11px; color: #cbd5e1; }
+        .osd-chip__val { font-size: 16px; font-variant-numeric: tabular-nums; margin-top: 4px; }
+        .osd-delta { display: block; font-size: 11px; color: #67e8f9; margin-top: 2px; }
+        .osd-terms { display: flex; flex-wrap: wrap; gap: 6px; }
+        .osd-term {
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(34, 211, 238, 0.35);
+            background: rgba(8, 47, 73, 0.35);
+            font-size: 12px;
+        }
+        .osd-stages {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 10px;
+        }
+        .osd-stage {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            background: #0f141b;
+            font-size: 12px;
+        }
+        .osd-stage--ok { border-color: rgba(52, 211, 153, 0.45); }
+        .osd-stage--fail { border-color: rgba(248, 113, 113, 0.55); }
+        .osd-stage strong {
+            display: block;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+        .osd-stage pre {
+            margin: 8px 0 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: #cbd5e1;
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+            font-size: 11px;
+        }
+        .osd-camera img {
+            width: 100%;
+            max-height: 420px;
+            object-fit: contain;
+            background: #000;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            display: block;
+        }
+        .osd-camera-stage {
+            position: relative;
+            width: 100%;
+            line-height: 0;
+        }
+        .osd-kernel-overlay {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .osd-overlay-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 11px;
+            color: var(--muted);
+        }
+        .osd-overlay-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: #0f141b;
+        }
+        .osd-overlay-chip small { color: #94a3b8; }
+        .osd-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .osd-dot--detected { background: #fbbf24; box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.4); }
+        .osd-dot--target { background: #38bdf8; box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4); }
+        .osd-table-wrap {
+            overflow: auto;
+            max-height: 420px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .osd-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .osd-table th, .osd-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid #1f2937;
+            text-align: left;
+            vertical-align: top;
+            white-space: nowrap;
+        }
+        .osd-table th { color: var(--muted); position: sticky; top: 0; background: #121820; }
+        .osd-row--best td { background: rgba(52, 211, 153, 0.08); }
+        .osd-pill {
+            display: inline-block;
+            margin-left: 4px;
+            padding: 0 5px;
+            border-radius: 4px;
+            background: rgba(52, 211, 153, 0.2);
+            color: var(--ok);
+            font-size: 10px;
+        }
+        .osd-var-delta { display: block; color: #64748b; font-size: 10px; }
+        .osd-mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+        .osd-log {
+            max-height: 280px;
+            overflow: auto;
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+            font-size: 11px;
+            background: #0f141b;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 8px 10px;
+        }
+        .osd-log__row { padding: 2px 0; color: #cbd5e1; }
+        .osd-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .osd-btn {
+            border: 1px solid rgba(52, 211, 153, 0.5);
+            background: rgba(6, 78, 59, 0.4);
+            color: #a7f3d0;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .osd-btn:disabled { opacity: 0.6; cursor: wait; }
+        .osd-btn--ghost {
+            border-color: var(--border);
+            background: transparent;
+            color: var(--muted);
+        }
+        #osd-error {
+            color: var(--fail);
+            font-size: 13px;
+            margin: 0 22px 8px;
+            min-height: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <h1>Optimization session</h1>
+        </div>
+        <div class="header-meta">
+            <label>
+                Backend
+                <select id="osd-backend"></select>
+            </label>
+            <span id="osd-poll-hint">polling…</span>
+            <div class="osd-actions">
+                <button type="button" class="osd-btn" id="osd-accept" hidden>Accept · good enough</button>
+                <button type="button" class="osd-btn osd-btn--ghost" id="osd-refresh">Refresh</button>
+            </div>
+            <nav>
+                <a href="/">Twin</a>
+                <a href="/optimize-session" class="active">Session</a>
+                <a href="/operations">Operations</a>
+            </nav>
+        </div>
+    </header>
+    <p id="osd-error"></p>
+    <main>
+        <section class="osd-panel osd-loss-panel" id="osd-loss-shell" hidden>
+            <h2>Loss curve</h2>
+            <div class="osd-loss-chart-wrap">
+                <canvas id="osd-loss-chart" width="960" height="280" aria-label="Optimization loss vs eval"></canvas>
+            </div>
+            <p class="osd-idle" style="margin-top:8px">Hover a point for eval / loss. Y defaults to 0–2; X grows every 10 evals. Green dashed = best so far.</p>
+        </section>
+        <div id="osd-root">
+            <div class="osd-empty"><p>Loading lab state…</p></div>
+        </div>
+    </main>
+    <script type="module" src="/static/js/optimize-session/dashboard.js"></script>
+</body>
+</html>

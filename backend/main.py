@@ -10,6 +10,7 @@ import math
 import uuid
 import asyncio
 import time
+import copy
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
@@ -21,6 +22,9 @@ import inspect
 import httpx
 
 logger = logging.getLogger(__name__)
+# Twin polls edge /lab-state on the frontend idle cadence; hush httpx INFO so the console stays usable.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def _install_windows_connection_reset_handler() -> None:
@@ -325,6 +329,20 @@ def _edge_client_for(backend_id: str | None = None):
     return resolve_edge_client(bid, lab=lab, edge_config=cfg)
 
 
+def _coordinator_set_system_status(store, status: str, *, source: str) -> None:
+    """Flip Twin ``system_status`` on the coordinator working store (HTTP-edge safe)."""
+    from lab_model.coordinator.state.runtime_manager import MutationKind
+
+    def _mutate(state: Dict[str, Any]) -> None:
+        state["system_status"] = status
+
+    store.mutate(
+        _mutate,
+        kind=MutationKind.PROCESS_TRANSITION,
+        source=source,
+    )
+
+
 async def _southbound_execute(
     command: Dict[str, Any],
     *,
@@ -334,49 +352,182 @@ async def _southbound_execute(
 ):
     """Run one primitive via the unified EdgeClient southbound path.
 
-    After a successful **remote** (HTTP/poll) execute, apply coordinator
-    language commits (in-air, move/store, affirm, scan-rotate) so Twin FSM
-    fields update even when the edge lab-state stays IDLE. In-process mock
-    already commits inside orchestration — skipped here.
+    For **remote** (HTTP/poll) transports the coordinator owns Twin
+    ``system_status``: set BUSY before execute, apply language commits on
+    success, then clear BUSY to IDLE when commits did not already land a
+    quiescent status (e.g. HOLDING). Edges must not invent Twin FSM writers;
+    in-process hosts already drive BUSY inside orchestration — skipped here.
+
+    Teleop is special on remote edges (mock parity): commit ``active`` + not
+    ``ready`` *before* the long edge START so Twin can show Loading while the
+    arm grabs; commit ``ready`` only after edge success.
     """
+    from lab_model.language.domain.holding import (
+        SYSTEM_STATUS_BUSY,
+        SYSTEM_STATUS_IDLE,
+    )
+    from lab_model.coordinator.state.apply_primitive_commit import (
+        apply_edge_primitive_commit,
+        canonical_action,
+    )
+
     bid = (backend_id or _active_backend_id()).strip()
     client = _edge_client_for(bid)
-    result = await client.execute_command(
-        command, timeout_s=timeout_s, lease_id=lease_id
-    )
+    transport = getattr(client, "transport", None)
+    remote = transport is not None and transport != EdgeTransport.IN_PROCESS
+    store = None
+    prior_status = SYSTEM_STATUS_IDLE
+    action = canonical_action(command)
+    if remote:
+        from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+
+        rt = require_backend(backend_registry, bid, init=False)
+        store = ensure_lab_state_store(rt)
+        snap = store.snapshot() if store is not None else {}
+        prior_status = (
+            (snap.get("system_status") if isinstance(snap, dict) else None)
+            or SYSTEM_STATUS_IDLE
+        )
+        _coordinator_set_system_status(
+            store, SYSTEM_STATUS_BUSY, source="southbound:busy"
+        )
+        # Pending teleop session before the edge arms hardware (may take seconds).
+        if action == "START_TELEOP" and store is not None:
+            try:
+                apply_edge_primitive_commit(
+                    store,
+                    {**command, "action": "START_TELEOP", "_teleop_phase": "pending"},
+                    edge_result={},
+                    backend_id=bid,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "coordinator teleop pending commit failed backend=%s", bid
+                )
+
+    try:
+        result = await client.execute_command(
+            command, timeout_s=timeout_s, lease_id=lease_id
+        )
+    except Exception:
+        if remote and store is not None:
+            if action == "START_TELEOP":
+                try:
+                    apply_edge_primitive_commit(
+                        store,
+                        {
+                            **command,
+                            "action": "START_TELEOP",
+                            "_teleop_phase": "failed",
+                        },
+                        edge_result={"error": "edge execute raised"},
+                        backend_id=bid,
+                    )
+                except Exception:  # noqa: BLE001
+                    _coordinator_set_system_status(
+                        store, prior_status, source="southbound:restore"
+                    )
+            else:
+                _coordinator_set_system_status(
+                    store, prior_status, source="southbound:restore"
+                )
+        raise
+
     if not result.ok:
+        if remote and store is not None:
+            if action == "START_TELEOP":
+                try:
+                    apply_edge_primitive_commit(
+                        store,
+                        {
+                            **command,
+                            "action": "START_TELEOP",
+                            "_teleop_phase": "failed",
+                        },
+                        edge_result={"error": result.error or "edge execute failed"},
+                        backend_id=bid,
+                    )
+                except Exception:  # noqa: BLE001
+                    _coordinator_set_system_status(
+                        store, prior_status, source="southbound:restore"
+                    )
+            else:
+                _coordinator_set_system_status(
+                    store, prior_status, source="southbound:restore"
+                )
         status = 502 if result.transport != EdgeTransport.IN_PROCESS else 409
         raise HTTPException(status_code=status, detail=result.error or "edge execute failed")
-    if result.transport != EdgeTransport.IN_PROCESS:
-        try:
-            from lab_model.coordinator.state.apply_primitive_commit import (
-                apply_edge_primitive_commit,
-            )
-            from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
 
-            rt = require_backend(backend_registry, bid, init=False)
-            store = ensure_lab_state_store(rt)
+    if remote and store is not None:
+        try:
             edge_payload = result.result if isinstance(result.result, dict) else {}
-            apply_edge_primitive_commit(
-                store,
-                command,
-                edge_result=edge_payload,
-                backend_id=bid,
-            )
+            if action == "START_TELEOP":
+                apply_edge_primitive_commit(
+                    store,
+                    {**command, "action": "START_TELEOP", "_teleop_phase": "ready"},
+                    edge_result=edge_payload,
+                    backend_id=bid,
+                )
+            else:
+                apply_edge_primitive_commit(
+                    store,
+                    command,
+                    edge_result=edge_payload,
+                    backend_id=bid,
+                )
         except Exception:  # noqa: BLE001
             logger.exception(
                 "coordinator commit after southbound failed backend=%s", bid
+            )
+        # MOVE / motor / etc. commits do not clear BUSY; pick/place set HOLDING/IDLE.
+        # If still BUSY, re-derive from teleop/holding (acquiring→BUSY, ready→TELEOP)
+        # instead of blindly forcing IDLE (which would hide an active TeleOp session).
+        try:
+            after = store.snapshot() if store is not None else {}
+            if isinstance(after, dict) and after.get("system_status") == SYSTEM_STATUS_BUSY:
+                from lab_model.coordinator.state.commits import _sync_system_status_for_teleop
+                from lab_model.coordinator.state.runtime_manager import MutationKind
+
+                def _rederive(state: Dict[str, Any]) -> None:
+                    if state.get("system_status") == SYSTEM_STATUS_BUSY:
+                        _sync_system_status_for_teleop(state)
+
+                store.mutate(
+                    _rederive,
+                    kind=MutationKind.PROCESS_TRANSITION,
+                    source="southbound:busy_rederive",
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "coordinator BUSY clear after southbound failed backend=%s", bid
             )
     return result
 
 
 def _telemetry_after_edge(tag_id: str, edge_result) -> Dict[str, Any]:
-    """Twin alias enrichment: local lab when in-process, else edge result fields."""
+    """Twin alias enrichment: local lab when in-process, else coordinator store.
+
+    HTTP edges often return flat ``{active: true}`` without a nested
+    ``telemetry`` blob. After remote ``START_TELEOP`` / ``END_TELEOP`` commits,
+    Twin session flags live on the working lab-state store.
+    """
     if edge_result.transport == EdgeTransport.IN_PROCESS and lab is not None:
         try:
             return lab.return_telemetry_for_tag(tag_id) or {}
         except Exception:
             return {}
+    try:
+        from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+
+        store = ensure_lab_state_store(_runtime_for_active(init=True))
+        snap = store.snapshot() if store is not None else {}
+        comps = snap.get("components") if isinstance(snap, dict) else None
+        entry = comps.get(tag_id) if isinstance(comps, dict) else None
+        tel = entry.get("telemetry") if isinstance(entry, dict) else None
+        if isinstance(tel, dict) and tel:
+            return copy.deepcopy(tel)
+    except Exception:  # noqa: BLE001
+        pass
     raw = edge_result.result if isinstance(edge_result.result, dict) else {}
     tel = raw.get("telemetry")
     return tel if isinstance(tel, dict) else {}
@@ -490,16 +641,23 @@ def _persist_session_checkpoint_on_shutdown() -> None:
     Never call ``init=True`` / ``require_backend`` here: a failed bind, an
     unavailable backend (e.g. missing lab_automation), or a coordinator that
     never served a Twin session must not construct communicators or log 503s.
+
+    HTTP-edge backends use the Twin lab-state store (no in-process host saver).
     """
+    from lab_model.coordinator.state.session_reconciliation import (
+        save_session_checkpoint_for_runtime,
+    )
+
     for bid in backend_registry.known_backend_ids():
         try:
             rt = backend_registry.get_runtime(bid, init=False)
-            if rt.availability != "ready" or rt.lab is None:
+            if rt.availability != "ready":
+                continue
+            # Need either an in-process host or a seeded Twin store.
+            if rt.lab is None and getattr(rt, "lab_state_store", None) is None:
                 continue
             with BackendSession(rt):
-                saver = getattr(rt.lab, "save_session_checkpoint_if_enabled", None)
-                if callable(saver):
-                    saver()
+                save_session_checkpoint_for_runtime(rt)
         except Exception as e:  # noqa: BLE001
             logger.warning("Shutdown session checkpoint save failed for %s: %s", bid, e)
 
@@ -716,109 +874,11 @@ class _ReservedBackgroundTasks:
 
 
 def _session_reconciliation_offers_dict() -> Dict[str, Any]:
-    client = _edge_client_for()
-    if client.transport != EdgeTransport.IN_PROCESS:
-        # Session checkpoint reconciliation belongs to an in-process lab host.
-        # An external edge owns its live state and is reconciled deliberately
-        # through edge primitives such as RECORD_TUNABLES / LOCALIZE_COMPONENTS.
-        return {
-            "enabled": False,
-            "skipped_reason": "external_edge",
-            "checkpoint_path": None,
-            "checkpoint_saved_at": None,
-            "checkpoint_lab_mode": None,
-            "age_hours": None,
-            "stale_warning_hours": None,
-            "stale_warning": False,
-            "thresholds": None,
-            "offers": [],
-        }
+    """Offers for mock (in-process) and HTTP-edge Twin store checkpoints."""
+    from lab_model.coordinator.state.session_reconciliation import offers_dict_for_runtime
 
-    from mock_backend.shared.session_checkpoint import (
-        checkpoint_age_hours,
-        checkpoint_lab_state,
-        merge_offers_with_debug,
-        read_checkpoint_document,
-        reconciliation_thresholds_from_manifest,
-        stale_warning_hours_from_manifest,
-    )
-
-    paths = get_lab_view_paths()
-    chk_path = getattr(paths, "session_checkpoint_json", "") or ""
-    stale_warn_hours = stale_warning_hours_from_manifest()
-    thresholds = (
-        lab.session_reconciliation_thresholds()
-        if lab is not None
-        else reconciliation_thresholds_from_manifest()
-    )
-    thresholds_dict = {"position_mm": thresholds.position_mm, "yaw_deg": thresholds.yaw_deg}
-
-    doc = read_checkpoint_document(chk_path) if chk_path else None
-    age_h = checkpoint_age_hours(doc.get("saved_at")) if isinstance(doc, dict) else None
-    resp: Dict[str, Any] = {
-        "enabled": bool(lab is not None and getattr(lab, "session_checkpoint_enabled", lambda: False)()),
-        "skipped_reason": None,
-        "checkpoint_path": chk_path or None,
-        "checkpoint_saved_at": doc.get("saved_at") if isinstance(doc, dict) else None,
-        "checkpoint_lab_mode": doc.get("lab_mode") if isinstance(doc, dict) else None,
-        "age_hours": age_h,
-        "stale_warning_hours": stale_warn_hours,
-        "stale_warning": False,
-        "thresholds": thresholds_dict,
-        "offers": [],
-    }
-
-    if age_h is not None:
-        resp["stale_warning"] = float(age_h) >= float(stale_warn_hours)
-
-    if lab is None:
-        resp["enabled"] = False
-        resp["skipped_reason"] = "lab_unavailable"
-        return resp
-
-    chk_state = checkpoint_lab_state(doc) if isinstance(doc, dict) else None
-
-    if not getattr(lab, "session_checkpoint_enabled", lambda: False)():
-        resp["enabled"] = False
-        resp["skipped_reason"] = "feature_disabled"
-        return resp
-
-    cur = lab.get_lab_state()
-    if cur.get("system_status") != "IDLE":
-        resp["skipped_reason"] = f"busy:{cur.get('system_status')}"
-        return resp
-
-    if not isinstance(chk_state, dict):
-        resp["skipped_reason"] = "no_checkpoint"
-        return resp
-
-    offer_ids, merge_debug = merge_offers_with_debug(
-        current_state=cur,
-        checkpoint_state=chk_state,
-        thresholds=thresholds,
-    )
-    resp["offers"] = [{"tag_id": tid} for tid in offer_ids]
-    resp["debug"] = merge_debug
-    try:
-        from lab_model.coordinator.backends.lab_view_config import get_lab_manifest
-
-        resp["manifest"] = {
-            "session_checkpoint": bool(get_lab_manifest().session_checkpoint),
-            "session_reconciliation": get_lab_manifest().as_dict().get(
-                "session_reconciliation"
-            ),
-        }
-    except Exception:
-        resp["manifest"] = None
-    print(
-        f"[session-reconcile] backend_id={_active_backend_id()!r} "
-        f"enabled={resp['enabled']} skipped={resp.get('skipped_reason')!r} "
-        f"offers={len(offer_ids)} checkpoint={chk_path!r} "
-        f"exists={os.path.isfile(chk_path) if chk_path else False} "
-        f"debug={merge_debug}",
-        flush=True,
-    )
-    return resp
+    rt = _runtime_for_active(init=True)
+    return offers_dict_for_runtime(rt)
 
 
 # --- Recipe Executor (Uses Communicator) ---
@@ -885,7 +945,7 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
         path = request.scope.get("path", "")
-        if path == "/" or path == "/twin" or path == "/debug" or path.startswith("/static"):
+        if path == "/" or path == "/twin" or path == "/debug" or path == "/operations" or path == "/optimize-session" or path.startswith("/static"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
@@ -1109,8 +1169,17 @@ async def refresh_mujoco_runtime():
             detail="Refresh MuJoCo requires a configured HTTP simulation edge",
         )
     try:
+        from lab_model.coordinator.state.lab_state_store import (
+            ensure_lab_state_store,
+        )
+
+        store = ensure_lab_state_store(rt)
+        working_state = store.snapshot()
         async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as edge:
-            resp = await edge.post("/simulator/restart")
+            resp = await edge.post(
+                "/simulator/restart",
+                json={"lab_state": working_state},
+            )
             body = resp.json()
         if resp.status_code >= 400:
             detail = body.get("error") or body.get("detail") or body
@@ -1684,6 +1753,8 @@ async def get_component_telemetry_preview(tag_id: str, exposure: float = 0.2):
     When live feed is active on a table recorder, returns the latest **JPEG**
     from the preview ring buffer (fast). Otherwise falls back to full ``CAP``
     still capture (slow, used by ``RECORD_MEASURABLES`` contract).
+
+    HTTP edges: proxy the capability JPEG channel (no local table-cam).
     """
     from lab_model.coordinator.catalog.schema import (
         live_feed_channel,
@@ -1691,8 +1762,63 @@ async def get_component_telemetry_preview(tag_id: str, exposure: float = 0.2):
     )
     from lab_model.language.domain.component import is_live_feed_active
 
+    # HTTP edge: proxy Tier B JPEG after START_LIVE_FEED committed on coordinator.
+    client = _edge_client_for()
+    if isinstance(client, HttpEdgeClient):
+        live_on = False
+        try:
+            from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+
+            store = ensure_lab_state_store(_runtime_for_active(init=True))
+            snap = store.snapshot() if store is not None else {}
+            comps = snap.get("components") if isinstance(snap, dict) else None
+            entry = comps.get(tag_id) if isinstance(comps, dict) else None
+            live_on = isinstance(entry, dict) and is_live_feed_active(entry, "stream")
+        except Exception:  # noqa: BLE001
+            live_on = False
+        if not live_on:
+            # Also accept merged Twin view (edge-only seed) when available.
+            try:
+                twin = await _compose_twin_lab_state()
+                entry = ((twin.get("components") or {}).get(tag_id))
+                live_on = isinstance(entry, dict) and is_live_feed_active(entry, "stream")
+            except Exception:  # noqa: BLE001
+                live_on = False
+        if not live_on:
+            return Response(status_code=204)
+        caps = client.get_capabilities()
+        resolved = resolve_live_channel_path(
+            caps,
+            measurable_or_channel=f"{tag_id}.camera_image",
+            prefer_mjpeg=False,
+        )
+        if resolved is None:
+            resolved = resolve_live_channel_path(
+                caps, measurable_or_channel=tag_id, prefer_mjpeg=False
+            )
+        if resolved is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Component {tag_id!r} has no jpeg_poll telemetry channel "
+                    f"on the edge capabilities."
+                ),
+            )
+        path, _transport = resolved
+        data = client.fetch_bytes(path)
+        if not data:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Live feed armed for {tag_id!r} but edge returned no JPEG "
+                    f"(is START_LIVE_FEED channel mapped to "
+                    f"{tag_id}.camera_image?)."
+                ),
+            )
+        return Response(content=data, media_type="image/jpeg")
+
     catalog_row = _catalog_row_or_404(tag_id)
-    # JPEGPoll declares ``live_feed.stream`` with url ``.../telemetry/preview`` â€”
+    # JPEGPoll declares ``live_feed.stream`` with url ``.../telemetry/preview`` —
     # there is no separate ``preview`` catalog channel.
     if (
         live_feed_channel(catalog_row, "stream") is None
@@ -2000,51 +2126,104 @@ async def get_component_telemetry_live_pose(tag_id: str):
     _refuse_teleop_if_lab_down(tag_id)
     from lab_model.language.domain.component import is_teleop_ready
 
-    state = lab.get_lab_state()
+    # Coordinator store owns TeleOp ready flags (HTTP-edge merge); do not call
+    # lab.get_lab_state() here — that raises for real.default (no communicator).
+    state = _control_runtime_state()
     entry = (state.get("components") or {}).get(tag_id)
     if not isinstance(entry, dict) or not is_teleop_ready(entry):
         raise HTTPException(
             status_code=409,
             detail=f"{tag_id!r} is not in an active ready TELEOP session.",
         )
-    pose = lab.get_teleop_live_pose(tag_id)
+    client = _edge_client_for()
+    pose = None
+    if client.transport == EdgeTransport.IN_PROCESS and lab is not None:
+        try:
+            pose = lab.get_teleop_live_pose(tag_id)
+        except AttributeError:
+            pose = None
     if pose is None:
-        raise HTTPException(status_code=503, detail="Live pose unavailable.")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Live pose unavailable over HTTP for this backend; "
+                "use WS /api/components/{tag_id}/teleop/session."
+            ),
+        )
     return {"status": "ok", "pose": pose}
 
 
 @app.websocket("/api/components/{tag_id}/teleop/session")
-async def ws_component_teleop_session(websocket: WebSocket, tag_id: str):
+async def ws_component_teleop_session(
+    websocket: WebSocket,
+    tag_id: str,
+    backend_id: str = Query(...),
+):
     """Duplex TeleOp session: server-push pose @ ~50 Hz; client ``goto`` / ``ping``.
 
     Proxies to the edge's ``/ws/teleop`` when an HTTP Edge Contract backend is
     configured (edge owns the arm + coordinate transform); otherwise drives the
     in-process ``LabCommunicator``.
+
+    ``backend_id`` is required: Starlette does not run HTTP middleware for
+    WebSockets, so the request-scoped backend context must be bound here.
     """
-    if runtime_manager is not None and runtime_manager.mode == "mujoco":
-        await websocket.close(code=4403, reason="TeleOp is unavailable in MuJoCo v1")
+    from lab_model.coordinator.backends.context import (
+        bind_backend_context,
+        reset_backend_context,
+    )
+
+    bid = (backend_id or "").strip()
+    if not bid:
+        await websocket.close(code=4400, reason="backend_id required")
+        return
+    try:
+        rt = require_backend(backend_registry, bid, init=False)
+    except HTTPException as exc:
+        await websocket.close(code=4404, reason=str(exc.detail)[:120])
         return
 
-    # HTTP edge: proxy to the edge's own teleop socket (no in-process lab needed).
-    client = _edge_client_for()
-    if isinstance(client, HttpEdgeClient):
+    token = set_request_backend_id(bid)
+    paths_token = None
+    try:
+        if rt.paths.root_dir:
+            paths_token = bind_backend_context(rt.paths, rt.manifest)
+
+        if runtime_manager is not None and runtime_manager.mode == "mujoco":
+            await websocket.close(code=4403, reason="TeleOp is unavailable in MuJoCo v1")
+            return
+
+        # HTTP edge: proxy to the edge's own teleop socket (no in-process lab needed).
+        client = _edge_client_for(bid)
+        if isinstance(client, HttpEdgeClient):
+            from lab_model.execution.orchestration.teleop_session_ws import (
+                run_teleop_session_proxy,
+            )
+
+            await run_teleop_session_proxy(websocket, client, tag_id)
+            return
+
+        if lab is None:
+            await websocket.close(code=1013, reason="Lab not initialized")
+            return
+        catalog_row = (lab.catalog_map or {}).get(tag_id)
+        if not isinstance(catalog_row, dict):
+            await websocket.close(code=4404, reason=f"Unknown tag {tag_id!r}")
+            return
         from lab_model.execution.orchestration.teleop_session_ws import (
-            run_teleop_session_proxy,
+            run_teleop_session_websocket,
         )
 
-        await run_teleop_session_proxy(websocket, client, tag_id)
-        return
-
-    if lab is None:
-        await websocket.close(code=1013, reason="Lab not initialized")
-        return
-    catalog_row = (lab.catalog_map or {}).get(tag_id)
-    if not isinstance(catalog_row, dict):
-        await websocket.close(code=4404, reason=f"Unknown tag {tag_id!r}")
-        return
-    from lab_model.execution.orchestration.teleop_session_ws import run_teleop_session_websocket
-
-    await run_teleop_session_websocket(websocket, lab, tag_id)
+        await run_teleop_session_websocket(
+            websocket,
+            lab,
+            tag_id,
+            lab_state=_control_runtime_state(),
+        )
+    finally:
+        if paths_token is not None:
+            reset_backend_context(paths_token)
+        reset_request_backend_id(token)
 
 
 @app.post("/api/components/{tag_id}/telemetry/live-feed/start")
@@ -2153,131 +2332,160 @@ async def get_component_camera_image(tag_id: str):
     return FileResponse(abs_path, media_type=media_by_fmt[fmt])
 
 
+async def _compose_twin_lab_state() -> Dict[str, Any]:
+    """Coordinator working copy + edge overlays (works for HTTP edges)."""
+    bid = _active_backend_id()
+    from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+    from lab_model.coordinator.state.merge_lab_state import merge_lab_state_for_twin
+
+    edge_snapshot: Optional[Dict[str, Any]] = None
+    if edge_agent_registry.is_attached(bid):
+        cached = edge_agent_registry.get_cached_lab_state(bid)
+        if isinstance(cached, dict):
+            edge_snapshot = cached
+        else:
+            try:
+                proxied = await _proxy_to_edge(
+                    backend_id=bid,
+                    kind="get_lab_state",
+                    payload={},
+                    timeout_s=5.0,
+                )
+                if isinstance(proxied, dict) and isinstance(
+                    proxied.get("lab_state"), dict
+                ):
+                    edge_snapshot = proxied["lab_state"]
+                    rec = edge_agent_registry.get_for_backend(bid)
+                    if rec is not None:
+                        edge_agent_registry.heartbeat(
+                            rec.agent_id, lab_state=edge_snapshot
+                        )
+            except HTTPException as exc:
+                disconnect = edge_agent_registry.last_disconnect(bid)
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "message": (
+                            "edge attached but lab_state unavailable "
+                            f"({exc.detail})"
+                        ),
+                        "edge_offline": disconnect,
+                    },
+                ) from exc
+
+    if edge_snapshot is None:
+        _edge_client = _edge_client_for(bid)
+        if _edge_client.transport == EdgeTransport.HTTP:
+            try:
+                async with httpx.AsyncClient(
+                    base_url=_edge_client.base_url,
+                    timeout=10.0,
+                ) as client:
+                    resp = await client.get("/lab-state")
+                    resp.raise_for_status()
+                    edge_state = resp.json()
+                if isinstance(edge_state, dict):
+                    edge_snapshot = edge_state
+            except Exception as exc:  # noqa: BLE001
+                # Prefer coordinator working copy over hard 503 — teleop session
+                # flags and commanded tunables live on the store; edge downtime
+                # must not blank the Twin after a successful START_TELEOP.
+                logger.warning(
+                    "edge lab_state unavailable backend=%s reason=%s; "
+                    "serving coordinator working copy",
+                    bid,
+                    exc,
+                )
+
+    rt = _runtime_for_active(init=True)
+    store = ensure_lab_state_store(rt)
+    if isinstance(edge_snapshot, dict):
+        # Once per edge process after SYNC ready: Twin working copy := edge
+        # snapshot (sim + real HTTP). Falls through to seed/membership when
+        # the session is unchanged or runtime_sync is still pending.
+        if not store.reset_from_new_edge_session(edge_snapshot):
+            store.ensure_seeded_from_edge(edge_snapshot)
+            # Inventory membership is edge SoT. Prune ghosts (e.g. tag removed
+            # from inventory.json) without touching library.
+            store.reconcile_membership_from_edge(edge_snapshot)
+
+    working = store.snapshot()
+    if isinstance(edge_snapshot, dict):
+        state = merge_lab_state_for_twin(
+            working, edge_snapshot, backend_id=bid
+        )
+        edge_state_source = "merged"
+    else:
+        state = copy.deepcopy(working) if isinstance(working, dict) else {}
+        edge_state_source = "coordinator"
+        if not (isinstance(state, dict) and state.get("components")):
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "message": "edge lab_state unavailable",
+                    "reason": "no coordinator working components either",
+                },
+            )
+
+    if not isinstance(state, dict):
+        return {}
+
+    active_runtime = rt.lab_mode.upper()
+    disconnect = edge_agent_registry.last_disconnect(bid)
+    edge_rec = edge_agent_registry.get_for_backend(bid)
+    state = {
+        **state,
+        "lab_mode": active_runtime,
+        "runtime_mode": active_runtime.lower(),
+        "session_lease": _session_lease_runtime_field(bid),
+        "active_backend_id": bid,
+        "active_job_id": job_hub.active_job_id(bid),
+        "edge_attached": edge_rec is not None or edge_snapshot is not None,
+        "edge_state_source": edge_state_source,
+        "edge_agent": edge_rec.to_api_dict() if edge_rec else None,
+        "edge_offline": disconnect,
+        "edge_stale_after_s": DEFAULT_STALE_AFTER_S,
+    }
+    try:
+        from lab_model.coordinator.lab_initialization import note_lab_state
+
+        state["lab_initialization"] = note_lab_state(
+            bid,
+            state,
+            source="get_lab_state",
+            edge_attached=edge_rec is not None or edge_snapshot is not None,
+            edge_offline=bool(disconnect),
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("lab_init note_lab_state failed", exc_info=True)
+    return state
+
+
 @app.get("/api/lab-state")
 async def get_lab_state():
     """Return Twin lab-state (coordinator working copy + edge overlays).
 
     Phase 2: semantic FSM fields come from the per-backend coordinator store;
     ``runtime_sync`` / teleop telemetry overlay from the edge when attached.
-    Edge snapshots are still fetched (cache → proxy → HTTP) for overlays and
-    one-time seed when the working copy has no components.
+    Edge snapshots are fetched for overlays, one-time empty seed, inventory
+    membership reconcile, and (once per ``edge_session_id`` after
+    ``runtime_sync=ready``) full working-copy hydrate from the edge.
     """
     bid = _active_backend_id()
     logger.debug("GET /api/lab-state backend=%s", bid)
     try:
-        from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
-        from lab_model.coordinator.state.merge_lab_state import merge_lab_state_for_twin
-
-        edge_snapshot: Optional[Dict[str, Any]] = None
-        if edge_agent_registry.is_attached(bid):
-            cached = edge_agent_registry.get_cached_lab_state(bid)
-            if isinstance(cached, dict):
-                edge_snapshot = cached
-            else:
-                try:
-                    proxied = await _proxy_to_edge(
-                        backend_id=bid,
-                        kind="get_lab_state",
-                        payload={},
-                        timeout_s=5.0,
-                    )
-                    if isinstance(proxied, dict) and isinstance(
-                        proxied.get("lab_state"), dict
-                    ):
-                        edge_snapshot = proxied["lab_state"]
-                        rec = edge_agent_registry.get_for_backend(bid)
-                        if rec is not None:
-                            edge_agent_registry.heartbeat(
-                                rec.agent_id, lab_state=edge_snapshot
-                            )
-                except HTTPException as exc:
-                    disconnect = edge_agent_registry.last_disconnect(bid)
-                    raise HTTPException(
-                        status_code=503,
-                        detail={
-                            "message": (
-                                "edge attached but lab_state unavailable "
-                                f"({exc.detail})"
-                            ),
-                            "edge_offline": disconnect,
-                        },
-                    ) from exc
-
-        if edge_snapshot is None:
-            _edge_client = _edge_client_for(bid)
-            if _edge_client.transport == EdgeTransport.HTTP:
-                try:
-                    async with httpx.AsyncClient(
-                        base_url=_edge_client.base_url,
-                        timeout=10.0,
-                    ) as client:
-                        resp = await client.get("/lab-state")
-                        resp.raise_for_status()
-                        edge_state = resp.json()
-                    if isinstance(edge_state, dict):
-                        edge_snapshot = edge_state
-                except Exception as exc:  # noqa: BLE001
-                    raise HTTPException(
-                        status_code=503,
-                        detail={
-                            "message": "edge lab_state unavailable",
-                            "reason": str(exc),
-                        },
-                    ) from exc
-
-        rt = _runtime_for_active(init=True)
-        store = ensure_lab_state_store(rt)
-        if isinstance(edge_snapshot, dict):
-            store.ensure_seeded_from_edge(edge_snapshot)
-
-        working = store.snapshot()
-        if isinstance(edge_snapshot, dict):
-            state = merge_lab_state_for_twin(
-                working, edge_snapshot, backend_id=bid
-            )
-            edge_state_source = "merged"
-        else:
-            state = working if isinstance(working, dict) else {}
-            edge_state_source = "coordinator"
-
+        state = await _compose_twin_lab_state()
         logger.debug(
-            "GET /api/lab-state: ok edge_state_source=%s", edge_state_source
+            "GET /api/lab-state: ok edge_state_source=%s",
+            (state or {}).get("edge_state_source"),
         )
-        if isinstance(state, dict):
-            active_runtime = rt.lab_mode.upper()
-            disconnect = edge_agent_registry.last_disconnect(bid)
-            edge_rec = edge_agent_registry.get_for_backend(bid)
-            state = {
-                **state,
-                "lab_mode": active_runtime,
-                "runtime_mode": active_runtime.lower(),
-                "session_lease": _session_lease_runtime_field(bid),
-                "active_backend_id": bid,
-                "active_job_id": job_hub.active_job_id(bid),
-                "edge_attached": edge_rec is not None,
-                "edge_state_source": edge_state_source,
-                "edge_agent": edge_rec.to_api_dict() if edge_rec else None,
-                "edge_offline": disconnect,
-                "edge_stale_after_s": DEFAULT_STALE_AFTER_S,
-            }
-            try:
-                from lab_model.coordinator.lab_initialization import note_lab_state
-
-                state["lab_initialization"] = note_lab_state(
-                    bid,
-                    state,
-                    source="get_lab_state",
-                    edge_attached=edge_rec is not None,
-                    edge_offline=bool(disconnect),
-                )
-            except Exception:  # noqa: BLE001
-                logger.debug("lab_init note_lab_state failed", exc_info=True)
         return JSONResponse(content=state)
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("GET /api/lab-state failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to read Lab State: {str(e)}")
+
 
 def _schedule_pose_refresh(
     background_tasks: BackgroundTasks,
@@ -2354,17 +2562,92 @@ def _schedule_pose_refresh(
     }
 
 
+def _selection_offers_for_remote_edge(
+    scope_tag_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Checkbox selection for HTTP edges (no dry-run scan preview).
+
+    Checked tags are scanned via RECORD_TUNABLES on apply (top/ceiling cameras
+    on the real bench). Twin working-store poses are shown as ``current_pose``.
+    """
+    from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+    from lab_model.coordinator.state.pose_refresh_selection import normalize_tag_id_list
+    from lab_model.language.domain.component import (
+        PRESENCE_BREADBOARD,
+        PRESENCE_STORAGE,
+        get_tunables,
+    )
+
+    thresholds_dict = {"position_mm": 2.0, "yaw_deg": 5.0}
+    resp: Dict[str, Any] = {
+        "supported": True,
+        "skipped_reason": None,
+        "thresholds": thresholds_dict,
+        "offers": [],
+        "eligible_count": 0,
+        "hardware_note": (
+            "Real edge: apply runs RECORD_TUNABLES (ceiling/top camera scan) for "
+            "checked tags only. Unchecked tags stay frozen. No dry-run preview — "
+            "proposed poses appear after the scan commits."
+        ),
+        "selection_only": True,
+    }
+    try:
+        bid = _active_backend_id()
+        rt = require_backend(backend_registry, bid, init=False)
+        store = ensure_lab_state_store(rt)
+        snap = store.snapshot() if store is not None else {}
+    except Exception:  # noqa: BLE001
+        resp["supported"] = False
+        resp["skipped_reason"] = "lab_state_unavailable"
+        return resp
+
+    components = snap.get("components") if isinstance(snap, dict) else {}
+    if not isinstance(components, dict) or not components:
+        resp["skipped_reason"] = "no_eligible_components"
+        return resp
+
+    scope = normalize_tag_id_list(scope_tag_ids) if scope_tag_ids else []
+    scope_set = set(scope) if scope else None
+    offers: List[Dict[str, Any]] = []
+    for tid, comp in sorted(components.items(), key=lambda kv: str(kv[0])):
+        if scope_set is not None and str(tid) not in scope_set:
+            continue
+        if not isinstance(comp, dict):
+            continue
+        presence = get_tunables(comp).get("presence")
+        if presence not in (PRESENCE_BREADBOARD, PRESENCE_STORAGE):
+            continue
+        tun = get_tunables(comp)
+        current = tun.get("nominal_pose") if isinstance(tun.get("nominal_pose"), dict) else None
+        offers.append(
+            {
+                "tag_id": str(tid),
+                "current_pose": current,
+                "proposed_pose": None,
+                "default_apply": True,
+                "within_tolerance": False,
+                "delta_mm": None,
+                "delta_yaw_deg": None,
+                "note": "Will scan from top/ceiling camera on apply",
+            }
+        )
+
+    if not offers:
+        resp["skipped_reason"] = "no_eligible_components"
+        return resp
+    resp["offers"] = offers
+    resp["eligible_count"] = len(offers)
+    return resp
+
+
 def _pose_refresh_offers_dict(scope_tag_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     client = _edge_client_for()
     if client.transport != EdgeTransport.IN_PROCESS:
-        # Preview offers are a mock/in-process dry run. A physical HTTP edge
-        # cannot truthfully preview camera measurements without performing the
-        # scan, so the UI should use its deliberate refresh confirmation.
-        return {
-            "supported": False,
-            "skipped_reason": "external_edge",
-            "offers": [],
-        }
+        # Physical HTTP edge cannot dry-run a ceiling scan without executing RECORD.
+        # Still return checkbox selection offers from Twin working state so the
+        # operator can choose which tags to refresh (checked = scan + overwrite).
+        return _selection_offers_for_remote_edge(scope_tag_ids)
 
     from mock_backend.shared.session_checkpoint import reconciliation_thresholds_from_manifest
     from lab_model.coordinator.state.pose_refresh_offers import build_pose_refresh_offers
@@ -2469,36 +2752,55 @@ async def api_session_reconciliation_offers():
 
 @app.post("/api/session-reconciliation/apply")
 async def api_session_reconciliation_apply(payload: SessionReconcileApplyBody):
-    if lab is None:
+    from lab_model.coordinator.state.session_reconciliation import (
+        apply_session_reconciliation_tags_for_runtime,
+        current_lab_state_for_reconcile,
+        session_checkpoint_enabled,
+    )
+
+    rt = _runtime_for_active(init=True)
+    if not session_checkpoint_enabled(rt):
+        raise HTTPException(
+            status_code=400,
+            detail="Session checkpoint disabled for this communicator",
+        )
+    cur = current_lab_state_for_reconcile(rt)
+    if not cur:
         raise HTTPException(status_code=503, detail="Lab communicator not initialized")
-    if not getattr(lab, "session_checkpoint_enabled", lambda: False)():
-        raise HTTPException(status_code=400, detail="Session checkpoint disabled for this communicator")
-    cur = lab.get_lab_state()
     if cur.get("system_status") != "IDLE":
         raise HTTPException(
             status_code=409,
             detail=f"System is {cur.get('system_status')}; reconciliation only applies in IDLE.",
         )
-    merged = lab.apply_session_reconciliation_tags(payload.tag_ids)
+    merged = apply_session_reconciliation_tags_for_runtime(rt, payload.tag_ids)
     return {"status": "ok", "applied_tag_ids": merged}
 
 
 @app.post("/api/session-reconciliation/save")
 async def api_session_checkpoint_save():
     """Write ``session_last_lab_state.json`` now (same shape as graceful shutdown save)."""
+    from lab_model.coordinator.state.session_reconciliation import (
+        current_lab_state_for_reconcile,
+        save_session_checkpoint_for_runtime,
+        session_checkpoint_enabled,
+    )
 
-    if lab is None:
+    rt = _runtime_for_active(init=True)
+    if not session_checkpoint_enabled(rt):
+        raise HTTPException(
+            status_code=400,
+            detail="Session checkpoint disabled for this communicator",
+        )
+    cur = current_lab_state_for_reconcile(rt)
+    if not cur:
         raise HTTPException(status_code=503, detail="Lab communicator not initialized")
-    if not getattr(lab, "session_checkpoint_enabled", lambda: False)():
-        raise HTTPException(status_code=400, detail="Session checkpoint disabled for this communicator")
-    cur = lab.get_lab_state()
     if cur.get("system_status") in ("BUSY", "OPTIMIZING"):
         raise HTTPException(
             status_code=409,
             detail=f"System is {cur.get('system_status')}. Please wait.",
         )
-    lab.save_session_checkpoint_if_enabled()
-    return {"status": "ok"}
+    path = save_session_checkpoint_for_runtime(rt, snapshot=cur)
+    return {"status": "ok", "checkpoint_path": path}
 
 
 def _get_control_manager(repo_id: str):
@@ -2574,10 +2876,67 @@ def _claim_bench(repo_id: str, configuration_id: Optional[str]) -> None:
     write_bench_origin(_CONTROL_DIR(), safe, configuration_id)
 
 
+def _control_runtime_state() -> Dict[str, Any]:
+    """Working lab-state for VC status/commit (coordinator store; HTTP-edge safe)."""
+    try:
+        from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+
+        store = ensure_lab_state_store(_runtime_for_active(init=True))
+        snap = store.snapshot()
+        if isinstance(snap, dict) and snap:
+            return snap
+    except Exception:  # noqa: BLE001
+        pass
+    return _overlay_lab_state()
+
+
+def _control_catalog_context() -> Dict[str, Any]:
+    """Active tag ids + catalog hash for VC (edge inventory SoT).
+
+    Prefer :func:`resolve_edge_catalog` (HTTP ``/library``+``/inventory`` or
+    teaching ``cloudlabs_edge/data/``). Fall back to legacy
+    ``active_catalog.json`` only when no edge catalog is available.
+    Never require ``active_catalog.json`` on HTTP backends that use inventory.
+    """
+    import hashlib
+    import json as _json
+
+    from lab_model.coordinator.catalog.resolve_edge_catalog import (
+        EdgeCatalogUnavailable,
+        resolve_edge_catalog,
+    )
+
+    try:
+        cat = resolve_edge_catalog(_runtime_for_active(init=False))
+        catalog_ids = list(cat.active_tag_ids())
+        library_ids = list(cat.library_tag_id_list())
+        payload = _json.dumps(
+            sorted(catalog_ids), separators=(",", ":"), ensure_ascii=True
+        )
+        catalog_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return {
+            "catalog_hash": catalog_hash,
+            "catalog_tag_ids": catalog_ids,
+            "library_tag_ids": library_ids,
+            "source": cat.source,
+        }
+    except EdgeCatalogUnavailable:
+        pass
+
+    from lab_model.coordinator.catalog.bundle import active_tag_ids, library_by_tag
+    from lab_model.coordinator.catalog.catalog_hash import compute_active_catalog_hash
+
+    catalog_ids = list(active_tag_ids())
+    return {
+        "catalog_hash": compute_active_catalog_hash(),
+        "catalog_tag_ids": catalog_ids,
+        "library_tag_ids": list(library_by_tag().keys()),
+        "source": "active_catalog_file",
+    }
+
+
 def _assert_lab_idle_for_control() -> None:
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab communicator not initialized")
-    status = (lab.get_lab_state() or {}).get("system_status")
+    status = (_control_runtime_state() or {}).get("system_status")
     if status in ("BUSY", "OPTIMIZING"):
         raise HTTPException(
             status_code=409,
@@ -2588,10 +2947,11 @@ def _assert_lab_idle_for_control() -> None:
 def _lab_runtime_manager():
     manager = getattr(lab, "_lab_runtime_manager", None)
     if manager is None:
-        raise HTTPException(
-            status_code=500,
-            detail="RuntimeManager not available on lab communicator",
-        )
+        # HTTP-edge backends: LabStateStore owns the working RuntimeManager.
+        from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+
+        store = ensure_lab_state_store(_runtime_for_active(init=True))
+        return store.runtime
     return manager
 
 
@@ -2627,7 +2987,8 @@ async def control_backfill_lines(payload: Dict[str, Any] = Body(default={})):
         normalize_laser_lines_doc,
     )
 
-    runtime = lab.get_lab_state() if lab is not None else {}
+    # HTTP edges have no in-process communicator; use store/edge overlays.
+    runtime = _overlay_lab_state()
     if isinstance(payload.get("alignment_guides"), list):
         guides = normalize_alignment_guides(payload.get("alignment_guides"))
     else:
@@ -2660,6 +3021,19 @@ async def control_backfill_optimization_metadata():
     return {"repos": len(repos), "updated": updated}
 
 
+@app.post("/api/control/backfill-storage-slot-only")
+async def control_backfill_storage_slot_only():
+    """Idempotent migration: stored inventory on commits keeps slot only (no XY/rot)."""
+    from lab_model.coordinator.state.control_manager import list_control_repos
+
+    repos = list_control_repos(_CONTROL_DIR())
+    updated = 0
+    for repo in repos:
+        mgr = _get_control_manager(repo["repo_id"])
+        updated += mgr.backfill_storage_slot_only()
+    return {"repos": len(repos), "updated": updated}
+
+
 @app.post("/api/control/repos")
 async def control_create_repo(payload: ControlCreateRepoBody):
     from lab_model.coordinator.state.control_manager import create_control_repo, validate_repo_id
@@ -2682,7 +3056,7 @@ async def control_create_repo(payload: ControlCreateRepoBody):
 
 @app.get("/api/control/{repo_id}/status")
 async def control_status(repo_id: str):
-    runtime = lab.get_lab_state() if lab is not None else None
+    runtime = _control_runtime_state()
     status = _get_control_manager(repo_id).status(
         runtime, owns_bench=_repo_owns_bench(repo_id)
     )
@@ -2737,10 +3111,8 @@ async def control_diff(
 @app.post("/api/control/{repo_id}/configurations")
 async def control_commit_configuration(repo_id: str, payload: ControlCommitBody):
     _assert_lab_idle_for_control()
-    from lab_model.coordinator.catalog.bundle import active_tag_ids, library_by_tag
-    from lab_model.coordinator.catalog.catalog_hash import compute_active_catalog_hash
 
-    runtime = lab.get_lab_state()
+    runtime = _control_runtime_state()
     mgr = _get_control_manager(repo_id)
     working = mgr.working_state(runtime, owns_bench=_repo_owns_bench(repo_id))
     if working.get("detached"):
@@ -2763,7 +3135,7 @@ async def control_commit_configuration(repo_id: str, payload: ControlCommitBody)
             },
         )
     try:
-        catalog_hash = compute_active_catalog_hash()
+        catalog_hash = _control_catalog_context().get("catalog_hash")
     except Exception:
         catalog_hash = None
     document = mgr.commit_from_runtime(
@@ -2784,18 +3156,16 @@ async def control_checkout_report(
     configuration_id: str = Query(..., min_length=1),
 ):
     """Tag/catalog compatibility between a commit and the live runtime bench."""
-    from lab_model.coordinator.catalog.bundle import active_tag_ids, library_by_tag
-    from lab_model.coordinator.catalog.catalog_hash import compute_active_catalog_hash
-
     mgr = _get_control_manager(repo_id)
     try:
-        current_hash = compute_active_catalog_hash()
-        catalog_ids = active_tag_ids()
-        library_ids = list(library_by_tag().keys())
+        ctx = _control_catalog_context()
+        current_hash = ctx["catalog_hash"]
+        catalog_ids = ctx["catalog_tag_ids"]
+        library_ids = ctx["library_tag_ids"]
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Catalog unavailable: {exc}") from exc
 
-    runtime = lab.get_lab_state() if lab is not None else {}
+    runtime = _control_runtime_state()
     try:
         report = mgr.checkout_compatibility_report(
             configuration_id,
@@ -2853,11 +3223,11 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
     branch = str(document.get("branch") or "main")
 
     if mode == "adopt":
-        # "Set as node": declare this node as the current node WITHOUT moving the
-        # bench (git reset --soft). No reconcile plan, no projection â€” the
+        # "Set as node": declare this node as the current reference WITHOUT moving
+        # the bench (git reset --soft). No reconcile plan, no projection — the
         # physical bench is left exactly as-is and becomes uncommitted edits
-        # relative to the adopted node. Used to establish a base when you enter a
-        # repo and have no current node yet.
+        # relative to the adopted node. Allowed while dirty so operators can
+        # retarget the diff base for branching without stashing first.
         _control_log(
             "checkout:adopt",
             repo=repo_id,
@@ -2876,7 +3246,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
             "branch": branch,
             "applied": mgr.get_applied(),
             "working": mgr.working_state(
-                lab.get_lab_state(), owns_bench=_repo_owns_bench(repo_id)
+                _control_runtime_state(), owns_bench=_repo_owns_bench(repo_id)
             ),
         }
 
@@ -2913,7 +3283,8 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
             "steps_executed": 0,
         }
 
-    runtime = lab.get_lab_state()
+    # HTTP edges have no in-process communicator; use LabStateStore / overlays.
+    runtime = _control_runtime_state()
 
     # Git-like guard applies ONLY to a hard checkout, the one mode that
     # physically moves the bench: you cannot reconcile away from a dirty working
@@ -2951,15 +3322,14 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
             )
 
     if mode in ("soft", "hard"):
-        from lab_model.coordinator.catalog.bundle import active_tag_ids, library_by_tag
-        from lab_model.coordinator.catalog.catalog_hash import compute_active_catalog_hash
         try:
+            ctx = _control_catalog_context()
             compat = mgr.checkout_compatibility_report(
                 payload.configuration_id,
                 runtime,
-                current_catalog_hash=compute_active_catalog_hash(),
-                catalog_tag_ids=active_tag_ids(),
-                library_tag_ids=list(library_by_tag().keys()),
+                current_catalog_hash=ctx["catalog_hash"],
+                catalog_tag_ids=ctx["catalog_tag_ids"],
+                library_tag_ids=ctx["library_tag_ids"],
             )
         except Exception:
             compat = {"ready": True, "issues": []}
@@ -3062,7 +3432,7 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
     """
     _assert_lab_idle_for_control()
     mgr = _get_control_manager(repo_id)
-    runtime = lab.get_lab_state()
+    runtime = _control_runtime_state()
     owns_bench = _repo_owns_bench(repo_id)
     working = mgr.working_state(runtime, owns_bench=owns_bench)
 
@@ -3127,7 +3497,7 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
             "stash": mgr.stash_summary(),
             "steps_executed": 0,
             "working": mgr.working_state(
-                lab.get_lab_state(), owns_bench=_repo_owns_bench(repo_id)
+                _control_runtime_state(), owns_bench=_repo_owns_bench(repo_id)
             ),
         }
 
@@ -3184,7 +3554,7 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
         "stash": mgr.stash_summary(),
         "steps_executed": len(plan),
         "working": mgr.working_state(
-            lab.get_lab_state(), owns_bench=_repo_owns_bench(repo_id)
+            _control_runtime_state(), owns_bench=_repo_owns_bench(repo_id)
         ),
     }
 
@@ -3198,7 +3568,7 @@ async def control_stash_pop(repo_id: str, payload: ControlStashBody = ControlSta
     """
     _assert_lab_idle_for_control()
     mgr = _get_control_manager(repo_id)
-    runtime = lab.get_lab_state()
+    runtime = _control_runtime_state()
     working = mgr.working_state(runtime, owns_bench=_repo_owns_bench(repo_id))
 
     stash = mgr.get_stash()
@@ -3229,7 +3599,7 @@ async def control_stash_pop(repo_id: str, payload: ControlStashBody = ControlSta
             "finalized": True,
             "steps_executed": 0,
             "working": mgr.working_state(
-                lab.get_lab_state(), owns_bench=_repo_owns_bench(repo_id)
+                _control_runtime_state(), owns_bench=_repo_owns_bench(repo_id)
             ),
         }
 
@@ -3290,7 +3660,7 @@ async def control_stash_pop(repo_id: str, payload: ControlStashBody = ControlSta
         "status": "ok",
         "steps_executed": len(plan),
         "working": mgr.working_state(
-            lab.get_lab_state(), owns_bench=_repo_owns_bench(repo_id)
+            _control_runtime_state(), owns_bench=_repo_owns_bench(repo_id)
         ),
     }
 
@@ -3307,7 +3677,7 @@ async def control_stash_drop(repo_id: str):
 @app.post("/api/control/{repo_id}/observations")
 async def control_pin_observations(repo_id: str, payload: ControlObservationsBody):
     _assert_lab_idle_for_control()
-    runtime = lab.get_lab_state()
+    runtime = _control_runtime_state()
     try:
         pin = _get_control_manager(repo_id).pin_observations(
             runtime,
@@ -3326,7 +3696,7 @@ async def control_save_setup(repo_id: str, payload: ControlSetupBody):
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
     mgr = _get_control_manager(repo_id)
-    runtime = lab.get_lab_state()
+    runtime = _control_runtime_state()
     if payload.include_observations:
         setup = mgr.build_setup_from_runtime(
             runtime,
@@ -3356,28 +3726,35 @@ async def control_save_setup(repo_id: str, payload: ControlSetupBody):
 
 def _lab_component_wh(tag_id: str) -> Tuple[float, float]:
     """Catalog width/height in mm for layout analysis (mock vs real)."""
-    if lab is None:
+    try:
+        rt = _runtime_for_active(init=False)
+    except Exception:  # noqa: BLE001
         return (90.0, 90.0)
-    if hasattr(lab, "_get_component_wh"):
-        return lab._get_component_wh(tag_id)
-    if hasattr(lab, "_catalog_wh"):
-        return lab._catalog_wh(tag_id)
+    host = rt.lab
+    if host is None:
+        return (90.0, 90.0)
+    if hasattr(host, "_get_component_wh"):
+        return host._get_component_wh(tag_id)
+    if hasattr(host, "_catalog_wh"):
+        return host._catalog_wh(tag_id)
     return (90.0, 90.0)
 
 
 @app.get("/api/layout-conflicts")
 async def get_layout_conflicts():
     """Semantic vs geometry issues for inventory modals (PLACED in Q3, STORED off-slot, etc.)."""
-    if lab is None:
-        raise HTTPException(status_code=503, detail="Lab not initialized")
     from lab_model.language.domain.storage_region import analyze_layout_issues
 
-    state = lab.get_lab_state()
+    # Use Twin merge path — HTTP real edges have no in-process ``lab`` host.
+    state = await _compose_twin_lab_state()
     comps = state.get("components") or {}
     stored_intent = None
-    getter = getattr(lab, "get_stored_intent_for_layout", None)
-    if callable(getter):
-        stored_intent = getter()
+    rt = _runtime_for_active(init=True)
+    if rt.lab is not None:
+        getter = getattr(rt.lab, "get_stored_intent_for_layout", None)
+        if callable(getter):
+            with BackendSession(rt):
+                stored_intent = getter()
     issues = analyze_layout_issues(comps, _lab_component_wh, stored_intent=stored_intent)
     return {"issues": issues}
 
@@ -3387,7 +3764,9 @@ async def get_storage_grid():
     """Inventory grid dimensions for canvas overlay (must match storage_region constants)."""
     from lab_model.language.domain.storage_region import storage_grid_spec
 
-    return storage_grid_spec()
+    rt = require_backend(backend_registry, _active_backend_id(), init=False)
+    with BackendSession(rt):
+        return storage_grid_spec()
 
 
 @app.get("/api/lab-layout")
@@ -3409,6 +3788,7 @@ async def get_lab_layout():
         paths = rt.paths
         manifest = rt.manifest
         enriched["lab_view_root"] = paths.root_dir
+        # BackendSession already bound storage_region from this edge bench.
         enriched["storage_grid"] = storage_grid_spec()
         enriched["lab_manifest"] = {
             **manifest.as_dict(),
@@ -3442,6 +3822,32 @@ async def get_component_library():
 GUIDE_MIN_LENGTH_MM = 2.0
 
 
+def _overlay_lab_state() -> Dict[str, Any]:
+    """Lab-state slice for Twin overlays (works without an in-process communicator)."""
+    rt = _runtime_for_active(init=False)
+    if rt.lab is not None:
+        try:
+            state = rt.lab.get_lab_state()
+            if isinstance(state, dict):
+                return state
+        except Exception:  # noqa: BLE001
+            pass
+    bid = _active_backend_id()
+    cached = edge_agent_registry.get_cached_lab_state(bid)
+    if isinstance(cached, dict):
+        return cached
+    try:
+        from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+
+        store = ensure_lab_state_store(_runtime_for_active(init=True))
+        snap = store.snapshot()
+        if isinstance(snap, dict):
+            return snap
+    except Exception:  # noqa: BLE001
+        pass
+    return {}
+
+
 def _runtime_laser_doc() -> Dict[str, Any]:
     """Live laser overlay slice from the runtime.
 
@@ -3450,8 +3856,16 @@ def _runtime_laser_doc() -> Dict[str, Any]:
     makes the bench dirty like any other configuration change, so reads/writes
     flow through the runtime rather than the bundle file.
     """
-    state = lab.get_lab_state() if lab is not None else {}
+    state = _overlay_lab_state()
     doc = state.get("laser_lines")
+    if not isinstance(doc, dict):
+        # HTTP edge / cold start: seed from the backend laser_lines.json.
+        try:
+            seeded = read_laser_lines_doc()
+            if isinstance(seeded, dict):
+                doc = seeded
+        except Exception:  # noqa: BLE001
+            doc = None
     if not isinstance(doc, dict):
         doc = {"snap_line_id": None, "lines": []}
     return {
@@ -3550,8 +3964,7 @@ async def patch_laser_line(line_id: str, payload: Dict[str, Any] = Body(...)):
     _lab_runtime_manager().mutate(
         _mut, kind=MutationKind.RECOVERY_PATCH, source=f"laser_patch:{line_id}"
     )
-    if hasattr(lab, "_persist_state"):
-        lab._persist_state()
+    _persist_lab_state_if_host()
     return _laser_lines_response()
 
 
@@ -3574,9 +3987,22 @@ def _parse_guide_points(payload: Dict[str, Any]) -> Tuple[Dict[str, float], Dict
 
 
 def _runtime_guides() -> List[Dict[str, Any]]:
-    state = lab.get_lab_state() if lab is not None else {}
+    # HTTP-edge backends (real.default) have no in-process communicator —
+    # never call lab.get_lab_state() here (RequestLab raises AttributeError).
+    state = _control_runtime_state()
     guides = state.get("alignment_guides")
     return guides if isinstance(guides, list) else []
+
+
+def _persist_lab_state_if_host() -> None:
+    """Persist mock in-process host state; no-op for HTTP-edge (store already wrote)."""
+    try:
+        rt = _runtime_for_active(init=False)
+    except Exception:  # noqa: BLE001
+        return
+    host = rt.lab
+    if host is not None and hasattr(host, "_persist_state"):
+        host._persist_state()
 
 
 def _mutate_guides(fn, *, source: str) -> None:
@@ -3590,8 +4016,7 @@ def _mutate_guides(fn, *, source: str) -> None:
         fn(guides)
 
     _lab_runtime_manager().mutate(_mut, kind=MutationKind.RECOVERY_PATCH, source=source)
-    if hasattr(lab, "_persist_state"):
-        lab._persist_state()
+    _persist_lab_state_if_host()
 
 
 @app.get("/api/guides")
@@ -3681,8 +4106,7 @@ async def replace_overlays(payload: Dict[str, Any] = Body(...)):
     _lab_runtime_manager().mutate(
         _mut, kind=MutationKind.PROJECTION_APPLY, source="overlay_apply"
     )
-    if hasattr(lab, "_persist_state"):
-        lab._persist_state()
+    _persist_lab_state_if_host()
     return {
         "alignment_guides": guides,
         "laser_lines": laser,
@@ -3700,6 +4124,19 @@ def _enforce_ensemble_preflight(lab_comm, cmd) -> None:
         state = lab_comm.current_state
     is_real = not _active_backend_id().startswith("mock.")
     catalog_map = getattr(lab_comm, "catalog_map", None)
+    if is_real:
+        try:
+            from lab_model.coordinator.catalog.resolve_edge_catalog import (
+                refresh_catalog_map,
+            )
+
+            rt = _runtime_for_active(init=True)
+            catalog_map = refresh_catalog_map(rt, host=rt.lab)
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[ensemble.preflight] catalog refresh failed: {exc}",
+                flush=True,
+            )
     try:
         preflight_ensemble(
             state,
@@ -3837,24 +4274,88 @@ async def list_optimization_metrics():
 
 @app.get("/api/kernels")
 async def list_edge_kernels(request: Request, backend: Optional[str] = Query(None)):
-    """Registered edge kernels for closed-loop jobs (catalog + optional session)."""
+    """Edge-owned kernel catalog for the active backend (+ lease session packages).
+
+    Remote / teaching edges: proxy ``GET /kernels`` (or sibling edge disk).
+    Coordinator ``schemas/kernels/`` is not the live catalog for HTTP edges.
+    Builtin orchestration ids (``ensemble.eval.*``) remain listed for Wiki UX.
+    """
     backend_id = _active_backend_id()
     lease_id = _extract_lease_id({}, request)
     if lease_id:
         from lab_model.execution.optimization.kernels import session_store
 
         session_store.activate_lease_roots(backend_id, lease_id)
-    try:
-        from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths_optional
 
-        paths = get_lab_view_paths_optional()
-        lv = str(paths.root_dir) if paths is not None else None
-    except Exception:
-        lv = None
-    rows = list_kernels(backend=backend, lab_view_path=lv)
+    rows: list = []
+    source = "coordinator_fallback"
+    try:
+        from lab_model.coordinator.catalog.resolve_edge_kernels import (
+            EdgeKernelsUnavailable,
+            resolve_edge_kernels,
+        )
+
+        rt = _runtime_for_active(init=False)
+        resolved = resolve_edge_kernels(rt)
+        rows = list(resolved.kernels)
+        source = resolved.source
+    except Exception as exc:  # noqa: BLE001 — fall back for in-process mock
+        logger.debug("edge kernels resolve failed (%s); using coordinator catalog", exc)
+        try:
+            from lab_model.coordinator.backends.lab_view_config import get_lab_view_paths_optional
+
+            paths = get_lab_view_paths_optional()
+            lv = str(paths.root_dir) if paths is not None else None
+        except Exception:
+            lv = None
+        rows = [k.to_api_dict() for k in list_kernels(backend=backend, lab_view_path=lv)]
+        source = "coordinator_fallback"
+
+    # Merge lease session packages on top (override same id).
+    if lease_id:
+        from lab_model.execution.optimization.kernels import session_store
+
+        by_id = {str(r.get("id")): dict(r) for r in rows if r.get("id")}
+        for raw in session_store.list_lease_packages(backend_id, lease_id):
+            kid = str(raw.get("id") or "").strip()
+            if not kid:
+                continue
+            by_id[kid] = {
+                "id": kid,
+                "label": raw.get("label") or kid,
+                "description": raw.get("description") or "",
+                "backend": backend_id.split(".", 1)[0] if backend_id else "any",
+                "phase": "session",
+                "hooks": [],
+                "scope": "session",
+                "runtime": raw.get("runtime") or "torchscript",
+                "artifact": raw.get("artifact"),
+                "artifact_path": raw.get("artifact_path"),
+                "artifact_present": raw.get("artifact_present"),
+                "output_kind": raw.get("output_kind"),
+                "feature_names": list(raw.get("feature_names") or []),
+                "digest": raw.get("digest"),
+            }
+        rows = sorted(by_id.values(), key=lambda r: str(r.get("id") or ""))
+
+    # Always surface coordinator builtin orchestration kernels (not TorchScript).
+    try:
+        from lab_model.execution.optimization.kernels.registry import _BUILTIN_KERNELS
+
+        by_id = {str(r.get("id")): dict(r) for r in rows if r.get("id")}
+        for desc in _BUILTIN_KERNELS.values():
+            if backend and desc.backend not in {backend.strip().lower(), "any"}:
+                continue
+            if desc.id not in by_id:
+                by_id[desc.id] = desc.to_api_dict()
+        rows = sorted(by_id.values(), key=lambda r: str(r.get("id") or ""))
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
-        "kernels": [k.to_api_dict() for k in rows],
+        "kernels": rows,
         "backend_id": backend_id,
+        "source": source,
     }
 
 
@@ -4093,7 +4594,14 @@ async def optimization_compile(body: Dict[str, Any] = Body(...)):
     try:
         compiled = compile_objective_payload(objective_in)
     except EnsemblePreflightError as exc:
-        raise HTTPException(status_code=400, detail=exc.as_dict()) from exc
+        detail = exc.as_dict()
+        print(
+            f"[api.optimization.compile] schema/compile FAIL "
+            f"message={detail.get('message')!r} "
+            f"errors={detail.get('errors')!r}",
+            flush=True,
+        )
+        raise HTTPException(status_code=400, detail=detail) from exc
 
     result: Dict[str, Any] = {"ok": True, "objective": compiled}
     do_preflight = bool(body.get("preflight", False))
@@ -4105,11 +4613,68 @@ async def optimization_compile(body: Dict[str, Any] = Body(...)):
                 "message": "lab not initialized",
             }
             result["ok"] = False
+            print(
+                "[api.optimization.compile] preflight FAIL message='lab not initialized'",
+                flush=True,
+            )
         else:
             with lab._state_lock:
                 state = lab.current_state
             is_real = not _active_backend_id().startswith("mock.")
             catalog_map = getattr(lab, "catalog_map", None)
+            edge_kernel_ids = None
+            try:
+                from lab_model.coordinator.catalog.resolve_edge_kernels import (
+                    EdgeKernelsUnavailable,
+                    edge_kernel_ids_for_remote,
+                )
+
+                rt = _runtime_for_active(init=True)
+                if is_real:
+                    try:
+                        from lab_model.coordinator.catalog.resolve_edge_catalog import (
+                            refresh_catalog_map,
+                        )
+
+                        # Stamp onto the real host (RequestLab setattr would miss it).
+                        catalog_map = refresh_catalog_map(rt, host=rt.lab)
+                        print(
+                            f"[api.optimization.compile] refreshed edge catalog "
+                            f"n={len(catalog_map) if isinstance(catalog_map, dict) else 0} "
+                            f"tag_22_type="
+                            f"{(catalog_map or {}).get('tag_22', {}).get('type')!r}",
+                            flush=True,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        print(
+                            f"[api.optimization.compile] catalog refresh failed: {exc}",
+                            flush=True,
+                        )
+                edge_kernel_ids = edge_kernel_ids_for_remote(rt)
+                if edge_kernel_ids is not None:
+                    print(
+                        f"[api.optimization.compile] remote edge kernels "
+                        f"n={len(edge_kernel_ids)} "
+                        f"sample={sorted(edge_kernel_ids)[:8]}",
+                        flush=True,
+                    )
+            except EdgeKernelsUnavailable as exc:
+                print(
+                    f"[api.optimization.compile] edge kernel catalog unavailable: {exc}",
+                    flush=True,
+                )
+                result["preflight"] = {
+                    "ok": False,
+                    "message": "edge kernel catalog unavailable",
+                    "errors": [{"reason": str(exc)}],
+                }
+                result["ok"] = False
+                return result
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"[api.optimization.compile] edge kernel id resolve failed: {exc}",
+                    flush=True,
+                )
             try:
                 if isinstance(body.get("parameters"), dict):
                     params = dict(body["parameters"])
@@ -4119,6 +4684,7 @@ async def optimization_compile(body: Dict[str, Any] = Body(...)):
                         params,
                         catalog_map=catalog_map,
                         strict_real_objectives=is_real,
+                        edge_kernel_ids=edge_kernel_ids,
                     )
                     result["parameters"] = spec.model_dump()
                     result["x0"] = x0
@@ -4129,11 +4695,18 @@ async def optimization_compile(body: Dict[str, Any] = Body(...)):
                         ObjectiveSpec.model_validate(compiled),
                         catalog_map=catalog_map,
                         strict_real_objectives=is_real,
+                        edge_kernel_ids=edge_kernel_ids,
                     )
                     result["preflight"] = {"ok": True}
             except EnsemblePreflightError as exc:
                 result["preflight"] = exc.as_dict()
                 result["ok"] = False
+                print(
+                    f"[api.optimization.compile] preflight FAIL "
+                    f"message={result['preflight'].get('message')!r} "
+                    f"errors={result['preflight'].get('errors')!r}",
+                    flush=True,
+                )
 
     return result
 
@@ -4307,6 +4880,25 @@ async def cancel_job(job_id: str):
         raise HTTPException(status_code=404, detail=f"job {job_id!r} not found")
     backend_id, mgr = found
     record = mgr.request_cancel(job_id)
+    _kick_job_runner_for(backend_id)
+    return record.to_api_dict()
+
+
+@app.post("/api/jobs/{job_id}/accept")
+async def accept_job(job_id: str):
+    """Operator good-enough: early-stop success (keep best), not cancel."""
+    found = job_hub.find_job(job_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"job {job_id!r} not found")
+    backend_id, mgr = found
+    record = mgr.request_accept(job_id)
+    if record.status == "queued":
+        raise HTTPException(
+            status_code=409,
+            detail="job is still queued — wait until it is running before accept",
+        )
+    if record.status in ("succeeded", "failed", "cancelled"):
+        return record.to_api_dict()
     _kick_job_runner_for(backend_id)
     return record.to_api_dict()
 
@@ -4685,22 +5277,36 @@ async def receive_command(
     except LeaseExpiredError as exc:
         raise HTTPException(status_code=410, detail=str(exc)) from exc
 
-    # Phase 3: poll-attached or HTTP edge.base_url â€” same EdgeClient southbound.
+    # Phase 3: poll-attached or HTTP edge.base_url — same EdgeClient southbound.
     _edge_client = _edge_client_for(backend_id)
     if _edge_client.transport != EdgeTransport.IN_PROCESS:
         try:
             cmd = parse_command_payload(payload)
         except ValidationError as e:
             raise HTTPException(status_code=400, detail=validation_error_detail(e))
+        # Coordinator-owned busy/optimizing gate (Twin store), same as in-process.
+        gate_busy = _control_runtime_state()
+        busy_status = (gate_busy or {}).get("system_status")
+        if busy_status in ("BUSY", "OPTIMIZING"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"System is {busy_status}. Please wait.",
+            )
         edge_rec = edge_agent_registry.get_for_backend(backend_id)
         disconnect = edge_agent_registry.last_disconnect(backend_id)
+        # Poll-agent cache is empty for pure HTTP edges; use live Twin/edge state.
         gate_state = edge_agent_registry.get_cached_lab_state(backend_id)
+        if not isinstance(gate_state, dict):
+            try:
+                gate_state = await _compose_twin_lab_state()
+            except HTTPException:
+                gate_state = None
         try:
             ensure_action_allowed(
                 backend_id,
                 cmd.action,
                 gate_state if isinstance(gate_state, dict) else None,
-                edge_attached=edge_rec is not None,
+                edge_attached=edge_rec is not None or isinstance(gate_state, dict),
                 edge_offline=bool(disconnect),
             )
         except LabNotInitializedError as exc:
@@ -5114,6 +5720,19 @@ async def read_operations():
     })
 
 
+@app.get("/optimize-session")
+async def read_optimize_session():
+    """Full-detail OPTIMIZE run page (Twin sidebar stays minimal)."""
+    path = os.path.join(frontend_path, "optimize-session.html")
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    return Response(content=html, media_type="text/html", headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
+
+
 @app.get("/debug")
 async def read_debug():
     path = os.path.join(frontend_path, "debug.html")
@@ -5131,8 +5750,11 @@ if __name__ == "__main__":
     # Optional: LOG_LEVEL=DEBUG shows per-poll lab-state logs above.
     _lvl = getattr(logging, (os.getenv("LOG_LEVEL") or "INFO").upper(), logging.INFO)
     logging.basicConfig(level=_lvl, format="%(levelname)s %(name)s: %(message)s")
+    # Twin polls /lab-state on the frontend idle cadence via httpx; keep that off the console.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-    # Access log prints every HTTP line (e.g. GET /api/lab-state twice per second). Off unless:
+    # Access log prints every HTTP line (e.g. GET /api/lab-state). Off unless:
     #   UVICORN_ACCESS_LOG=1
     # Or run: uvicorn main:app --reload --no-access-log
     _access = (os.getenv("UVICORN_ACCESS_LOG") or "").strip().lower() in ("1", "true", "yes")

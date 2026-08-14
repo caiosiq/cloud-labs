@@ -161,8 +161,12 @@ export function kernelPhysicalInterpretation(row = {}) {
             'Brightest normalized pixel in the frame — a crude peak-power proxy for demos.',
         'builtin.roi_centroid':
             'Sub-pixel center of the spot inside the center-half ROI, returned as (cx, cy) in full-frame pixels. Pair with a pixel target to align a beam on camera.',
+        'builtin.beam_power':
+            'Power proxy features: flux above background, peak, and saturated-fraction. Maximize flux with ratio_to_ref (first-eval flux is the scale); treat saturation as a hard health flag (pin exposure).',
         'builtin.gaussian_beam_fit':
             'Moment-based Gaussian summary: amplitude, center (cx, cy), and widths (σx, σy) in pixels. Intuition: “how bright, where, how wide” — not a full nonlinear fit.',
+        'builtin.beam_shift':
+            'Offset of the intensity CoM from this camera frame’s geometric center (W/2, H/2) as [dx, dy, magnitude] in px. Maximize magnitude to push the beam off-center; resolution-agnostic; no reference capture.',
         'ensemble.eval.block_cobyla':
             'Built-in optimizer hook: COBYLA proposes the next actuator step from the scalar loss. Not an image model — the “brain” that walks the loss landscape.',
         'ensemble.eval.mock_landscape':

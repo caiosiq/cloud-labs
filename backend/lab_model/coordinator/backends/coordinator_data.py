@@ -69,18 +69,58 @@ def _empty_laser_lines() -> dict:
     return {"version": 1, "lines": [], "snap_line_id": None}
 
 
+def _resolve_project_rel(project_root: str, path: str) -> str:
+    raw = (path or "").strip()
+    if not raw:
+        return ""
+    if not os.path.isabs(raw):
+        raw = os.path.join(project_root, raw)
+    return os.path.abspath(raw)
+
+
+def _copy_laser_lines_seed(dest: str, *source_roots: str) -> bool:
+    """Copy the first existing ``laser_lines.json`` under ``source_roots`` to dest."""
+    for root in source_roots:
+        if not root:
+            continue
+        src = os.path.join(root, "laser_lines.json")
+        if os.path.isfile(src):
+            shutil.copy2(src, dest)
+            return True
+    return False
+
+
+def _laser_lines_file_is_empty(path: str) -> bool:
+    """True when missing, unreadable, or ``lines`` is absent/empty."""
+    if not os.path.isfile(path):
+        return True
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            doc = json.load(fh)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return True
+    if not isinstance(doc, dict):
+        return True
+    lines = doc.get("lines")
+    return not isinstance(lines, list) or len(lines) == 0
+
+
 def ensure_coordinator_data(
     project_root: str,
     backend_id: str,
     *,
     coordinator_data_path: str = "",
     migrate_from_lab_view: str = "",
+    coordinator_seed_path: str = "",
 ) -> CoordinatorDataPaths:
     """Create or reuse ``coordinator_data/<backend_id>/`` (thin store).
 
     When ``migrate_from_lab_view`` points at an old fat lab_view and the
     coordinator ``control/`` is empty, copy ``control/`` and ``recipes/`` once
     so existing Twin VC history is not dropped.
+
+    ``coordinator_seed_path`` supplies Twin overlays (e.g. laser lines) for
+    HTTP-edge backends that have no local lab_view bundle.
     """
     safe = validate_backend_id_for_path(backend_id)
     rel = (coordinator_data_path or default_coordinator_data_path(safe)).strip()
@@ -92,30 +132,29 @@ def ensure_coordinator_data(
     recipes_dir = os.path.join(root, "recipes")
     lab_state_json = os.path.join(root, "lab_state.json")
     laser_lines_json = os.path.join(root, "laser_lines.json")
+    migrate_root = _resolve_project_rel(project_root, migrate_from_lab_view)
+    seed_root = _resolve_project_rel(project_root, coordinator_seed_path)
 
     os.makedirs(control_dir, exist_ok=True)
     os.makedirs(recipes_dir, exist_ok=True)
 
-    if migrate_from_lab_view:
-        src = migrate_from_lab_view
-        if not os.path.isabs(src):
-            src = os.path.join(project_root, src)
-        src = os.path.abspath(src)
-        _maybe_migrate_dir(os.path.join(src, "control"), control_dir)
-        _maybe_migrate_dir(os.path.join(src, "recipes"), recipes_dir)
+    if migrate_root:
+        _maybe_migrate_dir(os.path.join(migrate_root, "control"), control_dir)
+        _maybe_migrate_dir(os.path.join(migrate_root, "recipes"), recipes_dir)
         if not os.path.isfile(lab_state_json):
-            src_state = os.path.join(src, "lab_state.json")
+            src_state = os.path.join(migrate_root, "lab_state.json")
             if os.path.isfile(src_state):
                 shutil.copy2(src_state, lab_state_json)
-        if not os.path.isfile(laser_lines_json):
-            src_lines = os.path.join(src, "laser_lines.json")
-            if os.path.isfile(src_lines):
-                shutil.copy2(src_lines, laser_lines_json)
+
+    # Laser lines: migrate lab_view → coordinator seed → empty placeholder.
+    # Upgrade an auto-created empty placeholder when a non-empty seed exists.
+    if _laser_lines_file_is_empty(laser_lines_json):
+        if not _copy_laser_lines_seed(laser_lines_json, migrate_root, seed_root):
+            if not os.path.isfile(laser_lines_json):
+                _atomic_write_json(laser_lines_json, _empty_laser_lines())
 
     if not os.path.isfile(lab_state_json):
         _atomic_write_json(lab_state_json, _empty_lab_state())
-    if not os.path.isfile(laser_lines_json):
-        _atomic_write_json(laser_lines_json, _empty_laser_lines())
 
     action = "created" if created else "reused"
     print(

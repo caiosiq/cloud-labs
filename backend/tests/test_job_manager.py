@@ -49,6 +49,22 @@ class JobManagerTests(unittest.TestCase):
         cancelled = self.mgr.request_cancel(record.job_id)
         self.assertEqual(cancelled.status, "cancelled")
 
+    def test_accept_running(self) -> None:
+        record = self.mgr.submit(
+            backend_id="mock.default",
+            mode="closed_loop",
+            holder="job:accept",
+            spec={},
+        )
+        nxt = self.mgr.pop_next_queued()
+        assert nxt is not None
+        self.mgr.mark_running(nxt.job_id)
+        accepted = self.mgr.request_accept(nxt.job_id)
+        self.assertTrue(accepted.accept_requested)
+        self.assertTrue(self.mgr.is_accept_requested(nxt.job_id))
+        self.assertFalse(self.mgr.is_cancel_requested(nxt.job_id))
+        self.assertEqual(accepted.status, "running")
+
     def test_validate_closed_loop_spec(self) -> None:
         spec = validate_submit_spec(
             "closed_loop",

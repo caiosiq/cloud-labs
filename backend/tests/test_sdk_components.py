@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from cloudlabs.components import ComponentProxy, ComponentsNamespace
 from cloudlabs.measurable import MeasurableHandle
@@ -47,22 +47,21 @@ class ComponentProxyTests(unittest.TestCase):
 
     def test_move_x(self) -> None:
         out = self.comp.move(x=12.5)
-        self.client.move_component.assert_called_once_with(
+        self.client.move_pose.assert_called_once_with(
             "tag_20",
-            "tunables.nominal_pose.x",
-            12.5,
+            x=12.5,
+            y=None,
+            rotation=None,
         )
         self.assertIs(out, self.comp)
 
     def test_move_multi_axis(self) -> None:
         self.comp.move(x=1.0, y=2.0, rotation=3.0)
-        self.assertEqual(
-            self.client.move_component.call_args_list,
-            [
-                call("tag_20", "tunables.nominal_pose.x", 1.0),
-                call("tag_20", "tunables.nominal_pose.y", 2.0),
-                call("tag_20", "tunables.nominal_pose.rotation", 3.0),
-            ],
+        self.client.move_pose.assert_called_once_with(
+            "tag_20",
+            x=1.0,
+            y=2.0,
+            rotation=3.0,
         )
 
     def test_move_requires_axis(self) -> None:

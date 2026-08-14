@@ -1,3 +1,5 @@
+import { store } from '../state/store.js';
+
 const TAB_NAMES = ['optimization', 'recipes', 'component'];
 
 let activeTab = 'optimization';
@@ -33,12 +35,17 @@ export function showSelectedPartTab() {
     const button = tabButton('component');
     if (!button) return;
     button.hidden = false;
+    const count = store.openPanels.length;
+    button.textContent = count > 1 ? `Selected Parts (${count})` : 'Selected Part';
     activateWorkspaceTab('component');
 }
 
 export function hideSelectedPartTab() {
     const button = tabButton('component');
-    if (button) button.hidden = true;
+    if (button) {
+        button.hidden = true;
+        button.textContent = 'Selected Part';
+    }
     if (activeTab === 'component') activateWorkspaceTab(lastNonComponentTab);
 }
 

@@ -81,7 +81,19 @@ class CommandMappingTests(unittest.TestCase):
         )
         self.assertEqual(body["primitive"], "START_LIVE_FEED")
         self.assertEqual(body["args"]["tag_id"], "tag_22")
-        self.assertEqual(body["args"]["channel"], "stream")
+        # Twin ``stream`` → Edge Contract ``{tag}.camera_image``.
+        self.assertEqual(body["args"]["channel"], "tag_22.camera_image")
+        self.assertEqual(body["args"]["measurable_id"], "tag_22.camera_image")
+
+    def test_maps_end_live_feed_all(self) -> None:
+        body = command_to_execute_body(
+            {
+                "action": "END_LIVE_FEED",
+                "target_id": "tag_22",
+                "channel": "all",
+            }
+        )
+        self.assertEqual(body["args"]["channel"], "tag_22.camera_image")
 
 
 class StreamProxyHelperTests(unittest.TestCase):

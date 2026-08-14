@@ -218,7 +218,7 @@ class CatalogCuratedKernels(unittest.TestCase):
         from lab_model.execution.optimization.kernels import get_kernel
 
         for kid, nfeat in (
-            ("builtin.roi_centroid", 2),
+            ("builtin.roi_centroid", 3),
             ("builtin.gaussian_beam_fit", 5),
         ):
             desc = get_kernel(kid)
@@ -232,9 +232,10 @@ class CatalogCuratedKernels(unittest.TestCase):
         img[35:46, 65:76] = 220
         kind, feats = run_torchscript_output("builtin.roi_centroid", img)
         self.assertEqual(kind, "features")
-        self.assertEqual(len(feats), 2)
+        self.assertEqual(len(feats), 3)
         self.assertAlmostEqual(feats[0], 70.0, delta=3.0)
         self.assertAlmostEqual(feats[1], 40.0, delta=3.0)
+        self.assertGreater(feats[2], 0.5)
 
         kind, gfeats = run_torchscript_output("builtin.gaussian_beam_fit", img)
         self.assertEqual(kind, "features")

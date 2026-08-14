@@ -3,7 +3,8 @@ name: latency-channels
 description: >-
   Chooses the correct Cloud Labs edge channel for teleop, live video, and
   deliberate work. Use when implementing START_TELEOP, live feed streams,
-  WebSockets, OPTIMIZE jobs, or debating HTTP vs stream vs job.
+  WebSockets, OPTIMIZE jobs, debating HTTP vs stream vs job, or when Twin
+  teleop UI never shows loading/controls after a successful START_TELEOP.
 ---
 
 # Latency channels
@@ -15,6 +16,31 @@ description: >-
 | A | `START_TELEOP` | Flat WS frames | Interactive jog / pose |
 | B | `START_LIVE_FEED` | JPEG / MJPEG | Preview for the eye |
 | C | `POST /execute` / jobs | Request or job stream | Move, record, optimize |
+
+## Twin UI teleop session vs edge hardware lease
+
+These are **two different leases**. Confusing them is the usual “robot grabbed
+the part but Twin never entered teleop mode” bug.
+
+| Layer | Owns | What Twin needs |
+|-------|------|-----------------|
+| **This edge** | Hardware arming (LiveControl / robot enter), WS path, jog/goto execution | Honest `completed` / `refused` on `START_TELEOP` / `END_TELEOP` |
+| **Coordinator (Twin)** | `components[tag].telemetry.teleop.active` / `ready` / `mode`, and Twin `system_status=TELEOP` | Commit after remote execute succeeds |
+
+- Edge `START_TELEOP` may return a **flat** result
+  (`{tag_id, active: true, ws_path}`) — that is enough. You do **not** need to
+  invent a nested Twin `telemetry` blob for the UI to work on current Cloud Labs.
+- Edge `GET /lab-state` may keep `telemetry.teleop.active=false` as a static
+  template. Twin merge **preserves coordinator teleop session flags** and only
+  overlays edge streams (`live_feed`, samples). Do not “fix” Twin by writing
+  Twin FSM fields from the edge.
+- Twin shows LOADING when `active && !ready`, and jog controls when
+  `active && ready`. After a successful remote START, the coordinator commits
+  both (hardware setup already finished on the edge).
+
+If START succeeds on the arm but the UI stays idle: check the **coordinator**
+remote-commit path / lab-state poll — not a missing inventory camera and not a
+frontend-only bug.
 
 ## Do
 
@@ -34,6 +60,11 @@ description: >-
 - Do not mix Tier A rates with deep schema validation on every frame.
 - Do **not** always call held-Cartesian on START_TELEOP — that breaks on-table Rz TeleOp
   (`start_held_cartesian: not holding a part` while the Twin expected Rz).
+- Do not invent Twin-only teleop status endpoints or write Twin
+  `telemetry.teleop.active` / `system_status=TELEOP` from the edge so the UI
+  “looks right” — the coordinator commits those after remote START/END.
+- Do not require every lab to mirror Twin’s teleop FSM inside edge `/lab-state`
+  for certify; arm the hardware and return contract outcomes.
 
 ## Typical files
 

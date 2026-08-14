@@ -7,6 +7,7 @@
 import { applyComponentTelemetryFromServer } from '../component-state.js';
 import { labClient } from '../cloudlabs/client.js';
 import { stopJpegPollForTag } from '../widgets/jpeg-poll-registry.js';
+import { closeLiveFeedPopout } from '../ui/live-feed-popout.js';
 
 function _applyTelemetryResponse(tagId, body) {
     if (body && body.telemetry) {
@@ -22,6 +23,7 @@ export async function startLiveFeed(tagId, channel = 'stream') {
 
 export async function endLiveFeed(tagId, channel = 'all') {
     stopJpegPollForTag(tagId);
+    closeLiveFeedPopout(tagId);
     const body = await labClient.endLiveFeed(tagId, channel);
     _applyTelemetryResponse(tagId, body);
     return body;

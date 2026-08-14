@@ -185,7 +185,11 @@ async def _run_closed_loop(
             if kid not in existing:
                 existing.append(kid)
         params["kernels"] = existing
-        command["parameters"] = params
+    # Forward staged session packages into the edge OPTIMIZE / pipeline payload.
+    packages = spec.get("kernel_packages")
+    if isinstance(packages, list) and packages:
+        params["kernel_packages"] = list(packages)
+    command["parameters"] = params
     try:
         cmd = parse_command_payload(dict(command))
     except ValidationError as exc:
@@ -196,12 +200,15 @@ async def _run_closed_loop(
         return
     job_manager.update_progress(job_id, {"phase": "optimizing", "message": "OPTIMIZING"})
     setattr(lab, "_job_abort_check", lambda: job_manager.is_cancel_requested(job_id))
+    setattr(lab, "_job_accept_check", lambda: job_manager.is_accept_requested(job_id))
     setattr(lab, "_job_kernels", list(params.get("kernels") or []))
     try:
         await execute_validated_command(lab, cmd)
     finally:
         if hasattr(lab, "_job_abort_check"):
             delattr(lab, "_job_abort_check")
+        if hasattr(lab, "_job_accept_check"):
+            delattr(lab, "_job_accept_check")
         if hasattr(lab, "_job_kernels"):
             delattr(lab, "_job_kernels")
 

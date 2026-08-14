@@ -15,24 +15,71 @@ import { applyComponentTelemetryFromServer } from '../component-state.js';
 import { syncTeleopTargetFromCurrent } from '../teleop-target.js';
 import { labClient } from '../cloudlabs/client.js';
 import { isTeleopWsConnected, teleopGotoViaWs } from './teleop-session-ws.js';
+import { store } from '../state/store.js';
+
+/** Paint system-status badge immediately (avoid waiting for next poll). */
+function paintSystemStatusOptimistic(status) {
+    if (!store.labState || !status) return;
+    store.labState.system_status = status;
+    const statusBadge = document.getElementById('system-status-badge');
+    if (!statusBadge) return;
+    // Match updateUI / twin-viewer BUSY + TELEOP styling.
+    let badgeClass = 'active';
+    let badgeColor = 'placed';
+    let badgeStyle = '';
+    if (status === 'BUSY') {
+        badgeClass = '';
+        badgeColor = 'inventory';
+        badgeStyle = 'background-color: #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);';
+    } else if (status === 'TELEOP') {
+        badgeClass = '';
+        badgeColor = '';
+        badgeStyle = 'background-color: #0891b2; box-shadow: 0 0 8px rgba(34, 211, 238, 0.45);';
+    }
+    statusBadge.className = `system-status ${badgeClass}`;
+    statusBadge.innerHTML = `<span class="status-dot ${badgeColor}" style="${badgeStyle}"></span> ${status}`;
+}
 
 /**
  * Acquire the per-component TELEOP lease.
+ *
+ * Optimistically marks ``active && !ready`` so Twin can show Loading while the
+ * (possibly long) HTTP START runs on a real edge — same UX as mock's pending
+ * commit before hardware prepare finishes.
  *
  * @param {string} tagId
  * @returns {Promise<{ok: boolean, tunables?: object, error?: string}>}
  */
 export async function startTeleop(tagId) {
     if (!tagId) return { ok: false, error: 'tagId required' };
+    // Pending session in the browser store immediately (Loading TeleOp).
+    // Mirror acquiring on the system monitor as BUSY (not TELEOP until ready).
+    applyComponentTelemetryFromServer(tagId, {
+        teleop: { active: true, ready: false, last_error: null },
+    });
+    paintSystemStatusOptimistic('BUSY');
     try {
         const body = await labClient.startTeleop(tagId);
         if (body && body.telemetry) {
             applyComponentTelemetryFromServer(tagId, body.telemetry);
+        } else {
+            // HTTP edge often returns nested telemetry from the coordinator store;
+            // if missing, assume arming finished (ready) so controls appear.
+            applyComponentTelemetryFromServer(tagId, {
+                teleop: { active: true, ready: true, last_error: null },
+            });
         }
+        const tel = body && body.telemetry && body.telemetry.teleop;
+        const ready = tel ? !!tel.ready : true;
+        paintSystemStatusOptimistic(ready ? 'TELEOP' : 'BUSY');
         syncTeleopTargetFromCurrent(tagId);
         log(`START_TELEOP ${tagId} (target will sync from live pose)`, 'info');
         return { ok: true, tunables: body && body.tunables, telemetry: body && body.telemetry };
     } catch (e) {
+        applyComponentTelemetryFromServer(tagId, {
+            teleop: { active: false, ready: false, last_error: (e && e.message) ? e.message : String(e) },
+        });
+        paintSystemStatusOptimistic('IDLE');
         const msg = (e && e.message) ? e.message : String(e);
         log(`START_TELEOP ${tagId} refused: ${msg}`, 'warn');
         return { ok: false, error: msg };
@@ -51,6 +98,14 @@ export async function endTeleop(tagId) {
         const body = await labClient.endTeleop(tagId);
         if (body && body.telemetry) {
             applyComponentTelemetryFromServer(tagId, body.telemetry);
+        } else {
+            applyComponentTelemetryFromServer(tagId, {
+                teleop: { active: false, ready: false, last_error: null },
+            });
+        }
+        // Poll will refine HOLDING vs IDLE; clear TELEOP immediately.
+        if (store.labState && store.labState.system_status === 'TELEOP') {
+            paintSystemStatusOptimistic('IDLE');
         }
         log(`END_TELEOP ${tagId}`, 'info');
         return { ok: true, tunables: body && body.tunables, telemetry: body && body.telemetry };

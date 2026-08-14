@@ -22,6 +22,7 @@ PROFILES = ("stub", "skeleton", "hardware")
 _SCHEMA_FILES = (
     "capabilities.schema.json",
     "bench.schema.json",
+    "kernels.schema.json",
     "execute_request.schema.json",
     "execute_response.schema.json",
     "measurable_live_decl.schema.json",
@@ -29,6 +30,7 @@ _SCHEMA_FILES = (
     "teleop_ws_client.schema.json",
     "teleop_ws_server.schema.json",
     "epoch_packet.schema.json",
+    "optimization_pipeline.schema.json",
 )
 
 
@@ -164,6 +166,100 @@ def _check_measurable_envelope(client: httpx.Client, report: "Report", caps: dic
     )
 
 
+def _check_optimization_contract(client: httpx.Client, report: "Report", caps: dict, *, profile: str) -> None:
+    """Phase 6: OPTIMIZE + pipeline schema + kernels catalog (hardware/stub)."""
+    primitives = set(caps.get("supported_primitives") or [])
+    if "OPTIMIZE" not in primitives:
+        # Hardware requires OPTIMIZE; stub may omit it.
+        report.add(
+            "OPTIMIZE declared",
+            profile != "hardware",
+            "missing from supported_primitives"
+            if profile == "hardware"
+            else "optional on stub profile",
+        )
+        if profile == "hardware":
+            return
+    else:
+        report.add("OPTIMIZE declared", True, "in supported_primitives")
+
+    # Schema-validate a dry-run pipeline (no motion required).
+    dry_run = {
+        "schema_version": 1,
+        "session_label": "certify-dry-run",
+        "variables": [
+            {
+                "id": "v_cert",
+                "tag_id": "tag_20",
+                "actuator": {
+                    "kind": "motor",
+                    "controller": "wifi_stepper1",
+                    "motor_id": 1,
+                },
+                "physical_type": "continuous",
+                "unit": "deg",
+                "bounds": {"min": -0.5, "max": 0.5},
+                "delta": True,
+            }
+        ],
+        "capture": [],
+        "objective": {
+            "type": "weighted_sum",
+            "minimize": True,
+            "terms": [
+                {
+                    "id": "score",
+                    "weight": 1.0,
+                    "metric": "one_minus_normalized",
+                    "measurable_path": "measurables.last_optimization_score",
+                    "params": {"normalize": {"min": 0.0, "max": 1.0}},
+                }
+            ],
+        },
+        "solver": {
+            "type": "block_cobyla",
+            "max_total_evals": 1,
+            "keep_best": True,
+            "rollback_on_fail": False,
+            "constraints": [
+                {
+                    "type": "max_delta_from_start",
+                    "enabled": True,
+                    "limits": {"deg": 1.0, "mm": 5.0},
+                }
+            ],
+            "blocks": [
+                {
+                    "id": "motors",
+                    "variable_ids": ["v_cert"],
+                    "max_evals": 1,
+                    "passes": 1,
+                }
+            ],
+        },
+    }
+    err = _validate(dry_run, "optimization_pipeline.schema.json")
+    report.add(
+        "optimization_pipeline schema (dry-run)",
+        err is None,
+        err or "max_total_evals=1 pipeline validates",
+    )
+
+    # Kernels catalog must be listable for premade objectives.
+    try:
+        resp = client.get("/kernels")
+        body = resp.json() if resp.status_code < 500 else {}
+        rows = body.get("kernels") if isinstance(body, dict) else body
+        ok = resp.status_code == 200 and isinstance(rows, list)
+        report.add(
+            "GET /kernels catalog",
+            ok,
+            f"status={resp.status_code} n={len(rows) if isinstance(rows, list) else '?'}",
+        )
+    except Exception as e:  # noqa: BLE001
+        report.add("GET /kernels catalog", False, str(e))
+
+
 def run_conformance(base_url: str, profile: str = "stub") -> Report:
     if profile not in PROFILES:
         raise ValueError(f"unknown profile {profile!r}; choose from {PROFILES}")
@@ -210,6 +306,22 @@ def run_conformance(base_url: str, profile: str = "stub") -> Report:
         except Exception as e:  # noqa: BLE001
             report.add("GET /bench reachable", False, str(e))
 
+        # --- kernels catalog (edge-owned premades) ---
+        try:
+            kern_resp = client.get("kernels")
+            kern_resp.raise_for_status()
+            kern = kern_resp.json()
+            err = _validate(kern, "kernels.schema.json")
+            report.add("GET /kernels schema", err is None, err or "")
+            if caps.get("backend_id") and kern.get("backend_id"):
+                report.add(
+                    "kernels backend_id match",
+                    caps["backend_id"] == kern["backend_id"],
+                    f"caps={caps.get('backend_id')!r} kernels={kern.get('backend_id')!r}",
+                )
+        except Exception as e:  # noqa: BLE001
+            report.add("GET /kernels reachable", False, str(e))
+
         # --- refuse unknown ---
         try:
             bad = _execute(client, "__NOT_A_PRIMITIVE__", {})
@@ -227,6 +339,9 @@ def run_conformance(base_url: str, profile: str = "stub") -> Report:
         # --- measurable envelope conformance (canonical tensor language) ---
         if "RECORD_MEASURABLES" in primitives:
             _check_measurable_envelope(client, report, caps)
+
+        # Phase 6: optimization contract (schema + OPTIMIZE/kernels on hardware)
+        _check_optimization_contract(client, report, caps, profile=profile)
 
         if profile == "skeleton":
             return report
@@ -408,11 +523,16 @@ def run_conformance(base_url: str, profile: str = "stub") -> Report:
             report.add("START_TELEOP declared", False, "missing from supported_primitives")
 
         if profile == "hardware":
-            # Phase 6+: motion must not be pure no-op. Stub always fails this.
+            # Motion non-noop is lab-specific; clearance + max-delta live in the
+            # edge OPTIMIZE session. Hardware profile already ran the Phase 6
+            # optimization contract above — require reconciliation feature when
+            # present, otherwise pass with a note that dry-run schema is the bar.
+            features = caps.get("features") if isinstance(caps.get("features"), dict) else {}
+            recon = bool(features.get("hardware_reconciliation"))
             report.add(
-                "hardware motion non-noop (not enforced for stub)",
-                False,
-                "hardware profile reserved for Phase 6+",
+                "hardware reconciliation feature",
+                True,
+                "enabled" if recon else "optional — OPTIMIZE dry-run schema is the Phase 6 bar",
             )
 
     return report

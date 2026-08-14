@@ -1,6 +1,7 @@
 """Per-backend coordinator_data isolation and ControlManager cache keys."""
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -205,6 +206,156 @@ class BackendIsolationTests(unittest.TestCase):
 
 
 class CoordinatorDataEnsureTests(unittest.TestCase):
+    def test_simulation_working_state_resets_once_per_edge_session(self) -> None:
+        from lab_model.coordinator.state.lab_state_store import LabStateStore
+
+        tmp = Path(tempfile.mkdtemp(prefix="sim_state_reset_"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        state_path = tmp / "lab_state.json"
+        stale = {
+            "components": {
+                "tag_stale": {
+                    "statecontrol": {
+                        "tunables": {
+                            "nominal_pose": {"x": 999.0, "y": 999.0}
+                        }
+                    }
+                }
+            }
+        }
+        state_path.write_text(json.dumps(stale), encoding="utf-8")
+        store = LabStateStore.from_disk("sim.default", str(state_path))
+        edge_default = {
+            "components": {
+                "tag_default": {
+                    "statecontrol": {
+                        "tunables": {
+                            "nominal_pose": {"x": 10.0, "y": 20.0}
+                        }
+                    }
+                }
+            },
+            "runtime_sync": {"status": "ready"},
+            "edge_session_id": "session-a",
+        }
+
+        self.assertTrue(store.reset_from_new_edge_session(edge_default))
+        self.assertEqual(set(store.snapshot()["components"]), {"tag_default"})
+        self.assertNotIn("runtime_sync", store.snapshot())
+
+        same_session_edge = {
+            "components": {
+                "tag_later": {
+                    "statecontrol": {
+                        "tunables": {
+                            "nominal_pose": {"x": 30.0, "y": 40.0}
+                        }
+                    }
+                }
+            },
+            "runtime_sync": {"status": "ready"},
+            "edge_session_id": "session-a",
+        }
+        self.assertFalse(store.reset_from_new_edge_session(same_session_edge))
+        self.assertEqual(set(store.snapshot()["components"]), {"tag_default"})
+
+        new_session_edge = copy.deepcopy(same_session_edge)
+        new_session_edge["edge_session_id"] = "session-b"
+        self.assertTrue(store.reset_from_new_edge_session(new_session_edge))
+        self.assertEqual(set(store.snapshot()["components"]), {"tag_later"})
+
+    def test_real_edge_hydrates_poses_once_after_sync_ready(self) -> None:
+        from lab_model.coordinator.state.lab_state_store import LabStateStore
+
+        tmp = Path(tempfile.mkdtemp(prefix="real_state_reset_"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        state_path = tmp / "lab_state.json"
+        stale = {
+            "system_status": "IDLE",
+            "components": {
+                "tag_8": {
+                    "statecontrol": {
+                        "tunables": {
+                            "nominal_pose": {
+                                "x": 218.57,
+                                "y": 91.09,
+                                "rotation": 90.0,
+                            }
+                        }
+                    }
+                }
+            },
+            "alignment_guides": [{"id": "g_keep", "p1": {"x": 0}, "p2": {"x": 1}}],
+            "laser_lines": {"snap_line_id": None, "lines": []},
+        }
+        state_path.write_text(json.dumps(stale), encoding="utf-8")
+        store = LabStateStore.from_disk("real.default", str(state_path))
+
+        pending = {
+            "components": {
+                "tag_8": {
+                    "statecontrol": {
+                        "tunables": {
+                            "nominal_pose": {"x": 1.0, "y": 2.0, "rotation": 3.0}
+                        }
+                    }
+                }
+            },
+            "runtime_sync": {"status": "running"},
+            "edge_session_id": "real-session-1",
+        }
+        self.assertFalse(store.reset_from_new_edge_session(pending))
+        pose = store.snapshot()["components"]["tag_8"]["statecontrol"]["tunables"][
+            "nominal_pose"
+        ]
+        self.assertEqual(pose["x"], 218.57)
+
+        ready = {
+            "components": {
+                "tag_8": {
+                    "statecontrol": {
+                        "tunables": {
+                            "nominal_pose": {
+                                "x": 150.0,
+                                "y": -40.0,
+                                "rotation": 155.8,
+                            }
+                        }
+                    }
+                },
+                "tag_22": {
+                    "statecontrol": {
+                        "tunables": {
+                            "nominal_pose": {"x": 375.0, "y": -402.0, "rotation": 260.0}
+                        }
+                    }
+                },
+            },
+            "runtime_sync": {"status": "ready"},
+            "edge_session_id": "real-session-1",
+        }
+        self.assertTrue(store.reset_from_new_edge_session(ready))
+        snap = store.snapshot()
+        self.assertEqual(
+            snap["components"]["tag_8"]["statecontrol"]["tunables"]["nominal_pose"]["x"],
+            150.0,
+        )
+        self.assertIn("tag_22", snap["components"])
+        self.assertEqual(snap["alignment_guides"][0]["id"], "g_keep")
+        self.assertEqual(snap["laser_lines"]["snap_line_id"], None)
+        # Same session must not re-hydrate.
+        ready2 = copy.deepcopy(ready)
+        ready2["components"]["tag_8"]["statecontrol"]["tunables"]["nominal_pose"][
+            "x"
+        ] = 999.0
+        self.assertFalse(store.reset_from_new_edge_session(ready2))
+        self.assertEqual(
+            store.snapshot()["components"]["tag_8"]["statecontrol"]["tunables"][
+                "nominal_pose"
+            ]["x"],
+            150.0,
+        )
+
     def test_ensure_creates_thin_store(self) -> None:
         from lab_model.coordinator.backends.coordinator_data import ensure_coordinator_data
 
@@ -223,6 +374,48 @@ class CoordinatorDataEnsureTests(unittest.TestCase):
         self.assertFalse((root / "component_library.json").exists())
         self.assertFalse((root / "layout.json").exists())
         self.assertFalse((root / "motor_rotations.json").exists())
+
+    def test_ensure_seeds_laser_lines_from_coordinator_seed(self) -> None:
+        from lab_model.coordinator.backends.coordinator_data import ensure_coordinator_data
+
+        tmp = Path(tempfile.mkdtemp(prefix="coord_seed_"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        seed = tmp / "seed"
+        seed.mkdir()
+        (seed / "laser_lines.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "snap_line_id": "diode",
+                    "lines": [
+                        {
+                            "id": "diode",
+                            "name": "Laser diode",
+                            "enabled": True,
+                            "p1": {"x": 392.6, "y": -500.0},
+                            "p2": {"x": 392.6, "y": 500.0},
+                        },
+                        {
+                            "id": "ne_he",
+                            "name": "Ne-He",
+                            "enabled": True,
+                            "p1": {"x": 360.0, "y": -193.3},
+                            "p2": {"x": 360.4, "y": 206.7},
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        paths = ensure_coordinator_data(
+            str(tmp),
+            "real.default",
+            coordinator_data_path=str(tmp / "coordinator_data" / "real.default"),
+            coordinator_seed_path=str(seed),
+        )
+        doc = json.loads(Path(paths.laser_lines_json).read_text(encoding="utf-8"))
+        self.assertEqual(doc.get("snap_line_id"), "diode")
+        self.assertEqual([ln["id"] for ln in doc["lines"]], ["diode", "ne_he"])
 
 
 if __name__ == "__main__":

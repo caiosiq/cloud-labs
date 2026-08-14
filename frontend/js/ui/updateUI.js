@@ -20,6 +20,10 @@ import {
     physicalMountLabel,
 } from '../component-model.js';
 import { maybeRefreshBenchChromeBar } from './bench-chrome-bar.js';
+import {
+    reconcileLiveFeedPopouts,
+    syncLiveFeedSessionChrome,
+} from './live-feed-popout.js';
 import { getComponentIcon } from './icons.js';
 import { updateLayoutWarningBanner } from './layout-conflicts.js';
 import { createTrackToggleButton, listLibraryOnlyTags } from './inventory-add.js';
@@ -36,6 +40,8 @@ let _deps = {
     updateHoldingBanner: () => {},
     render: () => {},
     openPanel: () => {},
+    fetchLabState: null,
+    log: () => {},
 };
 
 let _lastSidebarSnapshot = '';
@@ -326,6 +332,10 @@ export function updateUI(opts = {}) {
         badgeClass = '';
         badgeColor = 'placed';
         badgeStyle = 'background-color: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);';
+    } else if (status === 'TELEOP') {
+        badgeClass = '';
+        badgeColor = '';
+        badgeStyle = 'background-color: #0891b2; box-shadow: 0 0 8px rgba(34, 211, 238, 0.45);';
     } else if (status === 'HOLDING') {
         badgeClass = '';
         badgeColor = '';
@@ -347,6 +357,11 @@ export function updateUI(opts = {}) {
     _deps.updateHoldingBanner();
     maybeRebuildComponentSidebar({ force: !!opts.forceSidebar });
     maybeRefreshBenchChromeBar();
+    reconcileLiveFeedPopouts(store.labState);
+    syncLiveFeedSessionChrome({
+        fetchLabState: _deps.fetchLabState || undefined,
+        log: _deps.log,
+    });
     _deps.updateMotorAngleLabels(store.selectedComponent);
     updateLayoutWarningBanner();
     _deps.render();

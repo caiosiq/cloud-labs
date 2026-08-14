@@ -3,10 +3,10 @@
   "layout": {
     "version": 1,
     "lab_bounds_mm": {
-      "x_min": -500,
-      "x_max": 500,
-      "y_min": -500,
-      "y_max": 500
+      "x_min": -590.55,
+      "x_max": 590.55,
+      "y_min": -609.6,
+      "y_max": 609.6
     },
     "danger_zone": {
       "radius_mm": 90,
@@ -14,13 +14,11 @@
     },
     "frame_safety": {
       "clearance_mm": 76.2,
+      "tcp_tool_envelope_radius_mm": 88.9,
       "minimum_component_footprint_mm": {
         "width": 75.0,
         "height": 75.0
       }
-    },
-    "manual_motion_workspace": {
-      "corner_cutoff_mm": 330.0
     },
     "storage": {
       "rule": "negative_xy",

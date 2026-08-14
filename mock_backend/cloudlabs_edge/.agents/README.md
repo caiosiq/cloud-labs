@@ -15,8 +15,11 @@ topic skill for the adapter you are filling.
 | [`skills/cloudlabs-context`](skills/cloudlabs-context/SKILL.md) | Orienting: what Cloud Labs is, who talks to whom |
 | [`skills/edge-contract`](skills/edge-contract/SKILL.md) | Adding endpoints, verbs, or side APIs |
 | [`skills/measurables-tensors`](skills/measurables-tensors/SKILL.md) | Capturing images / shaping MeasurableTensor |
+| [`skills/camera-bringup`](skills/camera-bringup/SKILL.md) | Real-lab camera init, exclusive USB, scan vs science cams |
 | [`skills/latency-channels`](skills/latency-channels/SKILL.md) | Teleop, live video, or long jobs |
 | [`skills/kernels-optimize`](skills/kernels-optimize/SKILL.md) | Scoring frames or closed-loop OPTIMIZE |
+| [`skills/optimize-pipeline-debug`](skills/optimize-pipeline-debug/SKILL.md) | Debugging capture / kernel / actuate on this edge |
+| [`skills/tunables-hold-for-measure`](skills/tunables-hold-for-measure/SKILL.md) | Keeping non-optimized tunables fixed when capturing |
 | [`skills/frames-calibration`](skills/frames-calibration/SKILL.md) | Table↔robot transforms |
 | [`skills/inventory-honesty`](skills/inventory-honesty/SKILL.md) | Store / place / inventory verbs |
 

@@ -80,14 +80,15 @@ instruments.
 
 | Belongs on **this edge** | Belongs on the **coordinator** (cloud-labs) |
 |--------------------------|---------------------------------------------|
-| `data/library.json` + `data/inventory.json` | Working Twin lab-state FSM (`HOLDING`, presence, commanded tunables) |
+| `data/library.json` + `data/inventory.json` | Working Twin lab-state FSM (`BUSY`/`HOLDING`/`IDLE`, presence, commanded tunables) |
 | Bench layout / geometry (`GET /bench`) | Version control (`control/` under `coordinator_data/<backend_id>/`) |
 | Motor / physical tunable tracking, RECORD/SYNC truth | Twin-only overlays for now (e.g. laser lines) |
 | Streams, teleop live samples, `runtime_sync` | Session lease / jobs |
 
-- After a successful primitive, the coordinator may apply language `commit_*`
-  so Twin shows HOLDING even if edge lab-state stays IDLE — **do not** invent
-  Twin FSM writers on the edge to “fix” the UI.
+- After a successful primitive, the coordinator applies language `commit_*` and
+  owns Twin `system_status` (BUSY while the southbound execute runs; then
+  IDLE/HOLDING from commits) even if edge `lab_state` stays IDLE — **do not**
+  invent Twin FSM writers, busy endpoints, or stash/dirty “fixes” on the edge.
 - Do not author a parallel library / inventory / active_catalog on the
   coordinator; active tags are inventory keys.
 - Debug: `[lab_init]` = SYNC/READY; `[lab_state]` / `[control]` / `[backend]`

@@ -14,6 +14,7 @@ and an **edge agent** (mock process or `cloudlabs_edge/` in a lab repo).
 |--------|------|--------|
 | `GET` | `/capabilities` | [`capabilities.schema.json`](./capabilities.schema.json) |
 | `GET` | `/bench` | [`bench.schema.json`](./bench.schema.json) |
+| `GET` | `/kernels` | [`kernels.schema.json`](./kernels.schema.json) — edge-owned premade + session catalog |
 | `GET` | `/library` | [`library.schema.json`](./library.schema.json) — full lab component library |
 | `GET` | `/inventory` | [`inventory.schema.json`](./inventory.schema.json) — declared tracked tags + placement |
 | `POST` | `/execute` | request [`execute_request.schema.json`](./execute_request.schema.json), response [`execute_response.schema.json`](./execute_response.schema.json) |

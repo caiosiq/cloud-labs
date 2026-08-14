@@ -603,6 +603,7 @@ class MockLabCommunicator(LabCommunicator):
         session_id: str,
         progress_callback: Callable[..., None],
         should_abort: Optional[Callable[[], bool]] = None,
+        should_accept: Optional[Callable[[], bool]] = None,
     ) -> Optional[Dict[str, Any]]:
         from mock_backend.host.ensemble import run_mock_ensemble_session
         from lab_model.execution.optimization.spec import OptimizeEnsembleParameters
@@ -630,6 +631,8 @@ class MockLabCommunicator(LabCommunicator):
                 state_lock=self._state_lock,
                 should_abort=should_abort
                 or getattr(self, "_job_abort_check", None),
+                should_accept=should_accept
+                or getattr(self, "_job_accept_check", None),
             )
             with self._state_lock:
                 self._persist_state()
@@ -642,6 +645,9 @@ class MockLabCommunicator(LabCommunicator):
             "final_values": result.final_values,
             "evals": result.evals,
             "trace": result.trace[-200:],
+            "aborted": bool(getattr(result, "aborted", False)),
+            "early_stopped": bool(getattr(result, "early_stopped", False)),
+            "early_stop_reason": getattr(result, "early_stop_reason", None),
         }
 
     async def _primitive_add_component_to_state(

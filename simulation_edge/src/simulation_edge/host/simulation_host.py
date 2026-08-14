@@ -12,6 +12,7 @@ import copy
 import math
 import os
 import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
@@ -85,6 +86,7 @@ class SimulationHost:
             str(row["tag_id"]): row for row in self.catalog if row.get("tag_id")
         }
         self.current_state = copy.deepcopy(dict(state))
+        self.edge_session_id = uuid.uuid4().hex
         self.layout = copy.deepcopy(dict(layout))
         self._lock = threading.RLock()
         # Alias for coordinator tunable commit helpers (``commit_nominal_pose``).
@@ -265,6 +267,7 @@ class SimulationHost:
         *,
         show_viewer: Optional[bool] = None,
         realtime: Optional[bool] = None,
+        lab_state: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         client = self._client
         if client is not None:
@@ -273,6 +276,35 @@ class SimulationHost:
         self.scene = None
         with self._lock:
             self._last_runtime_error = None
+            if lab_state is not None:
+                components = lab_state.get("components")
+                if not isinstance(components, Mapping):
+                    raise ValueError(
+                        "MuJoCo restart lab_state must contain components"
+                    )
+                synced = copy.deepcopy(dict(lab_state))
+                # These fields are generated live by this edge and must not be
+                # imported from the coordinator's previous edge snapshot.
+                for key in (
+                    "active_backend_id",
+                    "edge_agent",
+                    "edge_attached",
+                    "edge_offline",
+                    "edge_session_id",
+                    "edge_stale_after_s",
+                    "edge_state_source",
+                    "last_runtime_error",
+                    "runtime_sync",
+                    "session_lease",
+                    "simulator",
+                ):
+                    synced.pop(key, None)
+                self.current_state = synced
+                self._poses = {
+                    str(tag): _pose_from_component(component)
+                    for tag, component in components.items()
+                    if isinstance(component, Mapping)
+                }
         self._start_mujoco(show_viewer=show_viewer, realtime=realtime)
         return self.simulator_status()
 
@@ -294,6 +326,7 @@ class SimulationHost:
                     self._client is not None and getattr(self._client, "running", False)
                 ),
                 **sim_status,
+                "edge_session_id": self.edge_session_id,
             }
             spawn_adjustments = (
                 getattr(self.scene, "spawn_adjustments_mm", {}) if self.scene else {}
@@ -301,6 +334,7 @@ class SimulationHost:
             if spawn_adjustments:
                 simulator["spawn_adjustments"] = copy.deepcopy(spawn_adjustments)
             state["simulator"] = simulator
+            state["edge_session_id"] = self.edge_session_id
             state["runtime_sync"] = dict(self._runtime_sync or {"status": "pending"})
             return state
 

@@ -36,6 +36,7 @@ import {
 import { mmToPx } from './coordinates.js';
 import { store } from '../state/store.js';
 import {
+    catalogDeclaresTablePose,
     drawPose,
     isHeldTag,
     isStoredComponent,
@@ -46,6 +47,7 @@ import { clipTwoPointLineToLabBounds } from '../geometry/lines.js';
 import { drawAlignmentGuides, drawAlignmentIntersectionMarkers } from './guides.js';
 import { getComponentSize } from './interaction.js';
 import { placementUiLabel } from '../ui/context-panel.js';
+import { occupiedStorageSlots, storageSlotCenterPose } from '../storage-region.js';
 import {
     getOptimizationHighlightForTag,
     optimizationHighlightColor,
@@ -255,6 +257,48 @@ function drawStorageZone() {
         ctx.lineTo(b.x, b.y);
         ctx.stroke();
     }
+
+    // Choose-slot mode: tint free (green) vs occupied (red) cells.
+    if (store.storeToSlotTag) {
+        const occ = occupiedStorageSlots(store.storeToSlotTag);
+        for (let j = 0; j < ny; j++) {
+            for (let i = 0; i < nx; i++) {
+                const key = `${i},${j}`;
+                const xa = x0 + i * cw;
+                const xb = x0 + (i + 1) * cw;
+                const ya = y0 + j * ch;
+                const yb = y0 + (j + 1) * ch;
+                const sw = mmToPx(xa, ya);
+                const se = mmToPx(xb, ya);
+                const ne = mmToPx(xb, yb);
+                const nw = mmToPx(xa, yb);
+                ctx.beginPath();
+                ctx.moveTo(sw.x, sw.y);
+                ctx.lineTo(se.x, se.y);
+                ctx.lineTo(ne.x, ne.y);
+                ctx.lineTo(nw.x, nw.y);
+                ctx.closePath();
+                ctx.fillStyle = occ.has(key)
+                    ? 'rgba(248, 113, 113, 0.28)'
+                    : 'rgba(52, 211, 153, 0.22)';
+                ctx.fill();
+                // Subtle index for power users while choosing.
+                const mid = mmToPx((xa + xb) / 2, (ya + yb) / 2);
+                ctx.fillStyle = occ.has(key)
+                    ? 'rgba(254, 202, 202, 0.9)'
+                    : 'rgba(167, 243, 208, 0.95)';
+                ctx.font = '10px ui-monospace, monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`${i},${j}`, mid.x, mid.y);
+            }
+        }
+        ctx.textAlign = 'start';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = 'rgba(103, 232, 249, 0.95)';
+        ctx.font = '11px Inter, sans-serif';
+        ctx.fillText('Pick a free cell', pSw.x + 10, pSe.y + 14);
+    }
 }
 
 function drawLaserPath(docOverride) {
@@ -444,6 +488,45 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.strokeRect(-halfW, -halfH, w, h);
         ctx.fillStyle = 'rgba(248, 113, 113, 0.3)';
         ctx.fillRect(-halfW + 2, -halfH + 2, w - 4, h - 4);
+    } else if (
+        catalogId === 'P1' ||
+        catalogId === 'tilted_polarizer' ||
+        type === 'OPTICAL_POLARIZER'
+    ) {
+        // Polarizer mount: dark square + circular optic + polarization hatch.
+        ctx.fillStyle = '#1a1f2e';
+        ctx.fillRect(-halfW, -halfH, w, h);
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-halfW, -halfH, w, h);
+        const r = Math.min(halfW, halfH) * 0.72;
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#7dd3fc';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
+        ctx.lineWidth = 1.25;
+        const step = Math.max(4, r / 4);
+        for (let x = -r; x <= r; x += step) {
+            const halfChord = Math.sqrt(Math.max(0, r * r - x * x));
+            ctx.beginPath();
+            ctx.moveTo(x, -halfChord);
+            ctx.lineTo(x, halfChord);
+            ctx.stroke();
+        }
+        // Local +Y arrow = polarization axis cue.
+        ctx.strokeStyle = '#fbbf24';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, r * 0.55);
+        ctx.lineTo(0, -r * 0.55);
+        ctx.moveTo(-4, -r * 0.35);
+        ctx.lineTo(0, -r * 0.55);
+        ctx.lineTo(4, -r * 0.35);
+        ctx.stroke();
     } else if (catalogId === 'cam_gripper_1' || catalogId === 'cam_gripper_2' || type === 'OPTICAL_CAMERA') {
         ctx.fillStyle = '#1e293b';
         ctx.fillRect(-halfW, -halfH, w, h);
@@ -580,7 +663,10 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
 
     ctx.fillText(displayName, 0, -halfH - 10);
     const stLab = store.labState && store.labState.components[name] && placementUiLabel(store.labState.components[name]);
-    if (mode === 'SOLID' && stLab === 'STORED') {
+    const previewComp = store.control?.previewConfig?.components?.[name];
+    const showStorageBadge =
+        (previewComp && isStoredComponent(previewComp)) || stLab === 'STORED';
+    if (mode === 'SOLID' && showStorageBadge) {
         ctx.fillStyle = 'rgba(165, 180, 252, 0.95)';
         ctx.font = '600 9px Inter, sans-serif';
         ctx.fillText('STORAGE', 0, -halfH - 24);
@@ -653,10 +739,9 @@ function drawOptimizationGraph() {
 /**
  * Render a VIEWED node's configuration (read-only preview / "replace" mode).
  *
- * The previewed config (membership model) lists only the node's breadboard
- * parts at their nominal poses; we draw those, plus the live bench's stored
- * parts (storage isn't versioned, so they're physically the same regardless of
- * which node you view). The live bench is never modified by this.
+ * The previewed config lists breadboard parts and storage inventory at their
+ * nominal poses. Live-only stored tags that are absent from the node are still
+ * shown faintly so the operator can see ambient inventory during preview.
  *
  * @param {{ components?: Record<string, any> }} preview
  */
@@ -664,13 +749,22 @@ function drawPreviewConfiguration(preview) {
     const comps = (preview && preview.components) || {};
     Object.entries(comps).forEach(([name, c]) => {
         const tun = (c && c.statecontrol && c.statecontrol.tunables) || {};
-        const pose = tun.nominal_pose;
+        let pose = tun.nominal_pose;
+        // Stored inventory is slot-only on nodes — derive cell center for draw.
+        if (
+            (!pose || typeof pose.x !== 'number' || typeof pose.y !== 'number') &&
+            isStoredComponent(c)
+        ) {
+            pose = storageSlotCenterPose(tun.storage && tun.storage.slot);
+        }
         if (!pose || typeof pose.x !== 'number' || typeof pose.y !== 'number') return;
-        if (!shouldRenderOnCanvas(name, c)) return;
+        // Slot-derived poses skip shouldRenderOnCanvas (no nominal_pose on the node).
+        if (!isStoredComponent(c) && !shouldRenderOnCanvas(name, c)) return;
+        if (isStoredComponent(c) && !catalogDeclaresTablePose(name)) return;
         drawComponent(name, pose, c.type, 'SOLID');
     });
 
-    // Live stored parts stay visible in the storage zone during preview.
+    // Ambient live inventory not listed on this node (legacy nodes / extras).
     const live = store.labState && store.labState.components;
     if (live) {
         Object.entries(live).forEach(([name, comp]) => {
@@ -716,17 +810,24 @@ export function render() {
         }
     });
 
-    // 1b. TeleOp LIVE pose (hardware truth from fast poll).
+    // 1b. TeleOp LIVE pose (hardware truth from fast poll / WS).
     Object.entries(store.labState.components).forEach(([name, comp]) => {
         if (!shouldRenderOnCanvas(name, comp) || !isTeleopReady(comp)) return;
         const live = store.teleopLivePose[name];
-        if (live && Number.isFinite(live.x) && Number.isFinite(live.y)) {
-            drawComponent(name, live, comp.type, 'SOLID');
-            const p = mmToPx(live.x, live.y);
-            _ctx.fillStyle = TELEOP_LIVE_COLOR;
-            _ctx.font = '9px Inter, sans-serif';
-            _ctx.fillText('LIVE', p.x + 8, p.y - 8);
-        }
+        if (!live) return;
+        const target = store.teleopTarget[name];
+        // Some samples may only carry rotation briefly — keep xy from target/ghost.
+        const x = Number.isFinite(live.x) ? live.x
+            : (target && Number.isFinite(target.x) ? target.x : NaN);
+        const y = Number.isFinite(live.y) ? live.y
+            : (target && Number.isFinite(target.y) ? target.y : NaN);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        const drawLive = { ...live, x, y };
+        drawComponent(name, drawLive, comp.type, 'SOLID');
+        const p = mmToPx(x, y);
+        _ctx.fillStyle = TELEOP_LIVE_COLOR;
+        _ctx.font = '9px Inter, sans-serif';
+        _ctx.fillText('LIVE', p.x + 8, p.y - 8);
     });
 
     // 1c. TeleOp TARGET preview (client planning layer).

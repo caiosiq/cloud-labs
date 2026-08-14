@@ -97,11 +97,18 @@ async def run_teleop_session_websocket(
     websocket: "WebSocket",
     lab: "LabCommunicator",
     tag_id: str,
+    *,
+    lab_state: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Handle one TeleOp WebSocket through connect â†’ push/receive â†’ disconnect."""
+    """Handle one TeleOp WebSocket through connect â†’ push/receive â†’ disconnect.
+
+    ``lab_state`` should be the coordinator working snapshot when TeleOp ready
+    flags live there (HTTP-edge merge / pendingâ†’ready). Falls back to
+    ``lab.get_lab_state()`` for pure in-process mock.
+    """
     from fastapi import WebSocketDisconnect  # noqa: PLC0415
 
-    state = lab.get_lab_state()
+    state = lab_state if isinstance(lab_state, dict) else lab.get_lab_state()
     entry = (state.get("components") or {}).get(tag_id)
     if not isinstance(entry, dict) or not is_teleop_ready(entry):
         await websocket.close(code=4409, reason="TELEOP session not ready")
@@ -178,6 +185,36 @@ def _flat_pose_fields(msg: Dict[str, Any]) -> Dict[str, float]:
             continue
         try:
             out[axis] = float(val)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _flat_speed_fields(msg: Dict[str, Any]) -> Dict[str, float]:
+    """Flatten Twin ``speed: {linear_mm_s, angular_deg_s}`` for edge Tier-A WS.
+
+    Edge ``/ws/teleop`` rejects any dict/list value as ``NESTED_ENVELOPE``. HTTP
+    ``TELEOP_GOTO`` may keep a nested speed object; the WS hot path must use
+    scalar top-level keys only.
+    """
+    out: Dict[str, float] = {}
+    speed = msg.get("speed")
+    src: Dict[str, Any] = {}
+    if isinstance(speed, dict):
+        src.update(speed)
+    elif speed is not None and not isinstance(speed, (dict, list)):
+        try:
+            out["linear_mm_s"] = float(speed)
+        except (TypeError, ValueError):
+            pass
+    for key in ("linear_mm_s", "angular_deg_s"):
+        if key in msg and not isinstance(msg[key], (dict, list)):
+            src[key] = msg[key]
+        val = src.get(key)
+        if val is None:
+            continue
+        try:
+            out[key] = float(val)
         except (TypeError, ValueError):
             continue
     return out
@@ -304,8 +341,7 @@ async def run_teleop_session_proxy(
             if mtype == "goto":
                 frame: Dict[str, Any] = {"tag_id": tag_id, "cmd": "GOTO"}
                 frame.update(_flat_pose_fields(msg))
-                if msg.get("speed") is not None:
-                    frame["speed"] = msg["speed"]
+                frame.update(_flat_speed_fields(msg))
                 await _edge_send(frame)
                 continue
             if mtype == "jog":
@@ -315,6 +351,7 @@ async def run_teleop_session_proxy(
                     frame["val"] = msg["val"]
                 else:
                     frame.update(_flat_pose_fields(msg))
+                frame.update(_flat_speed_fields(msg))
                 await _edge_send(frame)
                 continue
             await websocket.send_json(

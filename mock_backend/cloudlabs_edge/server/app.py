@@ -89,6 +89,12 @@ def create_app(*, lab: Any = None, backend_id: str = "mock.default") -> FastAPI:
     async def get_bench() -> Dict[str, Any]:
         return bench_body
 
+    @app.get("/kernels")
+    async def get_kernels() -> Dict[str, Any]:
+        from cloudlabs_edge_dev.optimization import kernels_http_catalog
+
+        return kernels_http_catalog(backend_id, _edge_root() / "kernels")
+
     @app.get("/library")
     async def get_library() -> Dict[str, Any]:
         from cloudlabs_edge_dev.edge_data import load_library, stamp_backend

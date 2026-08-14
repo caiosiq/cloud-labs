@@ -190,6 +190,98 @@ class ObjectiveCompilerTests(unittest.TestCase):
         out = compile_objective_payload(runtime)
         self.assertEqual(out["terms"][0]["id"], runtime["terms"][0]["id"])
 
+    def test_ui_kernel_preset_graph_compiles_via_source_passthrough(self) -> None:
+        """Twin edge presets must compile (regression: forbidden kernel_id siblings)."""
+        graph = {
+            "version": 1,
+            "type": "weighted_sum",
+            "minimize": True,
+            "terms": [
+                {
+                    "id": "term_tag_22_builtin_roi_centroid",
+                    "tag_id": "tag_22",
+                    "weight": 1.0,
+                    "metric": "rms_distance",
+                    "source": {
+                        "tag_id": "tag_22",
+                        "kind": "torchscript_features",
+                        "kernel_id": "builtin.roi_centroid",
+                        "from": "measurables.camera_image",
+                        "feature_index": [0, 1],
+                        "target_px": {"x": 2744.0, "y": 1836.0},
+                    },
+                }
+            ],
+        }
+        compiled = compile_objective_graph(graph)
+        self.assertEqual(compiled.terms[0].source.kernel_id, "builtin.roi_centroid")
+        self.assertEqual(compiled.terms[0].source.kind, "torchscript_features")
+        self.assertEqual(compiled.terms[0].metric, "rms_distance")
+        self.assertEqual(compiled.terms[0].source.target_px, {"x": 2744.0, "y": 1836.0})
+
+        # Legacy forbidden shape must still fail closed with a clear schema error.
+        bad = {
+            "version": 1,
+            "type": "weighted_sum",
+            "minimize": True,
+            "terms": [
+                {
+                    "id": "bad",
+                    "tag_id": "tag_22",
+                    "field": "camera_image",
+                    "weight": 1.0,
+                    "metric": "rms_distance",
+                    "kernel_id": "builtin.roi_centroid",
+                    "source_kind": "torchscript_features",
+                    "feature_index": [0, 1],
+                    "target_px": {"x": 1.0, "y": 2.0},
+                }
+            ],
+        }
+        with self.assertRaises(EnsemblePreflightError) as ctx:
+            compile_objective_graph(bad)
+        self.assertIn("schema validation", ctx.exception.message)
+
+    def test_remote_edge_kernel_ids_skip_coordinator_manifest(self) -> None:
+        """HTTP-edge preflight must accept kernels that exist only on the edge."""
+        compiled = compile_objective_graph(
+            {
+                "version": 1,
+                "type": "weighted_sum",
+                "minimize": True,
+                "terms": [
+                    {
+                        "id": "term_tag_22_builtin_roi_centroid",
+                        "tag_id": "tag_22",
+                        "weight": 1.0,
+                        "metric": "rms_distance",
+                        "source": {
+                            "tag_id": "tag_22",
+                            "kind": "torchscript_features",
+                            "kernel_id": "builtin.roi_centroid",
+                            "from": "measurables.camera_image",
+                            "feature_index": [0, 1],
+                            "target_px": {"x": 2744.0, "y": 1836.0},
+                        },
+                    }
+                ],
+            }
+        )
+        # Without edge_kernel_ids this may raise (coordinator has no artifact).
+        # With the remote set, preflight must accept and skip ensure_torchscript_ready.
+        preflight_objective_sources(
+            self.fixture_runtime,
+            compiled,
+            edge_kernel_ids={"builtin.roi_centroid", "builtin.beam_power"},
+        )
+        with self.assertRaises(EnsemblePreflightError) as ctx:
+            preflight_objective_sources(
+                self.fixture_runtime,
+                compiled,
+                edge_kernel_ids={"demo.image_mean_score"},
+            )
+        self.assertIn("edge catalog", ctx.exception.message)
+
 
 if __name__ == "__main__":
     unittest.main()

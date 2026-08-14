@@ -71,26 +71,41 @@ def _cfg_component(tag, *, x=0.0, y=0.0):
 
 
 class MembershipExtractTests(unittest.TestCase):
-    def test_extract_excludes_stored_and_off_table(self) -> None:
+    def test_extract_includes_stored_with_slot_excludes_off_table(self) -> None:
+        stored = _runtime_entry(
+            "tag_stored", PRESENCE_STORAGE, x=-120.0, y=-80.0, in_storage=True
+        )
+        stored["statecontrol"]["tunables"]["storage"]["slot"] = {"i": 1, "j": 2}
         runtime = _runtime(
             {
                 "tag_on": _runtime_entry("tag_on"),
-                "tag_stored": _runtime_entry("tag_stored", PRESENCE_STORAGE, in_storage=True),
+                "tag_stored": stored,
                 "tag_off": _runtime_entry("tag_off", PRESENCE_OFF_TABLE),
             }
         )
         cfg = extract_configuration(runtime)
         self.assertIn("tag_on", cfg["components"])
-        self.assertNotIn("tag_stored", cfg["components"])
+        self.assertIn("tag_stored", cfg["components"])
         self.assertNotIn("tag_off", cfg["components"])
+        tun = cfg["components"]["tag_stored"]["statecontrol"]["tunables"]
+        self.assertEqual(tun["presence"], PRESENCE_STORAGE)
+        self.assertEqual(tun["storage"]["slot"], {"i": 1, "j": 2})
+        self.assertNotIn("nominal_pose", tun)
+        self.assertNotIn("reported_pose", tun)
 
-    def test_in_storage_flag_excludes_even_if_presence_breadboard(self) -> None:
+    def test_in_storage_flag_is_versioned(self) -> None:
         runtime = _runtime(
             {"tag_x": _runtime_entry("tag_x", PRESENCE_BREADBOARD, in_storage=True)}
         )
-        self.assertNotIn("tag_x", extract_configuration(runtime)["components"])
+        cfg = extract_configuration(runtime)
+        self.assertIn("tag_x", cfg["components"])
+        self.assertTrue(
+            cfg["components"]["tag_x"]["statecontrol"]["tunables"]["storage"][
+                "in_storage"
+            ]
+        )
 
-    def test_table_configuration_strips_legacy_stored_entry(self) -> None:
+    def test_table_configuration_strips_stored_entry(self) -> None:
         legacy = {
             "components": {
                 "tag_on": {
@@ -100,7 +115,7 @@ class MembershipExtractTests(unittest.TestCase):
                     "statecontrol": {
                         "tunables": {
                             "presence": PRESENCE_STORAGE,
-                            "storage": {"in_storage": True},
+                            "storage": {"in_storage": True, "slot": {"i": 0, "j": 0}},
                         }
                     }
                 },
@@ -108,6 +123,27 @@ class MembershipExtractTests(unittest.TestCase):
         }
         normalized = table_configuration(legacy)
         self.assertEqual(set(normalized["components"].keys()), {"tag_on"})
+
+    def test_lab_configuration_keeps_stored_entry(self) -> None:
+        from lab_model.coordinator.state.projections import lab_configuration
+
+        legacy = {
+            "components": {
+                "tag_on": {
+                    "statecontrol": {"tunables": {"presence": PRESENCE_BREADBOARD}}
+                },
+                "tag_stored": {
+                    "statecontrol": {
+                        "tunables": {
+                            "presence": PRESENCE_STORAGE,
+                            "storage": {"in_storage": True, "slot": {"i": 0, "j": 1}},
+                        }
+                    }
+                },
+            }
+        }
+        normalized = lab_configuration(legacy)
+        self.assertEqual(set(normalized["components"].keys()), {"tag_on", "tag_stored"})
 
 
 class MembershipDiffReconcileTests(unittest.TestCase):
@@ -155,6 +191,126 @@ class MembershipDiffReconcileTests(unittest.TestCase):
         self.assertIn(PrimitiveId.PLACE_FROM_STORAGE, actions)
         self.assertIn(PrimitiveId.SET_EXPOSURE, actions)
 
+    def test_store_to_explicit_slot(self) -> None:
+        current = _cfg_component("tag_a", x=10.0, y=20.0)
+        target = {
+            "components": {
+                "tag_a": {
+                    "id": "tag_a",
+                    "type": "mirror",
+                    "statecontrol": {
+                        "tunables": {
+                            "presence": PRESENCE_STORAGE,
+                            "nominal_pose": {"x": -120.0, "y": -80.0, "rotation": 0.0},
+                            "storage": {
+                                "in_storage": True,
+                                "slot": {"i": 2, "j": 1},
+                            },
+                        }
+                    },
+                }
+            },
+            "holding": {"tag_id": None, "nominal_pose": None},
+        }
+        plan = plan_reconcile(current, target)
+        store = next(c for c in plan if c["action"] == PrimitiveId.STORE_COMPONENT)
+        self.assertEqual(store["parameters"]["slot_i"], 2)
+        self.assertEqual(store["parameters"]["slot_j"], 1)
+
+    def test_storage_slot_change_plans_store(self) -> None:
+        current = {
+            "components": {
+                "tag_a": {
+                    "statecontrol": {
+                        "tunables": {
+                            "presence": PRESENCE_STORAGE,
+                            "storage": {
+                                "in_storage": True,
+                                "slot": {"i": 0, "j": 0},
+                            },
+                        }
+                    }
+                }
+            },
+            "holding": {"tag_id": None, "nominal_pose": None},
+        }
+        target = {
+            "components": {
+                "tag_a": {
+                    "statecontrol": {
+                        "tunables": {
+                            "presence": PRESENCE_STORAGE,
+                            "storage": {
+                                "in_storage": True,
+                                "slot": {"i": 1, "j": 2},
+                            },
+                        }
+                    }
+                }
+            },
+            "holding": {"tag_id": None, "nominal_pose": None},
+        }
+        plan = plan_reconcile(current, target)
+        store = next(c for c in plan if c["action"] == PrimitiveId.STORE_COMPONENT)
+        self.assertEqual(store["parameters"]["slot_i"], 1)
+        self.assertEqual(store["parameters"]["slot_j"], 2)
+
+    def test_stored_pose_in_legacy_config_does_not_plan_motion(self) -> None:
+        """Slot-only VC: embedded XY on a stored entry is ignored for reconcile."""
+        current = {
+            "components": {
+                "tag_a": {
+                    "statecontrol": {
+                        "tunables": {
+                            "presence": PRESENCE_STORAGE,
+                            "nominal_pose": {"x": -115.0, "y": -78.0, "rotation": 5.0},
+                            "storage": {
+                                "in_storage": True,
+                                "slot": {"i": 1, "j": 2},
+                            },
+                        }
+                    }
+                }
+            },
+            "holding": {"tag_id": None, "nominal_pose": None},
+        }
+        target = {
+            "components": {
+                "tag_a": {
+                    "statecontrol": {
+                        "tunables": {
+                            "presence": PRESENCE_STORAGE,
+                            "nominal_pose": {"x": -120.0, "y": -80.0, "rotation": 0.0},
+                            "storage": {
+                                "in_storage": True,
+                                "slot": {"i": 1, "j": 2},
+                            },
+                        }
+                    }
+                }
+            },
+            "holding": {"tag_id": None, "nominal_pose": None},
+        }
+        plan = plan_reconcile(current, target)
+        self.assertEqual(plan, [])
+
+    def test_dropping_stored_from_target_is_noop(self) -> None:
+        current = {
+            "components": {
+                "tag_a": {
+                    "statecontrol": {
+                        "tunables": {
+                            "presence": PRESENCE_STORAGE,
+                            "storage": {"in_storage": True, "slot": {"i": 0, "j": 0}},
+                        }
+                    }
+                }
+            },
+            "holding": {"tag_id": None, "nominal_pose": None},
+        }
+        plan = plan_reconcile(current, EMPTY_CONFIGURATION)
+        self.assertEqual(plan, [])
+
 
 class EmptyBaseDirtyTests(unittest.TestCase):
     def test_dirty_against_empty_when_no_applied(self) -> None:
@@ -168,6 +324,30 @@ class EmptyBaseDirtyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             mgr = ControlManager(tmp, "fresh")
             self.assertFalse(mgr.runtime_is_dirty(_runtime({})))
+
+    def test_storage_only_does_not_dirty_empty_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = ControlManager(tmp, "fresh")
+            runtime = _runtime(
+                {
+                    "tag_s": _runtime_entry(
+                        "tag_s", PRESENCE_STORAGE, in_storage=True
+                    )
+                }
+            )
+            self.assertFalse(mgr.runtime_is_dirty(runtime))
+
+    def test_dirty_when_applied_versions_storage_slot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = ControlManager(tmp, "fresh")
+            stored = _runtime_entry(
+                "tag_s", PRESENCE_STORAGE, x=-100.0, y=-100.0, in_storage=True
+            )
+            stored["statecontrol"]["tunables"]["storage"]["slot"] = {"i": 0, "j": 0}
+            mgr.commit_from_runtime(_runtime({"tag_s": stored}), message="inv")
+            moved = copy.deepcopy(stored)
+            moved["statecontrol"]["tunables"]["storage"]["slot"] = {"i": 1, "j": 0}
+            self.assertTrue(mgr.runtime_is_dirty(_runtime({"tag_s": moved})))
 
     def test_foreign_bench_is_dirty_when_not_owning(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -328,16 +508,19 @@ class ControlCapabilitiesTests(unittest.TestCase):
         self.assertFalse(caps["can_drop_stash"])
         self.assertTrue(caps["can_fork"])
         self.assertTrue(caps["can_checkout_other"])
+        self.assertTrue(caps["can_set_node"])
 
     def test_dirty_on_head(self) -> None:
         caps = _control_capabilities(
             dirty=True, detached=False, has_stash=False, has_commits=True
         )
-        # Dirty work must be stashed/committed before navigating away.
+        # Soft preview / Set as reference stay available while dirty; only hard
+        # apply-on-bench remains gated in the checkout endpoint / UI.
         self.assertTrue(caps["can_commit"])
         self.assertTrue(caps["commit_recommended"])
         self.assertTrue(caps["can_stash"])
-        self.assertFalse(caps["can_checkout_other"])
+        self.assertTrue(caps["can_checkout_other"])
+        self.assertTrue(caps["can_set_node"])
         self.assertFalse(caps["can_pop_stash"])
 
     def test_detached_blocks_commit_allows_fork(self) -> None:
@@ -381,6 +564,7 @@ class ControlCapabilitiesTests(unittest.TestCase):
             unadopted=True,
         )
         self.assertTrue(caps["can_set_node"])
+        self.assertTrue(caps["can_checkout_other"])
         self.assertFalse(caps["can_commit"])
         self.assertFalse(caps["can_stash"])
         self.assertFalse(caps["can_fork"])

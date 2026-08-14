@@ -28,18 +28,15 @@ class ComponentProxy:
         y: Optional[float] = None,
         rotation: Optional[float] = None,
     ) -> "ComponentProxy":
-        """Update one or more ``tunables.nominal_pose`` axes (each axis = one command)."""
-        updates = (("x", x), ("y", y), ("rotation", rotation))
-        if all(v is None for _, v in updates):
+        """One ``MOVE_COMPONENT`` to the merged breadboard pose.
+
+        Unspecified axes keep the current ``nominal_pose``. Prefer this over
+        calling :meth:`~cloudlabs.client.CloudLabsClient.move_component` once
+        per axis (that would drive the arm three times).
+        """
+        if x is None and y is None and rotation is None:
             raise ValueError("move() requires at least one of x, y, rotation")
-        for axis, value in updates:
-            if value is None:
-                continue
-            self.client.move_component(
-                self.tag_id,
-                f"tunables.nominal_pose.{axis}",
-                float(value),
-            )
+        self.client.move_pose(self.tag_id, x=x, y=y, rotation=rotation)
         return self
 
     def motor(self, motor_id: Union[int, str], angle_deg: float) -> "ComponentProxy":

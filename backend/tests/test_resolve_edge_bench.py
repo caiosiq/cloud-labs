@@ -146,5 +146,66 @@ class ResolveEdgeBenchTests(unittest.TestCase):
                 resolve_edge_bench(rt)
 
 
+class BindStorageGeometryTests(unittest.TestCase):
+    def test_rebinds_process_geometry_from_active_edge_bench(self) -> None:
+        """Mock Q3 must not stick when the active backend is real's centered strip."""
+        from lab_model.coordinator.catalog.resolve_edge_bench import bind_storage_geometry
+        from lab_model.language.domain.storage_region import (
+            configure_from_layout_document,
+            storage_grid_spec,
+        )
+
+        configure_from_layout_document(
+            {
+                "lab_bounds_mm": {
+                    "x_min": -500,
+                    "x_max": 500,
+                    "y_min": -500,
+                    "y_max": 500,
+                },
+                "danger_zone": {"radius_mm": 90, "padding_mm": 5},
+                "storage": {"rule": "negative_xy", "grid_nx": 4, "grid_ny": 4},
+            }
+        )
+        stuck = storage_grid_spec()
+        self.assertEqual(stuck["nx"], 4)
+        self.assertEqual(stuck["q3"]["x_max"], 0.0)
+
+        real_layout = {
+            "lab_bounds_mm": {
+                "x_min": -500,
+                "x_max": 500,
+                "y_min": -500,
+                "y_max": 500,
+            },
+            "danger_zone": {"radius_mm": 90, "padding_mm": 5},
+            "storage": {
+                "rule": "negative_xy",
+                "grid_nx": 3,
+                "grid_ny": 3,
+                "bounds_mm": {
+                    "x_min": -135.0,
+                    "x_max": 135.0,
+                    "y_min": -370.0,
+                    "y_max": -100.0,
+                },
+            },
+        }
+        rt = SimpleNamespace(edge_layout_cache=None)
+        with patch(
+            "lab_model.coordinator.catalog.resolve_edge_bench.resolve_edge_bench",
+            return_value=SimpleNamespace(layout=real_layout, source="edge_http"),
+        ):
+            bind_storage_geometry(rt)
+
+        fixed = storage_grid_spec()
+        self.assertEqual(fixed["nx"], 3)
+        self.assertEqual(fixed["ny"], 3)
+        self.assertEqual(fixed["q3"]["x_min"], -135.0)
+        self.assertEqual(fixed["q3"]["x_max"], 135.0)
+        self.assertEqual(fixed["q3"]["y_max"], -100.0)
+        self.assertEqual(rt.edge_layout_cache, real_layout)
+
+
 if __name__ == "__main__":
     unittest.main()

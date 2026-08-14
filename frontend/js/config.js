@@ -39,7 +39,18 @@ export let STORAGE_RECT_X_MAX = 0;
 export let STORAGE_RECT_Y_MIN = -500;
 export let STORAGE_RECT_Y_MAX = 0;
 
-export const POLLING_INTERVAL = 500;
+/**
+ * Background Twin lab-state poll (ms) while IDLE.
+ *
+ * Historically 500ms (~2Hz) so the canvas felt live; that proxies every tick to
+ * the edge ``GET /lab-state`` and floods the real-edge uvicorn access log.
+ * Commands / VC / tunable reads already call ``fetchLabState()`` on demand.
+ * While BUSY/HOLDING/OPTIMIZING the poller speeds up (see lab-state.js).
+ */
+export const POLLING_INTERVAL = 10000;
+
+/** Faster poll while a southbound primitive is in flight (status badge / dirty). */
+export const BUSY_POLLING_INTERVAL = 1000;
 
 /**
  * Minimum pause (ms) the reconcile plan runner holds between primitive steps
@@ -136,14 +147,26 @@ export function applyLabLayoutFromApiDoc(payload) {
     let srxx = 0;
     let sry = LAB_Y_MIN;
     let sryy = 0;
-    const sg = payload.storage_grid;
-    if (sg && typeof sg === 'object') {
-        const q = sg.q3;
-        if (q && typeof q === 'object') {
-            if (Number.isFinite(Number(q.x_min))) srx = Number(q.x_min);
-            if (Number.isFinite(Number(q.x_max))) srxx = Number(q.x_max);
-            if (Number.isFinite(Number(q.y_min))) sry = Number(q.y_min);
-            if (Number.isFinite(Number(q.y_max))) sryy = Number(q.y_max);
+    // Prefer edge ``storage.bounds_mm`` (SoT on the layout document). Fall back to
+    // enriched ``storage_grid.q3`` which used to lag when process geometry was
+    // still bound to another backend.
+    const st = payload.storage;
+    const bounds = st && typeof st === 'object' ? st.bounds_mm : null;
+    if (bounds && typeof bounds === 'object') {
+        if (Number.isFinite(Number(bounds.x_min))) srx = Number(bounds.x_min);
+        if (Number.isFinite(Number(bounds.x_max))) srxx = Number(bounds.x_max);
+        if (Number.isFinite(Number(bounds.y_min))) sry = Number(bounds.y_min);
+        if (Number.isFinite(Number(bounds.y_max))) sryy = Number(bounds.y_max);
+    } else {
+        const sg = payload.storage_grid;
+        if (sg && typeof sg === 'object') {
+            const q = sg.q3;
+            if (q && typeof q === 'object') {
+                if (Number.isFinite(Number(q.x_min))) srx = Number(q.x_min);
+                if (Number.isFinite(Number(q.x_max))) srxx = Number(q.x_max);
+                if (Number.isFinite(Number(q.y_min))) sry = Number(q.y_min);
+                if (Number.isFinite(Number(q.y_max))) sryy = Number(q.y_max);
+            }
         }
     }
     STORAGE_RECT_X_MIN = srx;

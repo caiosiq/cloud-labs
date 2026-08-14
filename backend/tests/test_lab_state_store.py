@@ -58,10 +58,43 @@ class MergeLabStateTests(unittest.TestCase):
         # Commanded pose stays coordinator's.
         pose = merged["components"]["tag_10"]["statecontrol"]["tunables"]["nominal_pose"]
         self.assertEqual(pose["x"], 1.0)
-        # Telemetry overlays from edge.
-        self.assertTrue(merged["components"]["tag_10"]["telemetry"]["teleop"]["active"])
-        # Edge-only tag visible read-time.
+        # Telemetry: coordinator owns teleop + live_feed sessions; edge-only
+        # tags still appear at read time.
+        self.assertFalse(
+            merged["components"]["tag_10"]["telemetry"]["teleop"]["active"]
+        )
         self.assertIn("tag_22", merged["components"])
+        self.assertTrue(
+            merged["components"]["tag_22"]["telemetry"]["live_feed"]["stream"]["live"]
+        )
+
+    def test_coordinator_keeps_live_feed_over_edge_idle(self) -> None:
+        working = {
+            "system_status": SYSTEM_STATUS_IDLE,
+            "components": {
+                "tag_22": {
+                    "telemetry": {
+                        "teleop": {"active": False},
+                        "live_feed": {"stream": {"live": True, "connected": True}},
+                    }
+                }
+            },
+        }
+        edge = {
+            "runtime_sync": {"status": "ready"},
+            "components": {
+                "tag_22": {
+                    "telemetry": {
+                        "teleop": {"active": False},
+                        "live_feed": {"stream": {"live": False, "connected": False}},
+                    }
+                }
+            },
+        }
+        merged = merge_lab_state_for_twin(working, edge, backend_id="real.default")
+        self.assertTrue(
+            merged["components"]["tag_22"]["telemetry"]["live_feed"]["stream"]["live"]
+        )
 
     def test_no_edge_returns_working_copy(self) -> None:
         working = {"system_status": SYSTEM_STATUS_IDLE, "components": {}}
@@ -136,6 +169,101 @@ class LabStateStoreTests(unittest.TestCase):
         self.assertEqual(snap["runtime_sync"]["status"], "ready")
         store.persist()
         self.assertFalse(os.path.isfile(self.path))
+
+    def test_reconcile_prunes_tags_absent_from_edge_inventory(self) -> None:
+        store = LabStateStore("real.default", self.path)
+        store.replace_state(
+            {
+                "system_status": SYSTEM_STATUS_IDLE,
+                "components": {
+                    "tag_10": {
+                        "id": "tag_10",
+                        "statecontrol": {
+                            "tunables": {
+                                "nominal_pose": {"x": 1.0, "y": 2.0, "rotation": 0.0}
+                            }
+                        },
+                    },
+                    "tag_8": {
+                        "id": "tag_8",
+                        "statecontrol": {
+                            "tunables": {
+                                "nominal_pose": {"x": 3.0, "y": 4.0, "rotation": 0.0}
+                            }
+                        },
+                    },
+                },
+            },
+            kind=MutationKind.BOOT_HYDRATE,
+            source="test_seed",
+        )
+        edge = {
+            "components": {
+                "tag_8": {
+                    "id": "tag_8",
+                    "statecontrol": {
+                        "tunables": {
+                            "nominal_pose": {"x": 30.0, "y": 40.0, "rotation": 0.0}
+                        }
+                    },
+                },
+                "tag_22": {"id": "tag_22", "statecontrol": {"tunables": {}}},
+            }
+        }
+        self.assertTrue(store.reconcile_membership_from_edge(edge))
+        snap = store.snapshot()
+        self.assertNotIn("tag_10", snap["components"])
+        self.assertIn("tag_8", snap["components"])
+        # Existing shared tag keeps coordinator commanded pose.
+        self.assertEqual(
+            snap["components"]["tag_8"]["statecontrol"]["tunables"]["nominal_pose"]["x"],
+            3.0,
+        )
+        self.assertIn("tag_22", snap["components"])
+        # Second pass is a no-op.
+        self.assertFalse(store.reconcile_membership_from_edge(edge))
+
+
+class LaserLinesBundleSeedTests(unittest.TestCase):
+    def test_empty_placeholder_upgraded_from_bundle(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="laser_seed_"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        state_path = tmp / "lab_state.json"
+        lines_path = tmp / "laser_lines.json"
+        state_path.write_text(
+            json.dumps(
+                {
+                    "system_status": "IDLE",
+                    "components": {},
+                    "laser_lines": {"snap_line_id": None, "lines": []},
+                }
+            ),
+            encoding="utf-8",
+        )
+        lines_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "snap_line_id": "diode",
+                    "lines": [
+                        {
+                            "id": "diode",
+                            "enabled": True,
+                            "p1": {"x": 1.0, "y": -1.0},
+                            "p2": {"x": 1.0, "y": 1.0},
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        store = LabStateStore.from_disk("real.default", str(state_path))
+        self.assertTrue(store.ensure_laser_lines_from_bundle(str(lines_path)))
+        ll = store.snapshot()["laser_lines"]
+        self.assertEqual(ll["snap_line_id"], "diode")
+        self.assertEqual(ll["lines"][0]["id"], "diode")
+        # Second call is a no-op once lines exist.
+        self.assertFalse(store.ensure_laser_lines_from_bundle(str(lines_path)))
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ import {
 
 import { afterCommandDispatch } from '../primitives/shared.js';
 
-import { buildTeleopGotoPayload, syncTeleopTargetFromCurrent } from '../teleop-target.js';
+import { buildTeleopGotoPayload } from '../teleop-target.js';
 
 import { ensureTeleopTargetPose, getTeleopTargetPose } from '../teleop-pose.js';
 
@@ -138,7 +138,15 @@ export default function TeleopRz({
 
             const fn = active ? endTeleop : startTeleop;
 
-            const result = await fn(tagId);
+            const pending = fn(tagId);
+
+            if (!active) {
+                // Optimistic Loading UI while real-edge START may take seconds.
+                await Promise.resolve();
+                await refresh();
+            }
+
+            const result = await pending;
 
             toggle.disabled = false;
 
@@ -190,7 +198,10 @@ export default function TeleopRz({
 
 
 
-    syncTeleopTargetFromCurrent(tagId);
+    // Seed TARGET only if missing. Do NOT sync from CURRENT on every panel
+    // rebuild — Go → refresh() would overwrite the planned target with the
+    // still-moving live pose (e.g. target 40 jumps back to current 60).
+    // START_TELEOP already calls syncTeleopTargetFromCurrent once.
     ensureTeleopTargetPose(tagId, state);
 
 

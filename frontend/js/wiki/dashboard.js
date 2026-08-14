@@ -2,11 +2,13 @@
  * Cloud Labs Wiki — Learn curriculum + live Backends hub.
  */
 import {
+    backendHeaders,
     fetchBackends,
     getSelectedBackendId,
     setSelectedBackendId,
     withBackendQuery,
 } from '../state/backend-selection.js';
+
 import { normalizeCapabilities } from '../component-state.js';
 import { loadPlatformRegistries } from '../lab-capabilities.js';
 import {
@@ -79,7 +81,7 @@ function escapeHtml(value) {
 }
 
 async function fetchJson(url) {
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: backendHeaders() });
     if (!res.ok) throw new Error(`${url} → ${res.status}`);
     return res.json();
 }
@@ -745,7 +747,7 @@ function renderKernelDetail() {
 
 async function loadKernels() {
     try {
-        const data = await fetchJson('/api/kernels');
+        const data = await fetchJson(withBackendQuery('/api/kernels'));
         kernels = Array.isArray(data.kernels) ? data.kernels : [];
         if (!selectedKernelId || !kernels.some((k) => k.id === selectedKernelId)) {
             selectedKernelId =
