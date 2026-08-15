@@ -23,4 +23,6 @@ Science capture is one primitive end-to-end — not a Twin-only shortcut:
 - Edge logs use a stable `[measurables]` prefix (begin, camera class/cam_id, shape, jpeg bytes, epoch, href, JPEG route miss). Coordinator logs request/response fields + shape.
 - Never swallow capture failures silently; refuse/fail with a logged stage so Twin and the edge terminal agree.
 - Live feed is not a substitute for `RECORD_MEASURABLES` science.
+- **EVAL_KERNEL:** Prefer the latched RECORD frame for the same tag (what Twin is showing) unless `recapture` / `fresh_capture` is set. Keep `[measurables]` logs for latched vs live source.
+- **OPTIMIZE** stashes sparse preview JPEGs into the same per-tag capture store so `/camera-image` keeps working; do not invent a second image cache. Closed-loop details: `.cursor/skills/cloudlabs-optimization` and `docs/EDGE_OPTIMIZATION_PIPELINE.md`.
 - See edge skill `measurables-tensors`. Orchestration: `run_record_measurables`; remote commit: `apply_primitive_commit.py`.
