@@ -39,7 +39,7 @@ export default function JPEGPoll({ tagId, fieldName, descriptor, comp, hooks }) 
     const img = document.createElement('img');
     img.alt = `JPEG poll for ${tagId}`;
     img.style.width = '100%';
-    img.style.maxHeight = '220px';
+    img.style.maxHeight = '360px';
     img.style.objectFit = 'contain';
     img.style.background = '#000';
     img.style.border = '1px solid #2a2e36';

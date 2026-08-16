@@ -340,7 +340,7 @@ const TELEOP_LIVE_COLOR = '#22d3ee';
  * Style + label for the amber / purple "in flight" overlay drawn on the ghost while
  * `store.pendingCommands` is non-empty for `name`.
  *
- * In-air actions (PICK/HOVER/PLACE_FROM_HOVER/SCAN_ROTATE_IN_PLACE) render in purple with a
+ * In-air actions (PICK/HOVER/PLACE_FROM_HOVER) render in purple with a
  * descriptive label — e.g. HOVERING... — instead of the generic amber "MOVING..." used for
  * everything else, to match the HOLDING status badge.
  */
@@ -353,8 +353,6 @@ function pendingOverlayStyle(name) {
             return { color: '#a855f7', label: 'HOVERING...' };
         case 'PLACE_FROM_HOVER':
             return { color: '#a855f7', label: 'PLACING...' };
-        case 'SCAN_ROTATE_IN_PLACE':
-            return { color: '#a855f7', label: 'SCAN ROTATING...' };
         default:
             return { color: '#f59e0b', label: 'MOVING...' };
     }

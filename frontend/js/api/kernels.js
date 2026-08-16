@@ -69,13 +69,25 @@ export function kernelsForMeasurableField(kernels, fieldName, descriptor) {
  * One-shot authoring probe via ``labClient.probeKernel`` → EVAL_KERNEL.
  *
  * @param {string} tagId
- * @param {{ kernel_id: string, field?: string }} opts
+ * @param {{ kernel_id: string, field?: string, skipConfirm?: boolean }} opts
  * @returns {Promise<{ ok: boolean, result?: object, error?: string }>}
  */
 export async function probeKernel(tagId, opts) {
     const kernelId = opts && opts.kernel_id;
     if (!kernelId) {
         return { ok: false, error: 'kernel_id required' };
+    }
+    if (!(opts && opts.skipConfirm)) {
+        const { confirmPrimitiveCommand } = await import('./confirm-primitive.js');
+        const ok = await confirmPrimitiveCommand({
+            action: 'EVAL_KERNEL',
+            target_id: tagId,
+            parameters: {
+                kernel_id: kernelId,
+                field: (opts && opts.field) || 'camera_image',
+            },
+        });
+        if (!ok) return { ok: false, error: 'cancelled' };
     }
     try {
         const result = await labClient.probeKernel(tagId, {

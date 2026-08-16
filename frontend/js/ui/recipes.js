@@ -109,12 +109,12 @@ export function updateRecipeEditorList() {
         if (step.action === 'MOVE_COMPONENT') {
             desc += ` to (${step.parameters.target_x.toFixed(1)}, ${step.parameters.target_y.toFixed(1)})`;
         } else if (step.action === 'OPTIMIZE') {
-            desc += ` with ${step.parameters.strategy || 'NEWTON'}`;
+            desc += ' (ensemble)';
         }
 
         item.innerHTML = `
             <div class="step-num">${index + 1}</div>
-            <div class="step-action">${step.action === 'MOVE_COMPONENT' ? 'MOVE' : 'OPTIMIZE'}</div>
+            <div class="step-action">${step.action === 'MOVE_COMPONENT' ? 'MOVE' : step.action}</div>
             <div class="step-desc">${desc}</div>
             <div class="material-icons-round step-del" title="Remove Step">delete</div>
         `;

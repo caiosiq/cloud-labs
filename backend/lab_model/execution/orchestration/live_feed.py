@@ -32,8 +32,17 @@ def _resolve_live_feed_profile(host: LiveFeedHost, target_id: str) -> str:
     return "default"
 
 
-async def run_start_live_feed(host: LiveFeedHost, target_id: str, *, channel: str = "stream") -> None:
-    print(f"{host.log_prefix} StartLiveFeed {target_id} channel={channel}")
+async def run_start_live_feed(
+    host: LiveFeedHost,
+    target_id: str,
+    *,
+    channel: str = "stream",
+    exposure_time_ms: float | None = None,
+) -> None:
+    print(
+        f"{host.log_prefix} StartLiveFeed {target_id} channel={channel}"
+        + (f" exposure_ms={exposure_time_ms:g}" if exposure_time_ms is not None else "")
+    )
     with host._state_lock:
         snapshot = host.current_state
 
@@ -63,6 +72,7 @@ async def run_start_live_feed(host: LiveFeedHost, target_id: str, *, channel: st
         backend=backend,
         cam_id=cam_id,
         profile=profile,
+        exposure_time_ms=exposure_time_ms,
     )
     if not ok:
         print(f"{host.log_prefix} start_live_feed hardware failed: {msg}")
@@ -78,6 +88,7 @@ async def run_start_live_feed(host: LiveFeedHost, target_id: str, *, channel: st
             channel=channel,
             backend=backend,
             resource_id=resource_id,
+            live_exposure_time_ms=exposure_time_ms,
         )
         host.current_state["last_updated"] = datetime.now().isoformat()
     host._persist_state()

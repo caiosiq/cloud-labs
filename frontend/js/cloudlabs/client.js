@@ -80,21 +80,36 @@ export class CloudLabsClient {
     }
 
     /** Primitive: START_LIVE_FEED (alias route). */
-    async startLiveFeed(tagId, channel = 'stream') {
-        _debug('START_LIVE_FEED', tagId, channel);
+    async startLiveFeed(tagId, channel = 'stream', opts = {}) {
+        _debug('START_LIVE_FEED', tagId, channel, opts);
         const q = `channel=${encodeURIComponent(channel || 'stream')}`;
         const url = withBackendQuery(
             `/api/components/${encodeURIComponent(tagId)}/telemetry/live-feed/start?${q}`,
         );
+        const payload = {};
+        if (opts && Number.isFinite(Number(opts.exposure_time_ms)) && Number(opts.exposure_time_ms) > 0) {
+            payload.exposure_time_ms = Number(opts.exposure_time_ms);
+        }
         const r = await fetch(url, {
             method: 'POST',
             headers: leaseHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload),
         });
         const body = await _parseJson(r);
         if (!r.ok) {
             throw new Error(_detail(body, r.status));
         }
         return body || { status: 'ok' };
+    }
+
+    /** Primitive: SET_LIVE_EXPOSURE via /api/command (preview VEXP only). */
+    async setLiveExposure(tagId, exposureTimeMs) {
+        _debug('SET_LIVE_EXPOSURE', tagId, exposureTimeMs);
+        return this.execute({
+            action: 'SET_LIVE_EXPOSURE',
+            target_id: tagId,
+            parameters: { exposure_time_ms: Number(exposureTimeMs) },
+        });
     }
 
     /** Primitive: END_LIVE_FEED (alias route). */

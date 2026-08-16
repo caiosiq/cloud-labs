@@ -35,6 +35,9 @@ capture. Enforce the invariant **per capture seam**:
   explicit override → camera last commanded → tunable overlay → library default
   → hardware last resort.
 - `SET_EXPOSURE` must `commit_tunable` so overlays match hardware.
+- Live preview brightness is separate: `SET_LIVE_EXPOSURE` / START_LIVE_FEED
+  `exposure_time_ms` apply recorder `VEXP` only and must **not**
+  `commit_tunable(exposure_time_ms)`.
 
 ## Do
 

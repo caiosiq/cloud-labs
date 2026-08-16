@@ -161,7 +161,7 @@ export default function TeleopPose3d({
 
             toggle.disabled = false;
 
-            if (!result.ok && hooks && hooks.log) {
+            if (!result.ok && result.error !== 'cancelled' && hooks && hooks.log) {
 
                 hooks.log(`TELEOP toggle failed: ${result.error}`, 'warn');
 

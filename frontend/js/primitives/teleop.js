@@ -17,7 +17,9 @@ export function renderStartTeleop(ctx) {
             if (typeof hooks.render === 'function') hooks.render();
             const result = await startPromise;
             if (!result.ok) {
-                hooks.log(`Teleop start failed: ${result.error || 'unknown'}`, 'error');
+                if (result.error !== 'cancelled') {
+                    hooks.log(`Teleop start failed: ${result.error || 'unknown'}`, 'error');
+                }
             }
             await afterCommandDispatch(hooks, tagId);
         })().finally(() => {
@@ -37,7 +39,9 @@ export function renderEndTeleop(ctx) {
         void endTeleop(tagId)
             .then(async (result) => {
                 if (!result.ok) {
-                    hooks.log(`Teleop end failed: ${result.error || 'unknown'}`, 'error');
+                    if (result.error !== 'cancelled') {
+                        hooks.log(`Teleop end failed: ${result.error || 'unknown'}`, 'error');
+                    }
                     return;
                 }
                 await afterCommandDispatch(hooks, tagId);

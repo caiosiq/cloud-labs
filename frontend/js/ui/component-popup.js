@@ -37,7 +37,6 @@ const PRIMITIVE_DEV_HINTS =
  *   checkCollision?: Function,
  *   render?: Function,
  *   updateContextPanel?: Function,
- *   showParameterModal?: Function,
  *   placementState?: string,
  *   closePanel?: (tagId: string) => void,
  * }} deps
@@ -326,7 +325,6 @@ function _renderBody(tagId, comp, catalogRow, deps) {
             checkCollision: deps.checkCollision,
             render: deps.render,
             updateContextPanel: deps.updateContextPanel,
-            showParameterModal: deps.showParameterModal,
         };
 
         primBlock.appendChild(renderPrimitiveRegions(tagId, caps.primitives, ctx));

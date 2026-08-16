@@ -32,7 +32,7 @@ export default function MJPEGViewer({ tagId, fieldName, descriptor, comp }) {
     img.src = url;
     img.alt = `MJPEG stream for ${tagId}`;
     img.style.width = '100%';
-    img.style.maxHeight = '220px';
+    img.style.maxHeight = '360px';
     img.style.objectFit = 'contain';
     img.style.background = '#000';
     img.style.border = '1px solid #2a2e36';

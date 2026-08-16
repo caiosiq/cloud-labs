@@ -16,7 +16,6 @@ REQUIRES_RUNTIME_READY = frozenset(
         "PICK_COMPONENT",
         "HOVER",
         "PLACE_FROM_HOVER",
-        "SCAN_ROTATE_IN_PLACE",
         "STORE_COMPONENT",
         "PLACE_FROM_STORAGE",
         "AFFIRM_PLACED_AT_CURRENT",

@@ -17,6 +17,14 @@ description: >-
 | B | `START_LIVE_FEED` | JPEG / MJPEG | Preview for the eye |
 | C | `POST /execute` / jobs | Request or job stream | Move, record, optimize |
 
+Live preview exposure is a **Tier B hyperparameter**:
+
+- Optional `parameters.exposure_time_ms` on `START_LIVE_FEED` → recorder `VEXP` only
+- `SET_LIVE_EXPOSURE` while armed → `VEXP` only; Twin stores it on
+  `telemetry.live_feed.stream.live_exposure_time_ms`
+- Do **not** write science `tunables.exposure_time_ms` from these paths —
+  that remains `SET_EXPOSURE` for RECORD / EVAL_KERNEL / OPTIMIZE (CAP)
+
 ## Twin UI teleop session vs edge hardware lease
 
 These are **two different leases**. Confusing them is the usual “robot grabbed

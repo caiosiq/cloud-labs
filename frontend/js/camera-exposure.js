@@ -1,6 +1,6 @@
 /**
- * Default camera exposure (seconds) for COBYLA / NEWTON when the command
- * omits an explicit `exposure` parameter.
+ * Default camera exposure (seconds) for capture / live-preview helpers
+ * when an explicit `exposure` parameter is omitted.
  */
 import { store } from './state/store.js';
 import { tunableValue } from './component-state.js';

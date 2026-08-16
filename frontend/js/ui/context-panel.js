@@ -21,7 +21,6 @@
 import { store } from '../state/store.js';
 import { log } from './log.js';
 import { maybeRefreshMotorAnglesFromEdge } from './motor-action-ui.js';
-import { showParameterModal } from './modals.js';
 import {
     getHolding,
     isHoldingState,
@@ -275,7 +274,7 @@ export function updateHoldingBanner() {
                 ? `<div style="color:#c4b5fd; font-family: monospace; font-size: 10px;">${poseStr}</div>`
                 : '') +
             '<div style="margin-top:4px;">' +
-            'Only <strong>HOVER</strong>, <strong>PLACE_FROM_HOVER</strong>, <strong>SCAN_ROTATE_IN_PLACE</strong>, or ' +
+            'Only <strong>HOVER</strong>, <strong>PLACE_FROM_HOVER</strong>, or ' +
             '<strong>CONFIRM_HOLDING_TAG</strong> are accepted for this tag until released.' +
             '</div>' +
             '</div></div>';
@@ -329,7 +328,6 @@ function _remountAllOpenPanels() {
             checkCollision: _checkCollision,
             render: _render,
             updateContextPanel,
-            showParameterModal,
             closePanel,
             focusPanel,
         };
@@ -363,7 +361,6 @@ function _mountOrRebuildPanel(tagId) {
         checkCollision: _checkCollision,
         render: _render,
         updateContextPanel,
-        showParameterModal,
         closePanel,
         focusPanel,
     };

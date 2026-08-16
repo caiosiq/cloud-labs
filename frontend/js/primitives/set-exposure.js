@@ -21,7 +21,8 @@ export function renderSetExposure(ctx) {
     hint.style.margin = '0';
     hint.style.lineHeight = '1.35';
     hint.textContent =
-        `Committed value is read-only above. Set exposure (${min}–${max} ${unit}) then run.`;
+        `Science capture exposure (${min}–${max} ${unit}) for RECORD / OPTIMIZE. ` +
+        `Live preview brightness is separate (Start live feed / pop-out).`;
     body.appendChild(hint);
 
     const inp = coordInput(`exposure (${unit})`, cur);

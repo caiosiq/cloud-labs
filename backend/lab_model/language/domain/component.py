@@ -60,6 +60,8 @@ def default_live_feed_channel() -> Dict[str, Any]:
         "backend": None,
         "resource_id": None,
         "last_error": None,
+        #: Preview (VEXP) exposure while armed — not science ``tunables.exposure_time_ms``.
+        "live_exposure_time_ms": None,
     }
 
 
@@ -138,6 +140,9 @@ def ensure_component_shape(entry: Dict[str, Any]) -> None:
         lf = tel.setdefault("live_feed", default_telemetry()["live_feed"])
         for ch in ("stream",):
             lf.setdefault(ch, default_live_feed_channel())
+            bucket = lf[ch]
+            if isinstance(bucket, dict):
+                bucket.setdefault("live_exposure_time_ms", None)
         lf.pop("preview", None)
         top = tel.setdefault("teleop", default_teleop_session())
         if top.get("active") and "ready" not in top:

@@ -8,7 +8,7 @@
 import { store } from '../state/store.js';
 import { isLiveFeedActive } from '../component-state.js';
 import { withBackendQuery } from '../state/backend-selection.js';
-import { endLiveFeed } from '../api/live-feed.js';
+import { endLiveFeed, setLiveExposure } from '../api/live-feed.js';
 import { getCatalogRow } from '../component-model.js';
 import { registerJpegPollStop } from '../widgets/jpeg-poll-registry.js';
 
@@ -40,6 +40,19 @@ function _previewUrl(tagId) {
 function _displayName(tagId) {
     const row = getCatalogRow(tagId);
     return (row && row.name) || tagId;
+}
+
+function _liveExposureMs(tagId) {
+    const entry = store.labState?.components?.[tagId];
+    const live = entry?.telemetry?.live_feed?.stream?.live_exposure_time_ms;
+    if (live !== undefined && live !== null && Number.isFinite(Number(live))) {
+        return Number(live);
+    }
+    const science = entry?.statecontrol?.tunables?.exposure_time_ms;
+    if (science !== undefined && science !== null && Number.isFinite(Number(science))) {
+        return Number(science);
+    }
+    return 50;
 }
 
 function _ensureLayer() {
@@ -76,6 +89,7 @@ export function openLiveFeedPopout(tagId, opts = {}) {
     const channel = opts.channel || 'stream';
     const layer = _ensureLayer();
     const offset = _nextOffset();
+    const exp0 = _liveExposureMs(id);
 
     const el = document.createElement('div');
     el.className = 'live-feed-popout';
@@ -94,11 +108,25 @@ export function openLiveFeedPopout(tagId, opts = {}) {
             </span>
         </div>
         <div class="live-feed-popout__hint">RECORD / OPTIMIZE blocked on this camera while live · ${_escape(_displayName(id))}</div>
+        <div class="live-feed-popout__exposure">
+            <label title="Preview only (VEXP) — not science SET_EXPOSURE">
+                Preview ms
+                <input type="number" min="1" step="1" value="${exp0}" data-live-exp />
+            </label>
+            <button type="button" class="live-feed-popout__btn" data-action="apply-exp">Apply</button>
+        </div>
         <div class="live-feed-popout__frame" tabindex="-1">
             <img alt="Live feed ${id}" class="live-feed-popout__img"/>
             <div class="live-feed-popout__err" hidden></div>
+            <div class="live-feed-popout__resize-hint" aria-hidden="true" title="Drag corner to resize"></div>
         </div>
     `;
+
+    // Explicit pixel size so CSS resize:both has a real height to grow/shrink.
+    const vw = Math.max(320, window.innerWidth || 1280);
+    const vh = Math.max(240, window.innerHeight || 800);
+    el.style.width = `${Math.min(780, Math.round(vw * 0.88))}px`;
+    el.style.height = `${Math.min(560, Math.round(vh * 0.78))}px`;
 
     const img = el.querySelector('.live-feed-popout__img');
     const err = el.querySelector('.live-feed-popout__err');
@@ -156,7 +184,33 @@ export function openLiveFeedPopout(tagId, opts = {}) {
                 if (typeof opts.fetchLabState === 'function') await opts.fetchLabState();
             })
             .catch((errObj) => {
+                if (String(errObj?.message || errObj) === 'cancelled') {
+                    if (btn) btn.disabled = false;
+                    return;
+                }
                 console.warn('[live-feed-popout] end failed', errObj);
+                if (btn) btn.disabled = false;
+            });
+    });
+    el.querySelector('[data-action="apply-exp"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const inp = el.querySelector('[data-live-exp]');
+        const btn = e.currentTarget;
+        const v = parseFloat(inp?.value);
+        if (!Number.isFinite(v) || v <= 0) {
+            console.warn('[live-feed-popout] invalid preview exposure');
+            return;
+        }
+        if (btn) btn.disabled = true;
+        void setLiveExposure(id, v)
+            .then(async () => {
+                if (typeof opts.fetchLabState === 'function') await opts.fetchLabState();
+            })
+            .catch((errObj) => {
+                if (String(errObj?.message || errObj) === 'cancelled') return;
+                console.warn('[live-feed-popout] set live exposure failed', errObj);
+            })
+            .finally(() => {
                 if (btn) btn.disabled = false;
             });
     });
@@ -231,7 +285,10 @@ export function syncLiveFeedSessionChrome(hooks = {}) {
                     if (typeof hooks.fetchLabState === 'function') await hooks.fetchLabState();
                     else reconcileLiveFeedPopouts();
                 })
-                .catch((e) => hooks.log?.(`End live feed failed: ${e.message || e}`, 'error'));
+                .catch((e) => {
+                    if (String(e?.message || e) === 'cancelled') return;
+                    hooks.log?.(`End live feed failed: ${e.message || e}`, 'error');
+                });
         });
     });
 }

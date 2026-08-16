@@ -294,6 +294,11 @@ export function mountMeasurableKernelStrip(opts) {
 
         if (!out.ok) {
             status.textContent = '';
+            if (out.error === 'cancelled') {
+                status.textContent = 'Cancelled';
+                paint([]);
+                return;
+            }
             status.classList.add('meas-kernel-strip__status--err');
             status.textContent = out.error || 'probe failed';
             paint([]);
