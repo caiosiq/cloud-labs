@@ -693,9 +693,9 @@ class CloudLabsClient:
     ) -> ReconcileResult:
         """Apply the loaded snapshot to hardware with visible step telemetry.
 
-        Executes each reconcile primitive through ``/api/command`` (one step at a
-        time), logs progress like the UI reconcile runner, then finalizes the
-        checkout pointer when all steps succeed.
+        Prefers ``POST /api/command-batch`` so Park/move/motor steps honor
+        ``predecessors`` and can drain in parallel on the Command Matrix.
+        Falls back to serial ``/api/command`` when the matrix is disabled (404).
 
         Parameters
         ----------
@@ -737,16 +737,27 @@ class CloudLabsClient:
                 },
                 include_lease=True,
             )
+        except CloudLabsReconcileError as exc:
+            raise CloudLabsReconcileError(
+                str(exc),
+                status_code=exc.status_code,
+                detail=exc.detail,
+                batch_plan=_batch_plan_from_detail(exc.detail),
+            ) from exc
         except CloudLabsCommandError as exc:
             raise CloudLabsReconcileError(
                 str(exc),
                 status_code=exc.status_code,
                 detail=exc.detail,
+                batch_plan=_batch_plan_from_detail(exc.detail),
             ) from exc
 
         plan_raw = preview.get("plan")
         if not isinstance(plan_raw, list):
             plan_raw = []
+        batch_plan = preview.get("batch_plan")
+        if not isinstance(batch_plan, dict):
+            batch_plan = None
         steps = build_reconcile_steps(plan_raw)
         total = len(steps)
 
@@ -776,6 +787,313 @@ class CloudLabsClient:
             total,
         )
 
+        envelopes = [
+            dict(env) for env in plan_raw if isinstance(env, dict)
+        ]
+        try:
+            executed = self._reconcile_via_batch(
+                steps,
+                envelopes,
+                timeout_s=timeout_s,
+                progress=progress,
+            )
+        except _MatrixUnavailable:
+            executed = self._reconcile_serial(
+                steps,
+                step_delay_s=step_delay_s,
+                timeout_s=timeout_s,
+                progress=progress,
+            )
+        except CloudLabsReconcileError:
+            raise
+        except (CloudLabsCommandError, CloudLabsTimeoutError) as exc:
+            failed = next((s for s in steps if s.status == "error"), steps[-1])
+            raise CloudLabsReconcileError(
+                f"Reconcile failed at step {failed.index + 1} ({failed.label}): {exc}",
+                step_index=failed.index,
+                status_code=getattr(exc, "status_code", None),
+                detail=getattr(exc, "detail", None),
+                batch_plan=batch_plan,
+            ) from exc
+
+        progress(
+            "Status: Reconcile steps complete — finalizing checkout.",
+            steps[-1],
+            total,
+            total,
+        )
+        self._finalize_checkout(snap)
+        self._loaded_snapshot = snap
+
+        result = ReconcileResult(
+            repo_id=snap.repo_id,
+            branch=snap.branch,
+            configuration_id=snap.configuration_id,
+            steps_total=total,
+            steps_executed=executed,
+            steps=steps,
+            finalized=True,
+            message=f"Reconciled {executed} primitive(s) to {snap.configuration_id}.",
+        )
+        progress(
+            f"Status: Reconcile complete ({executed}/{total} steps).",
+            steps[-1],
+            total,
+            total,
+        )
+        return result
+
+    def enqueue_batch(
+        self,
+        commands: Sequence[Mapping[str, Any]],
+        *,
+        wait: bool = False,
+        timeout_s: float = 120.0,
+        poll_interval_s: float = 0.15,
+    ) -> Dict[str, Any]:
+        """Enqueue a declared command batch onto the Command Matrix.
+
+        Pass envelopes with optional ``plan_step_id`` / ``predecessors`` from a
+        checkout preview (or hand-authored DAG). Does **not** invent a seat DAG
+        for casual ``move_component`` calls.
+
+        When ``wait`` is true, blocks until every returned command_id is
+        terminal (done / failed / cancelled).
+        """
+        self._require_lease()
+        if not isinstance(commands, (list, tuple)) or not commands:
+            raise CloudLabsCommandError("commands must be a non-empty list")
+        payload = {"commands": [dict(c) for c in commands]}
+        try:
+            result = self._post_json(
+                "/api/command-batch",
+                payload,
+                include_lease=True,
+            )
+        except CloudLabsCommandError as exc:
+            if exc.status_code == 404:
+                raise CloudLabsCommandError(
+                    "Command Matrix is disabled for this backend "
+                    "(CLOUDLABS_COMMAND_MATRIX); cannot enqueue_batch.",
+                    status_code=404,
+                    detail=exc.detail,
+                ) from exc
+            raise
+        if wait:
+            ids = result.get("command_ids") or []
+            if isinstance(ids, list) and ids:
+                statuses = self.wait_for_commands(
+                    [str(x) for x in ids],
+                    timeout_s=timeout_s,
+                    poll_interval_s=poll_interval_s,
+                )
+                result = dict(result)
+                result["final_statuses"] = statuses
+        return result
+
+    def wait_for_commands(
+        self,
+        command_ids: Sequence[str],
+        *,
+        timeout_s: float = 120.0,
+        poll_interval_s: float = 0.15,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Poll ``/api/command-queue/status`` until all command_ids are terminal.
+
+        Returns the final status map ``{command_id: {status, error, …}}``.
+        Raises :class:`CloudLabsTimeoutError` if any remain queued/running, or
+        :class:`CloudLabsCommandError` if any fail/cancel.
+        """
+        ids = [str(x) for x in command_ids if x is not None and str(x).strip()]
+        if not ids:
+            return {}
+        deadline = time.monotonic() + timeout_s
+        last: Dict[str, Dict[str, Any]] = {}
+        while time.monotonic() < deadline:
+            resp = self._post_json(
+                "/api/command-queue/status",
+                {"command_ids": ids},
+                include_lease=False,
+            )
+            if not resp.get("enabled", True):
+                raise CloudLabsCommandError(
+                    "Command Matrix is disabled; cannot wait_for_commands.",
+                    status_code=404,
+                    detail=resp,
+                )
+            raw = resp.get("statuses") or {}
+            if not isinstance(raw, dict):
+                raw = {}
+            last = {str(k): (v if isinstance(v, dict) else {"status": v}) for k, v in raw.items()}
+            terminal = True
+            for cid in ids:
+                st = str((last.get(cid) or {}).get("status") or "unknown").lower()
+                if st in ("queued", "running", "unknown"):
+                    terminal = False
+                    break
+            if terminal:
+                failed = [
+                    cid
+                    for cid in ids
+                    if str((last.get(cid) or {}).get("status") or "").lower()
+                    in ("failed", "cancelled")
+                ]
+                if failed:
+                    errs = []
+                    for cid in failed:
+                        info = last.get(cid) or {}
+                        errs.append(f"{cid}:{info.get('status')}:{info.get('error')}")
+                    raise CloudLabsCommandError(
+                        "Batch command(s) failed: " + "; ".join(errs),
+                        detail={"statuses": last, "failed": failed},
+                    )
+                return last
+            time.sleep(poll_interval_s)
+        raise CloudLabsTimeoutError(
+            f"Timed out after {timeout_s}s waiting for commands; last={last!r}"
+        )
+
+    def preview_reconcile(
+        self,
+        *,
+        repo: Optional[str] = None,
+        branch: Optional[str] = None,
+        configuration_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Hard-checkout preview: planned envelopes + ``batch_plan`` report.
+
+        Does not move hardware. Useful before :meth:`enqueue_batch` or
+        :meth:`reconcile_hardware`.
+        """
+        self._require_lease()
+        snap = self._resolve_reconcile_target(
+            repo=repo,
+            branch=branch,
+            configuration_id=configuration_id,
+        )
+        try:
+            return self._post_json(
+                f"/api/control/{snap.repo_id}/checkout",
+                {
+                    "configuration_id": snap.configuration_id,
+                    "mode": "hard",
+                    "preview": True,
+                    "initialization_policy": self.initialization_policy,
+                },
+                include_lease=True,
+            )
+        except (CloudLabsReconcileError, CloudLabsCommandError) as exc:
+            raise CloudLabsReconcileError(
+                str(exc),
+                status_code=getattr(exc, "status_code", None),
+                detail=getattr(exc, "detail", None),
+                batch_plan=_batch_plan_from_detail(getattr(exc, "detail", None)),
+            ) from exc
+
+    def _reconcile_via_batch(
+        self,
+        steps: List[ReconcileStep],
+        envelopes: List[Dict[str, Any]],
+        *,
+        timeout_s: float,
+        progress: ProgressCallback,
+    ) -> int:
+        total = len(steps)
+        for step in steps:
+            step.status = "active"
+        progress(
+            f"Status: Reconciling via command-batch — {total} step(s).",
+            steps[0],
+            0,
+            total,
+        )
+        try:
+            result = self._post_json(
+                "/api/command-batch",
+                {"commands": envelopes},
+                include_lease=True,
+            )
+        except CloudLabsCommandError as exc:
+            if exc.status_code == 404:
+                raise _MatrixUnavailable() from exc
+            for step in steps:
+                step.status = "error"
+            raise
+
+        command_ids = [
+            str(x) for x in (result.get("command_ids") or []) if x is not None
+        ]
+        if len(command_ids) != total:
+            for step in steps:
+                step.status = "error"
+            raise CloudLabsReconcileError(
+                f"command-batch returned {len(command_ids)} ids for {total} steps",
+                detail=result,
+            )
+
+        try:
+            statuses = self.wait_for_commands(command_ids, timeout_s=timeout_s)
+        except CloudLabsCommandError as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            st_map = detail.get("statuses") if isinstance(detail, dict) else None
+            if not isinstance(st_map, dict):
+                st_map = {}
+            for index, step in enumerate(steps):
+                cid = command_ids[index] if index < len(command_ids) else ""
+                info = st_map.get(cid) or {}
+                st = str(info.get("status") or "").lower()
+                step.status = "done" if st == "done" else "error"
+            failed_idx = next(
+                (i for i, s in enumerate(steps) if s.status == "error"),
+                len(steps) - 1,
+            )
+            progress(
+                f"Status: Reconcile FAILED at step {failed_idx + 1}/{total}: {exc}",
+                steps[failed_idx],
+                sum(1 for s in steps if s.status == "done"),
+                total,
+            )
+            raise CloudLabsReconcileError(
+                f"Reconcile failed at step {failed_idx + 1} ({steps[failed_idx].label}): {exc}",
+                step_index=failed_idx,
+                detail=exc.detail,
+            ) from exc
+        except CloudLabsTimeoutError as exc:
+            for step in steps:
+                if step.status == "active":
+                    step.status = "error"
+            raise CloudLabsReconcileError(
+                str(exc),
+                step_index=next(
+                    (s.index for s in steps if s.status == "error"),
+                    None,
+                ),
+            ) from exc
+
+        for step in steps:
+            step.status = "done"
+        progress(
+            f"Status: Batch reconcile drained — {total}/{total} done.",
+            steps[-1],
+            total,
+            total,
+        )
+        # Matrix drain may finish while system_status briefly lags.
+        try:
+            self.wait_until_idle(timeout_s=min(30.0, timeout_s))
+        except CloudLabsTimeoutError:
+            pass
+        return total
+
+    def _reconcile_serial(
+        self,
+        steps: List[ReconcileStep],
+        *,
+        step_delay_s: float,
+        timeout_s: float,
+        progress: ProgressCallback,
+    ) -> int:
+        total = len(steps)
         executed = 0
         try:
             for step in steps:
@@ -806,34 +1124,10 @@ class CloudLabsClient:
             raise CloudLabsReconcileError(
                 f"Reconcile failed at step {step.index + 1} ({step.label}): {exc}",
                 step_index=step.index,
+                status_code=getattr(exc, "status_code", None),
+                detail=getattr(exc, "detail", None),
             ) from exc
-
-        progress(
-            "Status: Reconcile steps complete — finalizing checkout.",
-            steps[-1],
-            total,
-            total,
-        )
-        self._finalize_checkout(snap)
-        self._loaded_snapshot = snap
-
-        result = ReconcileResult(
-            repo_id=snap.repo_id,
-            branch=snap.branch,
-            configuration_id=snap.configuration_id,
-            steps_total=total,
-            steps_executed=executed,
-            steps=steps,
-            finalized=True,
-            message=f"Reconciled {executed} primitive(s) to {snap.configuration_id}.",
-        )
-        progress(
-            f"Status: Reconcile complete ({executed}/{total} steps).",
-            steps[-1],
-            total,
-            total,
-        )
-        return result
+        return executed
 
     def _resolve_reconcile_target(
         self,
@@ -2123,6 +2417,25 @@ def _response_detail(resp: requests.Response) -> Any:
     if isinstance(payload, dict):
         return payload.get("detail", payload)
     return payload
+
+
+def _batch_plan_from_detail(detail: Any) -> Optional[Dict[str, Any]]:
+    """Pull structured ``batch_plan`` from a checkout 409 detail payload."""
+    if not isinstance(detail, dict):
+        return None
+    plan = detail.get("batch_plan")
+    if isinstance(plan, dict):
+        return plan
+    nested = detail.get("detail")
+    if isinstance(nested, dict):
+        plan = nested.get("batch_plan")
+        if isinstance(plan, dict):
+            return plan
+    return None
+
+
+class _MatrixUnavailable(Exception):
+    """Internal: Command Matrix disabled (serial reconcile fallback)."""
 
 
 def _normalize_id_list(items: Sequence[str], *, name: str) -> List[str]:

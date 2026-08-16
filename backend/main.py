@@ -2860,6 +2860,26 @@ def _get_control_manager(repo_id: str):
         layout = getattr(rt, "edge_layout_cache", None)
         if isinstance(layout, dict):
             mgr.bind_edge_staging_seats(layout)
+    # Catalog footprints for plan_batch collision (match Twin checkCollision mm).
+    try:
+        from lab_model.coordinator.catalog.lookup import catalog_wh
+        from lab_model.coordinator.catalog.resolve_edge_catalog import (
+            catalog_map_from_resolved,
+            resolve_edge_catalog,
+        )
+
+        cat_map = catalog_map_from_resolved(resolve_edge_catalog(rt))
+
+        def _size_fn(tag_id: str, _map=cat_map):
+            return catalog_wh(lambda tid: _map.get(tid), tag_id)
+
+        mgr.bind_catalog_size_fn(_size_fn)
+    except Exception:
+        host = getattr(rt, "lab", None)
+        if host is not None and hasattr(host, "_catalog_wh"):
+            mgr.bind_catalog_size_fn(host._catalog_wh)
+        elif host is not None and hasattr(host, "_get_component_wh"):
+            mgr.bind_catalog_size_fn(host._get_component_wh)
     return mgr
 
 

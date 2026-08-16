@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from lab_model.coordinator.state.control_documents import (
     DEFAULT_REPO_ID,
@@ -202,6 +202,10 @@ class ControlManager:
         #: Optional override / provider for layout ``reconcile_staging_seats``.
         self.staging_seats: Optional[List[Dict[str, float]]] = None
         self.staging_seats_provider: Optional[Any] = None
+        #: Catalog footprint lookup ``tag_id -> (width_mm, height_mm)`` for
+        #: ``plan_batch`` collision (same mm Twin uses). Bound from the active
+        #: edge catalog in ``main._get_control_manager``.
+        self.size_fn: Optional[Callable[[str], Tuple[float, float]]] = None
 
     def reconcile_staging_seats(self) -> List[Dict[str, float]]:
         """Park buffers from the active edge bench layout (any backend).
@@ -226,6 +230,12 @@ class ControlManager:
         seats = parse_staging_seats(layout)
         self.staging_seats = seats
         return seats
+
+    def bind_catalog_size_fn(
+        self, size_fn: Optional[Callable[[str], Tuple[float, float]]]
+    ) -> None:
+        """Bind catalog footprints for seat-DAG collision checks."""
+        self.size_fn = size_fn
 
     def _refs(self) -> Dict[str, Any]:
         # utf-8-sig tolerates a stray BOM (e.g. a file hand-edited on Windows).
@@ -624,6 +634,7 @@ class ControlManager:
         to_id: str,
         *,
         staging_seats: Optional[Iterable[Mapping[str, Any]]] = None,
+        size_fn: Optional[Callable[[str], Tuple[float, float]]] = None,
     ) -> List[Dict[str, Any]]:
         from_doc = self.get_configuration(from_id)
         to_doc = self.get_configuration(to_id)
@@ -636,6 +647,7 @@ class ControlManager:
             lab_configuration(from_doc.get("configuration") or {}),
             lab_configuration(to_doc.get("configuration") or {}),
             staging_seats=seats,
+            size_fn=size_fn if size_fn is not None else self.size_fn,
         )
 
     def plan_checkout_from_runtime(
@@ -644,6 +656,7 @@ class ControlManager:
         to_id: str,
         *,
         staging_seats: Optional[Iterable[Mapping[str, Any]]] = None,
+        size_fn: Optional[Callable[[str], Tuple[float, float]]] = None,
     ) -> List[Dict[str, Any]]:
         """Plan a hard checkout from the *actual* bench state to ``to_id``.
 
@@ -664,6 +677,7 @@ class ControlManager:
             extract_configuration(runtime),
             lab_configuration(to_doc.get("configuration") or {}),
             staging_seats=seats,
+            size_fn=size_fn if size_fn is not None else self.size_fn,
         )
 
     def plan_checkout_from_runtime_detailed(
@@ -672,6 +686,7 @@ class ControlManager:
         to_id: str,
         *,
         staging_seats: Optional[Iterable[Mapping[str, Any]]] = None,
+        size_fn: Optional[Callable[[str], Tuple[float, float]]] = None,
     ) -> BatchPlanResult:
         """Like :meth:`plan_checkout_from_runtime` but includes the batch report."""
         to_doc = self.get_configuration(to_id)
@@ -684,6 +699,7 @@ class ControlManager:
             extract_configuration(runtime),
             lab_configuration(to_doc.get("configuration") or {}),
             staging_seats=seats,
+            size_fn=size_fn if size_fn is not None else self.size_fn,
         )
         if not result.ready:
             raise BatchPlanError(result.report)
@@ -695,6 +711,7 @@ class ControlManager:
         target_configuration: Mapping[str, Any],
         *,
         staging_seats: Optional[Iterable[Mapping[str, Any]]] = None,
+        size_fn: Optional[Callable[[str], Tuple[float, float]]] = None,
     ) -> List[Dict[str, Any]]:
         """Plan reconcile from the live bench to an arbitrary configuration.
 
@@ -710,6 +727,7 @@ class ControlManager:
             extract_configuration(runtime),
             lab_configuration(target_configuration or {}),
             staging_seats=seats,
+            size_fn=size_fn if size_fn is not None else self.size_fn,
         )
 
     def checkout_compatibility_report(

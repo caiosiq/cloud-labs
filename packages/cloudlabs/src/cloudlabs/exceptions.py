@@ -70,8 +70,10 @@ class CloudLabsReconcileError(CloudLabsError):
         status_code: Optional[int] = None,
         detail: Any = None,
         step_index: Optional[int] = None,
+        batch_plan: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.detail = detail
         self.step_index = step_index
+        self.batch_plan = batch_plan if isinstance(batch_plan, dict) else None

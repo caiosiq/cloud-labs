@@ -140,11 +140,22 @@ Failed/cancelled predecessor → fail or cancel dependents (policy: fail with re
 
 - [x] Checkout UI surfaces staging needs (plan roles + `batch_plan` on 409)  
 - [x] Multi-arm ready via same pred model (unit coverage)  
-- [ ] Mock swap soak; deathray matrix soak *(operator — not mock-hardcoded logic)*  
+- [x] SDK `reconcile_hardware` → `POST /api/command-batch` + serial fallback; `batch_plan` on errors  
+- [x] SDK helpers: `enqueue_batch`, `wait_for_commands`, `preview_reconcile`  
+- [x] Catalog footprints wired into checkout `plan_batch` (`size_fn` from edge library)  
+- [x] Deathray `reconcile_staging_seats` near storage (grid-like (−1.5, 2.5) → (−300, −40) mm + neighbor)  
+- [ ] Mock swap soak with matrix on *(operator)*  
+- [ ] Deathray matrix soak once staging deployed *(operator)*  
+
+### Soak notes (operator)
+
+1. **Mock / sim:** enable `CLOUDLABS_COMMAND_MATRIX=1`, hard-checkout a config that swaps two table parts; confirm Park → Move → Unpark in the Twin queue with blocked-head waits, and that SDK `reconcile_hardware` uses one batch drain (not serial `/api/command` spam).  
+2. **Deathray:** restart edge so `GET /bench` advertises the two staging seats west/north of storage; run a swap-heavy reconcile from Twin and from SDK; a 409 without seats should expose `batch_plan.needs_staging_n` on `CloudLabsReconcileError.batch_plan`.  
+3. **Footprints:** near-miss placements should match Twin collision (catalog `size`), not the 90×90 default.
 
 ### Edge contract (general)
 
-Staging seats are **layout**, not mock code: every edge’s `bench/layout.json` / `GET /bench` may declare `reconcile_staging_seats`. Scaffold ships two example seats. Planner + matrix live in the coordinator and apply to any backend_id.
+Staging seats are **layout**, not mock code: every edge’s `bench/layout.json` / `GET /bench` may declare `reconcile_staging_seats`. Scaffold ships two example seats; deathray places seats outside the storage rectangle at fractional-grid equivalents. Planner + matrix live in the coordinator and apply to any backend_id.
 
 ## Non-goals (v1)
 
