@@ -91,6 +91,35 @@
           "fps": { "type": "number", "minimum": 1, "maximum": 120 }
         }
       }
+    },
+    "execution_threads": {
+      "type": "array",
+      "description": "Shared Command Matrix columns this edge exposes (topology only). Advertise arm/sense here. Do not list per-motor columns — inventory reuses motor_id per tag; the coordinator creates motor.<tag_id>.<motor_id> on demand. See docs/COMMAND_MATRIX.md.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Thread id, e.g. arm.0, sense.0. Prefer not to use bare motor.<n>."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["arm", "sense", "motor"],
+            "description": "Resource kind for coordinator routing."
+          },
+          "motor_id": {
+            "type": "integer",
+            "description": "Optional local motor index (legacy global motor.<n> ads only)."
+          },
+          "tag_id": {
+            "type": "string",
+            "description": "Optional component tag when advertising a pre-declared motor.<tag>.<n> column."
+          }
+        }
+      }
     }
   }
 }

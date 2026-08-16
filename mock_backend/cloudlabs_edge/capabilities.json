@@ -8,9 +8,14 @@
     "runtime_sync": true,
     "lan_direct_streams": true
   },
+  "execution_threads": [
+    { "id": "arm.0", "kind": "arm" },
+    { "id": "sense.0", "kind": "sense" }
+  ],
   "supported_primitives": [
     "START_LIVE_FEED",
     "END_LIVE_FEED",
+    "SET_LIVE_EXPOSURE",
     "START_TELEOP",
     "END_TELEOP",
     "TELEOP_JOG",
@@ -28,7 +33,6 @@
     "PICK_COMPONENT",
     "HOVER",
     "PLACE_FROM_HOVER",
-    "SCAN_ROTATE_IN_PLACE",
     "CONFIRM_HOLDING_TAG",
     "STORE_COMPONENT",
     "PLACE_FROM_STORAGE",

@@ -102,9 +102,14 @@ CAPABILITIES_JSON = """\
     "runtime_sync": true,
     "lan_direct_streams": true
   }},
+  "execution_threads": [
+    {{ "id": "arm.0", "kind": "arm" }},
+    {{ "id": "sense.0", "kind": "sense" }}
+  ],
   "supported_primitives": [
     "START_LIVE_FEED",
     "END_LIVE_FEED",
+    "SET_LIVE_EXPOSURE",
     "START_TELEOP",
     "END_TELEOP",
     "TELEOP_JOG",
@@ -122,7 +127,6 @@ CAPABILITIES_JSON = """\
     "PICK_COMPONENT",
     "HOVER",
     "PLACE_FROM_HOVER",
-    "SCAN_ROTATE_IN_PLACE",
     "CONFIRM_HOLDING_TAG",
     "STORE_COMPONENT",
     "PLACE_FROM_STORAGE",
@@ -192,6 +196,7 @@ LIBRARY_JSON = """\
         "primitives": [
           "RECORD_MEASURABLES",
           "SET_EXPOSURE",
+          "SET_LIVE_EXPOSURE",
           "START_LIVE_FEED",
           "END_LIVE_FEED",
           "LOCALIZE_COMPONENTS",
@@ -783,10 +788,16 @@ PRIMITIVE_HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "START_LIVE_FEED": lambda a: live_feed.arm_live_feed(
         str(a.get("channel") or a.get("measurable_id") or ""),
         profile=a.get("profile"),
+        exposure_time_ms=(
+            float(a["exposure_time_ms"])
+            if a.get("exposure_time_ms") is not None
+            else None
+        ),
     ),
     "END_LIVE_FEED": lambda a: live_feed.disarm_live_feed(
         str(a.get("channel") or a.get("measurable_id") or ""),
     ),
+    "SET_LIVE_EXPOSURE": lambda a: live_feed.set_live_exposure(a),
     "START_TELEOP": lambda a: teleop.start_teleop(
         str(a.get("tag_id") or a.get("target_id") or "")
     ),
@@ -803,7 +814,6 @@ PRIMITIVE_HANDLERS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "PICK_COMPONENT": lambda a: motion.pick_component(a),
     "HOVER": lambda a: motion.hover_component(a),
     "PLACE_FROM_HOVER": lambda a: motion.place_from_hover(a),
-    "SCAN_ROTATE_IN_PLACE": lambda a: motion.scan_rotate_in_place(a),
     "CONFIRM_HOLDING_TAG": lambda a: motion.confirm_holding_tag(a),
     "STORE_COMPONENT": lambda a: motion.store_component(a),
     "PLACE_FROM_STORAGE": lambda a: motion.place_from_storage(a),
@@ -968,23 +978,6 @@ def place_from_hover(args: dict[str, Any]) -> dict[str, Any]:
         ``tag_id``, resulting presence (placed), and final pose.
     """
     raise NotImplementedError("Phase 6: place_from_hover_cloudlab")
-
-
-def scan_rotate_in_place(args: dict[str, Any]) -> dict[str, Any]:
-    """Rotate the component in place for scanning (SCAN_ROTATE_IN_PLACE).
-
-    Parameters
-    ----------
-    args:
-        ``tag_id`` / ``target_id`` and rotation parameters (absolute yaw or
-        relative delta — match the existing cloudlab scan helper).
-
-    Returns
-    -------
-    dict
-        ``tag_id`` and the rotation that was applied or measured.
-    """
-    raise NotImplementedError("Phase 6: scan_rotate_in_place_cloudlab")
 
 
 def confirm_holding_tag(args: dict[str, Any]) -> dict[str, Any]:
@@ -1307,10 +1300,14 @@ channel is not armed.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 
-def arm_live_feed(channel: str, profile: str | None = None) -> None:
+def arm_live_feed(
+    channel: str,
+    profile: str | None = None,
+    exposure_time_ms: float | None = None,
+) -> None:
     """Start producing wire frames for a capability channel.
 
     Parameters
@@ -1320,6 +1317,8 @@ def arm_live_feed(channel: str, profile: str | None = None) -> None:
         ``"tag_22.camera_image"``). May also arrive as ``measurable_id``.
     profile:
         Optional wire profile name from ``capabilities.wire_profiles``.
+    exposure_time_ms:
+        Optional preview (VEXP) exposure — must not write science CAP tunable.
 
     Returns
     -------
@@ -1330,8 +1329,14 @@ def arm_live_feed(channel: str, profile: str | None = None) -> None:
         as the same arm bit).
     """
     raise NotImplementedError(
-        f"Phase 6: arm live feed channel={channel!r} profile={profile!r}"
+        f"Phase 6: arm live feed channel={channel!r} profile={profile!r} "
+        f"exposure_ms={exposure_time_ms!r}"
     )
+
+
+def set_live_exposure(args: dict[str, Any]) -> dict[str, Any]:
+    """Adjust preview VEXP while armed (SET_LIVE_EXPOSURE). Do not commit_tunable."""
+    raise NotImplementedError("SET_LIVE_EXPOSURE — preview exposure only")
 
 
 def disarm_live_feed(channel: str) -> None:
@@ -1662,7 +1667,7 @@ contracts; this page is only a map of where those contracts live.
 ```text
 cloudlabs_edge/
   main.py              # ASGI entry; Phase 5 stub, Phase 6 dispatch
-  capabilities.json    # planned supported_primitives + channels
+  capabilities.json    # supported_primitives + channels + execution_threads
   contract.py          # completed / refused / failed envelopes
   latch.py             # epoch_ms and latch_quality
   kernel_host.py       # TorchScript on local BGR (provisioning ships working)
@@ -1684,6 +1689,22 @@ cloudlabs_edge/
     README.md          # skill index
     skills/*/SKILL.md  # contract, tensors, camera-bringup, latency, kernels, frames, inventory
 ```
+
+## `execution_threads` (Command Matrix topology)
+
+Advertise **shared** columns only — the edge does not own queues:
+
+```json
+"execution_threads": [
+  { "id": "arm.0", "kind": "arm" },
+  { "id": "sense.0", "kind": "sense" }
+]
+```
+
+Do **not** list `motor.1`, `motor.2`, … Inventory reuses local `motor_id` per
+component (`tag_20` motor `1` ≠ `tag_11` motor `1`). The coordinator creates
+`motor.<tag_id>.<motor_id>` columns when motor primitives are enqueued. See
+`docs/COMMAND_MATRIX.md` in cloud-labs.
 
 ## Phase 6 coaching (`.agents/skills`)
 

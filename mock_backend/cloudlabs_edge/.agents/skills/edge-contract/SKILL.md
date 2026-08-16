@@ -14,6 +14,10 @@ description: >-
 - Mutation has **one door**: `POST /execute` with `{"primitive", "args"}`.
 - Route verbs through `dispatch.dispatch_primitive` → `adapters/*`.
 - Keep `GET /capabilities` and `GET /bench` as declarations only (abilities vs geometry).
+- Advertise shared Command Matrix topology in `capabilities.json` as
+  `execution_threads`: `arm.0` + `sense.0` only. Do **not** list bare
+  `motor.<n>` columns — `motor_id` is per-tag; the coordinator creates
+  `motor.<tag_id>.<motor_id>` on demand (see cloud-labs `docs/COMMAND_MATRIX.md`).
 - Map outcomes with `contract.py`: `completed` / `refused` / `failed`.
 - Raise `NotImplementedError` for unsupported verbs → surface as `refused` + `NOT_IMPLEMENTED`.
 - Keep hardware imports inside `adapters/` (and lab runtime helpers), not in `main.py`.
@@ -24,6 +28,8 @@ description: >-
 - Do not merge bench geometry into capabilities (or the reverse).
 - Do not invent success for missing hardware — refuse or fail honestly.
 - Do not import coordinator / SDK packages from the edge process.
+- Do not implement a command queue on the edge — `/execute` stays single-shot;
+  the coordinator owns queues, HOLDING locks, and OPTIMIZE barriers.
 - Do not add Twin-only status endpoints or write Twin `system_status` /
   dirty/stash / `telemetry.teleop.active` to “fix” the UI — the coordinator
   owns BUSY/HOLDING/IDLE/TELEOP around southbound execute (see

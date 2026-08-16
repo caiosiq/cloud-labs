@@ -187,6 +187,10 @@ description: >-
 - Mutation has **one door**: `POST /execute` with `{"primitive", "args"}`.
 - Route verbs through `dispatch.dispatch_primitive` → `adapters/*`.
 - Keep `GET /capabilities` and `GET /bench` as declarations only (abilities vs geometry).
+- Advertise shared Command Matrix topology in `capabilities.json` as
+  `execution_threads`: `arm.0` + `sense.0` only. Do **not** list bare
+  `motor.<n>` columns — `motor_id` is per-tag; the coordinator creates
+  `motor.<tag_id>.<motor_id>` on demand (see cloud-labs `docs/COMMAND_MATRIX.md`).
 - Map outcomes with `contract.py`: `completed` / `refused` / `failed`.
 - Raise `NotImplementedError` for unsupported verbs → surface as `refused` + `NOT_IMPLEMENTED`.
 - Keep hardware imports inside `adapters/` (and lab runtime helpers), not in `main.py`.
@@ -197,6 +201,8 @@ description: >-
 - Do not merge bench geometry into capabilities (or the reverse).
 - Do not invent success for missing hardware — refuse or fail honestly.
 - Do not import coordinator / SDK packages from the edge process.
+- Do not implement a command queue on the edge — `/execute` stays single-shot;
+  the coordinator owns queues, HOLDING locks, and OPTIMIZE barriers.
 - Do not add Twin-only status endpoints or write Twin `system_status` /
   dirty/stash / `telemetry.teleop.active` to “fix” the UI — the coordinator
   owns BUSY/HOLDING/IDLE/TELEOP around southbound execute (see
@@ -451,6 +457,14 @@ description: >-
 | B | `START_LIVE_FEED` | JPEG / MJPEG | Preview for the eye |
 | C | `POST /execute` / jobs | Request or job stream | Move, record, optimize |
 
+Live preview exposure is a **Tier B hyperparameter**:
+
+- Optional `parameters.exposure_time_ms` on `START_LIVE_FEED` → recorder `VEXP` only
+- `SET_LIVE_EXPOSURE` while armed → `VEXP` only; Twin stores it on
+  `telemetry.live_feed.stream.live_exposure_time_ms`
+- Do **not** write science `tunables.exposure_time_ms` from these paths —
+  that remains `SET_EXPOSURE` for RECORD / EVAL_KERNEL / OPTIMIZE (CAP)
+
 ## Twin UI teleop session vs edge hardware lease
 
 These are **two different leases**. Confusing them is the usual “robot grabbed
@@ -605,6 +619,9 @@ capture. Enforce the invariant **per capture seam**:
   explicit override → camera last commanded → tunable overlay → library default
   → hardware last resort.
 - `SET_EXPOSURE` must `commit_tunable` so overlays match hardware.
+- Live preview brightness is separate: `SET_LIVE_EXPOSURE` / START_LIVE_FEED
+  `exposure_time_ms` apply recorder `VEXP` only and must **not**
+  `commit_tunable(exposure_time_ms)`.
 
 ## Do
 

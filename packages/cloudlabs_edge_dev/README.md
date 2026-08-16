@@ -43,6 +43,11 @@ cloudlabs_edge/
     observe.py         # RECORD_MEASURABLES, EVAL_KERNEL
 ```
 
+`capabilities.json` includes `execution_threads` with **`arm.0` + `sense.0` only**.
+Do not advertise bare `motor.<n>` columns — motor ids are per-tag and the
+coordinator creates `motor.<tag_id>.<motor_id>` on demand
+(`docs/COMMAND_MATRIX.md`).
+
 Phase 5 HTTP still uses `stub_server.create_app` (no OpticalExperiment imports). Every adapter function raises `NotImplementedError` until Phase 6.
 
 ```powershell
