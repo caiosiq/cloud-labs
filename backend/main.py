@@ -108,7 +108,6 @@ from lab_model.language.primitives import (
     PlaceFromHoverBody,
     PrimitiveId,
     RecordMeasurablesBody,
-    ScanRotateInPlaceBody,
     StartTeleopBody,
     StartLiveFeedBody,
     OptimizeBody,
@@ -164,6 +163,12 @@ from lab_model.coordinator.lab_initialization import (
     ensure_action_allowed,
 )
 from lab_model.coordinator.jobs.runner import run_job, schedule_job_runner
+from lab_model.coordinator.jobs.command_matrix import (
+    CommandMatrixRefuse,
+    command_matrix_enabled,
+)
+from lab_model.coordinator.jobs.matrix_runtime import get_or_create_matrix
+from lab_model.coordinator.jobs.matrix_drain import kick_matrix_drain
 from lab_model.coordinator.backends.server import BackendSession, require_backend, resolve_backend_id
 from lab_model.execution.edge import edge_agent_registry, edge_command_queue
 from lab_model.execution.edge.client import (
@@ -265,6 +270,12 @@ def _kick_job_runner_for(backend_id: str) -> None:
 
     async def _run_one(job_id: str) -> None:
         rt = require_backend(backend_registry, backend_id, init=True)
+        from lab_model.coordinator.jobs.command_matrix import command_matrix_enabled
+        from lab_model.coordinator.jobs.matrix_runtime import get_or_create_matrix
+
+        matrix = None
+        if command_matrix_enabled(backend_id):
+            matrix = get_or_create_matrix(rt)
         with BackendSession(rt):
             await run_job(
                 job_id,
@@ -276,6 +287,7 @@ def _kick_job_runner_for(backend_id: str) -> None:
                 control_dir=rt.control_dir(),
                 pins_lookup=rt.catalog_pins_store,
                 repo_owns_bench=lambda repo_id: _repo_owns_bench_for(rt, repo_id),
+                command_matrix=matrix,
             )
 
     schedule_job_runner(
@@ -2227,16 +2239,30 @@ async def ws_component_teleop_session(
 
 
 @app.post("/api/components/{tag_id}/telemetry/live-feed/start")
-async def post_component_live_feed_start(tag_id: str, channel: str = "stream"):
-    """Connect and start live feed (``START_LIVE_FEED``) via EdgeClient."""
+async def post_component_live_feed_start(
+    tag_id: str,
+    channel: str = "stream",
+    body: Optional[Dict[str, Any]] = Body(default=None),
+):
+    """Connect and start live feed (``START_LIVE_FEED``) via EdgeClient.
+
+    Optional JSON body may include ``exposure_time_ms`` for preview (VEXP) only —
+    does not write science ``tunables.exposure_time_ms``.
+    """
     _refuse_teleop_if_lab_down(tag_id)
-    edge_result = await _southbound_execute(
-        {
-            "action": "START_LIVE_FEED",
-            "target_id": tag_id,
-            "channel": channel,
-        }
-    )
+    params: Dict[str, Any] = {}
+    if isinstance(body, dict):
+        exp = body.get("exposure_time_ms")
+        if exp is not None:
+            params["exposure_time_ms"] = float(exp)
+    cmd: Dict[str, Any] = {
+        "action": "START_LIVE_FEED",
+        "target_id": tag_id,
+        "channel": channel,
+    }
+    if params:
+        cmd["parameters"] = params
+    edge_result = await _southbound_execute(cmd)
     return {
         "status": "ok",
         "message": f"Live feed started for {tag_id}",
@@ -4198,31 +4224,6 @@ def _enforce_holding_rules(cmd, state: Dict[str, Any]) -> None:
             )
         return
 
-    if isinstance(cmd, ScanRotateInPlaceBody):
-        # SCAN_ROTATE_IN_PLACE has the SAME user intent in both cases ("sweep
-        # theta at constant rate") but dispatches to two different
-        # ``lab_automation`` paths in RealLabCommunicator:
-        #   - HOLDING  -> rotate the in-air held part (no pick/place).
-        #   - IDLE     -> rotate the placed part in situ on the table.
-        # In IDLE the lab backend is responsible for rejecting unsuitable
-        # targets (off-table, in storage, etc.); we only enforce the
-        # HOLDING tag-match rule here.
-        if status == "HOLDING":
-            if held and cmd.target_id != held:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"Currently holding {held}; cannot {cmd.action} on {cmd.target_id}. "
-                        "Place or hover the held part first."
-                    ),
-                )
-        elif status != "IDLE":
-            raise HTTPException(
-                status_code=409,
-                detail=f"{cmd.action} requires IDLE or HOLDING; current status is {status}.",
-            )
-        return
-
     if isinstance(cmd, ConfirmHoldingTagBody):
         if status != "HOLDING":
             raise HTTPException(
@@ -4713,23 +4714,15 @@ async def optimization_compile(body: Dict[str, Any] = Body(...)):
 
 @app.get("/api/optimization/capabilities")
 async def optimization_capabilities():
-    """Preferred optimize path + legacy deprecation flags (Step E)."""
-    redirect = (os.environ.get("CLOUDLABS_LEGACY_OPTIMIZE_REDIRECT") or "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    """Ensemble-only optimize capabilities."""
     return {
         "preferred_mode": "ensemble",
-        "legacy_strategy_deprecated": True,
         "closed_loop_requires_ensemble": True,
-        "legacy_redirect_enabled": redirect,
-        "legacy_redirect_env": "CLOUDLABS_LEGACY_OPTIMIZE_REDIRECT",
         "sdk_entrypoints": ["run_optimize", "run_cobyla"],
-        "ui_entrypoints": ["Twin Optimization â†’ Alignment session", "Operations job monitor"],
+        "ui_entrypoints": ["Twin Optimization → Alignment session", "Operations job monitor"],
         "notes": (
-            "Legacy NEWTON/COBYLA via component panel or command console remain for "
-            "real-bench MJPEG/place-UI parity; new work should use ensemble jobs."
+            "OPTIMIZE is ensemble-only. Use ensemble jobs, SDK run_optimize / run_cobyla, "
+            "or Twin Alignment session."
         ),
     }
 
@@ -5209,6 +5202,20 @@ async def release_session_lease(body: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=404, detail=f"lease {lease_id!r} not found")
 
     try:
+        rt = backend_registry.get_runtime(released.backend_id, init=False)
+        matrix_clear = None
+        if rt is not None and getattr(rt, "command_matrix", None) is not None:
+            matrix_clear = rt.command_matrix.clear_on_lease_release()
+            logger.info(
+                "command matrix cleared on lease release backend=%s cancelled=%s orphaned=%s",
+                released.backend_id,
+                len((matrix_clear or {}).get("cancelled_queued") or []),
+                len((matrix_clear or {}).get("orphaned_running") or []),
+            )
+    except Exception:  # noqa: BLE001
+        matrix_clear = None
+
+    try:
         from lab_model.execution.optimization.kernels import session_store
 
         session_store.delete_lease_scratch(released.backend_id, released.lease_id)
@@ -5221,7 +5228,10 @@ async def release_session_lease(body: Dict[str, Any] = Body(...)):
         released.holder,
         released.lease_id,
     )
-    return {"status": "released", "lease": lease_record_to_api_dict(released)}
+    out = {"status": "released", "lease": lease_record_to_api_dict(released)}
+    if matrix_clear is not None:
+        out["command_matrix"] = matrix_clear
+    return out
 
 
 @app.post("/api/jobs/lease/heartbeat")
@@ -5245,6 +5255,212 @@ async def heartbeat_session_lease(body: Dict[str, Any] = Body(...)):
     return lease_record_to_api_dict(record)
 
 
+# Primitives that must stay synchronous / hot-path (bypass Command Matrix enqueue).
+_MATRIX_BYPASS_ACTIONS = frozenset(
+    {
+        "TELEOP_JOG",
+        "TELEOP_GOTO",
+        "RECORD_MEASURABLES",
+        "EVAL_KERNEL",
+    }
+)
+
+
+def _lab_state_for_matrix_gate(backend_id: str) -> Optional[Dict[str, Any]]:
+    """Best-effort Twin/lab snapshot for HOLDING / OPTIMIZING admission checks."""
+    try:
+        state = _control_runtime_state()
+        if isinstance(state, dict) and state:
+            return state
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        cached = edge_agent_registry.get_cached_lab_state(backend_id)
+        if isinstance(cached, dict):
+            return cached
+    except Exception:  # noqa: BLE001
+        pass
+    if lab is not None:
+        try:
+            st = lab.get_lab_state()
+            if isinstance(st, dict):
+                return st
+        except Exception:  # noqa: BLE001
+            pass
+    return None
+
+
+async def _matrix_execute_queued_item(item: Any, *, backend_id: str) -> None:
+    """Drain callback: run one queued command southbound or in-process."""
+    payload = dict(item.payload or {})
+    lease_id = item.lease_id or None
+    _edge_client = _edge_client_for(backend_id)
+
+    if _edge_client.transport != EdgeTransport.IN_PROCESS:
+        edge_result = await _southbound_execute(
+            payload,
+            backend_id=backend_id,
+            timeout_s=180.0,
+            lease_id=lease_id,
+        )
+        if not edge_result.ok:
+            detail = edge_result.error or edge_result.detail or "edge execute failed"
+            raise RuntimeError(str(detail))
+        return
+
+    if lab is None:
+        raise RuntimeError("Lab Communicator not initialized")
+
+    cmd = parse_command_payload(payload)
+    _enforce_holding_rules(cmd, lab.get_lab_state())
+    if isinstance(cmd, OptimizeBody):
+        _enforce_ensemble_preflight(lab, cmd)
+
+    target_lab = lab
+    token = None
+    if runtime_manager is not None:
+        target_lab, token = runtime_manager.reserve_operation()
+    try:
+        target_lab._command_lease_id = lease_id
+        target_lab._command_backend_id = backend_id
+        await execute_validated_command(target_lab, cmd)
+    finally:
+        if runtime_manager is not None and token is not None:
+            runtime_manager.release_operation(token)
+
+
+def _enqueue_via_command_matrix(
+    payload: Dict[str, Any],
+    *,
+    backend_id: str,
+    lease_id: Optional[str],
+    cmd: Any,
+) -> Optional[Dict[str, Any]]:
+    """Enqueue when matrix enabled; return API ack or None to use legacy path."""
+    if not command_matrix_enabled(backend_id):
+        return None
+    action = str(getattr(cmd, "action", None) or payload.get("action") or "").strip().upper()
+    if action in _MATRIX_BYPASS_ACTIONS:
+        return None
+
+    rt = require_backend(backend_registry, backend_id, init=False)
+    matrix = get_or_create_matrix(rt)
+    gate_state = _lab_state_for_matrix_gate(backend_id)
+    try:
+        ack = matrix.enqueue(
+            payload if isinstance(payload, dict) else {"action": action},
+            lease_id=str(lease_id or ""),
+            lab_state=gate_state,
+        )
+    except CommandMatrixRefuse as exc:
+        raise HTTPException(status_code=409, detail=exc.reason) from exc
+
+    async def _execute(item: Any) -> None:
+        await _matrix_execute_queued_item(item, backend_id=backend_id)
+
+    kick_matrix_drain(backend_id, matrix, execute=_execute)
+    snap = matrix.snapshot()
+    out = dict(ack)
+    out["command_matrix"] = snap
+    return out
+
+
+@app.get("/api/command-queue")
+async def get_command_queue():
+    """Snapshot of the active backend's Command Matrix (threads + queued/running)."""
+    backend_id = _active_backend_id()
+    if not command_matrix_enabled(backend_id):
+        return {
+            "enabled": False,
+            "backend_id": backend_id,
+            "threads": [],
+            "message": "Command Matrix disabled for this backend "
+            "(set CLOUDLABS_COMMAND_MATRIX=1 to enable).",
+        }
+    rt = require_backend(backend_registry, backend_id, init=False)
+    matrix = get_or_create_matrix(rt)
+    snap = matrix.snapshot()
+    snap["enabled"] = True
+    return snap
+
+
+@app.post("/api/command-queue/cancel")
+async def cancel_command_queue(request: Request, body: Dict[str, Any] = Body(...)):
+    """Cancel queued matrix commands (not running).
+
+    Body:
+      - ``command_id``: cancel one queued item
+      - ``all_queued``: true → cancel every queued item
+    """
+    backend_id = _active_backend_id()
+    if not command_matrix_enabled(backend_id):
+        raise HTTPException(status_code=404, detail="Command Matrix disabled for this backend")
+
+    lease_id = _extract_lease_id(body if isinstance(body, dict) else {}, request)
+    require_lease = _command_lease_required()
+    if require_lease and not lease_id:
+        raise HTTPException(
+            status_code=400,
+            detail="X-CloudLabs-Lease required to cancel queued commands",
+        )
+    try:
+        session_lease_manager.validate_command_lease(
+            backend_id=backend_id,
+            lease_id=lease_id,
+            require_when_locked=require_lease,
+        )
+    except LeaseConflictError as exc:
+        return _lease_conflict_response(exc)
+    except LeaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LeaseExpiredError as exc:
+        raise HTTPException(status_code=410, detail=str(exc)) from exc
+
+    rt = require_backend(backend_registry, backend_id, init=False)
+    matrix = get_or_create_matrix(rt)
+    all_queued = bool(body.get("all_queued"))
+    command_id = str(body.get("command_id") or "").strip()
+
+    if all_queued:
+        cancelled = matrix.cancel_all_queued()
+        return {
+            "status": "ok",
+            "cancelled": cancelled,
+            "command_matrix": matrix.snapshot(),
+        }
+    if not command_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide command_id or all_queued=true",
+        )
+    ok = matrix.cancel_queued(command_id)
+    if not ok:
+        raise HTTPException(
+            status_code=409,
+            detail=f"command {command_id!r} is not queued (running/done/unknown)",
+        )
+    return {
+        "status": "ok",
+        "cancelled": [command_id],
+        "command_matrix": matrix.snapshot(),
+    }
+
+
+@app.post("/api/command-queue/status")
+async def command_queue_statuses(body: Dict[str, Any] = Body(...)):
+    """Look up statuses for a list of matrix command_ids (reconcile / await)."""
+    backend_id = _active_backend_id()
+    if not command_matrix_enabled(backend_id):
+        return {"enabled": False, "statuses": {}}
+    raw_ids = body.get("command_ids") if isinstance(body, dict) else None
+    if not isinstance(raw_ids, list):
+        raise HTTPException(status_code=400, detail="command_ids must be a list")
+    ids = [str(x) for x in raw_ids if x is not None and str(x).strip()]
+    rt = require_backend(backend_registry, backend_id, init=False)
+    matrix = get_or_create_matrix(rt)
+    return {"enabled": True, "statuses": matrix.statuses(ids)}
+
+
 @app.post("/api/command")
 async def receive_command(
     payload: Dict[str, Any],
@@ -5260,7 +5476,7 @@ async def receive_command(
         raise HTTPException(
             status_code=400,
             detail=(
-                "X-CloudLabs-Lease required â€” acquire via Twin Take control "
+                "X-CloudLabs-Lease required — acquire via Twin Take control "
                 "or SDK connect()/acquire_lease()"
             ),
         )
@@ -5277,6 +5493,8 @@ async def receive_command(
     except LeaseExpiredError as exc:
         raise HTTPException(status_code=410, detail=str(exc)) from exc
 
+    use_matrix = command_matrix_enabled(backend_id)
+
     # Phase 3: poll-attached or HTTP edge.base_url — same EdgeClient southbound.
     _edge_client = _edge_client_for(backend_id)
     if _edge_client.transport != EdgeTransport.IN_PROCESS:
@@ -5284,14 +5502,26 @@ async def receive_command(
             cmd = parse_command_payload(payload)
         except ValidationError as e:
             raise HTTPException(status_code=400, detail=validation_error_detail(e))
-        # Coordinator-owned busy/optimizing gate (Twin store), same as in-process.
-        gate_busy = _control_runtime_state()
-        busy_status = (gate_busy or {}).get("system_status")
-        if busy_status in ("BUSY", "OPTIMIZING"):
-            raise HTTPException(
-                status_code=409,
-                detail=f"System is {busy_status}. Please wait.",
+
+        if not use_matrix:
+            # Legacy single-flight busy gate.
+            gate_busy = _control_runtime_state()
+            busy_status = (gate_busy or {}).get("system_status")
+            if busy_status in ("BUSY", "OPTIMIZING"):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"System is {busy_status}. Please wait.",
+                )
+        else:
+            queued = _enqueue_via_command_matrix(
+                payload if isinstance(payload, dict) else {"action": cmd.action},
+                backend_id=backend_id,
+                lease_id=lease_id,
+                cmd=cmd,
             )
+            if queued is not None:
+                return queued
+
         edge_rec = edge_agent_registry.get_for_backend(backend_id)
         disconnect = edge_agent_registry.last_disconnect(backend_id)
         # Poll-agent cache is empty for pure HTTP edges; use live Twin/edge state.
@@ -5327,13 +5557,23 @@ async def receive_command(
 
     state = lab.get_lab_state()
     current_status = state.get("system_status")
-    if current_status == "BUSY" or current_status == "OPTIMIZING":
+    if not use_matrix and (current_status == "BUSY" or current_status == "OPTIMIZING"):
         raise HTTPException(status_code=409, detail=f"System is {current_status}. Please wait.")
 
     try:
         cmd = parse_command_payload(payload)
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=validation_error_detail(e))
+
+    if use_matrix:
+        queued = _enqueue_via_command_matrix(
+            payload if isinstance(payload, dict) else {"action": cmd.action},
+            backend_id=backend_id,
+            lease_id=lease_id,
+            cmd=cmd,
+        )
+        if queued is not None:
+            return queued
 
     _enforce_holding_rules(cmd, state)
     _enforce_ensemble_preflight(lab, cmd)

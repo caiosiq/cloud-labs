@@ -12,6 +12,7 @@ from typing import Any, Dict, Mapping, Optional, Set
 from lab_model.coordinator.state.commits import (
     commit_affirm_placed,
     commit_hover,
+    commit_live_exposure,
     commit_live_feed_end,
     commit_live_feed_start,
     commit_move_to_breadboard,
@@ -19,7 +20,6 @@ from lab_model.coordinator.state.commits import (
     commit_observed_measurables,
     commit_pick,
     commit_place_from_hover,
-    commit_scan_rotation,
     commit_teleop_end,
     commit_teleop_ready,
     commit_teleop_session_pose,
@@ -56,12 +56,13 @@ REMOTE_COMMIT_ACTIONS: Set[str] = {
     "RECENTER_IN_STORAGE",
     "REPACK_STORAGE",
     "AFFIRM_PLACED_AT_CURRENT",
-    "SCAN_ROTATE_IN_PLACE",
     "RECORD_MEASURABLES",
     "START_TELEOP",
     "END_TELEOP",
     "START_LIVE_FEED",
     "END_LIVE_FEED",
+    # Preview VEXP only — does not write science tunables.exposure_time_ms.
+    "SET_LIVE_EXPOSURE",
     # Commanded tunables: edge applies hardware; Twin store must mirror so UI / OPTIMIZE
     # hold-for-measure see the committed value (merge does not overlay edge tunables).
     "SET_EXPOSURE",
@@ -441,32 +442,6 @@ def apply_remote_commit(
         commit_affirm_placed(state, tag_id)
         return True
 
-    if action == "SCAN_ROTATE_IN_PLACE":
-        mode = str(params.get("mode") or result.get("mode") or "placed").strip().lower()
-        if mode not in ("held", "placed"):
-            mode = "placed"
-        x, y, rotation = _pose_xyr(params, result)
-        z_val = None
-        if mode == "held":
-            z_raw = params.get("z", result.get("z"))
-            if z_raw is None and isinstance(pose_from_edge, Mapping):
-                z_raw = pose_from_edge.get("z")
-            if z_raw is not None:
-                try:
-                    z_val = float(z_raw)
-                except (TypeError, ValueError):
-                    z_val = None
-        commit_scan_rotation(
-            state,
-            tag_id,
-            mode=mode,
-            x=x,
-            y=y,
-            rotation=rotation,
-            z=z_val,
-        )
-        return True
-
     if action == "RECORD_MEASURABLES":
         nested = result.get("measurables")
         if isinstance(nested, dict) and nested:
@@ -573,12 +548,18 @@ def apply_remote_commit(
             or "edge"
         )
         resource_id = result.get("resource_id") or result.get("channel") or tag_id
+        live_exp = result.get("live_exposure_time_ms")
+        if live_exp is None:
+            live_exp = params.get("exposure_time_ms")
         commit_live_feed_start(
             state,
             tag_id,
             channel=twin_channel,
             backend=backend,
             resource_id=str(resource_id) if resource_id is not None else tag_id,
+            live_exposure_time_ms=(
+                float(live_exp) if live_exp is not None else None
+            ),
         )
         return True
 
@@ -592,6 +573,32 @@ def apply_remote_commit(
             end_all_live_feed_channels(state, tag_id)
         else:
             commit_live_feed_end(state, tag_id, channel=twin_channel)
+        return True
+
+    if action == "SET_LIVE_EXPOSURE":
+        exp = result.get("live_exposure_time_ms")
+        if exp is None:
+            exp = result.get("exposure_time_ms")
+        if exp is None:
+            exp = params.get("exposure_time_ms")
+        if exp is None:
+            print(
+                f"[lab_state] source=edge_commit action=SET_LIVE_EXPOSURE "
+                f"tag={tag_id!r} skipped: missing exposure_time_ms",
+                flush=True,
+            )
+            return False
+        twin_channel = str(
+            command.get("channel") or params.get("channel") or "stream"
+        ).strip()
+        if twin_channel in ("", "all") or twin_channel.endswith(".camera_image"):
+            twin_channel = "stream"
+        commit_live_exposure(
+            state,
+            tag_id,
+            channel=twin_channel,
+            exposure_time_ms=float(exp),
+        )
         return True
 
     if action == "SET_EXPOSURE":

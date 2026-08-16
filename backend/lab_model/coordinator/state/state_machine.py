@@ -135,8 +135,8 @@ def refuse_if_holding_other_tag(
 ) -> RefusalResult:
     """Refuse when the gripper is HOLDING a tag different from ``target_id``.
 
-    Same-tag gate for HOVER, PLACE_FROM_HOVER, SCAN_ROTATE_IN_PLACE
-    (held mode). Permissive when ``held_tag`` is ``None`` (e.g.
+    Same-tag gate for HOVER and PLACE_FROM_HOVER (held mode).
+    Permissive when ``held_tag`` is ``None`` (e.g.
     HOLDING_UNCONFIRMED) -- the operator may not have confirmed the
     tag yet, and we don't want to silently lock them out.
     """
@@ -157,7 +157,7 @@ def refuse_if_not_in_state(
     """Refuse when ``target_id`` has no entry in ``state['components']``.
 
     Used as a precondition for any primitive that reads the part's
-    pose / measurables from state (PICK, SCAN_ROTATE placed-mode, etc).
+    pose / measurables from state (PICK, placed-mode motion, etc).
     Catches typos and stale UI selections before we forward to hardware.
     """
     components = current_state.get("components") or {}
@@ -243,9 +243,8 @@ def refuse_if_not_on_breadboard(
 ) -> RefusalResult:
     """Refuse when ``target_id`` is not on the breadboard.
 
-    Used by ``scan_rotate_in_place`` (placed mode) and any other
-    primitive that requires the part to be sitting on the table.
-    Differs from :func:`refuse_if_stored`: that one specifically
+    Used by primitives that require the part to be sitting on the
+    table. Differs from :func:`refuse_if_stored`: that one specifically
     rejects STORAGE; this one rejects anything that isn't BREADBOARD
     (STORAGE, OFF_TABLE, missing entry, etc).
     """
@@ -272,11 +271,10 @@ def refuse_if_status_not_idle(
 ) -> RefusalResult:
     """Refuse when ``system_status`` is not IDLE.
 
-    Used by primitives that demand a clean idle system (e.g.
-    ``scan_rotate_in_place`` placed-mode -- it needs the table to be
-    quiescent before it can pick up, rotate, and put down the part).
-    Status normalization handles older snapshots that pre-date the
-    holding fields and have ``status=None``.
+    Used by primitives that demand a clean idle system (table
+    quiescent before pick/place-style work). Status normalization
+    handles older snapshots that pre-date the holding fields and have
+    ``status=None``.
     """
     status = current_state.get("system_status") or SYSTEM_STATUS_IDLE
     if status != SYSTEM_STATUS_IDLE:

@@ -1,10 +1,10 @@
 """Per-primitive commit helpers (lab-state writes).
 
 When an in-air primitive (``pick_component``, ``hover_component``,
-``place_from_hover``, ``scan_rotate_in_place``) finishes its hardware
-step, the orchestrator commits the result to ``current_state``. The
-shape of that commit is identical between the real and mock backends;
-this module owns the merge logic so neither subclass repeats it.
+``place_from_hover``) finishes its hardware step, the orchestrator
+commits the result to ``current_state``. The shape of that commit is
+identical between the real and mock backends; this module owns the
+merge logic so neither subclass repeats it.
 
 Each helper takes the ``state`` dict by reference and mutates it in
 place. The orchestrator wraps the call inside ``self._state_lock`` and
@@ -181,57 +181,6 @@ def commit_place_from_hover(
         set_reported_pose(entry, pose)
         set_presence_and_storage(entry, PRESENCE_BREADBOARD, in_storage=False, slot=None)
     clear_holding(state)
-
-
-def commit_scan_rotation(
-    state: Dict[str, Any],
-    target_id: str,
-    *,
-    mode: str,
-    x: float,
-    y: float,
-    rotation: float,
-    z: Optional[float],
-) -> None:
-    """During / after a SCAN_ROTATE_IN_PLACE step: write ``rotation`` only.
-
-    Used both per-step (mock's stepwise UI updates) and once at the
-    end (the final commit at ``theta_max``).
-
-    - ``mode == "held"`` keeps the full ``(x, y, rotation, z)`` shape
-      on tunables/measurables AND refreshes ``state["holding"]`` --
-      the part is in-gripper, so its pose is fully described.
-    - ``mode == "placed"`` writes only ``(x, y, rotation)`` (z is
-      meaningless for an on-table part) and does not touch ``holding``
-      (the gripper is empty during placed-mode rotation -- the arm
-      transiently grips, rotates, releases).
-
-    XY are passed in as the *base* pose so a step-by-step caller
-    doesn't have to re-read them on every tick.
-    """
-    rot = float(rotation)
-    entry = _component_entry(state, target_id)
-    if entry is not None:
-        tun = tunables_bucket(entry)
-        meas = measurables_bucket(entry)
-        if mode == "held":
-            base = {"x": float(x), "y": float(y), "rotation": rot}
-            if z is not None:
-                base["z"] = float(z)
-            tun["nominal_pose"] = dict(base)
-            set_reported_pose(entry, base)
-        else:  # placed
-            base = {"x": float(x), "y": float(y), "rotation": rot}
-            tun["nominal_pose"] = dict(base)
-            set_reported_pose(entry, base)
-    if mode == "held":
-        held = get_holding(state)
-        nominal = dict(held.get("nominal_pose") or {})
-        nominal["rotation"] = rot
-        if z is not None:
-            nominal["z"] = float(z)
-        held["nominal_pose"] = nominal
-        state["holding"] = held
 
 
 def commit_move_to_breadboard(
@@ -873,6 +822,7 @@ def commit_live_feed_start(
     channel: str,
     backend: str,
     resource_id: Optional[str],
+    live_exposure_time_ms: Optional[float] = None,
 ) -> None:
     """Mark a live-feed channel connected and live."""
     entry = _component_entry(state, tag_id)
@@ -884,6 +834,23 @@ def commit_live_feed_start(
     ch["backend"] = backend
     ch["resource_id"] = resource_id
     ch["last_error"] = None
+    if live_exposure_time_ms is not None:
+        ch["live_exposure_time_ms"] = float(live_exposure_time_ms)
+
+
+def commit_live_exposure(
+    state: Dict[str, Any],
+    tag_id: str,
+    *,
+    channel: str = "stream",
+    exposure_time_ms: float,
+) -> None:
+    """Store preview exposure on the live-feed channel (not science tunables)."""
+    entry = _component_entry(state, tag_id)
+    if entry is None:
+        return
+    ch = live_feed_channel(entry, channel)
+    ch["live_exposure_time_ms"] = float(exposure_time_ms)
 
 
 def commit_live_feed_end(
@@ -900,6 +867,7 @@ def commit_live_feed_end(
     ch = live_feed_channel(entry, channel)
     ch["connected"] = False
     ch["live"] = False
+    ch["live_exposure_time_ms"] = None
     if error:
         ch["last_error"] = error
     else:
@@ -920,7 +888,6 @@ __all__ = [
     "commit_pick",
     "commit_hover",
     "commit_place_from_hover",
-    "commit_scan_rotation",
     "commit_move_to_breadboard",
     "commit_move_to_storage",
     "commit_affirm_placed",
@@ -938,6 +905,7 @@ __all__ = [
     "commit_teleop_session_pose",
     "commit_teleop_jog",
     "commit_live_feed_start",
+    "commit_live_exposure",
     "commit_live_feed_end",
     "end_all_live_feed_channels",
     "sweep_stale_teleop_leases",

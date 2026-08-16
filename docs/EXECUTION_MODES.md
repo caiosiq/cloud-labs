@@ -357,7 +357,7 @@ expire(lease_id)
 | `HOLDING` | Robot holding part | Requires lease; refusals for conflicting moves |
 | `TELEOP` | Per-component live control | **Policy TBD:** teleop may require lease or per-tag grant |
 
-**Remote (HTTP/poll) edges:** the coordinator working store drives Twin `IDLE → BUSY → IDLE|HOLDING` around `_southbound_execute`. Edge authors do **not** write Twin `system_status` so dirty/stash UI and busy gates stay consistent. Concurrent Twin commands while BUSY/OPTIMIZING still return HTTP 409 (single-flight); a future job handler may queue multi-component work without changing edge adapters.
+**Remote (HTTP/poll) edges:** the coordinator working store drives Twin `IDLE → BUSY → IDLE|HOLDING` around `_southbound_execute`. Edge authors do **not** write Twin `system_status` so dirty/stash UI and busy gates stay consistent. Historical single-flight returned HTTP 409 while BUSY/OPTIMIZING; the **Command Matrix** (see [`COMMAND_MATRIX.md`](./COMMAND_MATRIX.md)) is the lease-scoped multi-thread queue that replaces that for mock/sim (Phase 0–1 in progress) without changing edge `/execute` adapters.
 
 **Refusal order (target):**
 

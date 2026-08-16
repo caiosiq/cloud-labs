@@ -312,8 +312,7 @@ def validate_submit_spec(
         if params.get("mode") != "ensemble":
             raise ValueError(
                 "closed_loop OPTIMIZE requires parameters.mode=ensemble "
-                "(legacy_strategy / NEWTON|COBYLA via POST /api/command is deprecated; "
-                "use SDK run_optimize/run_cobyla or Twin Alignment session)"
+                "(use SDK run_optimize/run_cobyla or Twin Alignment session)"
             )
         # Also validate kernels nested in parameters
         if params.get("kernels") is not None:

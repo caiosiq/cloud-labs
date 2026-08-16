@@ -132,6 +132,8 @@ class BackendRuntime:
     lab_state_store: Any = None
     #: Cached flat edge bench layout (``lab_bounds_mm`` at top) for storage_region.
     edge_layout_cache: Optional[Dict[str, Any]] = field(default=None, repr=False)
+    #: Per-backend Command Matrix scheduler (Phase 0–1). None until first use.
+    command_matrix: Any = field(default=None, repr=False)
     availability: str = "unknown"  # ready | unavailable | error
     unavailable_reason: Optional[str] = None
     init_error: Optional[str] = None

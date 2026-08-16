@@ -33,6 +33,7 @@ async def run_job(
     control_dir: Optional[str] = None,
     pins_lookup: Optional[Any] = None,
     repo_owns_bench: Optional[Any] = None,
+    command_matrix: Any = None,
 ) -> None:
     """Execute one queued job: acquire lease, run spec, release lease."""
     try:
@@ -83,7 +84,15 @@ async def run_job(
             job_manager.update_progress(job_id, {"init": init_summary})
 
         if record.mode == "closed_loop":
-            await _run_closed_loop(job_id, target_lab, record.spec, job_manager)
+            await _run_closed_loop(
+                job_id,
+                target_lab,
+                record.spec,
+                job_manager,
+                backend_id=backend_id,
+                lease_id=lease_id,
+                command_matrix=command_matrix,
+            )
         elif record.mode == "compiled_dag":
             await _run_compiled_dag(
                 job_id,
@@ -174,6 +183,10 @@ async def _run_closed_loop(
     lab: Any,
     spec: Dict[str, Any],
     job_manager: JobManager,
+    *,
+    backend_id: str = "",
+    lease_id: Optional[str] = None,
+    command_matrix: Any = None,
 ) -> None:
     command = dict(spec.get("command") or {})
     # Thread job-level kernels[] into OPTIMIZE parameters (edge eval flags).
@@ -203,7 +216,35 @@ async def _run_closed_loop(
     setattr(lab, "_job_accept_check", lambda: job_manager.is_accept_requested(job_id))
     setattr(lab, "_job_kernels", list(params.get("kernels") or []))
     try:
-        await execute_validated_command(lab, cmd)
+        from lab_model.coordinator.jobs.command_matrix import command_matrix_enabled
+
+        use_matrix = (
+            command_matrix is not None
+            and backend_id
+            and command_matrix_enabled(backend_id)
+        )
+        if use_matrix:
+            from lab_model.coordinator.jobs.matrix_drain import enqueue_and_await
+
+            lab_state = None
+            try:
+                lab_state = lab.get_lab_state() if hasattr(lab, "get_lab_state") else None
+            except Exception:  # noqa: BLE001
+                lab_state = None
+
+            async def _execute(item: Any) -> None:
+                await execute_validated_command(lab, parse_command_payload(item.payload))
+
+            await enqueue_and_await(
+                command_matrix,
+                dict(command),
+                backend_id=backend_id,
+                lease_id=str(lease_id or ""),
+                execute=_execute,
+                lab_state=lab_state if isinstance(lab_state, dict) else None,
+            )
+        else:
+            await execute_validated_command(lab, cmd)
     finally:
         if hasattr(lab, "_job_abort_check"):
             delattr(lab, "_job_abort_check")

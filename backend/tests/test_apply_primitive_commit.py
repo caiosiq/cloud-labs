@@ -409,6 +409,52 @@ class ApplyInAirCommitTests(unittest.TestCase):
             50.0,
         )
 
+    def test_set_live_exposure_commits_live_feed_channel_not_science(self) -> None:
+        state = _seed_component("tag_22")
+        state["components"]["tag_22"]["statecontrol"]["tunables"][
+            "exposure_time_ms"
+        ] = 200.0
+        ok = apply_in_air_commit(
+            state,
+            "START_LIVE_FEED",
+            {
+                "action": "START_LIVE_FEED",
+                "target_id": "tag_22",
+                "channel": "stream",
+                "parameters": {"exposure_time_ms": 30.0},
+            },
+            {"channel": "tag_22.camera_image", "active": True, "live_exposure_time_ms": 30.0},
+        )
+        self.assertTrue(ok)
+        stream = state["components"]["tag_22"]["telemetry"]["live_feed"]["stream"]
+        self.assertEqual(stream.get("live_exposure_time_ms"), 30.0)
+        self.assertEqual(
+            state["components"]["tag_22"]["statecontrol"]["tunables"][
+                "exposure_time_ms"
+            ],
+            200.0,
+        )
+
+        ok2 = apply_in_air_commit(
+            state,
+            "SET_LIVE_EXPOSURE",
+            {
+                "action": "SET_LIVE_EXPOSURE",
+                "target_id": "tag_22",
+                "parameters": {"exposure_time_ms": 80.0},
+            },
+            {"tag_id": "tag_22", "live_exposure_time_ms": 80.0},
+        )
+        self.assertTrue(ok2)
+        stream2 = state["components"]["tag_22"]["telemetry"]["live_feed"]["stream"]
+        self.assertEqual(stream2.get("live_exposure_time_ms"), 80.0)
+        self.assertEqual(
+            state["components"]["tag_22"]["statecontrol"]["tunables"][
+                "exposure_time_ms"
+            ],
+            200.0,
+        )
+
     def test_set_laser_output_commits_tunable(self) -> None:
         state = _seed_component("tag_11")
         ok = apply_in_air_commit(
