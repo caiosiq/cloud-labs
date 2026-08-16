@@ -207,5 +207,41 @@ class BindStorageGeometryTests(unittest.TestCase):
         self.assertEqual(rt.edge_layout_cache, real_layout)
 
 
+class MockEdgeBenchStorageLockstepTests(unittest.TestCase):
+    """Mock edge bench must match lab_view packing extent (not bare full-Q3)."""
+
+    def test_mock_edge_and_lab_view_storage_rects_agree(self) -> None:
+        from lab_model.language.domain.storage_region import (
+            configure_from_layout_document,
+            storage_grid_spec,
+        )
+
+        repo = Path(__file__).resolve().parents[2]
+        edge_doc = json.loads(
+            (repo / "mock_backend" / "cloudlabs_edge" / "bench" / "layout.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        lab_view_doc = json.loads(
+            (repo / "mock_backend" / "lab_view" / "layout.json").read_text(encoding="utf-8")
+        )
+        edge_layout = unwrap_bench_layout(edge_doc)
+        self.assertIn("extent_from_origin_mm", edge_layout.get("storage") or {})
+        self.assertEqual(
+            edge_layout["storage"]["extent_from_origin_mm"],
+            lab_view_doc["storage"]["extent_from_origin_mm"],
+        )
+
+        configure_from_layout_document(edge_layout)
+        edge_q3 = storage_grid_spec()["q3"]
+        configure_from_layout_document(lab_view_doc)
+        view_q3 = storage_grid_spec()["q3"]
+        self.assertEqual(edge_q3, view_q3)
+        # Dense mock packing (~75×95 mm cells), not full-lab 125×125 mm.
+        self.assertAlmostEqual(edge_q3["x_min"], -300.0)
+        self.assertAlmostEqual(edge_q3["y_min"], -380.0)
+        self.assertLess(edge_q3["x_max"] - edge_q3["x_min"], 400.0)
+
+
 if __name__ == "__main__":
     unittest.main()

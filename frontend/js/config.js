@@ -147,16 +147,26 @@ export function applyLabLayoutFromApiDoc(payload) {
     let srxx = 0;
     let sry = LAB_Y_MIN;
     let sryy = 0;
-    // Prefer edge ``storage.bounds_mm`` (SoT on the layout document). Fall back to
-    // enriched ``storage_grid.q3`` which used to lag when process geometry was
-    // still bound to another backend.
+    // Prefer edge ``storage.bounds_mm`` (SoT on the layout document). Then
+    // legacy ``extent_from_origin_mm``. Fall back to enriched ``storage_grid.q3``
+    // (must match the active backend — BackendSession rebinds before lab-layout).
     const st = payload.storage;
     const bounds = st && typeof st === 'object' ? st.bounds_mm : null;
+    const extent = st && typeof st === 'object' ? st.extent_from_origin_mm : null;
     if (bounds && typeof bounds === 'object') {
         if (Number.isFinite(Number(bounds.x_min))) srx = Number(bounds.x_min);
         if (Number.isFinite(Number(bounds.x_max))) srxx = Number(bounds.x_max);
         if (Number.isFinite(Number(bounds.y_min))) sry = Number(bounds.y_min);
         if (Number.isFinite(Number(bounds.y_max))) sryy = Number(bounds.y_max);
+    } else if (extent && typeof extent === 'object') {
+        const ew = Number(extent.width_mm);
+        const eh = Number(extent.height_mm);
+        if (Number.isFinite(ew) && ew > 0 && Number.isFinite(eh) && eh > 0) {
+            srx = Math.max(LAB_X_MIN, -Math.abs(ew));
+            srxx = Math.min(0, LAB_X_MAX);
+            sry = Math.max(LAB_Y_MIN, -Math.abs(eh));
+            sryy = Math.min(0, LAB_Y_MAX);
+        }
     } else {
         const sg = payload.storage_grid;
         if (sg && typeof sg === 'object') {

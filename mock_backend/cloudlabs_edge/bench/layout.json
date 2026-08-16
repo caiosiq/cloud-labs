@@ -25,7 +25,11 @@
     "storage": {
       "rule": "negative_xy",
       "grid_nx": 4,
-      "grid_ny": 4
+      "grid_ny": 4,
+      "extent_from_origin_mm": {
+        "width_mm": 300,
+        "height_mm": 380
+      }
     },
     "breadboard": {
       "grid_spacing_mm": 25,
