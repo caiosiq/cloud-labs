@@ -149,7 +149,7 @@ Orchestration: `frontend/js/ui/component-popup.js` (read-only panel + PRIMITIVES
 
 1. **Placement + tunable control** — `MOVE_COMPONENT`, then `SET_EXPOSURE`, motor tunables, …
 2. **Manipulation** — storage, pick, hover, place
-3. **Workflow** — `RECORD_MEASURABLES`, `OPTIMIZE`, `SCAN_ROTATE_IN_PLACE`
+3. **Workflow** — `RECORD_MEASURABLES`, `OPTIMIZE`
 4. **Telemetry sessions** — TeleOp + live feed (always last)
 
 ## Add a new tunable (checklist)

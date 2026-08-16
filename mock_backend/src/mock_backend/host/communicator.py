@@ -832,43 +832,8 @@ class MockLabCommunicator(LabCommunicator):
         from mock_backend.host.primitives import primitive_place_from_hover
         await primitive_place_from_hover(self, target_id, commanded, params)
 
-    async def _primitive_scan_rotate_in_place(
-        self,
-        *,
-        target_id: str,
-        mode: str,
-        theta_min: float,
-        theta_max: float,
-        speed: float,
-        axis: str,
-        base_x: float,
-        base_y: float,
-        base_z: Optional[float],
-        params: Dict[str, Any],
-        on_rotation_update: Callable[[float], None],
-    ) -> None:
-        from mock_backend.host.primitives import primitive_scan_rotate_in_place
-        await primitive_scan_rotate_in_place(
-            self,
-            target_id=target_id,
-            mode=mode,
-            theta_min=theta_min,
-            theta_max=theta_max,
-            speed=speed,
-            axis=axis,
-            base_x=base_x,
-            base_y=base_y,
-            base_z=base_z,
-            params=params,
-            on_rotation_update=on_rotation_update,
-        )
-
-    # ``scan_rotate_in_place`` lives on the base template class
-    # (Phase 2B); mock relies on the inherited orchestrator plus the
-    # :meth:`_primitive_scan_rotate_in_place` hook above to drive the
-    # stepwise sweep and the per-step + final state commits through
-    # ``commit_scan_rotation``. ``confirm_holding_tag`` and the
-    # holding-state housekeeping it runs are inherited the same way.
+    # ``confirm_holding_tag`` and the holding-state housekeeping it runs
+    # are inherited from the base template class.
 
     def get_video_feed_status(self) -> Dict[str, Any]:
         return {"connected": True, "source": "/api/components/{tag_id}/telemetry/stream"}

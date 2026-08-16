@@ -10,8 +10,7 @@
 - [`EDGE_CONTRACT_AND_UC_LIVE_PLANE.md`](./EDGE_CONTRACT_AND_UC_LIVE_PLANE.md) — edge / UC boundary
 - [`EDGE_UC_MIGRATION_ROADMAP.md`](./EDGE_UC_MIGRATION_ROADMAP.md) — hardware edge phases
 - [`../backend/lab_model/README.md`](../backend/lab_model/README.md) — tunables / measurables
-- [`../backend/lab_model/execution/orchestration/optimize.py`](../backend/lab_model/execution/orchestration/optimize.py) — **today’s** single-tag orchestrator
-- [`../schemas/strategies.json`](../schemas/strategies.json) — legacy strategy presets (NEWTON, COBYLA, …)
+- [`../backend/lab_model/execution/orchestration/optimize.py`](../backend/lab_model/execution/orchestration/optimize.py) — ensemble OPTIMIZE orchestrator
 
 > **Naming:** **`ControlManager`** (cloud-labs) owns configuration history.  
 > **`lab_automation`** (`OpticalExperiment`) runs the inner optimization loop on hardware.  
@@ -591,13 +590,13 @@ Full example combining four mirror motors, optional invasive lens Y, centroid + 
 }
 ```
 
-**Legacy mode** (unchanged until migrated):
+**Legacy mode** (removed — OPTIMIZE is ensemble-only):
 
 ```json
 {
   "action": "OPTIMIZE",
   "target_id": "tag_m1",
-  "parameters": { "mode": "legacy_strategy", "strategy": "COBYLA", "motor_ids": [1, 3] }
+  "parameters": { "mode": "ensemble", "…": "see examples/" }
 }
 ```
 
@@ -816,14 +815,13 @@ Paste the `parameters` object from [`two_mirror_mock.json`](../schemas/ensemble_
 
 ## 19. Legacy preset migration
 
-| Legacy `parameters` | Ensemble equivalent |
-|---------------------|---------------------|
-| `{ "strategy": "NEWTON", "camera_number": 1, "axis": "x", … }` | Single-tag motors in one `block_cobyla` block; objective term `rms_distance_px` on camera centroid (real) or mock weighted_sum — see [`presets.py`](../backend/lab_model/execution/optimization/presets.py) `compile_legacy_strategy()` |
-| `{ "strategy": "COBYLA", "motor_ids": [1, 3], … }` | Single-tag motors via `compile_legacy_strategy()` / one `block_cobyla` block |
+Legacy `strategy: NEWTON|COBYLA` / `mode: legacy_strategy` paths are **removed**. Prefer `mode=ensemble`, SDK `run_optimize` / `run_cobyla`, Twin Alignment session, and closed-loop jobs. See `GET /api/optimization/capabilities` and [`two_mirror_mock.json`](../schemas/ensemble_optimization_examples/two_mirror_mock.json).
+
+| Former legacy `parameters` | Ensemble equivalent |
+|----------------------------|---------------------|
+| `{ "strategy": "NEWTON", … }` / `{ "strategy": "COBYLA", "motor_ids": […] }` | Single-tag motors in one `block_cobyla` block with an objective term (e.g. `rms_distance_px`) |
 | Multi-mirror bench alignment | [`two_mirror_mock.json`](../schemas/ensemble_optimization_examples/two_mirror_mock.json) |
 | Robot-held lens after mirrors | Add `invasive_discrete` variable in stage 2 (pose Y on **tag_11**) and a second solver block in advanced JSON |
-
-Legacy mode remains available for real-bench telemetry parity: `"mode": "legacy_strategy"` (default) with `"strategy": "NEWTON"` \| `"COBYLA"`. **Deprecated for new work (Step E)** — prefer `mode=ensemble`, SDK `run_optimize` / `run_cobyla`, Twin Alignment session, and closed-loop jobs. Optional mock redirect: `CLOUDLABS_LEGACY_OPTIMIZE_REDIRECT=1`. See `GET /api/optimization/capabilities`.
 
 ---
 

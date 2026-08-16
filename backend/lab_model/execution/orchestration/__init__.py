@@ -22,7 +22,6 @@ __all__ = [
     "run_recenter_stored_in_inventory",
     "run_record_measurables",
     "run_repack_storage_slot",
-    "run_scan_rotate_in_place",
     "run_start_live_feed",
     "run_store_component",
 ]
@@ -47,7 +46,6 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     ),
     "run_record_measurables": (".measurables_record", "run_record_measurables"),
     "run_repack_storage_slot": (".table_moves", "run_repack_storage_slot"),
-    "run_scan_rotate_in_place": (".scan_rotate", "run_scan_rotate_in_place"),
     "run_start_live_feed": (".live_feed", "run_start_live_feed"),
     "run_store_component": (".table_moves", "run_store_component"),
 }

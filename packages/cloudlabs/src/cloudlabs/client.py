@@ -977,21 +977,58 @@ class CloudLabsClient:
             }
         )
 
-    def start_live_feed(self, tag_id: str, channel: str = "stream") -> Dict[str, Any]:
+    def start_live_feed(
+        self,
+        tag_id: str,
+        channel: str = "stream",
+        *,
+        exposure_time_ms: Optional[float] = None,
+    ) -> Dict[str, Any]:
         """Arm Tier B live wire for a camera tag (``START_LIVE_FEED``).
 
         Same alias route Twin uses. Stream bytes come from catalog/capability
         URLs only after this returns successfully — not from lab-state poll.
+
+        Optional ``exposure_time_ms`` sets preview (VEXP) only — it does not
+        write science ``tunables.exposure_time_ms`` (use ``SET_EXPOSURE``).
         """
         self._require_lease()
         tag_id = tag_id.strip()
         channel = (channel or "stream").strip() or "stream"
-        self._vlog("START_LIVE_FEED tag=%s channel=%s", tag_id, channel)
+        self._vlog(
+            "START_LIVE_FEED tag=%s channel=%s exposure_ms=%s",
+            tag_id,
+            channel,
+            exposure_time_ms,
+        )
         path = (
             f"/api/components/{tag_id}/telemetry/live-feed/start"
             f"?channel={channel}"
         )
-        return self._post_json(path, {})
+        body: Dict[str, Any] = {}
+        if exposure_time_ms is not None:
+            body["exposure_time_ms"] = float(exposure_time_ms)
+        return self._post_json(path, body)
+
+    def set_live_exposure(
+        self, tag_id: str, exposure_time_ms: float
+    ) -> Dict[str, Any]:
+        """Adjust preview exposure while live (``SET_LIVE_EXPOSURE``).
+
+        Does not overwrite science ``tunables.exposure_time_ms``.
+        """
+        self._require_lease()
+        tag_id = tag_id.strip()
+        self._vlog(
+            "SET_LIVE_EXPOSURE tag=%s exposure_ms=%s", tag_id, exposure_time_ms
+        )
+        return self._post_command(
+            {
+                "action": primitive_action(PrimitiveId.SET_LIVE_EXPOSURE),
+                "target_id": tag_id,
+                "parameters": {"exposure_time_ms": float(exposure_time_ms)},
+            }
+        )
 
     def end_live_feed(self, tag_id: str, channel: str = "all") -> Dict[str, Any]:
         """Disarm live feed (``END_LIVE_FEED``). Idempotent."""

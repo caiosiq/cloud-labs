@@ -9,10 +9,9 @@ move primitive, the canonical hover height for pick).
 
 The mock backend is the canonical *UI-exercise* environment: it has
 to faithfully animate every state transition the real backend
-produces, so a few primitives (``primitive_scan_rotate_in_place``,
-``primitive_optimize_component``) drive a stepwise loop with the
-orchestrator-provided callback (``on_rotation_update`` /
-``progress_callback``) instead of just sleeping.
+produces, so a few primitives (``primitive_optimize_component``)
+drive a stepwise loop with the orchestrator-provided callback
+(``progress_callback``) instead of just sleeping.
 
 Architectural rules (``lab_communicator/README.md``, ``lab_model.platform``):
 
@@ -87,7 +86,7 @@ async def primitive_move_motor(
 
 
 # ---------------------------------------------------------------------------
-# In-air primitives (PICK / HOVER / PLACE_FROM_HOVER / SCAN_ROTATE)
+# In-air primitives (PICK / HOVER / PLACE_FROM_HOVER)
 # ---------------------------------------------------------------------------
 
 async def primitive_pick_component(
@@ -147,47 +146,6 @@ async def primitive_place_from_hover(
     precision beats top-camera-through-gripper).
     """
     await asyncio.sleep(1.5)
-
-
-async def primitive_scan_rotate_in_place(
-    communicator: "MockLabCommunicator",  # noqa: ARG001
-    *,
-    target_id: str,  # noqa: ARG001
-    mode: str,  # noqa: ARG001
-    theta_min: float,
-    theta_max: float,
-    speed: float,
-    axis: str,  # noqa: ARG001
-    base_x: float,  # noqa: ARG001
-    base_y: float,  # noqa: ARG001
-    base_z: Optional[float],  # noqa: ARG001
-    params: Dict[str, Any],  # noqa: ARG001
-    on_rotation_update: Callable[[float], None],
-) -> None:
-    """Mock hardware step for ``scan_rotate_in_place``.
-
-    Drives a stepwise sweep so the UI sees rotation animate. Every
-    step calls ``on_rotation_update(rotation)``, the closure the
-    orchestrator constructed -- this is the architectural escape
-    hatch that lets the primitive publish state updates without ever
-    touching ``self.current_state`` directly (CI lint enforces that
-    primitives are state-clean).
-
-    The final ``theta_max`` commit is the orchestrator's job; we stop
-    one step short so the orchestrator's terminal commit isn't
-    double-counted.
-    """
-    total_deg = abs(theta_max - theta_min)
-    duration_s = total_deg / speed if speed > 0 else 0.0
-    duration_s = min(duration_s, 10.0)  # cap for UI responsiveness
-    steps = max(1, min(20, int(duration_s * 4)))
-    step_sleep = duration_s / steps if steps > 0 else 0.0
-
-    for i in range(1, steps):
-        frac = i / steps
-        cur_rot = theta_min + (theta_max - theta_min) * frac
-        on_rotation_update(cur_rot)
-        await asyncio.sleep(step_sleep)
 
 
 # ---------------------------------------------------------------------------
@@ -418,7 +376,6 @@ __all__ = [
     "primitive_pick_component",
     "primitive_hover_component",
     "primitive_place_from_hover",
-    "primitive_scan_rotate_in_place",
     "primitive_move_component",
     "primitive_record_measurables",
     "primitive_optimize_component",

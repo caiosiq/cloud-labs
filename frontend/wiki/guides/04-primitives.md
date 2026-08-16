@@ -66,7 +66,6 @@ each tag. Below is the **full** platform inventory.
 | `PICK_COMPONENT` | Pick a part into the gripper |
 | `HOVER` | Hold / move while held above the table |
 | `PLACE_FROM_HOVER` | Place from hover onto the breadboard |
-| `SCAN_ROTATE_IN_PLACE` | Rotate while held / scanned for alignment |
 | `CONFIRM_HOLDING_TAG` | Confirm which tag is in the gripper |
 
 ### TeleOp and live feed
@@ -84,7 +83,7 @@ each tag. Below is the **full** platform inventory.
 
 | Primitive | Meaning |
 |-----------|---------|
-| `OPTIMIZE` | Closed-loop (or legacy) optimization session on the edge |
+| `OPTIMIZE` | Closed-loop ensemble optimization session on the edge |
 
 ## What is not a primitive
 

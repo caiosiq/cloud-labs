@@ -21,10 +21,20 @@ PRIMITIVE_HANDLERS: dict[str, Handler] = {
     "START_LIVE_FEED": lambda a: live_feed.arm_live_feed(
         str(a.get("channel") or a.get("measurable_id") or ""),
         profile=a.get("profile"),
+        exposure_time_ms=(
+            float(a["exposure_time_ms"])
+            if a.get("exposure_time_ms") is not None
+            else (
+                float(a["live_exposure_time_ms"])
+                if a.get("live_exposure_time_ms") is not None
+                else None
+            )
+        ),
     ),
     "END_LIVE_FEED": lambda a: live_feed.disarm_live_feed(
         str(a.get("channel") or a.get("measurable_id") or ""),
     ),
+    "SET_LIVE_EXPOSURE": lambda a: live_feed.set_live_exposure(a),
     "START_TELEOP": lambda a: teleop.start_teleop(
         str(a.get("tag_id") or a.get("target_id") or "")
     ),
@@ -41,7 +51,6 @@ PRIMITIVE_HANDLERS: dict[str, Handler] = {
     "PICK_COMPONENT": lambda a: motion.pick_component(a),
     "HOVER": lambda a: motion.hover_component(a),
     "PLACE_FROM_HOVER": lambda a: motion.place_from_hover(a),
-    "SCAN_ROTATE_IN_PLACE": lambda a: motion.scan_rotate_in_place(a),
     "CONFIRM_HOLDING_TAG": lambda a: motion.confirm_holding_tag(a),
     "STORE_COMPONENT": lambda a: motion.store_component(a),
     "PLACE_FROM_STORAGE": lambda a: motion.place_from_storage(a),

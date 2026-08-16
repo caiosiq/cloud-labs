@@ -34,17 +34,6 @@ class HoverParameters(PoseTargetParameters):
     z: float
 
 
-class ScanRotateParameters(BaseModel):
-    """Constant-rate angular sweep for SCAN_ROTATE_IN_PLACE."""
-
-    model_config = ConfigDict(extra="allow")
-
-    theta_min: float
-    theta_max: float
-    speed_deg_per_s: float = Field(..., gt=0.0)
-    axis: Literal["z"] = "z"
-
-
 class MoveMotorParameters(BaseModel):
     motor_id: int
     distance: float
@@ -56,6 +45,12 @@ class SetMotorSetpointParameters(BaseModel):
 
 
 class SetExposureParameters(BaseModel):
+    exposure_time_ms: float = Field(..., gt=0.0)
+
+
+class SetLiveExposureParameters(BaseModel):
+    """Preview exposure while a live feed is armed (does not write science tunable)."""
+
     exposure_time_ms: float = Field(..., gt=0.0)
 
 
@@ -76,9 +71,8 @@ class MotorIdParameters(BaseModel):
 
 
 class OptimizeParameters(BaseModel):
-    """OPTIMIZE primitive parameters.
+    """OPTIMIZE primitive parameters (ensemble only).
 
-    Ensemble mode accepts kernel **inputs** (not separate verbs):
     ``objective`` terms may reference ``kernel_id``; optional top-level
     ``kernels`` allowlists edge artifacts. Full ensemble shape is validated
     as ``OptimizeEnsembleParameters`` during preflight.
@@ -86,17 +80,11 @@ class OptimizeParameters(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    # Step E: prefer mode=ensemble (SDK run_optimize / Twin Alignment session).
-    # legacy_strategy remains for real-bench Newton/COBYLA telemetry parity.
-    mode: Literal["legacy_strategy", "ensemble"] = Field(
-        default="legacy_strategy",
-        description=(
-            "DEPRECATED default: legacy_strategy (NEWTON/COBYLA). "
-            "Prefer ensemble for new work (jobs, kernels, cancel)."
-        ),
+    mode: Literal["ensemble"] = Field(
+        default="ensemble",
+        description="Ensemble OPTIMIZE (Alignment session / SDK run_optimize).",
     )
-    strategy: str = "NEWTON"
-    #: Ensemble only — edge kernel ids referenced by the objective (inputs).
+    #: Edge kernel ids referenced by the objective (inputs).
     kernels: list[str] | None = Field(
         default=None,
         description="Optional allowlist of kernel ids for ensemble OPTIMIZE.",
@@ -128,6 +116,14 @@ class SetExposureBody(BaseModel):
     action: Literal["SET_EXPOSURE"]
     target_id: str = Field(..., min_length=1)
     parameters: SetExposureParameters
+
+
+class SetLiveExposureBody(BaseModel):
+    """Adjust Tier B preview exposure without changing science ``exposure_time_ms``."""
+
+    action: Literal["SET_LIVE_EXPOSURE"]
+    target_id: str = Field(..., min_length=1)
+    parameters: SetLiveExposureParameters
 
 
 class SetLaserOutputBody(BaseModel):
@@ -256,14 +252,6 @@ class PlaceFromHoverBody(BaseModel):
     parameters: PoseTargetParameters
 
 
-class ScanRotateInPlaceBody(BaseModel):
-    """Sweep the held part's rotation from theta_min to theta_max at constant speed."""
-
-    action: Literal["SCAN_ROTATE_IN_PLACE"]
-    target_id: str = Field(..., min_length=1)
-    parameters: ScanRotateParameters
-
-
 class ConfirmHoldingTagBody(BaseModel):
     """Operator confirms the tag currently in the gripper (clears HOLDING_UNCONFIRMED flag)."""
 
@@ -361,7 +349,13 @@ class StartLiveFeedBody(BaseModel):
     action: Literal["START_LIVE_FEED"]
     target_id: str = Field(..., min_length=1)
     channel: str = "stream"
-    parameters: Dict[str, Any] = Field(default_factory=dict)
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Optional ``exposure_time_ms`` for preview (VEXP) — does not write "
+            "science tunable exposure_time_ms."
+        ),
+    )
 
 
 class EndLiveFeedBody(BaseModel):
@@ -453,6 +447,7 @@ ValidatedCommand = Annotated[
         MoveMotorBody,
         SetMotorSetpointBody,
         SetExposureBody,
+        SetLiveExposureBody,
         SetLaserOutputBody,
         ApplyTunablesPatchBody,
         MotorSendHomeBody,
@@ -470,7 +465,6 @@ ValidatedCommand = Annotated[
         PickComponentBody,
         HoverBody,
         PlaceFromHoverBody,
-        ScanRotateInPlaceBody,
         ConfirmHoldingTagBody,
         StartTeleopBody,
         EndTeleopBody,

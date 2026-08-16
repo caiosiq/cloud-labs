@@ -29,6 +29,7 @@ from .schemas import (
     MoveMotorBody,
     OptimizeBody,
     SetExposureBody,
+    SetLiveExposureBody,
     SetLaserOutputBody,
     SetMotorSetpointBody,
     PickComponentBody,
@@ -40,7 +41,6 @@ from .schemas import (
     RemoveComponentBody,
     RepackStorageBody,
     ScanBody,
-    ScanRotateInPlaceBody,
     StartTeleopBody,
     StoreComponentBody,
     StartLiveFeedBody,
@@ -76,6 +76,7 @@ ValidatedCommand = Union[
     MoveMotorBody,
     SetMotorSetpointBody,
     SetExposureBody,
+    SetLiveExposureBody,
     SetLaserOutputBody,
     ApplyTunablesPatchBody,
     MotorSendHomeBody,
@@ -93,7 +94,6 @@ ValidatedCommand = Union[
     PickComponentBody,
     HoverBody,
     PlaceFromHoverBody,
-    ScanRotateInPlaceBody,
     ConfirmHoldingTagBody,
     StartTeleopBody,
     EndTeleopBody,
@@ -135,7 +135,6 @@ RECIPE_ACTION_ALIASES: Dict[str, str] = {
     # In-air manipulation aliases (see new_primitives.md Â§8 / Â§12 Stage 7).
     "PICK": "PICK_COMPONENT",
     "PLACE_HOVER": "PLACE_FROM_HOVER",
-    "SCAN_ROTATE": "SCAN_ROTATE_IN_PLACE",
     "CONFIRM_HOLDING": "CONFIRM_HOLDING_TAG",
 }
 
@@ -184,6 +183,11 @@ async def _invoke_atomic(
         await lab.set_exposure_time_ms(
             cmd.target_id, cmd.parameters.exposure_time_ms
         )
+    elif isinstance(cmd, SetLiveExposureBody):
+        _log_primitive("SET_LIVE_EXPOSURE", cmd.target_id, macro_parent=macro_parent)
+        await lab.set_live_exposure_time_ms(
+            cmd.target_id, cmd.parameters.exposure_time_ms
+        )
     elif isinstance(cmd, SetLaserOutputBody):
         _log_primitive("SET_LASER_OUTPUT", cmd.target_id, macro_parent=macro_parent)
         await lab.set_output_power_mw(cmd.target_id, cmd.parameters.output_power_mw)
@@ -198,27 +202,30 @@ async def _invoke_atomic(
         _log_primitive("OPTIMIZE", cmd.target_id, macro_parent=macro_parent)
         opt = cmd.parameters
         params = opt.model_dump()
-        if params.get("mode") == "ensemble":
-            strategy = params.get("session_label") or "ensemble"
-            # Phase 0: compile edge pipeline document into the OPTIMIZE payload
-            # (remote edges read ``parameters.pipeline``; mock may ignore until Phase 2).
-            try:
-                from lab_model.execution.optimization.pipeline import (
-                    PipelineCompileError,
-                    attach_pipeline,
-                    optional_catalog_map,
-                )
+        if params.get("mode") != "ensemble":
+            raise ValueError(
+                "OPTIMIZE requires parameters.mode=ensemble "
+                "(legacy NEWTON/COBYLA strategy mode removed). "
+                "Use Alignment session or SDK run_optimize / run_cobyla."
+            )
+        strategy = params.get("session_label") or "ensemble"
+        # Compile edge pipeline document into the OPTIMIZE payload
+        # (remote edges read ``parameters.pipeline``; mock may ignore until Phase 2).
+        try:
+            from lab_model.execution.optimization.pipeline import (
+                PipelineCompileError,
+                attach_pipeline,
+                optional_catalog_map,
+            )
 
-                attach_pipeline(params, catalog=optional_catalog_map(lab))
-            except PipelineCompileError as exc:
-                _LOG.warning(
-                    "OPTIMIZE ensemble pipeline compile failed for %s: %s",
-                    cmd.target_id,
-                    exc,
-                )
-                raise
-        else:
-            strategy = opt.strategy
+            attach_pipeline(params, catalog=optional_catalog_map(lab))
+        except PipelineCompileError as exc:
+            _LOG.warning(
+                "OPTIMIZE ensemble pipeline compile failed for %s: %s",
+                cmd.target_id,
+                exc,
+            )
+            raise
         await lab.optimize_component(cmd.target_id, strategy, params)
     elif isinstance(cmd, StoreComponentBody):
         _log_primitive("STORE_COMPONENT", cmd.target_id, macro_parent=macro_parent)
@@ -253,7 +260,7 @@ async def _invoke_atomic(
     elif isinstance(cmd, ScanBody):
         _log_primitive("SCAN", cmd.target_id, macro_parent=macro_parent)
         _LOG.warning(
-            "Legacy SCAN primitive is a no-op stub; use SCAN_ROTATE_IN_PLACE instead."
+            "Legacy SCAN primitive is a no-op stub; use TeleOp Rz for rotation."
         )
     elif isinstance(cmd, RemoveComponentBody):
         _log_primitive("REMOVE", cmd.target_id, macro_parent=macro_parent)
@@ -267,9 +274,6 @@ async def _invoke_atomic(
     elif isinstance(cmd, PlaceFromHoverBody):
         _log_primitive("PLACE_FROM_HOVER", cmd.target_id, macro_parent=macro_parent)
         await lab.place_from_hover(cmd.target_id, cmd.parameters.model_dump())
-    elif isinstance(cmd, ScanRotateInPlaceBody):
-        _log_primitive("SCAN_ROTATE_IN_PLACE", cmd.target_id, macro_parent=macro_parent)
-        await lab.scan_rotate_in_place(cmd.target_id, cmd.parameters.model_dump())
     elif isinstance(cmd, ConfirmHoldingTagBody):
         _log_primitive("CONFIRM_HOLDING_TAG", cmd.target_id, macro_parent=macro_parent)
         await lab.confirm_holding_tag(cmd.target_id)
@@ -282,7 +286,12 @@ async def _invoke_atomic(
         await lab.end_teleop(cmd.target_id)
     elif isinstance(cmd, StartLiveFeedBody):
         _log_primitive("START_LIVE_FEED", cmd.target_id, macro_parent=macro_parent)
-        await lab.start_live_feed(cmd.target_id, channel=cmd.channel)
+        params = dict(cmd.parameters or {})
+        await lab.start_live_feed(
+            cmd.target_id,
+            channel=cmd.channel,
+            exposure_time_ms=params.get("exposure_time_ms"),
+        )
     elif isinstance(cmd, EndLiveFeedBody):
         _log_primitive("END_LIVE_FEED", cmd.target_id, macro_parent=macro_parent)
         await lab.end_live_feed(cmd.target_id, channel=cmd.channel)
@@ -432,6 +441,17 @@ def schedule_validated_command(
             ),
         }
 
+    if isinstance(cmd, SetLiveExposureBody):
+        p = cmd.parameters
+        background_tasks.add_task(execute_validated_command, lab, cmd)
+        return {
+            "status": "accepted",
+            "message": (
+                f"Live preview exposure for {cmd.target_id} set to "
+                f"{p.exposure_time_ms:g} ms"
+            ),
+        }
+
     if isinstance(cmd, SetLaserOutputBody):
         p = cmd.parameters
         background_tasks.add_task(execute_validated_command, lab, cmd)
@@ -468,18 +488,16 @@ def schedule_validated_command(
     if isinstance(cmd, OptimizeBody):
         opt = cmd.parameters
         params = opt.model_dump()
-        if params.get("mode") == "ensemble":
-            label = params.get("session_label") or "ensemble"
-            background_tasks.add_task(execute_validated_command, lab, cmd)
-            return {
-                "status": "accepted",
-                "message": f"Ensemble optimization ({label}) started for {cmd.target_id}",
-            }
-        strat = opt.strategy
+        if params.get("mode") != "ensemble":
+            raise ValueError(
+                "OPTIMIZE requires parameters.mode=ensemble "
+                "(legacy NEWTON/COBYLA strategy mode removed)."
+            )
+        label = params.get("session_label") or "ensemble"
         background_tasks.add_task(execute_validated_command, lab, cmd)
         return {
             "status": "accepted",
-            "message": f"Optimization ({strat}) started for {cmd.target_id}",
+            "message": f"Ensemble optimization ({label}) started for {cmd.target_id}",
         }
 
     if isinstance(cmd, StoreComponentBody):
@@ -589,17 +607,6 @@ def schedule_validated_command(
         return {
             "status": "accepted",
             "message": f"Placing {cmd.target_id} from hover at ({p.target_x:.1f}, {p.target_y:.1f})",
-        }
-
-    if isinstance(cmd, ScanRotateInPlaceBody):
-        p = cmd.parameters
-        background_tasks.add_task(execute_validated_command, lab, cmd)
-        return {
-            "status": "accepted",
-            "message": (
-                f"Scan-rotate {cmd.target_id}: {p.theta_min:.1f}Â° â†’ {p.theta_max:.1f}Â° "
-                f"@ {p.speed_deg_per_s:g}Â°/s (axis={p.axis})"
-            ),
         }
 
     if isinstance(cmd, ConfirmHoldingTagBody):

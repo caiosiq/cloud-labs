@@ -89,7 +89,6 @@ Flow:
      - **`PLACE`** → **`MOVE_COMPONENT`**
      - **`PICK`** → **`PICK_COMPONENT`**
      - **`PLACE_HOVER`** → **`PLACE_FROM_HOVER`**
-     - **`SCAN_ROTATE`** → **`SCAN_ROTATE_IN_PLACE`**
      - **`CONFIRM_HOLDING`** → **`CONFIRM_HOLDING_TAG`**
 2. **`schedule_validated_command(lab, cmd, background_tasks)`** queues **`execute_validated_command`** on Starlette’s background tasks and returns the usual `{"status": "accepted", "message": "..."}` JSON.
 

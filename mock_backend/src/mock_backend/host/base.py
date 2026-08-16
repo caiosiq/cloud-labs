@@ -78,7 +78,6 @@ from lab_model.execution.orchestration import (
     run_recenter_stored_in_inventory,
     run_record_measurables,
     run_repack_storage_slot,
-    run_scan_rotate_in_place,
     run_start_live_feed,
     run_store_component,
 )
@@ -610,11 +609,78 @@ class LabCommunicator:
         """Lab-specific setup before TELEOP controls become ready."""
         return True, "ok"
 
-    async def start_live_feed(self, target_id: str, *, channel: str = "stream") -> None:
-        await run_start_live_feed(self, target_id, channel=channel)
+    async def start_live_feed(
+        self,
+        target_id: str,
+        *,
+        channel: str = "stream",
+        exposure_time_ms: float | None = None,
+    ) -> None:
+        await run_start_live_feed(
+            self,
+            target_id,
+            channel=channel,
+            exposure_time_ms=exposure_time_ms,
+        )
 
     async def end_live_feed(self, target_id: str, *, channel: str = "all") -> None:
         await run_end_live_feed(self, target_id, channel=channel)
+
+    async def set_live_exposure_time_ms(
+        self, target_id: str, exposure_time_ms: float
+    ) -> None:
+        """Apply preview (VEXP) exposure without writing science ``exposure_time_ms``."""
+        from lab_model.coordinator.state.commits import commit_live_exposure
+        from lab_model.language.domain.component import is_live_feed_active
+
+        exp = float(exposure_time_ms)
+        if exp <= 0:
+            print(f"{self.log_prefix} Refusing set_live_exposure: need positive ms")
+            return
+        with self._state_lock:
+            entry = (self.current_state.get("components") or {}).get(target_id)
+            if not isinstance(entry, dict) or not is_live_feed_active(entry, "stream"):
+                print(
+                    f"{self.log_prefix} Refusing set_live_exposure: "
+                    f"{target_id} live feed not active"
+                )
+                return
+        ok, msg = await self._primitive_set_live_exposure(target_id, exp)
+        if not ok:
+            print(f"{self.log_prefix} set_live_exposure hardware failed: {msg}")
+            return
+        with self._state_lock:
+            commit_live_exposure(
+                self.current_state,
+                target_id,
+                channel="stream",
+                exposure_time_ms=exp,
+            )
+            from datetime import datetime
+
+            self.current_state["last_updated"] = datetime.now().isoformat()
+        self._persist_state()
+        print(
+            f"{self.log_prefix} Live preview exposure for {target_id} set to {exp:g} ms"
+        )
+
+    async def _primitive_set_live_exposure(
+        self, target_id: str, exposure_time_ms: float
+    ) -> Tuple[bool, str]:
+        """Hardware VEXP for live preview (default: table_cam when available)."""
+        catalog_meta = self._catalog_meta_for_tag(target_id) or {}
+        from lab_model.coordinator.catalog.schema import (
+            resolve_cam_id_for_tag,
+            resolve_telemetry_stream_backend,
+        )
+
+        backend = resolve_telemetry_stream_backend(catalog_meta)
+        cam_id = resolve_cam_id_for_tag(catalog_meta)
+        if backend == "table_cam" and cam_id is not None:
+            return self.table_cam_send_vexp(int(cam_id), float(exposure_time_ms) / 1000.0)
+        if backend == "overhead":
+            return True, "ok"
+        return True, "ok"
 
     async def _primitive_start_live_feed(
         self,
@@ -624,6 +690,7 @@ class LabCommunicator:
         backend: str,
         cam_id: Optional[int],
         profile: str = "default",
+        exposure_time_ms: float | None = None,
     ) -> Tuple[bool, str]:
         if backend == "overhead":
             return True, "ok"
@@ -631,6 +698,12 @@ class LabCommunicator:
             ok, msg = self.table_cam_connect(int(cam_id))
             if not ok:
                 return False, msg
+            if exposure_time_ms is not None:
+                vok, vmsg = self.table_cam_send_vexp(
+                    int(cam_id), float(exposure_time_ms) / 1000.0
+                )
+                if not vok:
+                    return False, vmsg
             return self.table_cam_live_set(int(cam_id), True, profile=profile)
         return False, f"unsupported live feed backend {backend!r}"
 
@@ -1511,36 +1584,6 @@ class LabCommunicator:
         ``params`` is the original input dict so backends can pull
         side-channel knobs like ``safe_z`` without forcing them onto
         the canonical ``LabPose`` shape.
-        """
-        raise NotImplementedError
-
-    async def scan_rotate_in_place(
-        self, target_id: str, params: Dict[str, Any]
-    ) -> None:
-        await run_scan_rotate_in_place(self, target_id, params)
-
-    async def _primitive_scan_rotate_in_place(
-        self,
-        *,
-        target_id: str,
-        mode: str,
-        theta_min: float,
-        theta_max: float,
-        speed: float,
-        axis: str,
-        base_x: float,
-        base_y: float,
-        base_z: Optional[float],
-        params: Dict[str, Any],
-        on_rotation_update: "Callable[[float], None]",
-    ) -> None:
-        """Hardware step for :meth:`scan_rotate_in_place`.
-
-        ``mode`` is ``"held"`` or ``"placed"``. The hook runs the
-        sweep; for stepwise UI updates it calls
-        ``on_rotation_update(rotation)`` (the closure constructed by
-        the orchestrator -- it serializes per-step writes through the
-        state lock without the hook ever touching ``current_state``).
         """
         raise NotImplementedError
 

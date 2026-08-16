@@ -72,6 +72,15 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "read_only": False,
         "handler": "set_exposure_time_ms",
     },
+    PrimitiveId.SET_LIVE_EXPOSURE: {
+        "kind": PrimitiveKind.ATOMIC,
+        "read_only": False,
+        "handler": "set_live_exposure_time_ms",
+        "notes": (
+            "Preview exposure for an armed live feed (Tier B). Does not write "
+            "tunables.exposure_time_ms used by RECORD / EVAL_KERNEL / OPTIMIZE."
+        ),
+    },
     PrimitiveId.SET_LASER_OUTPUT: {
         "kind": PrimitiveKind.ATOMIC,
         "read_only": False,
@@ -152,11 +161,6 @@ PRIMITIVE_REGISTRY: Dict[PrimitiveId, Dict[str, Any]] = {
         "kind": PrimitiveKind.ATOMIC,
         "read_only": False,
         "handler": "place_from_hover",
-    },
-    PrimitiveId.SCAN_ROTATE_IN_PLACE: {
-        "kind": PrimitiveKind.ATOMIC,
-        "read_only": False,
-        "handler": "scan_rotate_in_place",
     },
     PrimitiveId.CONFIRM_HOLDING_TAG: {
         "kind": PrimitiveKind.ATOMIC,

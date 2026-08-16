@@ -119,38 +119,6 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
 
     let command = result.command;
 
-    if (command.action === 'OPTIMIZE' && command.parameters) {
-        const strat = command.parameters.strategy;
-        if (strat === 'COBYLA') {
-            const p = { ...command.parameters };
-            if (!p.motor_ids || !p.motor_ids.length) {
-                const entry = deps.getCatalogEntry(command.target_id);
-                const motorIds = entry && entry.motor_ids;
-                if (!motorIds || !motorIds.length) {
-                    appendLine(
-                        'COBYLA needs motor_ids (in JSON or the component catalog for the current mode).',
-                        'error'
-                    );
-                    return;
-                }
-                p.motor_ids = motorIds;
-            }
-            if (p.camera_number === undefined) {
-                p.camera_number = 1;
-            }
-            if (p.exposure === undefined && typeof deps.getTableCamExposureSeconds === 'function') {
-                p.exposure = deps.getTableCamExposureSeconds();
-            }
-            command = { ...command, parameters: p };
-        } else if (strat === 'NEWTON') {
-            const p = { ...command.parameters };
-            if (p.exposure === undefined && typeof deps.getTableCamExposureSeconds === 'function') {
-                p.exposure = deps.getTableCamExposureSeconds();
-            }
-            command = { ...command, parameters: p };
-        }
-    }
-
     if (command.action === 'MOVE_COMPONENT') {
         const tag = command.target_id;
         if (!deps.ensureGhostForConsole(tag)) {

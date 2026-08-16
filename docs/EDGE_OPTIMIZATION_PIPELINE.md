@@ -264,8 +264,8 @@ ensemble spec into it. Nothing executes yet.
 | 2.2 | `EdgeCaptureSource` implementing `CaptureSource` over 2.1, one capture per `capture_id` per eval | `lab_automation/cloudlabs_edge/optimization/capture_impl.py` (new) |
 | 2.3 | `RealActuatorRouter`: continuous → `adapters.motors.set_motor_setpoint`; invasive → motion helper with release-and-retract before measure | `lab_automation/cloudlabs_edge/optimization/router_impl.py` (new) |
 | 2.4 | Block-scoped bookkeeping: `set_system_status("BUSY")` and `set_observed_pose` on block enter/exit, **not per eval** | same |
-| 2.5 | Rewrite `optimize_component` to parse the pipeline and run `session.run()`; **refuse** `mode="ensemble"` falling through to legacy COBYLA | `lab_automation/cloudlabs_edge/adapters/optimize.py` |
-| 2.6 | Keep legacy strategies reachable only under an explicit `mode="legacy_strategy"` | same |
+| 2.5 | Rewrite `optimize_component` to parse the pipeline and run `session.run()`; OPTIMIZE is ensemble-only | `lab_automation/cloudlabs_edge/adapters/optimize.py` |
+| 2.6 | (removed) Legacy `mode="legacy_strategy"` — no longer supported | — |
 
 **Logic tests** — `lab_automation/cloudlabs_edge/tests/` (new):
 

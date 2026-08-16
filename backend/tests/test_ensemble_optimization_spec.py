@@ -18,7 +18,6 @@ from lab_model.execution.optimization.errors import EnsemblePreflightError, Path
 from lab_model.execution.optimization.normalize import NormalizedSearchSpace
 from lab_model.execution.optimization.paths import VariablePathResolver, parse_variable_path
 from lab_model.execution.optimization.preflight import preflight_ensemble
-from lab_model.execution.optimization.presets import compile_legacy_strategy
 from lab_model.execution.optimization.spec import OptimizeEnsembleParameters, VariableRef
 from lab_model.execution.orchestration.optimize_ensemble import run_optimize_ensemble
 from lab_model.coordinator.state.commits import commit_optimization_ensemble_complete
@@ -175,7 +174,7 @@ class EnsembleOptimizationSpecTests(unittest.TestCase):
         self.assertIsInstance(resolver.get("v_m1"), float)
 
     def test_preflight_ignores_legacy_strategy_default(self) -> None:
-        """``OptimizeParameters`` injects strategy=NEWTON; ensemble schema forbids it."""
+        """Stray ``strategy`` noise must not reach ensemble schema (extra=forbid)."""
         payload = _minimal_ensemble_payload()
         payload["strategy"] = "NEWTON"
         spec, _, x0 = preflight_ensemble(self.fixture_runtime, payload)
@@ -226,14 +225,6 @@ class EnsembleOptimizationSpecTests(unittest.TestCase):
             ],
             "ENSEMBLE",
         )
-
-    def test_compile_legacy_strategy_shape(self) -> None:
-        compiled = compile_legacy_strategy(
-            target_id="tag_20", strategy="COBYLA", motor_ids=[1, 3]
-        )
-        self.assertEqual(compiled["mode"], "ensemble")
-        self.assertEqual(len(compiled["variables"]), 2)
-        preflight_ensemble(self.fixture_runtime, compiled)
 
     def test_run_optimize_ensemble_stub_enters_and_exits_optimizing(self) -> None:
         state = copy.deepcopy(self.fixture_runtime)

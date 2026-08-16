@@ -8,8 +8,6 @@
  *   GET /api/storage-grid
  *   GET /api/layout-conflicts
  *   GET /api/recipes
- *
- * Strategies are currently hard-coded client-side (no /api/strategies yet).
  */
 import { store } from '../state/store.js';
 import { withBackendQuery } from '../state/backend-selection.js';
@@ -71,48 +69,6 @@ export async function fetchCatalogMap() {
     } catch (e) {
         console.error('Catalog fetch failed', e);
     }
-}
-
-/**
- * Strategy metadata — hard-coded for now (backend keeps the canonical list, but the UI
- * doesn't yet pull it). Mutates `store.availableStrategies` synchronously.
- */
-export async function fetchStrategies() {
-    store.availableStrategies = {
-        NEWTON: {
-            name: 'Newton Strategy (legacy)',
-            deprecated: true,
-            migrate_to: 'ensemble',
-            description:
-                'Legacy: aligns a component by minimizing beam deviation. Prefer Optimization → Alignment session (ensemble).',
-            parameters: {
-                camera_number: { type: 'integer', default: 2, description: 'Target Camera ID' },
-                target_x_pixel: { type: 'integer', default: 2744, description: 'Target X (pixel)' },
-                axis: { type: 'string', enum: ['x', 'y'], default: 'x', description: 'Axis' },
-                tolerance_ratio: { type: 'float', default: 0.1, description: 'Tolerance' },
-                exposure: {
-                    type: 'float',
-                    default: 0.2,
-                    description: 'Exposure (s) for strategy camera captures',
-                },
-            },
-        },
-        COBYLA: {
-            name: 'Cobyla Alignment (legacy)',
-            deprecated: true,
-            migrate_to: 'ensemble',
-            description:
-                'Legacy COBYLA. Prefer ensemble IR + kernels (builtin.roi_centroid / run_cobyla).',
-            parameters: {
-                objective_threshold: { type: 'float', default: 100.0, description: 'Threshold' },
-                exposure: {
-                    type: 'float',
-                    default: 0.2,
-                    description: 'Exposure (s) for strategy camera video + capture',
-                },
-            },
-        },
-    };
 }
 
 export async function fetchStorageGridSpec() {

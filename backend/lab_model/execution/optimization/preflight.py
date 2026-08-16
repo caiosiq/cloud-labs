@@ -17,8 +17,8 @@ from .objective_measurements import (
 from .paths import VariablePathResolver, component_entry
 from .spec import ObjectiveSpec, ObjectiveTermSpec, OptimizeEnsembleParameters
 
-# ``OptimizeParameters`` (legacy OPTIMIZE body) defaults ``strategy`` to
-# ``NEWTON``; that key must not reach ``OptimizeEnsembleParameters`` (extra=forbid).
+# Older clients may still send ``strategy`` / single-tag keys; those must not
+# reach ``OptimizeEnsembleParameters`` (extra=forbid).
 # ``pipeline`` / ``kernel_packages`` are edge-facing extras compiled alongside the IR.
 _LEGACY_ENSEMBLE_NOISE_KEYS = frozenset({"strategy", "pipeline", "kernel_packages"})
 

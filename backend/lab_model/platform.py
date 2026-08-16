@@ -147,7 +147,6 @@ def audit_real_hardware_hooks(real_cls: type) -> List[Dict[str, Any]]:
         "_primitive_pick_component",
         "_primitive_hover_component",
         "_primitive_place_from_hover",
-        "_primitive_scan_rotate_in_place",
         "_primitive_prepare_teleop",
         "_primitive_start_live_feed",
         "_primitive_end_live_feed",

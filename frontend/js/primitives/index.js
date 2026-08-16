@@ -20,8 +20,6 @@ import {
     renderHoldingNotice,
 } from './in-air.js';
 import { renderStoreComponent, renderPlaceFromStorage } from './storage.js';
-import { renderOptimize } from './optimize.js';
-import { renderScanRotate } from './scan-rotate.js';
 import { getWidget } from '../widgets/index.js';
 import { isLiveFeedActive, isTeleopActive, normalizeCapabilities } from '../component-state.js';
 import { isHeldTag, isStoredComponent } from '../component-model.js';
@@ -46,8 +44,6 @@ const PRIMITIVE_UI = {
     CONFIRM_HOLDING_TAG: renderConfirmHolding,
     STORE_COMPONENT: renderStoreComponent,
     PLACE_FROM_STORAGE: renderPlaceFromStorage,
-    OPTIMIZE: renderOptimize,
-    SCAN_ROTATE_IN_PLACE: (ctx) => renderScanRotate(ctx, { contextHint: 'placed' }),
 };
 
 /** Primitives that commit tunable / layout intent — blocked while TeleOp is active. */
@@ -65,7 +61,6 @@ const TUNABLE_WRITER_PRIMITIVES = new Set([
     'PLACE_FROM_HOVER',
     'CONFIRM_HOLDING_TAG',
     'OPTIMIZE',
-    'SCAN_ROTATE_IN_PLACE',
 ]);
 
 /** Blocked while live feed is streaming (use the feed instead of one-shot capture). */
@@ -81,6 +76,10 @@ const SILENT_PRIMITIVES = new Set([
     'RECENTER_IN_STORAGE',
     'SCAN',
     'REMOVE',
+    // Ensemble OPTIMIZE lives in right-sidebar Alignment session (no component panel).
+    'OPTIMIZE',
+    // Preview exposure lives inside START/END live-feed chrome + pop-out.
+    'SET_LIVE_EXPOSURE',
 ]);
 
 /** Telemetry session controls render last. */
@@ -107,8 +106,6 @@ const PRIMITIVE_DISPLAY_ORDER = [
     'PLACE_FROM_HOVER',
     'CONFIRM_HOLDING_TAG',
     'RECORD_MEASURABLES',
-    'OPTIMIZE',
-    'SCAN_ROTATE_IN_PLACE',
     ...TELEMETRY_BOTTOM_PRIMITIVES,
 ];
 

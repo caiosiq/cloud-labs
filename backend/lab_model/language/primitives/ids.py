@@ -42,6 +42,10 @@ class PrimitiveId(StrEnum):
     MOTOR_SEND_HOME = "MOTOR_SEND_HOME"
     MOTOR_SET_ZERO = "MOTOR_SET_ZERO"
     SET_EXPOSURE = "SET_EXPOSURE"
+    #: Preview-only exposure for an armed live feed (Tier B). Does **not**
+    #: overwrite the science tunable ``exposure_time_ms`` used by RECORD /
+    #: EVAL_KERNEL / OPTIMIZE.
+    SET_LIVE_EXPOSURE = "SET_LIVE_EXPOSURE"
     SET_LASER_OUTPUT = "SET_LASER_OUTPUT"
     APPLY_TUNABLES_PATCH = "APPLY_TUNABLES_PATCH"
     OPTIMIZE = "OPTIMIZE"
@@ -57,7 +61,6 @@ class PrimitiveId(StrEnum):
     PICK_COMPONENT = "PICK_COMPONENT"
     HOVER = "HOVER"
     PLACE_FROM_HOVER = "PLACE_FROM_HOVER"
-    SCAN_ROTATE_IN_PLACE = "SCAN_ROTATE_IN_PLACE"
     CONFIRM_HOLDING_TAG = "CONFIRM_HOLDING_TAG"
 
     # --- Per-component TELEOP (Phase 8 / universal_component_architecture §16.5) ---

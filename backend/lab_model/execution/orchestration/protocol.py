@@ -106,28 +106,6 @@ class OptimizeHost(StateHost, Protocol):
     def _primitive_finalize_optimization_run(self) -> None: ...
 
 
-class ScanRotateHost(StateHost, Protocol):
-    """Bridge surface for SCAN_ROTATE_IN_PLACE."""
-
-    def _set_status(self, status: str, *, persist: bool = True) -> None: ...
-
-    async def _primitive_scan_rotate_in_place(
-        self,
-        *,
-        target_id: str,
-        mode: str,
-        theta_min: float,
-        theta_max: float,
-        speed: float,
-        axis: str,
-        base_x: float,
-        base_y: float,
-        base_z: Optional[float],
-        params: Dict[str, Any],
-        on_rotation_update: Any,
-    ) -> None: ...
-
-
 class RecordMeasurablesHost(StateHost, Protocol):
     """Bridge surface for RECORD_MEASURABLES orchestration."""
 
@@ -154,6 +132,7 @@ class LiveFeedHost(StateHost, Protocol):
         backend: str,
         cam_id: Optional[int],
         profile: str = "default",
+        exposure_time_ms: Optional[float] = None,
     ) -> tuple[bool, str]: ...
 
     async def _primitive_end_live_feed(

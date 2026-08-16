@@ -23,10 +23,6 @@ async def place_from_hover(args: dict[str, Any]) -> dict[str, Any]:
     return await context.run_uc("PLACE_FROM_HOVER", args)
 
 
-async def scan_rotate_in_place(args: dict[str, Any]) -> dict[str, Any]:
-    return await context.run_uc("SCAN_ROTATE_IN_PLACE", args)
-
-
 async def confirm_holding_tag(args: dict[str, Any]) -> dict[str, Any]:
     return await context.run_uc("CONFIRM_HOLDING_TAG", args)
 

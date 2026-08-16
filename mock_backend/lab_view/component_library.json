@@ -183,6 +183,7 @@
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO",
+          "SET_LIVE_EXPOSURE",
           "START_LIVE_FEED",
           "END_LIVE_FEED"
         ]
@@ -295,6 +296,7 @@
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO",
+          "SET_LIVE_EXPOSURE",
           "START_LIVE_FEED",
           "END_LIVE_FEED"
         ]
@@ -394,7 +396,6 @@
           "PLACE_FROM_HOVER",
           "RECORD_MEASURABLES",
           "OPTIMIZE",
-          "SCAN_ROTATE_IN_PLACE",
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO"
@@ -643,7 +644,6 @@
           "PLACE_FROM_HOVER",
           "RECORD_MEASURABLES",
           "OPTIMIZE",
-          "SCAN_ROTATE_IN_PLACE",
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO"
@@ -744,7 +744,6 @@
           "PLACE_FROM_HOVER",
           "RECORD_MEASURABLES",
           "OPTIMIZE",
-          "SCAN_ROTATE_IN_PLACE",
           "START_TELEOP",
           "END_TELEOP",
           "TELEOP_GOTO"
@@ -1036,6 +1035,7 @@
         "primitives": [
           "SET_EXPOSURE",
           "RECORD_MEASURABLES",
+          "SET_LIVE_EXPOSURE",
           "START_LIVE_FEED",
           "END_LIVE_FEED"
         ]

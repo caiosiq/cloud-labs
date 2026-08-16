@@ -279,7 +279,7 @@ Map UC primitives to **current** OpticalExperiment / recorder / LiveControlSessi
 
 | Adapter | Maps to (deathray today) |
 |---------|---------------------------|
-| `adapters/motion.py` | `*_cloudlab` pick/hover/place/scan_rotate |
+| `adapters/motion.py` | `*_cloudlab` pick/hover/place |
 | `adapters/motors.py` | `wifi_stepper*.move_motor` |
 | `adapters/vision.py` | recorder TCP CAP/GET_JPEG; BGR for kernels |
 | `adapters/teleop.py` | `LiveControlSession` + pose publish |

@@ -3,7 +3,6 @@
  * @see coding_on_the_ui.md
  */
 
-import { COBYLA_DEFAULT_OBJECTIVE, NEWTON_DEFAULTS } from './command-parse.js';
 import { isOnTableComponent } from './component-model.js';
 
 const VERBS = [
@@ -20,11 +19,8 @@ const VERBS = [
     'motor',
     'motorhome',
     'motorset0',
-    'optimize',
     'json',
 ];
-const STRATEGIES = ['NEWTON', 'COBYLA'];
-const AXES = ['x', 'y'];
 
 /**
  * @param {string[]} list
@@ -132,7 +128,7 @@ export function getTabCompletions(line, caret, deps) {
         ) {
             return allTags;
         }
-        if (v === 'move' || v === 'motor' || v === 'motorhome' || v === 'motorset0' || v === 'optimize') {
+        if (v === 'move' || v === 'motor' || v === 'motorhome' || v === 'motorset0') {
             return tags;
         }
         return [];
@@ -208,68 +204,6 @@ export function getTabCompletions(line, caret, deps) {
         if (tokens.length === 3 && !endsWithSpace) {
             return filterPrefix(motorIdStrings(deps, tokens[1]), current);
         }
-        return [];
-    }
-
-    if (verb === 'optimize') {
-        if (tokens.length === 1 && endsWithSpace) {
-            return tags;
-        }
-        if (tokens.length === 2 && !endsWithSpace) {
-            return filterPrefix(tags, current);
-        }
-        if (tokens.length === 2 && endsWithSpace) {
-            return STRATEGIES;
-        }
-        if (tokens.length === 3 && !endsWithSpace) {
-            return filterPrefix(STRATEGIES, current);
-        }
-
-        const strategy = tokens[2] && tokens[2].toUpperCase();
-
-        if (strategy === 'NEWTON') {
-            const dCam = String(NEWTON_DEFAULTS.camera_number);
-            const dPx = String(NEWTON_DEFAULTS.target_x_pixel);
-            const dTol = String(NEWTON_DEFAULTS.tolerance_ratio);
-
-            if (tokens.length === 3 && endsWithSpace) {
-                return [dCam];
-            }
-            if (tokens.length === 4 && !endsWithSpace) {
-                return filterPrefix([dCam], current);
-            }
-            if (tokens.length === 4 && endsWithSpace) {
-                return [dPx];
-            }
-            if (tokens.length === 5 && !endsWithSpace) {
-                return filterPrefix([dPx], current);
-            }
-            if (tokens.length === 5 && endsWithSpace) {
-                return AXES;
-            }
-            if (tokens.length === 6 && !endsWithSpace) {
-                return filterPrefix(AXES, current);
-            }
-            if (tokens.length === 6 && endsWithSpace) {
-                return [dTol];
-            }
-            if (tokens.length === 7 && !endsWithSpace) {
-                return filterPrefix([dTol], current);
-            }
-            return [];
-        }
-
-        if (strategy === 'COBYLA') {
-            const dTh = String(COBYLA_DEFAULT_OBJECTIVE);
-            if (tokens.length === 3 && endsWithSpace) {
-                return [dTh];
-            }
-            if (tokens.length === 4 && !endsWithSpace) {
-                return filterPrefix([dTh], current);
-            }
-            return [];
-        }
-
         return [];
     }
 

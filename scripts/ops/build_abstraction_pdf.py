@@ -284,7 +284,6 @@ def build() -> Path:
             ["PICK_COMPONENT", "Pick a part into the gripper"],
             ["HOVER", "Hold / move while held above the table"],
             ["PLACE_FROM_HOVER", "Place from hover onto the breadboard"],
-            ["SCAN_ROTATE_IN_PLACE", "Rotate while held / scanned for alignment"],
             ["CONFIRM_HOLDING_TAG", "Confirm which tag is in the gripper"],
         ],
         [55, 125],

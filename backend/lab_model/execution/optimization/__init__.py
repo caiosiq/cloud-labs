@@ -14,7 +14,6 @@ from .pipeline import (
     compile_pipeline,
     validate_pipeline_document,
 )
-from .presets import compile_legacy_strategy
 from .router import ActuatorRouter, StubActuatorRouter
 from .session import EnsembleOptimizationResult, run_ensemble_optimization
 from .solvers.block_cobyla import run_block_cobyla
@@ -35,7 +34,6 @@ __all__ = [
     "VariablePathResolver",
     "VariableRef",
     "attach_pipeline",
-    "compile_legacy_strategy",
     "compile_objective_graph",
     "compile_objective_payload",
     "compile_pipeline",

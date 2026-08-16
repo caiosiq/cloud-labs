@@ -105,23 +105,6 @@ async def place_from_hover(args: dict[str, Any]) -> dict[str, Any]:
     raise NotImplementedError("Phase 6: place_from_hover_cloudlab")
 
 
-async def scan_rotate_in_place(args: dict[str, Any]) -> dict[str, Any]:
-    """Rotate the component in place for scanning (SCAN_ROTATE_IN_PLACE).
-
-    Parameters
-    ----------
-    args:
-        ``tag_id`` / ``target_id`` and rotation parameters (absolute yaw or
-        relative delta — match the existing cloudlab scan helper).
-
-    Returns
-    -------
-    dict
-        ``tag_id`` and the rotation that was applied or measured.
-    """
-    raise NotImplementedError("Phase 6: scan_rotate_in_place_cloudlab")
-
-
 async def confirm_holding_tag(args: dict[str, Any]) -> dict[str, Any]:
     """Confirm which tag the arm believes it is holding (CONFIRM_HOLDING_TAG).
 
