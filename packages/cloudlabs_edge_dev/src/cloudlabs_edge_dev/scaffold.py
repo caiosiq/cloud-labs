@@ -263,7 +263,11 @@ BENCH_JSON = """\
     "breadboard": {{
       "grid_spacing_mm": 25.0,
       "origin_offset_mm": {{ "x": 0.0, "y": 0.0 }}
-    }}
+    }},
+    "reconcile_staging_seats": [
+      {{ "x": 400.0, "y": 250.0, "rotation": 0.0 }},
+      {{ "x": 350.0, "y": 250.0, "rotation": 0.0 }}
+    ]
   }},
   "laser_lines": []
 }}

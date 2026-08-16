@@ -132,15 +132,21 @@ function buildThreadRows(thread) {
         const isBarrier = item.kind === 'barrier' || action === 'OPTIMIZE';
         let status = forcedStatus || item.status || 'queued';
         if (status === 'running') status = 'active';
-        const blocked =
+        const blockedOnPreds = Array.isArray(item.blocked_on) && item.blocked_on.length > 0;
+        const blockedByTeleop =
             Boolean(lock) &&
             status === 'queued' &&
             action !== 'END_TELEOP' &&
             String(lock.kind || '') === 'teleop';
+        const blocked = blockedOnPreds || blockedByTeleop;
+        let label = formatJobLabel(item);
+        if (blockedOnPreds && status === 'queued') {
+            label = `${label} (waiting)`;
+        }
         rows.push({
             kind: isBarrier ? 'barrier' : 'job',
             status: blocked ? 'blocked' : status,
-            label: formatJobLabel(item),
+            label,
             marker:
                 status === 'active'
                     ? '▶'

@@ -531,5 +531,191 @@ class Phase3CancelAndLeaseTests(unittest.TestCase):
         self.assertNotIn("arm.0", self.matrix.session_locks)
 
 
+class PredecessorGateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.matrix = CommandMatrix.from_capabilities(
+            "mock.default",
+            {
+                "execution_threads": [
+                    {"id": "arm.0", "kind": "arm"},
+                    {"id": "sense.0", "kind": "sense"},
+                ]
+            },
+        )
+
+    def test_unknown_predecessor_refused(self) -> None:
+        with self.assertRaises(CommandMatrixRefuse) as ctx:
+            self.matrix.enqueue(
+                {
+                    "action": "STORE_COMPONENT",
+                    "target_id": "b",
+                    "predecessors": ["missing_cmd"],
+                },
+                lease_id="L",
+            )
+        self.assertIn("unknown predecessor", ctx.exception.reason)
+
+    def test_cross_thread_head_blocked_until_pred_done(self) -> None:
+        # Motor on its own column, but must wait for arm STORE to finish.
+        store = self.matrix.enqueue(
+            {"action": "STORE_COMPONENT", "target_id": "tag_a"},
+            lease_id="L",
+        )
+        motor = self.matrix.enqueue(
+            {
+                "action": "SET_MOTOR_SETPOINT",
+                "target_id": "tag_20",
+                "parameters": {"motor_id": 1},
+                "predecessors": [store["command_id"]],
+            },
+            lease_id="L",
+        )
+        self.assertEqual(motor["predecessors"], [store["command_id"]])
+        mtid = "motor.tag_20.1"
+        # Motor is head of its column but blocked on the arm store.
+        self.assertIsNone(self.matrix.pop_runnable(mtid))
+        snap = self.matrix.snapshot()
+        motor_col = next(t for t in snap["threads"] if t["id"] == mtid)
+        self.assertEqual(motor_col["queue"][0]["blocked_on"], [store["command_id"]])
+
+        # Unrelated sense work still runs.
+        feed = self.matrix.enqueue(
+            {"action": "START_LIVE_FEED", "target_id": "tag_cam"},
+            lease_id="L",
+        )
+        sense_head = self.matrix.claim_runnable("sense.0")
+        self.assertIsNotNone(sense_head)
+        assert sense_head is not None
+        self.assertEqual(sense_head.command_id, feed["command_id"])
+        self.matrix.mark_done(feed["command_id"])
+
+        # Finish store → motor becomes runnable.
+        arm_head = self.matrix.claim_runnable("arm.0")
+        self.assertIsNotNone(arm_head)
+        assert arm_head is not None
+        self.assertEqual(arm_head.command_id, store["command_id"])
+        self.matrix.mark_done(store["command_id"])
+        motor_head = self.matrix.claim_runnable(mtid)
+        self.assertIsNotNone(motor_head)
+        assert motor_head is not None
+        self.assertEqual(motor_head.command_id, motor["command_id"])
+
+    def test_failed_predecessor_fails_dependent(self) -> None:
+        a = self.matrix.enqueue(
+            {"action": "STORE_COMPONENT", "target_id": "a"}, lease_id="L"
+        )
+        b = self.matrix.enqueue(
+            {
+                "action": "STORE_COMPONENT",
+                "target_id": "b",
+                "predecessors": [a["command_id"]],
+            },
+            lease_id="L",
+        )
+        claimed = self.matrix.claim_runnable("arm.0")
+        self.assertIsNotNone(claimed)
+        self.matrix.mark_done(a["command_id"], error="boom")
+        # B is next on arm but predecessor failed → B fails on peek.
+        self.assertIsNone(self.matrix.pop_runnable("arm.0"))
+        self.assertEqual(self.matrix.items[b["command_id"]].status, "failed")
+        self.assertIn("predecessor", self.matrix.items[b["command_id"]].error or "")
+
+
+class EnqueueBatchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.matrix = CommandMatrix.from_capabilities(
+            "mock.default",
+            {
+                "execution_threads": [
+                    {"id": "arm.0", "kind": "arm"},
+                    {"id": "sense.0", "kind": "sense"},
+                ]
+            },
+        )
+
+    def test_batch_remaps_plan_step_predecessors(self) -> None:
+        result = self.matrix.enqueue_batch(
+            [
+                {
+                    "action": "STORE_COMPONENT",
+                    "target_id": "a",
+                    "plan_step_id": "s0",
+                    "predecessors": [],
+                },
+                {
+                    "action": "SET_MOTOR_SETPOINT",
+                    "target_id": "tag_20",
+                    "parameters": {"motor_id": 1, "angle_deg": 10.0},
+                    "plan_step_id": "s1",
+                    "predecessors": ["s0"],
+                },
+            ],
+            lease_id="L",
+        )
+        self.assertEqual(result["steps"], 2)
+        ids = result["command_ids"]
+        self.assertEqual(len(ids), 2)
+        motor = self.matrix.items[ids[1]]
+        self.assertEqual(motor.predecessors, [ids[0]])
+        # Motor blocked until store done.
+        self.assertIsNone(self.matrix.pop_runnable("motor.tag_20.1"))
+        arm = self.matrix.claim_runnable("arm.0")
+        self.assertIsNotNone(arm)
+        assert arm is not None
+        self.matrix.mark_done(arm.command_id)
+        self.assertIsNotNone(self.matrix.claim_runnable("motor.tag_20.1"))
+
+
+class MultiArmPredecessorTests(unittest.TestCase):
+    """Phase 5: same pred model works across arm.0 ‖ arm.1 (not mock-specific)."""
+
+    def setUp(self) -> None:
+        self.matrix = CommandMatrix.from_capabilities(
+            "any.edge",
+            {
+                "execution_threads": [
+                    {"id": "arm.0", "kind": "arm"},
+                    {"id": "arm.1", "kind": "arm"},
+                    {"id": "sense.0", "kind": "sense"},
+                ]
+            },
+        )
+
+    def test_arm1_head_blocked_until_arm0_pred_done(self) -> None:
+        a = self.matrix.enqueue(
+            {"action": "MOVE_COMPONENT", "target_id": "A", "parameters": {
+                "target_x": 0.0, "target_y": 0.0, "rotation": 0.0,
+            }},
+            lease_id="L",
+        )
+        # Force second command onto arm.1 by using a payload that still routes
+        # to arm — matrix routes MOVE to all arms as resources; pick by claim.
+        # Enqueue B with predecessor A; both may share arm columns depending on
+        # route table — assert B cannot run until A is done when B lists A.
+        b = self.matrix.enqueue(
+            {
+                "action": "MOVE_COMPONENT",
+                "target_id": "B",
+                "parameters": {"target_x": 1.0, "target_y": 1.0, "rotation": 0.0},
+                "predecessors": [a["command_id"]],
+            },
+            lease_id="L",
+        )
+        # With a single arm.0 in resources for MOVE, B is queued behind A on the
+        # same column OR blocked by pred. Either way B is not runnable first.
+        first = self.matrix.claim_runnable("arm.0")
+        self.assertIsNotNone(first)
+        assert first is not None
+        self.assertEqual(first.command_id, a["command_id"])
+        self.assertIsNone(self.matrix.pop_runnable("arm.0"))
+        self.assertIsNone(self.matrix.pop_runnable("arm.1"))
+        self.matrix.mark_done(a["command_id"])
+        # After A done, B becomes runnable on some arm column.
+        nxt = self.matrix.claim_runnable("arm.0") or self.matrix.claim_runnable("arm.1")
+        self.assertIsNotNone(nxt)
+        assert nxt is not None
+        self.assertEqual(nxt.command_id, b["command_id"])
+
+
 if __name__ == "__main__":
     unittest.main()

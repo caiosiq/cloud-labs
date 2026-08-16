@@ -359,14 +359,40 @@ def run_optimization_session(
     progress_callback: Optional[Callable[..., None]] = None,
     should_abort: Optional[Callable[[], bool]] = None,
     should_accept: Optional[Callable[[], bool]] = None,
+    tunables_only_inner_loop: bool = False,
 ) -> OptimizationResult:
     """
     Inner macro loop on the edge: block COBYLA over capture→kernel→loss→actuate.
 
     Lab-specific work is confined to ``capture`` and ``router``.
     Phase 6: clearance interlock, max-delta vs x0, keep_best / rollback settle.
+
+    When ``tunables_only_inner_loop`` is true (or env
+    ``CLOUDLABS_OPTIMIZE_TUNABLES_ONLY=1``), pose / seat variables are refused —
+    breadboard MOVE/STORE belongs to coordinator ``plan_batch``, not this loop.
     """
+    import os
+
+    from .apply_setpoints import SpatialSetpointError, assert_tunables_only_variables
+
     spec = parse_pipeline(dict(pipeline) if isinstance(pipeline, Mapping) else pipeline)
+    env_tunables = os.environ.get("CLOUDLABS_OPTIMIZE_TUNABLES_ONLY", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if tunables_only_inner_loop or env_tunables:
+        try:
+            assert_tunables_only_variables(spec.variables)
+        except SpatialSetpointError as exc:
+            return OptimizationResult(
+                session_id=session_id or "refused",
+                best_loss=float("inf"),
+                final_values=dict(x0),
+                evals=0,
+                aborted=True,
+                refusal=str(exc),
+            )
     kdir = Path(kernels_dir) if kernels_dir is not None else default_kernels_dir()
     variables_by_id = {v.id: v for v in spec.variables}
     space = NormalizedSearchSpace(spec.variables, x0)

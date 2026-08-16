@@ -187,6 +187,7 @@ description: >-
 - Mutation has **one door**: `POST /execute` with `{"primitive", "args"}`.
 - Route verbs through `dispatch.dispatch_primitive` → `adapters/*`.
 - Keep `GET /capabilities` and `GET /bench` as declarations only (abilities vs geometry).
+- Declare `layout.reconcile_staging_seats` on `GET /bench` when the bench can Park for swaps (coordinator `plan_batch`); empty ⇒ fail closed.
 - Advertise shared Command Matrix topology in `capabilities.json` as
   `execution_threads`: `arm.0` + `sense.0` only. Do **not** list bare
   `motor.<n>` columns — `motor_id` is per-tag; the coordinator creates

@@ -30,7 +30,13 @@ from lab_model.coordinator.state.projections import (
     strip_non_reconcile_tunables_from_configuration,
     table_configuration,
 )
-from lab_model.coordinator.state.reconcile import plan_reconcile
+from lab_model.coordinator.state.batch_plan import (
+    BatchPlanError,
+    BatchPlanResult,
+    parse_staging_seats,
+    staging_commit_issues,
+)
+from lab_model.coordinator.state.reconcile import plan_reconcile, plan_reconcile_detailed
 from lab_model.coordinator.state.checkout_compatibility import build_checkout_compatibility_report
 
 
@@ -193,6 +199,33 @@ class ControlManager:
                     "viewing": None,
                 },
             )
+        #: Optional override / provider for layout ``reconcile_staging_seats``.
+        self.staging_seats: Optional[List[Dict[str, float]]] = None
+        self.staging_seats_provider: Optional[Any] = None
+
+    def reconcile_staging_seats(self) -> List[Dict[str, float]]:
+        """Park buffers from the active edge bench layout (any backend).
+
+        Populated from that edge's ``GET /bench`` / ``bench/layout.json``
+        ``reconcile_staging_seats`` via :meth:`bind_edge_staging_seats` /
+        ``main._get_control_manager`` — not mock-specific. Empty declaration
+        ⇒ swap plans fail closed with ``needs_staging_n``.
+        """
+        if self.staging_seats is not None:
+            return parse_staging_seats(self.staging_seats)
+        provider = self.staging_seats_provider
+        if callable(provider):
+            try:
+                return parse_staging_seats(provider())
+            except Exception:
+                return []
+        return []
+
+    def bind_edge_staging_seats(self, layout: Any) -> List[Dict[str, float]]:
+        """Refresh Park buffers from a flat edge layout document (any edge)."""
+        seats = parse_staging_seats(layout)
+        self.staging_seats = seats
+        return seats
 
     def _refs(self) -> Dict[str, Any]:
         # utf-8-sig tolerates a stray BOM (e.g. a file hand-edited on Windows).
@@ -489,8 +522,20 @@ class ControlManager:
         parent_id: Optional[str] = None,
         author: Optional[str] = None,
         catalog_hash: Optional[str] = None,
+        staging_seats: Optional[Iterable[Mapping[str, Any]]] = None,
     ) -> Dict[str, Any]:
         configuration = extract_configuration(runtime)
+        seats = (
+            parse_staging_seats(list(staging_seats))
+            if staging_seats is not None
+            else self.reconcile_staging_seats()
+        )
+        if seats:
+            blocking = staging_commit_issues(configuration, seats)
+            if blocking:
+                raise ValueError(
+                    "; ".join(str(i.get("message") or i.get("kind")) for i in blocking)
+                )
         metadata = extract_configuration_metadata(runtime)
         return self.commit_configuration(
             configuration,
@@ -499,7 +544,7 @@ class ControlManager:
             parent_id=parent_id,
             author=author,
             catalog_hash=catalog_hash,
-            metadata=metadata or None,
+            metadata=metadata,
         )
 
     def fork_branch(self, *, branch: str, parent_id: str) -> None:
@@ -573,18 +618,32 @@ class ControlManager:
             lab_configuration(to_doc.get("configuration") or {}),
         )
 
-    def plan_checkout(self, from_id: str, to_id: str) -> List[Dict[str, Any]]:
+    def plan_checkout(
+        self,
+        from_id: str,
+        to_id: str,
+        *,
+        staging_seats: Optional[Iterable[Mapping[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
         from_doc = self.get_configuration(from_id)
         to_doc = self.get_configuration(to_id)
+        seats = (
+            parse_staging_seats(list(staging_seats))
+            if staging_seats is not None
+            else self.reconcile_staging_seats()
+        )
         return plan_reconcile(
             lab_configuration(from_doc.get("configuration") or {}),
             lab_configuration(to_doc.get("configuration") or {}),
+            staging_seats=seats,
         )
 
     def plan_checkout_from_runtime(
         self,
         runtime: Mapping[str, Any],
         to_id: str,
+        *,
+        staging_seats: Optional[Iterable[Mapping[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """Plan a hard checkout from the *actual* bench state to ``to_id``.
 
@@ -596,24 +655,61 @@ class ControlManager:
         placed part) and false "no motion required" results.
         """
         to_doc = self.get_configuration(to_id)
+        seats = (
+            parse_staging_seats(list(staging_seats))
+            if staging_seats is not None
+            else self.reconcile_staging_seats()
+        )
         return plan_reconcile(
             extract_configuration(runtime),
             lab_configuration(to_doc.get("configuration") or {}),
+            staging_seats=seats,
         )
+
+    def plan_checkout_from_runtime_detailed(
+        self,
+        runtime: Mapping[str, Any],
+        to_id: str,
+        *,
+        staging_seats: Optional[Iterable[Mapping[str, Any]]] = None,
+    ) -> BatchPlanResult:
+        """Like :meth:`plan_checkout_from_runtime` but includes the batch report."""
+        to_doc = self.get_configuration(to_id)
+        seats = (
+            parse_staging_seats(list(staging_seats))
+            if staging_seats is not None
+            else self.reconcile_staging_seats()
+        )
+        result = plan_reconcile_detailed(
+            extract_configuration(runtime),
+            lab_configuration(to_doc.get("configuration") or {}),
+            staging_seats=seats,
+        )
+        if not result.ready:
+            raise BatchPlanError(result.report)
+        return result
 
     def plan_runtime_to_configuration(
         self,
         runtime: Mapping[str, Any],
         target_configuration: Mapping[str, Any],
+        *,
+        staging_seats: Optional[Iterable[Mapping[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """Plan reconcile from the live bench to an arbitrary configuration.
 
         Used for stash (target = applied node) and stash pop (target = the
         stashed snapshot, which is not a committed node).
         """
+        seats = (
+            parse_staging_seats(list(staging_seats))
+            if staging_seats is not None
+            else self.reconcile_staging_seats()
+        )
         return plan_reconcile(
             extract_configuration(runtime),
             lab_configuration(target_configuration or {}),
+            staging_seats=seats,
         )
 
     def checkout_compatibility_report(

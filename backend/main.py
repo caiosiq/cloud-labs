@@ -2848,7 +2848,19 @@ def _get_control_manager(repo_id: str):
             flush=True,
         )
         cache[safe] = ControlManager(control_dir, safe)
-    return cache[safe]
+    mgr = cache[safe]
+    # Park buffers from *this* edge's bench layout (GET /bench or disk) —
+    # same path for mock, sim, and real HTTP edges; never mock-hardcoded seats.
+    try:
+        from lab_model.coordinator.catalog.resolve_edge_bench import bind_storage_geometry
+
+        layout = bind_storage_geometry(rt)
+        mgr.bind_edge_staging_seats(layout)
+    except Exception:
+        layout = getattr(rt, "edge_layout_cache", None)
+        if isinstance(layout, dict):
+            mgr.bind_edge_staging_seats(layout)
+    return mgr
 
 
 _CONTROL_DEBUG = os.environ.get("CONTROL_DEBUG", "1").strip().lower() not in (
@@ -3389,7 +3401,25 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
         # AND across repos (membership reconcile turns component add/remove into
         # PLACE_FROM_STORAGE / STORE_COMPONENT).
         from_id = mgr.get_applied().get("configuration_id")
-        plan = mgr.plan_checkout_from_runtime(runtime, payload.configuration_id)
+        try:
+            detailed = mgr.plan_checkout_from_runtime_detailed(
+                runtime, payload.configuration_id
+            )
+            plan = list(detailed.commands)
+            batch_report = detailed.report
+        except Exception as exc:
+            from lab_model.coordinator.state.batch_plan import BatchPlanError
+
+            if isinstance(exc, BatchPlanError):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": str(exc),
+                        "batch_plan": exc.report,
+                        "code": "batch_plan_not_ready",
+                    },
+                ) from exc
+            raise
         if payload.preview:
             return {
                 "status": "planned",
@@ -3399,6 +3429,7 @@ async def control_checkout(repo_id: str, payload: ControlCheckoutBody, request: 
                 "branch": branch,
                 "plan": plan,
                 "steps": len(plan),
+                "batch_plan": batch_report,
                 "compatibility": compat,
             }
 
@@ -3535,7 +3566,17 @@ async def control_stash(repo_id: str, payload: ControlStashBody):
 
     snapshot = extract_configuration(runtime)
     snapshot_metadata = extract_configuration_metadata(runtime)
-    plan = mgr.plan_runtime_to_configuration(runtime, base_cfg)
+    try:
+        plan = mgr.plan_runtime_to_configuration(runtime, base_cfg)
+    except Exception as exc:
+        from lab_model.coordinator.state.batch_plan import BatchPlanError
+
+        if isinstance(exc, BatchPlanError):
+            raise HTTPException(
+                status_code=409,
+                detail={"message": str(exc), "batch_plan": exc.report},
+            ) from exc
+        raise
 
     if payload.preview:
         return {
@@ -3651,7 +3692,17 @@ async def control_stash_pop(repo_id: str, payload: ControlStashBody = ControlSta
             },
         )
 
-    plan = mgr.plan_runtime_to_configuration(runtime, snapshot)
+    try:
+        plan = mgr.plan_runtime_to_configuration(runtime, snapshot)
+    except Exception as exc:
+        from lab_model.coordinator.state.batch_plan import BatchPlanError
+
+        if isinstance(exc, BatchPlanError):
+            raise HTTPException(
+                status_code=409,
+                detail={"message": str(exc), "batch_plan": exc.report},
+            ) from exc
+        raise
 
     if payload.preview:
         return {
@@ -5459,6 +5510,93 @@ async def command_queue_statuses(body: Dict[str, Any] = Body(...)):
     rt = require_backend(backend_registry, backend_id, init=False)
     matrix = get_or_create_matrix(rt)
     return {"enabled": True, "statuses": matrix.statuses(ids)}
+
+
+@app.post("/api/command-batch")
+async def receive_command_batch(
+    request: Request,
+    body: Dict[str, Any] = Body(...),
+):
+    """Enqueue a declared batch onto the Command Matrix with predecessor remapping.
+
+    Body:
+      - ``commands``: list of command envelopes (optional ``plan_step_id`` /
+        ``predecessors`` from ``plan_batch``). Single ``POST /api/command`` is
+        unchanged for casual clicks.
+    """
+    backend_id = _active_backend_id()
+    if not command_matrix_enabled(backend_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Command Matrix disabled for this backend "
+            "(set CLOUDLABS_COMMAND_MATRIX=1 to enable).",
+        )
+
+    lease_id = _extract_lease_id(body if isinstance(body, dict) else {}, request)
+    require_lease = _command_lease_required()
+    if require_lease and not lease_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "X-CloudLabs-Lease required — acquire via Twin Take control "
+                "or SDK connect()/acquire_lease()"
+            ),
+        )
+    try:
+        session_lease_manager.validate_command_lease(
+            backend_id=backend_id,
+            lease_id=lease_id,
+            require_when_locked=require_lease,
+        )
+    except LeaseConflictError as exc:
+        return _lease_conflict_response(exc)
+    except LeaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LeaseExpiredError as exc:
+        raise HTTPException(status_code=410, detail=str(exc)) from exc
+
+    commands = body.get("commands") if isinstance(body, dict) else None
+    if not isinstance(commands, list) or not commands:
+        raise HTTPException(status_code=400, detail="commands must be a non-empty list")
+
+    from lab_model.coordinator.state.batch_plan import strip_plan_meta
+    from lab_model.language.primitives.dispatch import (
+        parse_command_payload,
+        validation_error_detail,
+    )
+    from pydantic import ValidationError
+
+    for index, raw in enumerate(commands):
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=400, detail=f"commands[{index}] must be an object")
+        try:
+            parse_command_payload(strip_plan_meta(raw))
+        except ValidationError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={"index": index, "errors": validation_error_detail(e)},
+            ) from e
+
+    rt = require_backend(backend_registry, backend_id, init=False)
+    matrix = get_or_create_matrix(rt)
+    gate_state = _lab_state_for_matrix_gate(backend_id)
+    try:
+        result = matrix.enqueue_batch(
+            commands,
+            lease_id=str(lease_id or ""),
+            lab_state=gate_state,
+        )
+    except CommandMatrixRefuse as exc:
+        raise HTTPException(status_code=409, detail=exc.reason) from exc
+
+    async def _execute(item: Any) -> None:
+        await _matrix_execute_queued_item(item, backend_id=backend_id)
+
+    kick_matrix_drain(backend_id, matrix, execute=_execute)
+    out = dict(result)
+    out["command_matrix"] = matrix.snapshot()
+    out["backend_id"] = backend_id
+    return out
 
 
 @app.post("/api/command")

@@ -37,7 +37,11 @@
     "breadboard": {
       "grid_spacing_mm": 25,
       "origin_offset_mm": { "x": -7.4, "y": 0 }
-    }
+    },
+    "reconcile_staging_seats": [
+      { "x": 450, "y": 450, "rotation": 0 },
+      { "x": 375, "y": 450, "rotation": 0 }
+    ]
   },
   "laser_lines": []
 }

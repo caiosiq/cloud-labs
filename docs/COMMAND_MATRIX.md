@@ -134,7 +134,10 @@ command_id, validated envelope, lease_id
 resources: set[thread_id]
 kind: normal | barrier | session_lock
 status: queued → running → done | failed | cancelled
+predecessors: list[command_id]   # optional; head blocked until all done
 ```
+
+Casual clicks: `POST /api/command` (unchanged). Declared batches (VC Apply / group-move): plan with [`BATCH_DAG_AND_MATRIX.md`](./BATCH_DAG_AND_MATRIX.md) then `POST /api/command-batch` — remaps local `plan_step_id` predecessors to concrete `command_id`s.
 
 ## Admission order
 
@@ -233,6 +236,7 @@ Still **409** for: wrong/missing lease, illegal mode (e.g. STORE while HOLDING a
 
 ## Related docs
 
+- [`BATCH_DAG_AND_MATRIX.md`](./BATCH_DAG_AND_MATRIX.md) — batch DAG planner + predecessor gates + OPTIMIZE latency split
 - [`EXECUTION_MODES.md`](./EXECUTION_MODES.md) — lease, modes, historical single-flight note
 - [`BACKEND_ISOLATION.md`](./BACKEND_ISOLATION.md) — coordinator owns Twin `system_status` around southbound
 - [`LAB_SURFACES_VC_AND_INITIALIZATION.md`](./LAB_SURFACES_VC_AND_INITIALIZATION.md) — Twin / Ops / lease surfaces

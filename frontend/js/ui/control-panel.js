@@ -901,7 +901,58 @@ function formatStepParamHint(step) {
     return bits.length ? ` · ${escapeHtml(bits.join(' · '))}` : '';
 }
 
-function formatPlanPreview(plan) {
+function formatPlanRoleBadge(step) {
+    const role = step && step.plan_role ? String(step.plan_role) : '';
+    if (role === 'park' || role === 'unpark') {
+        return ` <span style="opacity:0.85;font-weight:600">[${escapeHtml(role)}]</span>`;
+    }
+    if (role === 'add' || role === 'remove' || role === 'storage_slot') {
+        return ` <span style="opacity:0.7">[${escapeHtml(role)}]</span>`;
+    }
+    return '';
+}
+
+/** Human text for fail-closed seat-DAG / staging reports from plan_batch. */
+function formatBatchPlanError(report) {
+    if (!report || typeof report !== 'object') {
+        return 'This apply cannot be planned on the current bench.';
+    }
+    const parts = [];
+    const msg = report.message ? String(report.message) : '';
+    if (msg) parts.push(escapeHtml(msg));
+    const need = Number(report.needs_staging_n) || 0;
+    const have = Number(report.staging_available) || 0;
+    if (need > 0) {
+        parts.push(
+            `Needs <strong>${need}</strong> reconcile staging seat(s); this edge declares <strong>${have}</strong>.`,
+        );
+        parts.push(
+            'Add <code>reconcile_staging_seats</code> poses to this edge’s <code>GET /bench</code> layout (not mock-only).',
+        );
+    }
+    const cycles = Array.isArray(report.cycle_tags) ? report.cycle_tags.filter(Boolean) : [];
+    if (cycles.length) {
+        parts.push(`Cycle tags: ${cycles.map((t) => escapeHtml(String(t))).join(', ')}`);
+    }
+    const issues = Array.isArray(report.issues) ? report.issues : [];
+    for (const issue of issues.slice(0, 5)) {
+        if (!issue || typeof issue !== 'object') continue;
+        const im = issue.message || issue.kind;
+        if (im && String(im) !== msg) parts.push(escapeHtml(String(im)));
+    }
+    return parts.join('<br><br>') || 'Batch plan not ready.';
+}
+
+function formatBatchPlanNote(report) {
+    if (!report || typeof report !== 'object' || !report.ready) return '';
+    const need = Number(report.needs_staging_n) || 0;
+    if (need <= 0) return '';
+    const cycles = Array.isArray(report.cycle_tags) ? report.cycle_tags.filter(Boolean) : [];
+    const tags = cycles.length ? ` (${cycles.map((t) => escapeHtml(String(t))).join(', ')})` : '';
+    return `<p style="text-align:left;margin:8px 0 0;opacity:0.9">Uses <strong>${need}</strong> staging park${need === 1 ? '' : 's'}${tags} from this edge’s layout.</p>`;
+}
+
+function formatPlanPreview(plan, batchPlan) {
     if (!plan?.length) {
         return '<strong>No motion required</strong> — the bench already matches this configuration.';
     }
@@ -911,10 +962,12 @@ function formatPlanPreview(plan) {
             const action = escapeHtml(step.action || '?');
             const target = formatStepTargetLabel(step.target_id);
             const hint = formatStepParamHint(step);
-            return `<li style="text-align:left">${action} → ${target}${hint}</li>`;
+            const role = formatPlanRoleBadge(step);
+            return `<li style="text-align:left">${action}${role} → ${target}${hint}</li>`;
         })
         .join('');
-    return `<strong>${plan.length} primitive step(s):</strong><ol style="text-align:left;margin:8px 0 0;padding-left:1.4em">${items}</ol>`;
+    const note = formatBatchPlanNote(batchPlan);
+    return `<strong>${plan.length} primitive step(s):</strong><ol style="text-align:left;margin:8px 0 0;padding-left:1.4em">${items}</ol>${note}`;
 }
 
 
@@ -1167,8 +1220,9 @@ async function onApplyOnBench() {
         const preview = await previewHardCheckout(commitId);
 
         const plan = preview.plan || [];
+        const batchPlan = preview.batch_plan || null;
 
-        showPlanPreview(formatPlanPreview(plan));
+        showPlanPreview(formatPlanPreview(plan, batchPlan));
 
 
 
@@ -1180,7 +1234,7 @@ async function onApplyOnBench() {
 
                 : `Run ${plan.length} primitive step(s) on the bench?`;
 
-        const message = `${stepNote}<br><br>${formatPlanPreview(plan)}`;
+        const message = `${stepNote}<br><br>${formatPlanPreview(plan, batchPlan)}`;
 
 
 
@@ -1194,7 +1248,11 @@ async function onApplyOnBench() {
 
         console.error('[control-panel] hard checkout preview failed', e);
 
-        showErrorModal('Apply on bench failed', e.message || String(e), { kind: 'dismissible' });
+        const batchHtml = e && e.batchPlan ? formatBatchPlanError(e.batchPlan) : '';
+        const body = batchHtml
+            ? `${escapeHtml(e.message || String(e))}<br><br>${batchHtml}`
+            : (e.message || String(e));
+        showErrorModal('Apply on bench failed', body, { kind: 'dismissible' });
 
     }
 

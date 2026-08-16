@@ -35,5 +35,9 @@
       "x": -7.4,
       "y": 0
     }
-  }
+  },
+  "reconcile_staging_seats": [
+    { "x": 400, "y": 400, "rotation": 0 },
+    { "x": 325, "y": 400, "rotation": 0 }
+  ]
 }

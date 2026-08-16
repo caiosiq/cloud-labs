@@ -31,6 +31,14 @@ from .session import OptimizationResult, run_optimization_session
 from .spec import OptimizationPipeline, parse_pipeline
 from .stepper import run_block_cobyla
 from .tensors import EdgeTensor, camera_bgr_tensor, scalar_tensor
+from .apply_setpoints import (
+    SetpointWave,
+    SpatialSetpointError,
+    apply_setpoints,
+    assert_no_spatial_setpoints,
+    assert_tunables_only_variables,
+    parse_setpoint_wave,
+)
 
 __all__ = [
     "ActuatorRouter",
@@ -46,8 +54,13 @@ __all__ = [
     "OptimizationPipeline",
     "OptimizationResult",
     "RecordingRouter",
+    "SetpointWave",
+    "SpatialSetpointError",
     "StaticCaptureSource",
     "StubActuatorRouter",
+    "apply_setpoints",
+    "assert_no_spatial_setpoints",
+    "assert_tunables_only_variables",
     "camera_bgr_tensor",
     "clear_caches",
     "eval_kernel",
@@ -59,6 +72,7 @@ __all__ = [
     "load_manifest",
     "max_delta_limits",
     "parse_pipeline",
+    "parse_setpoint_wave",
     "provision_bytes",
     "resolve_artifact_path",
     "run_block_cobyla",

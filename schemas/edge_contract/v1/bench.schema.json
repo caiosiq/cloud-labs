@@ -51,6 +51,20 @@
               }
             }
           }
+        },
+        "reconcile_staging_seats": {
+          "type": "array",
+          "description": "Park buffers for seat-DAG reconcile / group-move (coordinator plan_batch). Declared by every edge in GET /bench; never versioned in VC commits. Empty ⇒ swaps fail closed.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["x", "y"],
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "rotation": { "type": "number", "default": 0 }
+            }
+          }
         }
       }
     },

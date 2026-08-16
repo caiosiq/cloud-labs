@@ -27,7 +27,13 @@ async function parseJson(res) {
         } else {
             msg = res.statusText || 'Request failed';
         }
-        throw new Error(msg);
+        const err = new Error(msg);
+        if (detail && typeof detail === 'object') {
+            err.detail = detail;
+            err.batchPlan = detail.batch_plan || null;
+            err.code = detail.code || null;
+        }
+        throw err;
     }
     return data;
 }

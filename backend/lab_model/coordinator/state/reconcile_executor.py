@@ -28,6 +28,8 @@ RECONCILE_ACTIONS: frozenset[str] = frozenset(
 
 def validate_reconcile_plan(plan: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     """Validate envelopes and return normalized command dicts."""
+    from lab_model.coordinator.state.batch_plan import strip_plan_meta
+
     normalized: List[Dict[str, Any]] = []
     for index, envelope in enumerate(plan):
         action = envelope.get("action")
@@ -35,13 +37,15 @@ def validate_reconcile_plan(plan: Sequence[Mapping[str, Any]]) -> List[Dict[str,
             raise ReconcilePlanError(
                 f"Step {index + 1}: unsupported reconcile action {action!r}"
             )
+        bare = strip_plan_meta(envelope)
         try:
-            parse_command_payload(dict(envelope))
+            parse_command_payload(bare)
         except ValidationError as exc:
             raise ReconcilePlanError(
                 f"Step {index + 1}: invalid command envelope ({exc})"
             ) from exc
-        normalized.append(dict(envelope))
+        # Execute path uses bare envelopes; plan meta is matrix/Twin only.
+        normalized.append(bare)
     return normalized
 
 

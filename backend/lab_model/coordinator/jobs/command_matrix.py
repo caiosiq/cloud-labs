@@ -1,8 +1,9 @@
-"""Command Matrix — per-backend multi-thread command scheduler (Phase 0–3).
+"""Command Matrix — per-backend multi-thread command scheduler.
 
-See ``docs/COMMAND_MATRIX.md``. Edge advertises shared threads (arm/sense);
-coordinator owns routing, mode locks, barriers, queues, and drain. Motor
-columns are ``motor.<tag_id>.<motor_id>`` and are created on demand.
+See ``docs/COMMAND_MATRIX.md`` and ``docs/BATCH_DAG_AND_MATRIX.md``.
+Edge advertises shared threads (arm/sense); coordinator owns routing, mode
+locks, barriers, queues, drain, and predecessor gates. Motor columns are
+``motor.<tag_id>.<motor_id>`` and are created on demand.
 """
 from __future__ import annotations
 
@@ -42,6 +43,8 @@ class QueuedCommand:
     lease_id: str
     error: Optional[str] = None
     enqueued_at: float = field(default_factory=time.time)
+    #: Command ids that must reach ``done`` before this item may claim a thread.
+    predecessors: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -456,6 +459,7 @@ class CommandMatrix:
                     item = self.items.get(cid)
                     if item is None or item.status not in ("queued", "running"):
                         continue
+                    blocked_on = self._blocked_on_unlocked(item) if item.status == "queued" else []
                     queued.append(
                         {
                             "command_id": item.command_id,
@@ -463,6 +467,8 @@ class CommandMatrix:
                             "target_id": item.target_id,
                             "kind": item.kind,
                             "status": item.status,
+                            "predecessors": list(item.predecessors),
+                            "blocked_on": blocked_on,
                         }
                     )
                 running = None
@@ -474,6 +480,7 @@ class CommandMatrix:
                         "target_id": r.target_id,
                         "kind": r.kind,
                         "status": r.status,
+                        "predecessors": list(r.predecessors),
                     }
                 lock = self.session_locks.get(tid)
                 thread_snaps.append(
@@ -643,6 +650,8 @@ class CommandMatrix:
             if command_id in self.items:
                 raise CommandMatrixRefuse(f"duplicate command_id: {command_id}")
 
+            predecessors = self._parse_predecessors_unlocked(payload, command_id)
+
             item = QueuedCommand(
                 command_id=command_id,
                 action=action,
@@ -652,6 +661,7 @@ class CommandMatrix:
                 kind=kind,
                 status="queued",
                 lease_id=str(lease_id or ""),
+                predecessors=predecessors,
             )
             self.items[command_id] = item
 
@@ -665,8 +675,84 @@ class CommandMatrix:
                 "action": action,
                 "resources": list(resources),
                 "kind": kind,
+                "predecessors": list(predecessors),
                 "message": f"queued on {', '.join(resources)}",
             }
+
+    def enqueue_batch(
+        self,
+        envelopes: list,
+        *,
+        lease_id: str,
+        lab_state: dict | None = None,
+    ) -> dict:
+        """Enqueue a declared batch, remapping ``plan_step_id`` predecessors.
+
+        Each envelope may carry ``plan_step_id`` / ``predecessors`` referring to
+        other steps in this batch (from ``plan_batch``). Those local ids are
+        rewritten to concrete ``command_id`` values before admission. Enqueue
+        order must respect the DAG (planner topo order is sufficient).
+        """
+        from lab_model.coordinator.state.batch_plan import strip_plan_meta
+
+        if not isinstance(envelopes, list) or not envelopes:
+            raise CommandMatrixRefuse("commands must be a non-empty list")
+
+        prepared: list[tuple[str, dict]] = []
+        step_map: dict[str, str] = {}
+        for index, raw in enumerate(envelopes):
+            if not isinstance(raw, dict):
+                raise CommandMatrixRefuse(f"commands[{index}] must be an object")
+            env = dict(raw)
+            plan_step_id = str(env.get("plan_step_id") or "").strip()
+            command_id = str(env.get("command_id") or "").strip() or f"cmd_{uuid.uuid4().hex[:12]}"
+            if plan_step_id:
+                if plan_step_id in step_map:
+                    raise CommandMatrixRefuse(
+                        f"duplicate plan_step_id {plan_step_id!r} in batch"
+                    )
+                step_map[plan_step_id] = command_id
+            prepared.append((command_id, env))
+
+        # Refuse unknown local preds before any enqueue mutates the matrix.
+        known_steps = set(step_map.keys())
+        for command_id, env in prepared:
+            for entry in env.get("predecessors") or []:
+                pid = str(entry or "").strip()
+                if not pid:
+                    continue
+                if pid in known_steps or pid in step_map.values():
+                    continue
+                # May already exist on the matrix — checked at enqueue time.
+                continue
+
+        acks: list[dict] = []
+        command_ids: list[str] = []
+        for command_id, env in prepared:
+            remapped: list[str] = []
+            seen: set[str] = set()
+            for entry in env.get("predecessors") or []:
+                pid = str(entry or "").strip()
+                if not pid:
+                    continue
+                resolved = step_map.get(pid, pid)
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                remapped.append(resolved)
+            payload = strip_plan_meta(env)
+            payload["command_id"] = command_id
+            payload["predecessors"] = remapped
+            ack = self.enqueue(payload, lease_id=lease_id, lab_state=lab_state)
+            acks.append(ack)
+            command_ids.append(str(ack.get("command_id") or command_id))
+
+        return {
+            "status": "queued",
+            "command_ids": command_ids,
+            "acks": acks,
+            "steps": len(command_ids),
+        }
 
     def cancel_queued(self, command_id: str) -> bool:
         """Cancel a queued (not running) command. Returns True if cancelled."""
@@ -718,6 +804,10 @@ class CommandMatrix:
                     "kind": item.kind,
                     "error": item.error,
                     "resources": list(item.resources),
+                    "predecessors": list(item.predecessors),
+                    "blocked_on": (
+                        self._blocked_on_unlocked(item) if item.status == "queued" else []
+                    ),
                 }
             return out
 
@@ -763,6 +853,79 @@ class CommandMatrix:
                 "orphaned_running": orphaned,
                 "session_locks_cleared": locks_cleared,
             }
+
+    def _parse_predecessors_unlocked(
+        self, payload: dict, command_id: str
+    ) -> list[str]:
+        raw = payload.get("predecessors")
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise CommandMatrixRefuse("predecessors must be a list of command_id strings")
+        out: list[str] = []
+        seen: set[str] = set()
+        for entry in raw:
+            pid = str(entry or "").strip()
+            if not pid:
+                continue
+            if pid == command_id:
+                raise CommandMatrixRefuse("command cannot list itself as a predecessor")
+            if pid in seen:
+                continue
+            seen.add(pid)
+            if pid not in self.items:
+                raise CommandMatrixRefuse(
+                    f"unknown predecessor {pid!r}; enqueue dependencies first"
+                )
+            out.append(pid)
+        return out
+
+    def _blocked_on_unlocked(self, item: QueuedCommand) -> list[str]:
+        """Predecessor ids that are not yet ``done`` (queued/running only)."""
+        pending: list[str] = []
+        for pid in item.predecessors:
+            pred = self.items.get(pid)
+            if pred is None:
+                pending.append(pid)
+                continue
+            if pred.status == "done":
+                continue
+            if pred.status in ("failed", "cancelled"):
+                continue
+            pending.append(pid)
+        return pending
+
+    def _predecessor_gate_unlocked(
+        self, item: QueuedCommand
+    ) -> tuple[bool, Optional[str]]:
+        """Return ``(ok_to_run, fatal_error)``.
+
+        Fatal when a predecessor is missing / failed / cancelled — caller should
+        fail the dependent so the thread queue does not stick forever.
+        """
+        for pid in item.predecessors:
+            pred = self.items.get(pid)
+            if pred is None:
+                return False, f"missing predecessor {pid}"
+            if pred.status == "done":
+                continue
+            if pred.status in ("failed", "cancelled"):
+                return False, f"predecessor {pid} {pred.status}"
+            # queued or running — head stays blocked
+            return False, None
+        return True, None
+
+    def _fail_queued_unlocked(self, item: QueuedCommand, error: str) -> None:
+        item.status = "failed"
+        item.error = error
+        for rid in item.resources:
+            ts = self.threads.get(rid)
+            if ts is None:
+                continue
+            try:
+                ts.queue.remove(item.command_id)
+            except ValueError:
+                pass
 
     def _barrier_runnable(self, item: QueuedCommand) -> bool:
         """Barrier may run only when head on every resource thread, idle, no session locks."""
@@ -828,6 +991,14 @@ class CommandMatrix:
                 return None
             if item.target_id and item.target_id != lock.tag_id:
                 return None
+
+        preds_ok, fatal = self._predecessor_gate_unlocked(item)
+        if fatal:
+            self._fail_queued_unlocked(item, fatal)
+            return None
+        if not preds_ok:
+            # Head stays queued but blocked on predecessors (other threads may still drain).
+            return None
 
         if item.kind == "barrier":
             if not self._barrier_runnable(item):
