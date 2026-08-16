@@ -19,7 +19,6 @@ import {
     fetchCatalogMap,
     fetchRecipes,
     fetchStorageGridSpec,
-    fetchStrategies,
     initApiFetchers,
 } from './api/fetchers.js';
 import { showErrorModal } from './ui/modals.js';
@@ -53,8 +52,10 @@ import { initBenchChromeBar, initBenchChromeBarInteraction } from './ui/bench-ch
 import { initBackendPicker } from './ui/backend-picker.js';
 import { initRuntimeMode } from './ui/runtime-mode.js';
 import { initWorkspaceTabs } from './ui/workspace-tabs.js';
+import { initSessionNotes } from './ui/session-notes.js';
 import { initOptimizationMode } from './ui/optimization-mode.js';
 import { initUpdateUI, initComponentSidebarInteraction, updateUI } from './ui/updateUI.js';
+import { initCommandMatrixPanel } from './ui/command-matrix-panel.js';
 import {
     initContextPanel,
     openPanel,
@@ -125,6 +126,7 @@ void initRuntimeMode({
     showErrorModal,
 });
 initWorkspaceTabs();
+initSessionNotes();
 initOptimizationMode({ sendCommand, log });
 
 // Guides are now versioned server state: they arrive via lab-state polling
@@ -273,7 +275,6 @@ function init() {
         })
         .catch((e) => console.warn('[cloud-labs] platform registries preload failed:', e));
     fetchStorageGridSpec();
-    fetchStrategies();
     fetchRecipes();
     // First fetch seeds runtime overlays server-side; then run the one-time
     // localStorage→server guide migration + backfill of existing commits, and
@@ -299,6 +300,7 @@ function init() {
 
     initAlignmentDockTools();
     initLaserLinesPanel();
+    initCommandMatrixPanel();
     // Phase 9c removed the lab-wide LIVE FEED pane.
     // Phase 9d removed the table-cam dock; cameras live in the component panel.
 

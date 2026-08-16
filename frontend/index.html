@@ -218,6 +218,182 @@
             display: block;
         }
 
+        #workspace-panel-notes.is-active {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .session-notes {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 10px 12px 12px;
+        }
+
+        .session-notes__head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+            flex: 0 0 auto;
+        }
+
+        .session-notes__title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .session-notes__status {
+            font-size: 10px;
+            color: #64748b;
+        }
+
+        .session-notes__hint {
+            margin: 0;
+            font-size: 10px;
+            line-height: 1.35;
+            color: #64748b;
+            flex: 0 0 auto;
+        }
+
+        .session-notes__toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            flex: 0 0 auto;
+        }
+
+        .session-notes__toolbar .btn {
+            padding: 5px 8px;
+            font-size: 11px;
+        }
+
+        .session-notes__editor {
+            flex: 1 1 auto;
+            min-height: 160px;
+            width: 100%;
+            resize: none;
+            box-sizing: border-box;
+            padding: 10px;
+            border: 1px solid #2a2e36;
+            border-radius: 6px;
+            background: #0f1115;
+            color: #e2e8f0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .session-notes__editor:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .session-notes-popout {
+            position: fixed;
+            z-index: 12000;
+            min-width: 280px;
+            min-height: 220px;
+            max-width: 96vw;
+            max-height: 92vh;
+            resize: both;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            border-radius: 10px;
+            border: 1px solid rgba(148, 163, 184, 0.45);
+            background: rgba(15, 17, 21, 0.97);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .session-notes-popout--flash {
+            outline: 2px solid #94a3b8;
+        }
+
+        .session-notes-popout__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 6px 8px;
+            cursor: grab;
+            user-select: none;
+            border-bottom: 1px solid #1e293b;
+            flex: 0 0 auto;
+            background: #12151b;
+        }
+
+        .session-notes-popout__header:active {
+            cursor: grabbing;
+        }
+
+        .session-notes-popout__title {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+
+        .session-notes-popout__title .material-icons-round {
+            font-size: 14px;
+        }
+
+        .session-notes-popout__actions {
+            display: inline-flex;
+            gap: 4px;
+        }
+
+        .session-notes-popout__btn {
+            border: 1px solid #334155;
+            background: #1e293b;
+            color: #e2e8f0;
+            border-radius: 4px;
+            font-size: 10px;
+            padding: 3px 7px;
+            cursor: pointer;
+        }
+
+        .session-notes-popout__btn--ghost {
+            border-color: #475569;
+            background: transparent;
+            color: #cbd5e1;
+        }
+
+        .session-notes-popout__editor {
+            flex: 1 1 auto;
+            min-height: 120px;
+            width: 100%;
+            resize: none;
+            border: none;
+            padding: 10px;
+            box-sizing: border-box;
+            background: transparent;
+            color: #e2e8f0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .session-notes-popout__editor:focus {
+            outline: none;
+        }
+
+        .session-notes-popout__footer {
+            flex: 0 0 auto;
+            padding: 4px 8px;
+            font-size: 10px;
+            color: #64748b;
+            border-top: 1px solid #1e293b;
+        }
+
         /* Override global .btn { width:100% } for compact multi-button rows in right sidebar */
         #sidebar-right .btn--sidebar-inline {
             width: auto;
@@ -619,6 +795,213 @@
             word-break: break-word;
         }
 
+        /* Command Matrix — per-thread queues (VC-style step lists) */
+        .command-matrix-panel {
+            position: absolute;
+            top: 8px;
+            right: calc(100% + 10px);
+            width: max-content;
+            max-width: min(420px, 46vw);
+            min-width: 168px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            background: rgba(15, 18, 24, 0.94);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+            font-size: 10px;
+            line-height: 1.35;
+            color: #cbd5e1;
+            z-index: 5;
+        }
+
+        .command-matrix-panel.is-reconcile {
+            border-color: rgba(245, 158, 11, 0.55);
+        }
+
+        .command-matrix-panel.is-idle {
+            border-color: rgba(148, 163, 184, 0.22);
+            background: rgba(15, 18, 24, 0.72);
+        }
+
+        .command-matrix-panel[hidden] {
+            display: none !important;
+        }
+
+        .command-matrix-panel__header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+
+        .command-matrix-panel__title {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #93c5fd;
+        }
+
+        .command-matrix-panel__meta {
+            font-size: 9px;
+            color: #64748b;
+            margin-left: auto;
+        }
+
+        .command-matrix-panel__clear {
+            margin: 0;
+            padding: 2px 6px;
+            font-size: 9px;
+            line-height: 1.2;
+            border-radius: 4px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            background: transparent;
+            color: #94a3b8;
+            cursor: pointer;
+        }
+
+        .command-matrix-panel__clear:hover:not(:disabled) {
+            color: #fca5a5;
+            border-color: rgba(248, 113, 113, 0.45);
+        }
+
+        .command-matrix-panel__clear:disabled,
+        .command-matrix-panel__clear[hidden] {
+            display: none;
+        }
+
+        .command-matrix-panel__empty {
+            margin: 0;
+            color: #64748b;
+            font-size: 10px;
+        }
+
+        .command-matrix-panel__grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 14px;
+            align-items: flex-start;
+        }
+
+        .command-matrix-panel__grid.is-compact {
+            gap: 8px 10px;
+        }
+
+        .command-matrix-panel__col {
+            min-width: 118px;
+            max-width: 180px;
+            flex: 1 1 118px;
+            transition: opacity 0.15s ease;
+        }
+
+        .command-matrix-panel__col.is-empty {
+            opacity: 0.32;
+        }
+
+        .command-matrix-panel__col-head {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 2px;
+            padding-bottom: 3px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+            word-break: break-word;
+        }
+
+        .command-matrix-panel__col:not(.is-empty)[data-kind="arm"] .command-matrix-panel__col-head {
+            color: #fbbf24;
+            border-bottom-color: rgba(251, 191, 36, 0.35);
+        }
+
+        .command-matrix-panel__col:not(.is-empty)[data-kind="sense"] .command-matrix-panel__col-head {
+            color: #22d3ee;
+            border-bottom-color: rgba(34, 211, 238, 0.35);
+        }
+
+        .command-matrix-panel__col:not(.is-empty)[data-kind="motor"] .command-matrix-panel__col-head {
+            color: #c4b5fd;
+            border-bottom-color: rgba(196, 181, 253, 0.35);
+        }
+
+        .command-matrix-panel__steps {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            max-height: 240px;
+            overflow-y: auto;
+        }
+
+        .command-matrix-panel__step {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            padding: 3px 0;
+            font-size: 10px;
+            line-height: 1.35;
+            color: #64748b;
+        }
+
+        .command-matrix-panel__step.is-active {
+            color: #fde68a;
+            font-weight: 600;
+        }
+
+        .command-matrix-panel__step.is-done {
+            color: #86efac;
+        }
+
+        .command-matrix-panel__step.is-error {
+            color: #fca5a5;
+        }
+
+        .command-matrix-panel__step.is-blocked {
+            color: #fdba74;
+        }
+
+        .command-matrix-panel__step.is-barrier {
+            color: #6ee7b7;
+        }
+
+        .command-matrix-panel__step.is-barrier.is-active {
+            color: #34d399;
+            font-weight: 700;
+        }
+
+        .command-matrix-panel__step.is-lock {
+            color: #22d3ee;
+            font-weight: 600;
+        }
+
+        .command-matrix-panel__step.is-idle {
+            color: #475569;
+            font-style: italic;
+        }
+
+        .command-matrix-panel__marker {
+            flex-shrink: 0;
+            width: 14px;
+            text-align: center;
+            font-size: 9px;
+            line-height: 1.5;
+        }
+
+        .command-matrix-panel__label {
+            word-break: break-word;
+        }
+
+        @media (max-width: 1280px) {
+            .command-matrix-panel {
+                right: auto;
+                left: 0;
+                top: auto;
+                bottom: calc(100% + 8px);
+                max-width: min(520px, 92vw);
+            }
+        }
+
         @media (max-width: 1120px) {
             .config-view-badge {
                 left: auto;
@@ -665,17 +1048,154 @@
         }
 
         .control-graph-panel {
-            flex-shrink: 0;
+            flex: 1;
+            min-height: 0;
             display: flex;
             flex-direction: column;
+            align-self: stretch;
+            width: 100%;
+            max-width: none;
+            margin: 0;
+            border: none;
+            border-radius: 0;
+            background: transparent;
+            overflow: hidden;
+        }
+
+        .control-vc-status {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
             align-self: center;
             width: min(1000px, calc(100% - 24px));
             max-width: 100%;
             margin: 8px auto 0;
-            border: 1px solid rgba(148, 163, 184, 0.15);
+            padding: 6px 10px;
+            border: 1px solid rgba(148, 163, 184, 0.18);
             border-radius: 8px;
             background: rgba(20, 24, 32, 0.92);
+        }
+
+        .control-vc-status__open {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            background: rgba(15, 20, 28, 0.95);
+            color: #cbd5e1;
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .control-vc-status__open:hover {
+            border-color: #64748b;
+            color: #f1f5f9;
+        }
+
+        .control-vc-status__open .material-icons-round {
+            font-size: 16px;
+            color: #a78bfa;
+        }
+
+        .control-vc-status__meta {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .control-vc-status.vc-inactive .control-vc-status__meta {
+            display: none !important;
+        }
+
+        .control-vc-status:not(.vc-inactive) #control-vc-status-label::after {
+            content: '';
+        }
+
+        .control-vc-status__branch {
+            font-size: 11px;
+            color: #c4b5fd;
+            background: rgba(139, 92, 246, 0.12);
+            border: 1px solid rgba(139, 92, 246, 0.35);
+            border-radius: 4px;
+            padding: 2px 6px;
+        }
+
+        #workspace-panel-config.is-active {
+            display: flex;
+            flex-direction: column;
             overflow: hidden;
+        }
+
+        #workspace-panel-config .control-graph-toolbar {
+            flex-direction: column;
+            align-items: stretch;
+            flex-wrap: nowrap;
+            gap: 8px;
+            flex: 0 0 auto;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+        }
+
+        #workspace-panel-config .control-graph-toolbar-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #workspace-panel-config .control-graph-actions {
+            margin-left: 0;
+            padding-left: 0;
+            border-left: none;
+        }
+
+        #workspace-panel-config .control-graph-wrap {
+            flex: 1 1 auto;
+            min-height: 240px;
+            max-height: none;
+            overflow-x: auto;
+            overflow-y: auto;
+            border-left: none;
+            border-top: 1px solid rgba(148, 163, 184, 0.08);
+            align-items: flex-start;
+            justify-content: flex-start;
+        }
+
+        #workspace-panel-config .control-graph-svg {
+            max-height: none;
+            max-width: none;
+        }
+
+        #workspace-panel-config .control-graph-empty {
+            white-space: normal;
+            padding: 16px 12px;
+            line-height: 1.4;
+        }
+
+        #workspace-panel-config .control-graph-repo-select,
+        #workspace-panel-config .control-graph-branch-select {
+            max-width: none;
+            flex: 1 1 auto;
+        }
+
+        #workspace-panel-config #control-plan-preview {
+            margin: 8px 10px;
+        }
+
+        #workspace-panel-config .control-adopt-notice {
+            margin: 8px 10px 0;
+        }
+
+        #workspace-panel-config .control-graph-panel.vc-inactive {
+            justify-content: center;
+        }
+
+        #workspace-panel-config .control-graph-panel.vc-inactive .control-vc-start {
+            flex: 1;
         }
 
         .control-graph-toolbar {
@@ -1576,9 +2096,13 @@
         .live-feed-popout {
             position: fixed;
             z-index: 12000;
-            width: min(420px, 92vw);
-            min-width: 240px;
-            min-height: 180px;
+            /* Larger default; corner-drag (resize:both) scales from here. */
+            width: min(780px, 88vw);
+            height: min(560px, 78vh);
+            min-width: 320px;
+            min-height: 240px;
+            max-width: 96vw;
+            max-height: 92vh;
             resize: both;
             overflow: hidden;
             display: flex;
@@ -1598,6 +2122,7 @@
             gap: 8px;
             padding: 6px 8px;
             cursor: grab;
+            flex: 0 0 auto;
             background: rgba(8, 47, 73, 0.9);
             border-bottom: 1px solid rgba(34, 211, 238, 0.25);
             user-select: none;
@@ -1633,21 +2158,70 @@
             font-size: 9px;
             color: #94a3b8;
             border-bottom: 1px solid #1e293b;
+            flex: 0 0 auto;
+        }
+        .live-feed-popout__exposure {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 8px;
+            font-size: 10px;
+            color: #cbd5e1;
+            border-bottom: 1px solid #1e293b;
+            flex: 0 0 auto;
+            background: #0f172a;
+        }
+        .live-feed-popout__exposure label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1 1 auto;
+        }
+        .live-feed-popout__exposure input {
+            width: 72px;
+            padding: 2px 4px;
+            border: 1px solid #334155;
+            border-radius: 3px;
+            background: #020617;
+            color: #e2e8f0;
+            font-size: 11px;
         }
         .live-feed-popout__frame {
-            flex: 1;
-            min-height: 140px;
+            flex: 1 1 auto;
+            min-height: 160px;
             background: #000;
             display: flex;
             align-items: center;
             justify-content: center;
             position: relative;
+            overflow: hidden;
         }
         .live-feed-popout__img {
-            max-width: 100%;
-            max-height: 100%;
+            width: 100%;
+            height: 100%;
             object-fit: contain;
             display: block;
+        }
+        .live-feed-popout__resize-hint {
+            position: absolute;
+            right: 4px;
+            bottom: 4px;
+            width: 14px;
+            height: 14px;
+            pointer-events: none;
+            opacity: 0.55;
+            background:
+                linear-gradient(135deg, transparent 50%, rgba(165, 243, 252, 0.15) 50%),
+                repeating-linear-gradient(
+                    -45deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(165, 243, 252, 0.7) 2px,
+                    rgba(165, 243, 252, 0.7) 3px
+                );
+            background-size: 100% 100%, 8px 8px;
+            background-position: right bottom;
+            border-radius: 2px;
         }
         .live-feed-popout__err {
             position: absolute;
@@ -2207,86 +2781,31 @@
         <div class="section-header">
             <span>Configuration</span>
         </div>
-        <p style="padding: 0 16px 12px; margin: 0; font-size: 11px; line-height: 1.45; color: var(--text-muted);">
-            Branch graph and commits are above the optical table. Save, fork, and travel history there.
+        <p style="padding: 0 16px 8px; margin: 0; font-size: 11px; line-height: 1.45; color: var(--text-muted);">
+            Branch graph and commits live in the right sidebar <strong>Config</strong> tab.
         </p>
+        <div style="padding: 0 16px 12px;">
+            <button type="button" id="control-vc-open-sidebar-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px 10px;">
+                <span class="material-icons-round" style="font-size: 14px;" aria-hidden="true">account_tree</span>
+                Open Config
+            </button>
+        </div>
     </div>
 
     <!-- MAIN CANVAS AREA -->
     <div id="main-content">
-        <div id="control-graph-panel" class="control-graph-panel vc-inactive" aria-label="Configuration branch graph">
-            <div id="control-vc-start" class="control-vc-start">
-                <button id="control-vc-start-btn" type="button" class="btn btn-primary control-vc-start-btn">
-                    <span class="material-icons-round" aria-hidden="true">account_tree</span>
-                    Start version control
-                </button>
-            </div>
-            <div class="control-graph-toolbar">
-                <div class="control-graph-toolbar-start">
-                    <select id="control-repo-select" class="control-graph-repo-select control-graph-toolbar-select" aria-label="Configuration repo">
-                        <option value="default">optical-cavity</option>
-                    </select>
-                    <button id="control-new-repo-btn" type="button" class="control-new-repo-btn" title="New configuration repo">
-                        <span class="material-icons-round" aria-hidden="true">add</span>
-                        <span class="sr-only">New repo</span>
-                    </button>
-                    <button id="control-stop-vc-btn" type="button" class="control-new-repo-btn" title="Stop version control">
-                        <span class="material-icons-round" aria-hidden="true">power_settings_new</span>
-                        <span class="sr-only">Stop version control</span>
-                    </button>
-                </div>
-                <div class="control-graph-wrap">
-                    <div id="control-graph-empty" class="control-graph-empty">Loading…</div>
-                </div>
-                <button id="control-save-config-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-commit-btn" title="Commit layout">
-                    <span class="material-icons-round" aria-hidden="true">save</span>
-                    <span class="sr-only">Commit</span>
-                </button>
-                <button id="control-publish-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-publish-btn" title="Request publish to Snapshots">
-                    <span class="material-icons-round" aria-hidden="true">publish</span>
-                    <span class="sr-only">Publish</span>
-                </button>
-                <button id="control-catalog-pin-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-catalog-pin-btn" title="Start from snapshot pin (frozen)">
-                    <span class="material-icons-round" aria-hidden="true">push_pin</span>
-                    <span class="sr-only">Snapshot pin</span>
-                </button>
-                <span id="control-head-label" class="control-graph-head-pill" title="Branch HEAD">
+        <div id="control-vc-status" class="control-vc-status vc-inactive" role="status" aria-label="Version control status">
+            <button type="button" id="control-vc-status-open" class="control-vc-status__open" title="Open Config tab">
+                <span class="material-icons-round" aria-hidden="true">account_tree</span>
+                <span id="control-vc-status-label">Version control</span>
+            </button>
+            <span id="control-vc-status-meta" class="control-vc-status__meta" hidden>
+                <code id="control-vc-status-branch" class="control-vc-status__branch">—</code>
+                <span id="control-vc-status-pill" class="control-graph-head-pill" title="Branch HEAD">
                     <span class="control-graph-head-pill__tag">HEAD</span>
                     <code class="control-graph-head-pill__id">—</code>
                 </span>
-                <div class="control-graph-actions">
-                    <span id="control-stash-box" class="control-stash-box" title="Stash" hidden>
-                        <button id="control-stash-btn" type="button" class="control-stash-create" title="Stash uncommitted changes">
-                            <span class="material-icons-round" aria-hidden="true">inventory_2</span>
-                            <span class="control-stash-create__label">Stash</span>
-                        </button>
-                        <span id="control-stash-present" class="control-stash-present" hidden>
-                            <span class="material-icons-round control-stash-present__icon" aria-hidden="true">inventory_2</span>
-                            <span class="control-stash-present__label">Stash</span>
-                            <button id="control-stash-pop-btn" type="button" class="control-stash-action" title="Pop stash">
-                                <span class="material-icons-round" aria-hidden="true">unarchive</span>
-                                <span class="sr-only">Pop stash</span>
-                            </button>
-                            <button id="control-stash-drop-btn" type="button" class="control-stash-action control-stash-action--danger" title="Drop stash">
-                                <span class="material-icons-round" aria-hidden="true">delete</span>
-                                <span class="sr-only">Drop stash</span>
-                            </button>
-                        </span>
-                    </span>
-                    <button id="control-fork-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-fork-btn" title="Fork branch">
-                        <span class="material-icons-round" aria-hidden="true">call_split</span>
-                        <span class="sr-only">Fork</span>
-                    </button>
-                    <select id="control-branch-select" class="control-graph-branch-select control-graph-toolbar-select" aria-label="Configuration branch">
-                        <option value="main">main</option>
-                    </select>
-                </div>
-            </div>
-            <div id="control-adopt-notice" class="control-adopt-notice" hidden>
-                <span class="material-icons-round" aria-hidden="true">touch_app</span>
-                <span>No reference yet — Twin will soft-point at main HEAD when available, or preview a node and Set as reference.</span>
-            </div>
-            <div id="control-plan-preview" class="control-plan-preview" hidden></div>
+            </span>
         </div>
         <div id="canvas-stage" class="canvas-stage">
             <div id="bench-header" class="bench-header">
@@ -2308,6 +2827,14 @@
                 </div>
             </div>
             <div class="canvas-stage__row">
+                <aside id="command-matrix-panel" class="command-matrix-panel" hidden aria-live="polite" aria-label="Command queue by thread">
+                    <div class="command-matrix-panel__header">
+                        <span class="command-matrix-panel__title">Command queue</span>
+                        <span id="command-matrix-meta" class="command-matrix-panel__meta"></span>
+                        <button type="button" id="command-matrix-clear-btn" class="command-matrix-panel__clear" hidden title="Cancel all queued commands (not the one currently running)">Clear queued</button>
+                    </div>
+                    <div id="command-matrix-threads"></div>
+                </aside>
                 <div id="canvas-wrapper">
                     <canvas id="optical-table" width="1000" height="700"></canvas>
                     <div id="canvas-view-shield" class="canvas-view-shield" hidden aria-hidden="true" title="Read-only configuration preview"></div>
@@ -2383,9 +2910,15 @@
                 <button id="workspace-tab-optimization" class="workspace-tab" type="button"
                     role="tab" aria-selected="true" aria-controls="workspace-panel-optimization"
                     data-workspace-tab="optimization">Optimization</button>
+                <button id="workspace-tab-config" class="workspace-tab" type="button"
+                    role="tab" aria-selected="false" aria-controls="workspace-panel-config"
+                    data-workspace-tab="config">Config</button>
                 <button id="workspace-tab-recipes" class="workspace-tab" type="button"
                     role="tab" aria-selected="false" aria-controls="workspace-panel-recipes"
                     data-workspace-tab="recipes">Recipes</button>
+                <button id="workspace-tab-notes" class="workspace-tab" type="button"
+                    role="tab" aria-selected="false" aria-controls="workspace-panel-notes"
+                    data-workspace-tab="notes">Notes</button>
                 <button id="workspace-tab-component" class="workspace-tab" type="button"
                     role="tab" aria-selected="false" aria-controls="workspace-panel-component"
                     data-workspace-tab="component" hidden>Selected Part</button>
@@ -3558,6 +4091,88 @@
         </div>
             </section>
 
+        </section>
+
+        <section id="workspace-panel-config" class="workspace-tab-panel"
+            role="tabpanel" aria-labelledby="workspace-tab-config">
+            <div id="control-graph-panel" class="control-graph-panel vc-inactive" aria-label="Configuration branch graph">
+                <div id="control-vc-start" class="control-vc-start">
+                    <button id="control-vc-start-btn" type="button" class="btn btn-primary control-vc-start-btn">
+                        <span class="material-icons-round" aria-hidden="true">account_tree</span>
+                        Start version control
+                    </button>
+                </div>
+                <div class="control-graph-toolbar">
+                    <div class="control-graph-toolbar-start">
+                        <select id="control-repo-select" class="control-graph-repo-select control-graph-toolbar-select" aria-label="Configuration repo">
+                            <option value="default">optical-cavity</option>
+                        </select>
+                        <button id="control-new-repo-btn" type="button" class="control-new-repo-btn" title="New configuration repo">
+                            <span class="material-icons-round" aria-hidden="true">add</span>
+                            <span class="sr-only">New repo</span>
+                        </button>
+                        <button id="control-stop-vc-btn" type="button" class="control-new-repo-btn" title="Stop version control">
+                            <span class="material-icons-round" aria-hidden="true">power_settings_new</span>
+                            <span class="sr-only">Stop version control</span>
+                        </button>
+                    </div>
+                    <div class="control-graph-toolbar-row">
+                        <button id="control-save-config-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-commit-btn" title="Commit layout">
+                            <span class="material-icons-round" aria-hidden="true">save</span>
+                            <span class="sr-only">Commit</span>
+                        </button>
+                        <button id="control-publish-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-publish-btn" title="Request publish to Snapshots">
+                            <span class="material-icons-round" aria-hidden="true">publish</span>
+                            <span class="sr-only">Publish</span>
+                        </button>
+                        <button id="control-catalog-pin-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-catalog-pin-btn" title="Start from snapshot pin (frozen)">
+                            <span class="material-icons-round" aria-hidden="true">push_pin</span>
+                            <span class="sr-only">Snapshot pin</span>
+                        </button>
+                        <span id="control-head-label" class="control-graph-head-pill" title="Branch HEAD">
+                            <span class="control-graph-head-pill__tag">HEAD</span>
+                            <code class="control-graph-head-pill__id">—</code>
+                        </span>
+                        <div class="control-graph-actions">
+                            <span id="control-stash-box" class="control-stash-box" title="Stash" hidden>
+                                <button id="control-stash-btn" type="button" class="control-stash-create" title="Stash uncommitted changes">
+                                    <span class="material-icons-round" aria-hidden="true">inventory_2</span>
+                                    <span class="control-stash-create__label">Stash</span>
+                                </button>
+                                <span id="control-stash-present" class="control-stash-present" hidden>
+                                    <span class="material-icons-round control-stash-present__icon" aria-hidden="true">inventory_2</span>
+                                    <span class="control-stash-present__label">Stash</span>
+                                    <button id="control-stash-pop-btn" type="button" class="control-stash-action" title="Pop stash">
+                                        <span class="material-icons-round" aria-hidden="true">unarchive</span>
+                                        <span class="sr-only">Pop stash</span>
+                                    </button>
+                                    <button id="control-stash-drop-btn" type="button" class="control-stash-action control-stash-action--danger" title="Drop stash">
+                                        <span class="material-icons-round" aria-hidden="true">delete</span>
+                                        <span class="sr-only">Drop stash</span>
+                                    </button>
+                                </span>
+                            </span>
+                            <button id="control-fork-btn" type="button" class="btn control-graph-btn control-graph-btn--icon control-fork-btn" title="Fork branch">
+                                <span class="material-icons-round" aria-hidden="true">call_split</span>
+                                <span class="sr-only">Fork</span>
+                            </button>
+                            <select id="control-branch-select" class="control-graph-branch-select control-graph-toolbar-select" aria-label="Configuration branch">
+                                <option value="main">main</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="control-graph-wrap">
+                    <div id="control-graph-empty" class="control-graph-empty">Loading…</div>
+                </div>
+                <div id="control-adopt-notice" class="control-adopt-notice" hidden>
+                    <span class="material-icons-round" aria-hidden="true">touch_app</span>
+                    <span>No reference yet — Twin will soft-point at main HEAD when available, or preview a node and Set as reference.</span>
+                </div>
+                <div id="control-plan-preview" class="control-plan-preview" hidden></div>
+            </div>
+        </section>
+
         <!-- Recipe Editor -->
         <section id="workspace-panel-recipes" class="workspace-tab-panel"
             role="tabpanel" aria-labelledby="workspace-tab-recipes">
@@ -3591,6 +4206,33 @@
                 <!-- List -->
             </div>
         </div>
+        </section>
+
+        <section id="workspace-panel-notes" class="workspace-tab-panel"
+            role="tabpanel" aria-labelledby="workspace-tab-notes">
+            <div class="session-notes">
+                <div class="session-notes__head">
+                    <span class="session-notes__title">Session notes</span>
+                    <span id="session-notes-status" class="session-notes__status">Saved locally</span>
+                </div>
+                <p class="session-notes__hint">Scratchpad for measurements, checklist, next steps. Stays on this browser for the selected backend — not lab state.</p>
+                <div class="session-notes__toolbar">
+                    <button type="button" id="session-notes-stamp" class="btn btn-secondary btn--sidebar-inline" title="Insert timestamp">
+                        <span class="material-icons-round" style="font-size:14px" aria-hidden="true">schedule</span> Time
+                    </button>
+                    <button type="button" id="session-notes-copy" class="btn btn-secondary btn--sidebar-inline" title="Copy all">
+                        <span class="material-icons-round" style="font-size:14px" aria-hidden="true">content_copy</span> Copy
+                    </button>
+                    <button type="button" id="session-notes-clear" class="btn btn-secondary btn--sidebar-inline" title="Clear notes">
+                        <span class="material-icons-round" style="font-size:14px" aria-hidden="true">delete</span> Clear
+                    </button>
+                    <button type="button" id="session-notes-popout" class="btn btn-secondary btn--sidebar-inline" title="Pop out notepad">
+                        <span class="material-icons-round" style="font-size:14px" aria-hidden="true">open_in_new</span> Pop out
+                    </button>
+                </div>
+                <textarea id="session-notes-editor" class="session-notes__editor" spellcheck="true"
+                    placeholder="Measurements, checklist, next steps…"></textarea>
+            </div>
         </section>
 
         <section id="workspace-panel-component" class="workspace-tab-panel"

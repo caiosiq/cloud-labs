@@ -1,13 +1,16 @@
 /**
- * Git-style configuration commit graph (SVG) — horizontal timeline above canvas.
+ * Git-style configuration commit graph (SVG) — vertical timeline for Config tab.
+ *
+ * Time flows top → bottom; branches are columns (lanes).
  */
 import { shortCommitId } from '../api/control.js';
 
-const LANE_HEIGHT = 34;
-const GEN_WIDTH = 92;
-const NODE_R = 8;
-const PAD_X = 18;
-const PAD_Y = 18;
+const LANE_WIDTH = 78;
+const GEN_HEIGHT = 58;
+const NODE_R = 11;
+const PAD_X = 28;
+const PAD_Y = 36;
+const LABEL_RIGHT = 72;
 
 const COLORS = {
     edge: '#475569',
@@ -23,12 +26,12 @@ const COLORS = {
 };
 
 /**
- * Horizontal layout: time flows left → right (depth = column), branches = lanes (rows).
+ * Vertical layout: time flows top → bottom (depth = row), branches = lanes (columns).
  * @param {Array<{id:string,parent_id?:string|null,branch?:string,message?:string,created_at?:string}>} nodes
  */
 export function layoutCommitGraph(nodes, { heads = {}, activeBranch = 'main', headId = null } = {}) {
     if (!nodes?.length) {
-        return { width: 320, height: 80, positions: new Map(), edges: [], nodes: [] };
+        return { width: 220, height: 120, positions: new Map(), edges: [], nodes: [] };
     }
 
     const byId = new Map(nodes.map((n) => [String(n.id), n]));
@@ -92,8 +95,8 @@ export function layoutCommitGraph(nodes, { heads = {}, activeBranch = 'main', he
         maxDepth = Math.max(maxDepth, gen);
         maxLane = Math.max(maxLane, lane);
         positions.set(id, {
-            x: PAD_X + gen * GEN_WIDTH,
-            y: PAD_Y + lane * LANE_HEIGHT,
+            x: PAD_X + lane * LANE_WIDTH,
+            y: PAD_Y + gen * GEN_HEIGHT,
             gen,
             lane,
             node,
@@ -114,24 +117,25 @@ export function layoutCommitGraph(nodes, { heads = {}, activeBranch = 'main', he
         });
     });
 
-    const width = PAD_X * 2 + (maxDepth + 1) * GEN_WIDTH;
-    // Lanes span PAD_Y … PAD_Y + maxLane*LANE_HEIGHT, so this keeps a single-lane
-    // (linear) history vertically centered instead of top-aligned with dead space.
-    const height = PAD_Y * 2 + maxLane * LANE_HEIGHT;
+    // Lanes span PAD_X … PAD_X + maxLane*LANE_WIDTH; single-branch history stays
+    // centered horizontally instead of left-aligned with dead space.
+    const width = PAD_X * 2 + maxLane * LANE_WIDTH + LABEL_RIGHT;
+    const height = PAD_Y * 2 + (maxDepth + 1) * GEN_HEIGHT;
 
     return { width, height, positions, edges, nodes, branchLane, activeChain, headId };
 }
 
+/** Orthogonal path for parent → child in a vertical timeline. */
 function edgePath(from, to) {
     const x1 = from.x;
     const y1 = from.y;
     const x2 = to.x;
     const y2 = to.y;
-    if (Math.abs(y1 - y2) < 1) {
-        return `M ${x1 + NODE_R} ${y1} L ${x2 - NODE_R} ${y2}`;
+    if (Math.abs(x1 - x2) < 1) {
+        return `M ${x1} ${y1 + NODE_R} L ${x2} ${y2 - NODE_R}`;
     }
-    const midX = (x1 + x2) / 2;
-    return `M ${x1 + NODE_R} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2 - NODE_R} ${y2}`;
+    const midY = (y1 + y2) / 2;
+    return `M ${x1} ${y1 + NODE_R} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2 - NODE_R}`;
 }
 
 /**
@@ -209,13 +213,12 @@ export function renderControlGraph(container, layout, state = {}) {
         labelLayer.setAttribute('class', 'control-graph-branch-labels');
         layout.branchLane.forEach((lane, branchName) => {
             const text = document.createElementNS(ns, 'text');
-            text.setAttribute('x', '2');
-            // Sit the lane label ABOVE the node row so it never hides behind the
-            // first node's circle (which used to clip "main" down to just "m").
-            // Clamp so the top lane's label doesn't clip past the SVG top edge.
-            text.setAttribute('y', String(Math.max(9, PAD_Y + lane * LANE_HEIGHT - NODE_R - 3)));
+            text.setAttribute('x', String(PAD_X + lane * LANE_WIDTH));
+            text.setAttribute('y', '14');
+            text.setAttribute('text-anchor', 'middle');
             text.setAttribute('fill', COLORS.laneLabel);
             text.setAttribute('font-size', '10');
+            text.setAttribute('font-weight', '600');
             text.textContent = branchName === 'main' ? 'main' : branchName;
             labelLayer.appendChild(text);
         });
@@ -269,6 +272,14 @@ export function renderControlGraph(container, layout, state = {}) {
             g.appendChild(view);
         }
 
+        // Larger invisible hit target for easier clicking on multi-branch graphs.
+        const hit = document.createElementNS(ns, 'circle');
+        hit.setAttribute('cx', String(pos.x));
+        hit.setAttribute('cy', String(pos.y));
+        hit.setAttribute('r', String(NODE_R + 12));
+        hit.setAttribute('fill', 'transparent');
+        g.appendChild(hit);
+
         const circle = document.createElementNS(ns, 'circle');
         circle.setAttribute('cx', String(pos.x));
         circle.setAttribute('cy', String(pos.y));
@@ -281,6 +292,15 @@ export function renderControlGraph(container, layout, state = {}) {
         circle.setAttribute('stroke-width', isHead || isApplied ? '1.5' : '1');
         circle.setAttribute('opacity', inactive ? '0.4' : '1');
         g.appendChild(circle);
+
+        const idLabel = document.createElementNS(ns, 'text');
+        idLabel.setAttribute('x', String(pos.x + NODE_R + 8));
+        idLabel.setAttribute('y', String(pos.y + 4));
+        idLabel.setAttribute('fill', inactive ? COLORS.label : COLORS.message);
+        idLabel.setAttribute('font-size', '10');
+        idLabel.setAttribute('font-family', 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace');
+        idLabel.textContent = shortCommitId(id);
+        g.appendChild(idLabel);
 
         g.addEventListener('click', (ev) => {
             ev.stopPropagation();
@@ -308,9 +328,9 @@ export function renderControlGraph(container, layout, state = {}) {
     if (headId) {
         requestAnimationFrame(() => {
             const headPos = layout.positions.get(String(headId));
-            if (headPos && wrap.scrollWidth > wrap.clientWidth) {
-                const target = Math.max(0, headPos.x - wrap.clientWidth * 0.65);
-                wrap.scrollTo({ left: target, behavior: 'smooth' });
+            if (headPos && wrap.scrollHeight > wrap.clientHeight) {
+                const target = Math.max(0, headPos.y - wrap.clientHeight * 0.35);
+                wrap.scrollTo({ top: target, behavior: 'smooth' });
             }
         });
     }

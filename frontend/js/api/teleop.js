@@ -16,6 +16,7 @@ import { syncTeleopTargetFromCurrent } from '../teleop-target.js';
 import { labClient } from '../cloudlabs/client.js';
 import { isTeleopWsConnected, teleopGotoViaWs } from './teleop-session-ws.js';
 import { store } from '../state/store.js';
+import { confirmPrimitiveCommand } from './confirm-primitive.js';
 
 /** Paint system-status badge immediately (avoid waiting for next poll). */
 function paintSystemStatusOptimistic(status) {
@@ -48,10 +49,21 @@ function paintSystemStatusOptimistic(status) {
  * commit before hardware prepare finishes.
  *
  * @param {string} tagId
+ * @param {{ skipConfirm?: boolean }} [opts]
  * @returns {Promise<{ok: boolean, tunables?: object, error?: string}>}
  */
-export async function startTeleop(tagId) {
+export async function startTeleop(tagId, opts = {}) {
     if (!tagId) return { ok: false, error: 'tagId required' };
+    if (!opts.skipConfirm && !store.isRecording) {
+        const ok = await confirmPrimitiveCommand({
+            action: 'START_TELEOP',
+            target_id: tagId,
+        });
+        if (!ok) {
+            log(`START_TELEOP ${tagId} cancelled by user.`, 'info');
+            return { ok: false, error: 'cancelled' };
+        }
+    }
     // Pending session in the browser store immediately (Loading TeleOp).
     // Mirror acquiring on the system monitor as BUSY (not TELEOP until ready).
     applyComponentTelemetryFromServer(tagId, {
@@ -90,10 +102,21 @@ export async function startTeleop(tagId) {
  * Release the per-component TELEOP lease. Idempotent.
  *
  * @param {string} tagId
+ * @param {{ skipConfirm?: boolean }} [opts]
  * @returns {Promise<{ok: boolean, tunables?: object, error?: string}>}
  */
-export async function endTeleop(tagId) {
+export async function endTeleop(tagId, opts = {}) {
     if (!tagId) return { ok: false, error: 'tagId required' };
+    if (!opts.skipConfirm && !store.isRecording) {
+        const ok = await confirmPrimitiveCommand({
+            action: 'END_TELEOP',
+            target_id: tagId,
+        });
+        if (!ok) {
+            log(`END_TELEOP ${tagId} cancelled by user.`, 'info');
+            return { ok: false, error: 'cancelled' };
+        }
+    }
     try {
         const body = await labClient.endTeleop(tagId);
         if (body && body.telemetry) {

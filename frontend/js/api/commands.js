@@ -5,9 +5,8 @@
  * so runs hold a session lease and appear on ``/operations`` — see ``api/jobs.js``.
  *
  * Two-stage flow:
- *   1. `sendCommand` — applies user-facing safeguards (e.g. MOVE_COMPONENT confirm modal). If the
- *      user confirms, it delegates to `executeSendCommand`. Recording-mode bypasses the modal
- *      because the recipe editor needs every command to be captured deterministically.
+ *   1. `sendCommand` — confirms with the operator (except high-frequency teleop frames,
+ *      recipe recording, or ``{ skipConfirm: true }``), then delegates to `executeSendCommand`.
  *   2. `executeSendCommand` — does the network call, mirrors recipe state, and tracks
  *      `pendingCommands` / `pendingActions` so the renderer can show pending visual feedback
  *      while the backend processes the request.
@@ -24,7 +23,12 @@ import { log } from '../ui/log.js';
 import { leaseHeaders } from './session-lease.js';
 import { withBackendQuery } from '../state/backend-selection.js';
 import { showConfirmationModal } from '../ui/modals.js';
+import {
+    PRIMITIVE_CONFIRM_SKIP,
+    confirmPrimitiveCommand,
+} from './confirm-primitive.js';
 import { drawPose, isBreadboardIntent } from '../component-model.js';
+import { applyCommandMatrixSnapshot } from '../ui/command-matrix-panel.js';
 import { updateRecipeEditorList } from '../ui/recipes.js';
 import { fetchLabState } from '../state/lab-state.js';
 
@@ -49,58 +53,48 @@ export function initCommands(deps) {
     }
 }
 
-export async function sendCommand(command) {
+/**
+ * @param {object} command
+ * @param {{ skipConfirm?: boolean }} [opts]
+ */
+export async function sendCommand(command, opts = {}) {
     const blocked = runtimeEditableOrMessage();
     if (blocked) {
         log(blocked, 'warn');
         return { ok: false, error: blocked };
     }
 
-    // MOVE_COMPONENT goes through a user confirmation modal — except while recording a recipe,
-    // where every command is captured verbatim so the recipe stays deterministic.
-    if (command.action === 'MOVE_COMPONENT' && !store.isRecording) {
-        let msg = `Move <strong>${command.target_id}</strong>?`;
-        if (command.parameters) {
-            msg += `<br>X: ${command.parameters.target_x.toFixed(1)} mm<br>Y: ${command.parameters.target_y.toFixed(1)} mm<br>Rot: ${command.parameters.rotation.toFixed(1)}°`;
-        }
+    const action = String(command?.action || '').trim();
+    const skipConfirm =
+        Boolean(opts.skipConfirm) ||
+        store.isRecording ||
+        PRIMITIVE_CONFIRM_SKIP.has(action);
 
-        return new Promise((resolve) => {
-            showConfirmationModal(
-                msg,
-                async () => {
-                    const r = await executeSendCommand(command);
-                    resolve(r);
-                },
-                () => {
-                    log('Move cancelled by user.', 'info');
+    if (!skipConfirm && action) {
+        const ok = await confirmPrimitiveCommand(command);
+        if (!ok) {
+            log(`${action} cancelled by user.`, 'info');
 
-                    if (
-                        command.target_id &&
-                        store.labState &&
-                        store.labState.components &&
-                        store.labState.components[command.target_id] &&
-                        isBreadboardIntent(store.labState.components[command.target_id])
-                    ) {
-                        const original = drawPose(store.labState.components[command.target_id]);
-                        // Only revert if we have the ghost state object — the ghost is what the canvas draws,
-                        // so without it there is nothing visible to roll back.
-                        if (store.ghostState[command.target_id]) {
-                            store.ghostState[command.target_id].x = original.x;
-                            store.ghostState[command.target_id].y = original.y;
-                            store.ghostState[command.target_id].rotation = original.rotation;
-
-                            // Multi-panel: refresh whichever open panel matches
-                            // this target — not just the focused one.
-                            if (store.openPanels.includes(command.target_id)) {
-                                _updateContextPanel(command.target_id);
-                            }
-                            _render();
-                        }
+            // MOVE_COMPONENT: revert ghost pose if the canvas was already previewing the target.
+            if (
+                action === 'MOVE_COMPONENT' &&
+                command.target_id &&
+                store.labState?.components?.[command.target_id] &&
+                isBreadboardIntent(store.labState.components[command.target_id])
+            ) {
+                const original = drawPose(store.labState.components[command.target_id]);
+                if (store.ghostState[command.target_id]) {
+                    store.ghostState[command.target_id].x = original.x;
+                    store.ghostState[command.target_id].y = original.y;
+                    store.ghostState[command.target_id].rotation = original.rotation;
+                    if (store.openPanels.includes(command.target_id)) {
+                        _updateContextPanel(command.target_id);
                     }
-                    resolve({ ok: false, error: 'cancelled' });
-                },
-            );
-        });
+                    _render();
+                }
+            }
+            return { ok: false, error: 'cancelled' };
+        }
     }
 
     return await executeSendCommand(command);
@@ -183,6 +177,21 @@ export async function executeSendCommand(command) {
                 store.pendingActions.delete(command.target_id);
             }
             return { ok: false, error: detail };
+        }
+
+        // Command Matrix: accepted into a per-thread queue (may still be waiting).
+        if (result.status === 'queued') {
+            const res = Array.isArray(result.resources) ? result.resources.join(', ') : '';
+            const cid = result.command_id ? ` [${result.command_id}]` : '';
+            log(
+                `${command.action}${cid} queued${res ? ` on ${res}` : ''}` +
+                    (command.target_id ? ` → ${command.target_id}` : ''),
+                'info',
+            );
+            if (result.command_matrix) {
+                applyCommandMatrixSnapshot(result.command_matrix);
+            }
+            return { ok: true, message: result.message || 'queued', queued: true, result };
         }
 
         const serverMessage = result.message || result.status || 'Command accepted';

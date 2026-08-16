@@ -1,10 +1,11 @@
 /**
 
- * Configuration version control — branch graph above canvas + toolbar actions.
+ * Configuration version control — Config workspace tab + bench status strip.
 
  */
 
 import { store } from '../state/store.js';
+import { activateWorkspaceTab } from './workspace-tabs.js';
 
 import {
     adoptConfiguration,
@@ -86,6 +87,8 @@ import {
 
 import { log } from './log.js';
 
+import { getCatalogRow } from '../component-model.js';
+
 import { showConfirmationModal, showErrorModal } from './modals.js';
 import { runBringBenchWizard } from './bring-bench-wizard.js';
 
@@ -112,6 +115,34 @@ function _headLabelParts() {
         tag: _els.headLabel.querySelector('.control-graph-head-pill__tag'),
         id: _els.headLabel.querySelector('.control-graph-head-pill__id'),
     };
+}
+
+function _statusPillParts() {
+    if (!_els.statusPill) return { tag: null, id: null };
+    return {
+        tag: _els.statusPill.querySelector('.control-graph-head-pill__tag'),
+        id: _els.statusPill.querySelector('.control-graph-head-pill__id'),
+    };
+}
+
+function _syncStatusStripFromHeadLabel() {
+    if (!_els.statusPill || !_els.headLabel) return;
+    const src = _headLabelParts();
+    const dst = _statusPillParts();
+    if (src.tag && dst.tag) dst.tag.textContent = src.tag.textContent;
+    if (src.id && dst.id) dst.id.textContent = src.id.textContent;
+    _els.statusPill.classList.toggle(
+        'is-uncommitted',
+        _els.headLabel.classList.contains('is-uncommitted'),
+    );
+    _els.statusPill.title = _els.headLabel.title || '';
+    if (_els.statusBranch) {
+        _els.statusBranch.textContent = store.control.branch || '—';
+    }
+    if (_els.statusLabel) {
+        const active = Boolean(store.control.repoId);
+        _els.statusLabel.textContent = active ? 'Config' : 'Version control';
+    }
 }
 
 /** Pick the right HEAD-pill rendering for the current working state. */
@@ -143,6 +174,7 @@ function updateHeadLabel({ uncommitted = false, headId = null, detached = false,
         if (id) id.textContent = 'pick';
         _els.headLabel.title =
             'No current reference — preview a node and "Set as reference", or Commit the current bench';
+        _syncStatusStripFromHeadLabel();
         return;
     }
     if (uncommitted) {
@@ -150,6 +182,7 @@ function updateHeadLabel({ uncommitted = false, headId = null, detached = false,
         if (id) id.textContent = 'table';
         _els.headLabel.title =
             'Uncommitted layout on this branch — Commit to start version history';
+        _syncStatusStripFromHeadLabel();
         return;
     }
     if (detached) {
@@ -158,6 +191,7 @@ function updateHeadLabel({ uncommitted = false, headId = null, detached = false,
         _els.headLabel.title = headId
             ? `Detached — bench is at ${headId} (not a branch HEAD). Fork to edit.`
             : 'Detached from branch HEAD';
+        _syncStatusStripFromHeadLabel();
         return;
     }
     if (tag) tag.textContent = 'HEAD';
@@ -168,6 +202,7 @@ function updateHeadLabel({ uncommitted = false, headId = null, detached = false,
         if (id) id.textContent = '—';
         _els.headLabel.title = 'Branch HEAD';
     }
+    _syncStatusStripFromHeadLabel();
 }
 
 export function initControlPanel(deps = {}) {
@@ -214,6 +249,14 @@ export function initControlPanel(deps = {}) {
 
         stashDropBtn: document.getElementById('control-stash-drop-btn'),
 
+        statusBar: document.getElementById('control-vc-status'),
+        statusOpen: document.getElementById('control-vc-status-open'),
+        statusLabel: document.getElementById('control-vc-status-label'),
+        statusMeta: document.getElementById('control-vc-status-meta'),
+        statusBranch: document.getElementById('control-vc-status-branch'),
+        statusPill: document.getElementById('control-vc-status-pill'),
+        openSidebarBtn: document.getElementById('control-vc-open-sidebar-btn'),
+
     };
 
 
@@ -236,6 +279,10 @@ export function initControlPanel(deps = {}) {
     });
 
 
+
+    const openConfigTab = () => activateWorkspaceTab('config');
+    _els.statusOpen?.addEventListener('click', openConfigTab);
+    _els.openSidebarBtn?.addEventListener('click', openConfigTab);
 
     _els.saveBtn?.addEventListener('click', () => void onSaveConfiguration());
 
@@ -373,7 +420,15 @@ export function initControlPanel(deps = {}) {
 /** Toggle the panel between the start screen and the live toolbar. */
 function setVcActive(active) {
     _els.graphPanel?.classList.toggle('vc-inactive', !active);
+    _els.statusBar?.classList.toggle('vc-inactive', !active);
     if (_els.vcStart) _els.vcStart.hidden = active;
+    if (_els.statusMeta) _els.statusMeta.hidden = !active;
+    if (_els.statusLabel) {
+        _els.statusLabel.textContent = active ? 'Config' : 'Version control';
+    }
+    if (active && _els.statusBranch) {
+        _els.statusBranch.textContent = store.control.branch || '—';
+    }
 }
 
 /** Enter a repo (opt-in). The physical bench is untouched. */
@@ -389,6 +444,7 @@ function enterRepo(repoId) {
     store.control.liveHeadId = null;
     store.control.working = null;
     setVcActive(true);
+    activateWorkspaceTab('config');
     void (async () => {
         await refreshControlPanel();
         await softDefaultMainHeadReference();
@@ -811,30 +867,54 @@ async function viewConfiguration(commitId, node) {
 
 
 
-function formatPlanPreview(plan) {
-
-    if (!plan?.length) {
-
-        return '<strong>No motion required</strong> — the bench already matches this configuration.';
-
+function formatStepTargetLabel(tagId) {
+    const id = tagId == null || tagId === '' ? '' : String(tagId);
+    if (!id) return '—';
+    const name = getCatalogRow(id)?.name;
+    if (name && name !== id) {
+        return `${escapeHtml(name)} <span style="opacity:0.65">(${escapeHtml(id)})</span>`;
     }
+    return escapeHtml(id);
+}
 
+function formatStepParamHint(step) {
+    const params = step && typeof step.parameters === 'object' ? step.parameters : null;
+    if (!params) return '';
+    const bits = [];
+    if (params.motor_id != null) bits.push(`motor ${params.motor_id}`);
+    if (params.angle_deg != null && Number.isFinite(Number(params.angle_deg))) {
+        bits.push(`${Number(params.angle_deg).toFixed(1)}°`);
+    }
+    if (params.exposure_time_ms != null && Number.isFinite(Number(params.exposure_time_ms))) {
+        bits.push(`${Number(params.exposure_time_ms)} ms`);
+    }
+    if (
+        params.target_x != null &&
+        params.target_y != null &&
+        Number.isFinite(Number(params.target_x)) &&
+        Number.isFinite(Number(params.target_y))
+    ) {
+        bits.push(
+            `(${Number(params.target_x).toFixed(1)}, ${Number(params.target_y).toFixed(1)})`,
+        );
+    }
+    return bits.length ? ` · ${escapeHtml(bits.join(' · '))}` : '';
+}
+
+function formatPlanPreview(plan) {
+    if (!plan?.length) {
+        return '<strong>No motion required</strong> — the bench already matches this configuration.';
+    }
+    // Use <ol> numbering only — do not prefix "${i}." inside <li> (that doubles digits).
     const items = plan
-
-        .map((step, index) => {
-
-            const action = step.action || '?';
-
-            const target = step.target_id || '—';
-
-            return `<li>${index + 1}. ${action} → ${target}</li>`;
-
+        .map((step) => {
+            const action = escapeHtml(step.action || '?');
+            const target = formatStepTargetLabel(step.target_id);
+            const hint = formatStepParamHint(step);
+            return `<li style="text-align:left">${action} → ${target}${hint}</li>`;
         })
-
         .join('');
-
-    return `<strong>${plan.length} primitive step(s):</strong><ol>${items}</ol>`;
-
+    return `<strong>${plan.length} primitive step(s):</strong><ol style="text-align:left;margin:8px 0 0;padding-left:1.4em">${items}</ol>`;
 }
 
 

@@ -1,6 +1,7 @@
 import { store } from '../state/store.js';
+import { onNotesTabActivated } from './session-notes.js';
 
-const TAB_NAMES = ['optimization', 'recipes', 'component'];
+const TAB_NAMES = ['optimization', 'config', 'recipes', 'notes', 'component'];
 
 let activeTab = 'optimization';
 let lastNonComponentTab = 'optimization';
@@ -29,6 +30,7 @@ export function activateWorkspaceTab(name) {
 
     activeTab = name;
     if (name !== 'component') lastNonComponentTab = name;
+    if (name === 'notes') onNotesTabActivated();
 }
 
 export function showSelectedPartTab() {

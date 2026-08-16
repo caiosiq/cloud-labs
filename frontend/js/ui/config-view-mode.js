@@ -20,6 +20,7 @@ import {
 import { shortCommitId } from '../api/control.js';
 import { store } from '../state/store.js';
 import { updatePencilToolButtonUi } from '../canvas/guides.js';
+import { syncCommandMatrixPanel } from './command-matrix-panel.js';
 
 let _els = {};
 let _onApply = async () => {};
@@ -99,13 +100,17 @@ export function syncReconcileProgressUi() {
     if (_els.badge) _els.badge.classList.toggle('is-applying', applying);
     if (_els.viewingPanel) _els.viewingPanel.hidden = applying;
     if (_els.applyingPanel) _els.applyingPanel.hidden = !applying;
+    // Thread columns (shared with everyday Command queue panel).
+    syncCommandMatrixPanel();
     if (!applying || !progress) return;
     if (_els.applyingId) {
         _els.applyingId.textContent = shortCommitId(progress.commitId || '') || '—';
     }
     if (_els.reconcileProgress) {
-        const total = Math.max(1, Number(progress.total) || 1);
-        const current = Math.min(total, Number(progress.current) || 1);
+        const total = Math.max(1, (progress.steps && progress.steps.length) || 1);
+        const idx = Number(progress.currentIndex);
+        const current =
+            Number.isFinite(idx) && idx >= 0 ? Math.min(total, idx + 1) : 1;
         _els.reconcileProgress.textContent = `Step ${current} of ${total}`;
     }
     renderReconcileSteps(progress);

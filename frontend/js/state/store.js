@@ -28,6 +28,8 @@ export const store = {
      * job steps (operations dashboard tracks running jobs on the twin canvas).
      */
     operationsMonitorActive: false,
+    /** Latest Command Matrix snapshot from enqueue ack or GET /api/command-queue. */
+    commandMatrix: null,
     operationsTrackedJobId: null,
     /** @type {(() => void) | null} */
     operationsOnLabStatePoll: null,
@@ -71,7 +73,6 @@ export const store = {
      * panel-dock manager.
      */
     contextPanelSnapshots: new Map(),
-    availableStrategies: null,
     availableRecipes: [],
     /** From GET /api/laser-lines (per LAB_MODE schema). */
     laserLinesDoc: null,
@@ -104,7 +105,7 @@ export const store = {
     activeCatalogTags: [],
     /** All tag ids declared in ``component_library.json``. */
     libraryTagIds: [],
-    /** Default camera exposure (seconds) for COBYLA/NEWTON when command omits `exposure`. */
+    /** Default camera exposure (seconds) when a command omits `exposure`. */
     defaultCameraExposureSec: 0.02,
     // Phase 9d removed the table-cam dock and its store fields.
     // Phase 9a deleted the legacy Cobyla-reference preview object URL
