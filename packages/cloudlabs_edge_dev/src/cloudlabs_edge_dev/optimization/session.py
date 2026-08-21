@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 import math
+import time
 
 from .capture import CaptureSource
 from .guards import (
@@ -122,6 +123,14 @@ def _collect_measurements(
                 if len(feats) >= 2 and term.metric in (
                     "rms_distance",
                     "rms_distance_px",
+                    "signed_axis_offset",
+                ):
+                    term_dbg["detected_xy"] = [
+                        round(float(feats[0]), 3),
+                        round(float(feats[1]), 3),
+                    ]
+                elif len(feats) >= 2 and (term.kernel_id or "").startswith(
+                    ("builtin.beam_com", "builtin.roi_centroid", "builtin.gaussian")
                 ):
                     term_dbg["detected_xy"] = [
                         round(float(feats[0]), 3),
@@ -152,14 +161,17 @@ def _collect_measurements(
 
 
 def _attach_viz_params(entry: Dict[str, Any], term: ObjectiveTerm) -> None:
-    """Copy UI-overlay fields (target / frame size) onto a debug term row."""
+    """Copy UI-overlay fields (target / origin / frame size) onto a debug term row."""
     tp = term.params.get("target_px")
+    if not isinstance(tp, Mapping):
+        tp = term.params.get("origin_px")
     if isinstance(tp, Mapping):
         try:
             entry["target_px"] = {
                 "x": float(tp.get("x", 0.0)),
                 "y": float(tp.get("y", 0.0)),
             }
+            entry["origin_px"] = dict(entry["target_px"])
         except (TypeError, ValueError):
             pass
     target = term.params.get("target")
@@ -168,6 +180,15 @@ def _attach_viz_params(entry: Dict[str, Any], term: ObjectiveTerm) -> None:
             entry["target"] = [float(target[0]), float(target[1])]
         except (TypeError, ValueError):
             pass
+    axis = term.params.get("axis")
+    if axis is not None:
+        entry["axis"] = str(axis)
+    direction = term.params.get("direction")
+    if direction is not None:
+        try:
+            entry["direction"] = float(direction)
+        except (TypeError, ValueError):
+            entry["direction"] = direction
     hw = term.params.get("frame_hw")
     if isinstance(hw, (list, tuple)) and len(hw) >= 2:
         try:
@@ -221,6 +242,12 @@ def inject_frame_scales(
             term.params.get("normalize_by_fov")
             or term.kernel_id in ("builtin.gaussian_beam_fit", "builtin.beam_shift")
         ):
+            term.params.setdefault("normalize_by_fov", True)
+            term.params.setdefault("value_scale_px", width_scale)
+            term.params.setdefault("loss_cap", 2.0)
+            term.params.setdefault("frame_hw", [h, w])
+        # Signed axis push from operator origin (full-frame CoM).
+        if term.metric == "signed_axis_offset" or term.kernel_id == "builtin.beam_com":
             term.params.setdefault("normalize_by_fov", True)
             term.params.setdefault("value_scale_px", width_scale)
             term.params.setdefault("loss_cap", 2.0)
@@ -297,7 +324,18 @@ def _build_policy_debug(
                 entry[key] = term.params[key]
         if feats:
             entry["features_preview"] = [round(float(x), 4) for x in list(feats)[:5]]
-            if len(feats) >= 2 and term.metric in ("rms_distance", "rms_distance_px"):
+            if len(feats) >= 2 and term.metric in (
+                "rms_distance",
+                "rms_distance_px",
+                "signed_axis_offset",
+            ):
+                entry["detected_xy"] = [
+                    round(float(feats[0]), 3),
+                    round(float(feats[1]), 3),
+                ]
+            elif len(feats) >= 2 and (term.kernel_id or "").startswith(
+                ("builtin.beam_com", "builtin.roi_centroid", "builtin.gaussian")
+            ):
                 entry["detected_xy"] = [
                     round(float(feats[0]), 3),
                     round(float(feats[1]), 3),
@@ -430,6 +468,12 @@ def run_optimization_session(
                 stop_loss = sl
         except (TypeError, ValueError):
             stop_loss = None
+    try:
+        settle_ms = int(getattr(spec.solver, "settle_ms", 0) or 0)
+    except (TypeError, ValueError):
+        settle_ms = 0
+    if settle_ms < 0:
+        settle_ms = 0
 
     class _Aborted(Exception):
         pass
@@ -525,6 +569,7 @@ def run_optimization_session(
                     "delta_from_x0": delta_from_x0,
                     "applied": {vid: float(physical[vid]) for vid in space.variable_ids},
                     "error": None,
+                    "settle_ms": settle_ms,
                 }
             except Exception as exc:  # noqa: BLE001
                 actuate_dbg = {
@@ -532,6 +577,7 @@ def run_optimization_session(
                     "block_id": block_id,
                     "delta_from_x0": delta_from_x0,
                     "error": str(exc),
+                    "settle_ms": settle_ms,
                 }
                 evals += 1
                 record = {
@@ -551,6 +597,12 @@ def run_optimization_session(
                 if progress_callback is not None:
                     progress_callback(step=evals, best_loss=best_loss, **record)
                 raise
+
+            # Post-move wait before capture (Twin "Post-move wait (ms)").
+            # Without this, OPTIMIZE grabs frames while mechanics still move /
+            # vibration settles — CoM looks wrong vs a manual RECORD probe.
+            if settle_ms > 0:
+                time.sleep(float(settle_ms) / 1000.0)
 
             current = {vid: float(physical[vid]) for vid in space.variable_ids}
             trial_values = dict(current)

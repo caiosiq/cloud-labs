@@ -6,7 +6,7 @@ import { normalizeCapabilities } from '../component-state.js';
 function _exposureDefaults(ctx) {
     const caps = normalizeCapabilities(ctx.catalogRow?.capabilities);
     const desc = caps.statecontrol?.tunables?.exposure_time_ms || {};
-    const min = Number.isFinite(Number(desc.min)) ? Number(desc.min) : 10;
+    const min = Number.isFinite(Number(desc.min)) ? Number(desc.min) : 0.1;
     const max = Number.isFinite(Number(desc.max)) ? Number(desc.max) : 1000;
     const unit = desc.unit || 'ms';
     const live = ctx.comp?.telemetry?.live_feed?.stream?.live_exposure_time_ms;
@@ -34,9 +34,9 @@ export function renderStartLiveFeed(ctx) {
     body.appendChild(hint);
 
     const inp = coordInput(`preview exposure (${unit})`, cur);
-    inp.min = String(min);
-    inp.max = String(max);
-    inp.step = '1';
+    inp.input.min = String(min);
+    inp.input.max = String(max);
+    inp.input.step = '0.1';
     body.appendChild(inp);
 
     const btn = sessionStartButton('live-feed', 'Turn live feed on', 'videocam');
@@ -84,9 +84,9 @@ export function renderEndLiveFeed(ctx) {
     row.style.alignItems = 'flex-end';
 
     const inp = coordInput(`preview (${unit})`, cur);
-    inp.min = String(min);
-    inp.max = String(max);
-    inp.step = '1';
+    inp.input.min = String(min);
+    inp.input.max = String(max);
+    inp.input.step = '0.1';
     inp.style.flex = '1';
     row.appendChild(inp);
 

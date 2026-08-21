@@ -46,6 +46,7 @@ PROBE_KERNELS = (
     "builtin.beam_power",
     "builtin.gaussian_beam_fit",
     "builtin.beam_shift",
+    "builtin.beam_com",
     "demo.image_mean_score",
     "demo.roi_mean_score",
 )

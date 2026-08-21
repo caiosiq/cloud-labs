@@ -212,16 +212,34 @@ def _term_params(term: ObjectiveTermSpec) -> Dict[str, Any]:
         "frame_hw",
         "latch_value_ref",
         "value_ref",
+        "origin_px",
+        "axis",
+        "direction",
     ):
         if hasattr(src, key) and getattr(src, key) is not None:
             params[key] = getattr(src, key)
         elif key in extra and extra[key] is not None:
             params[key] = extra[key]
+    # Origin alias for signed-axis push (also mirror onto target_px for overlays).
+    if "origin_px" in params and "target_px" not in params:
+        op = params["origin_px"]
+        if isinstance(op, dict):
+            params["target_px"] = dict(op)
+            params.setdefault(
+                "target",
+                [float(op.get("x", 0.0)), float(op.get("y", 0.0))],
+            )
     # Centroid align terms: latch full-frame peak on eval 1 by default.
     if "latch_peak_ref" not in params:
         kid = (src.kernel_id or "").strip()
-        if term.metric in ("rms_distance", "rms_distance_px", "beam_presence") and (
-            kid in ("", "builtin.roi_centroid") or src.kind == "derived_centroid"
+        if term.metric in (
+            "rms_distance",
+            "rms_distance_px",
+            "beam_presence",
+            "signed_axis_offset",
+        ) and (
+            kid in ("", "builtin.roi_centroid", "builtin.beam_com")
+            or src.kind == "derived_centroid"
         ):
             params["latch_peak_ref"] = True
             params.setdefault("min_peak_ratio", 0.5)
@@ -229,8 +247,13 @@ def _term_params(term: ObjectiveTermSpec) -> Dict[str, Any]:
     if term.metric in ("ratio_to_ref", "ratio_from_ref"):
         params.setdefault("latch_value_ref", True)
         params.setdefault("feature_index", 0)
-    if term.metric in ("rms_distance", "rms_distance_px"):
+    if term.metric in ("rms_distance", "rms_distance_px", "signed_axis_offset"):
         params.setdefault("loss_cap", 2.0)
+    if term.metric == "signed_axis_offset":
+        params.setdefault("feature_index", [0, 1])
+        params.setdefault("normalize_by_fov", True)
+        params.setdefault("axis", "x")
+        params.setdefault("direction", 1)
     if term.metric == "minimize_value" and (
         params.get("normalize_by_fov")
         or (src.kernel_id or "").strip()

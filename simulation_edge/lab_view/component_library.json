@@ -1,6 +1,83 @@
 {
   "schema_version": 1,
   "components": {
+    "tag_1": {
+      "id": "test_fixture_1",
+      "type": "OPTICAL_FILTER",
+      "name": "Test Fixture 1",
+      "tag_id": "tag_1",
+      "size": {
+        "width": 62,
+        "height": 62
+      },
+      "height_mm": 60,
+      "parameters": {
+        "test_fixture": true,
+        "description": "Empty base for pick / place / storage motion tests (no optic)."
+      },
+      "capabilities": {
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose",
+              "recordable": true
+            }
+          },
+          "measurables": {}
+        },
+        "telemetry": {
+          "teleop": {
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
+          },
+          "live_feed": {}
+        },
+        "primitives": [
+          "MOVE_COMPONENT",
+          "STORE_COMPONENT",
+          "PLACE_FROM_STORAGE",
+          "PICK_COMPONENT",
+          "HOVER",
+          "PLACE_FROM_HOVER",
+          "RECORD_MEASURABLES",
+          "START_TELEOP",
+          "END_TELEOP",
+          "TELEOP_GOTO",
+          "RECORD_TUNABLES",
+          "SYNC_RUNTIME",
+          "LOCALIZE_COMPONENTS"
+        ]
+      }
+    },
     "tag_9": {
       "id": "nd_filter",
       "type": "OPTICAL_FILTER",
@@ -105,7 +182,7 @@
             },
             "exposure_time_ms": {
               "widget": "FloatRange",
-              "min": 10.0,
+              "min": 0.1,
               "max": 1000.0,
               "default": 200.0,
               "unit": "ms",
@@ -219,7 +296,7 @@
             },
             "exposure_time_ms": {
               "widget": "FloatRange",
-              "min": 10.0,
+              "min": 0.1,
               "max": 1000.0,
               "default": 200.0,
               "unit": "ms",
@@ -993,7 +1070,7 @@
           "tunables": {
             "exposure_time_ms": {
               "widget": "FloatRange",
-              "min": 10.0,
+              "min": 0.1,
               "max": 1000.0,
               "default": 50.0,
               "unit": "ms",

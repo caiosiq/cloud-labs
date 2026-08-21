@@ -58,6 +58,7 @@ class BuiltinKernelTests(unittest.TestCase):
             "builtin_beam_power.pt",
             "builtin_gaussian_beam_fit.pt",
             "builtin_beam_shift.pt",
+            "builtin_beam_com.pt",
         ):
             src = _EDGE_KERNELS / name
             if not src.is_file():
@@ -88,6 +89,7 @@ class BuiltinKernelTests(unittest.TestCase):
             "builtin.beam_power",
             "builtin.gaussian_beam_fit",
             "builtin.beam_shift",
+            "builtin.beam_com",
         ):
             self.assertIn(kid, ids)
 
@@ -153,6 +155,17 @@ class BuiltinKernelTests(unittest.TestCase):
         _, feats2 = self._eval("builtin.beam_shift", bgr2)
         self.assertAlmostEqual(feats2[0], cx2 - w2 * 0.5, delta=1.5)
         self.assertAlmostEqual(feats2[1], cy2 - h2 * 0.5, delta=1.5)
+
+    def test_beam_com_matches_injected_center(self) -> None:
+        h, w = 100, 120
+        cx_t, cy_t = 70.0, 35.0
+        bgr = _synthetic_gaussian(h, w, cx=cx_t, cy=cy_t, sigma=5.0, amplitude=210.0)
+        kind, feats = self._eval("builtin.beam_com", bgr)
+        self.assertEqual(kind, "features")
+        self.assertEqual(len(feats), 3)
+        self.assertAlmostEqual(feats[0], cx_t, delta=0.75)
+        self.assertAlmostEqual(feats[1], cy_t, delta=0.75)
+        self.assertGreater(feats[2], 0.5)
 
 
 if __name__ == "__main__":

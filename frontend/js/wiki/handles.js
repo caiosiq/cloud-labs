@@ -167,6 +167,8 @@ export function kernelPhysicalInterpretation(row = {}) {
             'Moment-based Gaussian summary: amplitude, center (cx, cy), and widths (σx, σy) in pixels. Intuition: “how bright, where, how wide” — not a full nonlinear fit.',
         'builtin.beam_shift':
             'Offset of the intensity CoM from this camera frame’s geometric center (W/2, H/2) as [dx, dy, magnitude] in px. Maximize magnitude to push the beam off-center; resolution-agnostic; no reference capture.',
+        'builtin.beam_com':
+            'Full-frame intensity CoM [cx, cy, peak] (same 50%-of-peak gate as beam_shift). Maximize signed displacement from an operator origin along X or Y (+/−) via signed_axis_offset; peak latches beam presence.',
         'ensemble.eval.block_cobyla':
             'Built-in optimizer hook: COBYLA proposes the next actuator step from the scalar loss. Not an image model — the “brain” that walks the loss landscape.',
         'ensemble.eval.mock_landscape':

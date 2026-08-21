@@ -211,7 +211,7 @@ LIBRARY_JSON = """\
             },
             "exposure_time_ms": {
               "widget": "FloatRange",
-              "min": 10.0,
+              "min": 0.1,
               "max": 1000.0,
               "default": 200.0,
               "unit": "ms",

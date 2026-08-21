@@ -380,6 +380,82 @@ def metric_rms_distance(
     return normalize_spatial_loss(rms_px, measurement, term)
 
 
+@register_metric(metric_id="signed_axis_offset")
+def metric_signed_axis_offset(
+    measurement: Mapping[str, Any],
+    term: ObjectiveTerm,
+) -> float:
+    """Maximize signed CoM displacement along one axis from an origin.
+
+    Params:
+      - ``origin_px`` / ``target_px``: ``{x, y}`` reference pixel
+      - ``axis``: ``\"x\"`` or ``\"y\"``
+      - ``direction``: ``+1`` or ``-1`` (positive / negative along that axis)
+
+    Loss = ``-(direction * (c_axis - o_axis)) / scale`` so lower is farther in
+    the requested direction (weight +1). Absent beam → ``loss_cap``.
+    """
+    if measurement.get("presence_ok") is False:
+        return _loss_cap(term)
+
+    feats = _features(measurement)
+    idx = _param(term, "feature_index", [0, 1])
+    if isinstance(idx, (list, tuple)) and len(idx) >= 2:
+        i0, i1 = int(idx[0]), int(idx[1])
+    else:
+        i0, i1 = 0, 1
+    if not feats or max(i0, i1) >= len(feats):
+        raise MeasurementInvalid(
+            "empty or incomplete features for signed_axis_offset",
+            term_id=term.id,
+        )
+    cx = _require_finite(feats[i0], term_id=term.id, what="feature[0]")
+    cy = _require_finite(feats[i1], term_id=term.id, what="feature[1]")
+
+    origin = _param(term, "origin_px")
+    if origin is None:
+        origin = _param(term, "target_px")
+    if origin is None:
+        origin = _param(term, "target")
+    if isinstance(origin, Mapping):
+        ox = float(origin.get("x", origin.get("0", 0.0)))
+        oy = float(origin.get("y", origin.get("1", 0.0)))
+    elif isinstance(origin, (list, tuple)) and len(origin) >= 2:
+        ox, oy = float(origin[0]), float(origin[1])
+    else:
+        raise MeasurementInvalid(
+            "missing origin_px for signed_axis_offset",
+            term_id=term.id,
+        )
+
+    axis_raw = str(_param(term, "axis", "x") or "x").strip().lower()
+    if axis_raw in ("y", "1", "cy"):
+        coord, origin_v = cy, oy
+    else:
+        coord, origin_v = cx, ox
+
+    direction_raw = _param(term, "direction", 1)
+    try:
+        direction = float(direction_raw)
+    except (TypeError, ValueError):
+        direction = 1.0
+    if direction >= 0:
+        direction = 1.0
+    else:
+        direction = -1.0
+
+    signed_px = direction * (coord - origin_v)
+    scale = resolve_length_scale_px(
+        measurement,
+        term,
+        prefer_keys=("value_scale_px", "rms_scale_px"),
+    )
+    # Lower loss = farther in the desired direction; allow negative (no floor).
+    raw = -float(signed_px) / scale
+    # Soft-cap the "good" side so a huge FOV jump does not dominate mixed terms.
+    return max(raw, -_loss_cap(term))
+
+
 @register_metric(metric_id="beam_presence")
 def metric_beam_presence(
     measurement: Mapping[str, Any],
@@ -477,6 +553,7 @@ __all__ = [
     "metric_ratio_from_ref",
     "metric_ratio_to_ref",
     "metric_rms_distance",
+    "metric_signed_axis_offset",
     "metric_squared_error",
     "normalize_spatial_loss",
     "register_metric",

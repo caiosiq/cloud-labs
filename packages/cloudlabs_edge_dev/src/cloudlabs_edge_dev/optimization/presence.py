@@ -15,7 +15,7 @@ from .spec import ObjectiveTerm
 DEFAULT_MIN_PEAK_RATIO = 0.5
 DEFAULT_PEAK_FEATURE_INDEX = 2
 _RMS_METRICS = frozenset({"rms_distance", "rms_distance_px"})
-_PRESENCE_METRICS = frozenset({"beam_presence"}) | _RMS_METRICS
+_PRESENCE_METRICS = frozenset({"beam_presence", "signed_axis_offset"}) | _RMS_METRICS
 
 
 def _peak_index(term: ObjectiveTerm) -> int:

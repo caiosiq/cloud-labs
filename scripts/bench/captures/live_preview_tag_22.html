@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Live feed — tag_22</title>
+  <style>
+    html, body { margin: 0; background: #111; color: #ddd; font: 14px/1.4 system-ui, sans-serif; }
+    header { padding: 10px 14px; background: #1a1a1a; border-bottom: 1px solid #333; }
+    code { color: #9cf; }
+    #wrap { padding: 12px; text-align: center; }
+    img { max-width: 100%; height: auto; background: #000; }
+    #status { margin-top: 8px; color: #888; }
+  </style>
+</head>
+<body>
+  <header>
+    Live feed preview for <strong>tag_22</strong>
+    · backend <code>real.default</code>
+    · polls every 250 ms
+  </header>
+  <div id="wrap">
+    <img id="frame" alt="waiting for JPEG…"/>
+    <div id="status">connecting…</div>
+  </div>
+  <script>
+    const base = 'http://127.0.0.1:8000/api/components/tag_22/telemetry/preview?backend_id=real.default';
+    const img = document.getElementById('frame');
+    const status = document.getElementById('status');
+    let ok = 0, fail = 0;
+    function tick() {
+      const url = base + (base.includes('?') ? '&' : '?') + '_=' + Date.now();
+      const probe = new Image();
+      probe.onload = () => {
+        img.src = url;
+        ok += 1;
+        status.textContent = 'frames ok=' + ok + ' fail=' + fail + ' · ' + new Date().toLocaleTimeString();
+      };
+      probe.onerror = () => {
+        fail += 1;
+        status.textContent = 'no JPEG (204/error) — is live feed on? fail=' + fail + ' ok=' + ok;
+      };
+      probe.src = url;
+    }
+    tick();
+    setInterval(tick, 250);
+  </script>
+</body>
+</html>

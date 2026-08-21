@@ -4044,6 +4044,65 @@
             }
             .opt-results-card + .opt-results-card,
             .opt-results-grid + .opt-results-card { margin-top: 8px; }
+            .opt-results-card-head {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                margin-bottom: 6px;
+            }
+            .opt-results-card-head h4 { margin: 0; flex: 1; min-width: 0; }
+            .opt-beam-center-wrap {
+                max-height: none;
+                overflow-x: auto;
+                overflow-y: hidden;
+                width: 100%;
+            }
+            .opt-beam-center-table {
+                width: max-content;
+                min-width: 100%;
+                table-layout: auto;
+            }
+            .opt-beam-center-table .opt-beam-center-id {
+                word-break: break-all;
+                max-width: 7.5rem;
+                color: #cbd5e1;
+            }
+            .opt-beam-center-table .opt-beam-center-num {
+                white-space: nowrap;
+                font-variant-numeric: tabular-nums;
+                font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                color: #e2e8f0;
+                text-align: right;
+            }
+            .opt-beam-center-table .opt-beam-center-actions {
+                white-space: nowrap;
+                width: 1%;
+                padding-left: 6px;
+            }
+            .opt-copy-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 3px;
+                flex-shrink: 0;
+                border: 1px solid #334155;
+                background: #1e293b;
+                color: #cbd5e1;
+                border-radius: 5px;
+                padding: 2px 7px;
+                font-size: 9px;
+                font-weight: 600;
+                cursor: pointer;
+                line-height: 1.2;
+            }
+            .opt-copy-btn:hover { border-color: #64748b; color: #f1f5f9; }
+            .opt-copy-btn.is-copied {
+                border-color: #34d399;
+                color: #6ee7b7;
+            }
+            .opt-copy-btn--icon {
+                padding: 2px 4px;
+            }
             .opt-mode-exit-btn {
                 display: inline-flex !important;
                 align-items: center;

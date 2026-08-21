@@ -111,7 +111,7 @@ export function openLiveFeedPopout(tagId, opts = {}) {
         <div class="live-feed-popout__exposure">
             <label title="Preview only (VEXP) — not science SET_EXPOSURE">
                 Preview ms
-                <input type="number" min="1" step="1" value="${exp0}" data-live-exp />
+                <input type="number" min="0.1" max="1000" step="0.1" value="${exp0}" data-live-exp />
             </label>
             <button type="button" class="live-feed-popout__btn" data-action="apply-exp">Apply</button>
         </div>

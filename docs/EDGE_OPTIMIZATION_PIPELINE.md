@@ -358,6 +358,7 @@ Real-optics checks stay in [§ Real-bench checklist](#real-bench-checklist).
 | 5.2 | `builtin.beam_power` (add to real edge `kernels/` if missing) | `[flux_above_background, peak, saturated_fraction]` | Pin exposure/gain for the session; saturation channel mandatory |
 | 5.3 | `builtin.gaussian_beam_fit` (seeded) | `[amplitude, cx, cy, sigma_x, sigma_y]` | Moment-based — fine for closed loop |
 | 5.4 | `builtin.beam_shift` | `[dx, dy, magnitude]` from this frame's `(W/2, H/2)` | Maximize ‖Δ‖ (weight −1 on magnitude). Resolution-agnostic; **no** reference capture |
+| 5.5 | `builtin.beam_com` | `[cx, cy, peak]` full-frame CoM (same gate as beam_shift) | Maximize signed offset from operator **origin** along axis X/Y ± via metric `signed_axis_offset`; peak latch for presence |
 
 Objective for beam shift: push the single-beam intensity CoM as far as possible from the
 **current camera frame's geometric center**. The kernel never bakes a lab-specific pixel

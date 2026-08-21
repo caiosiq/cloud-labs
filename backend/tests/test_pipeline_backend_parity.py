@@ -28,6 +28,7 @@ _REQUIRED_BUILTINS = {
     "builtin.beam_power",
     "builtin.gaussian_beam_fit",
     "builtin.beam_shift",
+    "builtin.beam_com",
 }
 
 

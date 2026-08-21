@@ -552,6 +552,7 @@ Twin/SDK  --HTTPS once-->  edge OPTIMIZE job
 | `builtin.beam_power` | `[flux, peak, sat]` | maximize flux; watch sat |
 | `builtin.gaussian_beam_fit` | `[amp, cx, cy, σx, σy]` | often minimize σₓ |
 | `builtin.beam_shift` | `[dx, dy, magnitude]` | maximize ‖Δ‖ from **this frame** `(W/2,H/2)`; weight −1; **no** reference capture |
+| `builtin.beam_com` | `[cx, cy, peak]` | full-frame CoM; maximize signed offset from operator origin along X/Y ± (`signed_axis_offset`) |
 
 Rebuild/seed: from cloud-labs repo `python scripts/ops/build_torchscript_kernels.py --seed-edges`.
 

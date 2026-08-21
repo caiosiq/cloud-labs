@@ -186,6 +186,38 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(kinds[-1], "exit")
         self.assertFalse(router.engaged)
 
+    def test_settle_ms_sleeps_before_capture(self) -> None:
+        """solver.settle_ms must pause after actuate before the next capture."""
+        from unittest import mock
+
+        truth = {"v_a": 0.0, "v_b": 0.0}
+        landscape = _LandscapeCapture(truth)
+        router = _RouterWithCapture(landscape)
+        pipe = self._pipeline(max_evals=2)
+        pipe["solver"]["settle_ms"] = 250
+
+        with mock.patch(
+            "cloudlabs_edge_dev.optimization.session.time.sleep"
+        ) as sleep_mock:
+            result = run_optimization_session(
+                pipe,
+                {"v_a": 0.0, "v_b": 0.0},
+                capture=landscape,
+                router=router,
+            )
+        self.assertGreater(result.evals, 0)
+        self.assertGreaterEqual(sleep_mock.call_count, result.evals)
+        for call in sleep_mock.call_args_list:
+            self.assertAlmostEqual(float(call.args[0]), 0.25, places=6)
+        # Trace should stamp the configured settle on successful actuates.
+        stamped = [
+            row.get("stages", {}).get("actuate", {}).get("settle_ms")
+            for row in result.trace
+            if row.get("stages", {}).get("actuate", {}).get("ok")
+        ]
+        self.assertTrue(stamped)
+        self.assertTrue(all(s == 250 for s in stamped))
+
 
 if __name__ == "__main__":
     unittest.main()

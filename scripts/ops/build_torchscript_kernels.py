@@ -40,6 +40,7 @@ EDGE_SEED_ARTIFACTS = (
     "builtin_beam_power.pt",
     "builtin_gaussian_beam_fit.pt",
     "builtin_beam_shift.pt",
+    "builtin_beam_com.pt",
 )
 
 
@@ -98,10 +99,12 @@ def build_peak_intensity(out_path: Path) -> None:
 
 
 def build_roi_centroid(out_path: Path) -> None:
-    """Sub-pixel intensity CoM in the center-half ROI (full-frame coords).
+    """Unweighted geometric centroid in the center-half ROI (full-frame coords).
 
-    Returns ``[cx, cy, peak]`` where ``peak`` is the **full-frame** max gray
-    intensity (presence proxy for OPTIMIZE latch vs first-eval peak).
+    Mask is background-relative: ``gray > bg + 0.05*(peak-bg)`` (median bg),
+    so a dimmer second lobe is not dropped the way ``0.1*peak`` often does.
+    ``(cx, cy)`` = mean of mask coordinates. Returns ``[cx, cy, peak]`` with
+    full-frame peak for presence latching.
     """
     import torch
     import torch.nn as nn
@@ -120,8 +123,15 @@ def build_roi_centroid(out_path: Path) -> None:
             crop = image[0, :, y0:y1, x0:x1]
             gray = crop.mean(dim=0)
             local_peak = torch.clamp(gray.max(), min=1e-6)
-            weights = gray * (gray > (0.5 * local_peak)).to(gray.dtype)
-            total = torch.clamp(weights.sum(), min=1e-6)
+            flat = gray.reshape(-1)
+            sorted_vals, _ = torch.sort(flat)
+            n = int(sorted_vals.numel())
+            mid = max(n // 2, 0)
+            bg = sorted_vals[mid] if n > 0 else torch.tensor(0.0, dtype=gray.dtype)
+            contrast = torch.clamp(local_peak - bg, min=1e-6)
+            thr = bg + (0.05 * contrast)
+            mask = (gray > thr).to(gray.dtype)
+            total = torch.clamp(mask.sum(), min=1e-6)
             ch = int(gray.size(0))
             cw = int(gray.size(1))
             ys = (
@@ -134,8 +144,8 @@ def build_roi_centroid(out_path: Path) -> None:
                 .unsqueeze(0)
                 .expand(ch, cw)
             )
-            cy = (weights * ys).sum() / total + float(y0)
-            cx = (weights * xs).sum() / total + float(x0)
+            cy = (mask * ys).sum() / total + float(y0)
+            cx = (mask * xs).sum() / total + float(x0)
             return torch.stack([cx, cy, peak])
 
     module = torch.jit.script(RoiCentroid())
@@ -145,7 +155,11 @@ def build_roi_centroid(out_path: Path) -> None:
 
 
 def build_gaussian_beam_fit(out_path: Path) -> None:
-    """Moment-based Gaussian beam estimate: [amplitude, cx, cy, sigma_x, sigma_y]."""
+    """Mask-based beam geometry: [amplitude, cx, cy, sigma_x, sigma_y].
+
+    Unweighted mask uses median background + 5% of (peak−bg) so Gaussian and
+    two-lobe beams both contribute to the geometric centroid / widths.
+    """
     import torch
     import torch.nn as nn
 
@@ -156,8 +170,15 @@ def build_gaussian_beam_fit(out_path: Path) -> None:
             gray = image[0].mean(dim=0)
             amplitude = gray.max()
             peak = torch.clamp(amplitude, min=1e-6)
-            weights = gray * (gray > (0.1 * peak)).to(gray.dtype)
-            total = torch.clamp(weights.sum(), min=1e-6)
+            flat = gray.reshape(-1)
+            sorted_vals, _ = torch.sort(flat)
+            n = int(sorted_vals.numel())
+            mid = max(n // 2, 0)
+            bg = sorted_vals[mid] if n > 0 else torch.tensor(0.0, dtype=gray.dtype)
+            contrast = torch.clamp(peak - bg, min=1e-6)
+            thr = bg + (0.05 * contrast)
+            mask = (gray > thr).to(gray.dtype)
+            total = torch.clamp(mask.sum(), min=1e-6)
             h = int(gray.size(0))
             w = int(gray.size(1))
             ys = (
@@ -170,10 +191,10 @@ def build_gaussian_beam_fit(out_path: Path) -> None:
                 .unsqueeze(0)
                 .expand(h, w)
             )
-            cy = (weights * ys).sum() / total
-            cx = (weights * xs).sum() / total
-            var_y = (weights * (ys - cy) * (ys - cy)).sum() / total
-            var_x = (weights * (xs - cx) * (xs - cx)).sum() / total
+            cy = (mask * ys).sum() / total
+            cx = (mask * xs).sum() / total
+            var_y = (mask * (ys - cy) * (ys - cy)).sum() / total
+            var_x = (mask * (xs - cx) * (xs - cx)).sum() / total
             sigma_y = torch.sqrt(torch.clamp(var_y, min=1e-6))
             sigma_x = torch.sqrt(torch.clamp(var_x, min=1e-6))
             return torch.stack([amplitude, cx, cy, sigma_x, sigma_y])
@@ -213,13 +234,11 @@ def build_beam_power(out_path: Path) -> None:
 
 
 def build_beam_shift(out_path: Path) -> None:
-    """Offset of intensity CoM from this frame's geometric center.
+    """Offset of unweighted geometric centroid from this frame's center.
 
     Outputs ``[dx, dy, magnitude]`` in pixels where the origin is
-    ``(W/2, H/2)`` of the *current* capture — so different camera
-    resolutions need no baked-in center like 2790. Pair with a
-    **negative** objective weight on ``magnitude`` to maximize shift.
-    No reference / baseline capture.
+    ``(W/2, H/2)`` of the *current* capture. Mask:
+    ``gray > median_bg + 0.05*(peak-bg)``.
     """
     import torch
     import torch.nn as nn
@@ -230,8 +249,15 @@ def build_beam_shift(out_path: Path) -> None:
                 image = image.unsqueeze(0)
             gray = image[0].mean(dim=0)
             peak = torch.clamp(gray.max(), min=1e-6)
-            weights = gray * (gray > (0.5 * peak)).to(gray.dtype)
-            total = torch.clamp(weights.sum(), min=1e-6)
+            flat = gray.reshape(-1)
+            sorted_vals, _ = torch.sort(flat)
+            n = int(sorted_vals.numel())
+            mid = max(n // 2, 0)
+            bg = sorted_vals[mid] if n > 0 else torch.tensor(0.0, dtype=gray.dtype)
+            contrast = torch.clamp(peak - bg, min=1e-6)
+            thr = bg + (0.05 * contrast)
+            mask = (gray > thr).to(gray.dtype)
+            total = torch.clamp(mask.sum(), min=1e-6)
             h = int(gray.size(0))
             w = int(gray.size(1))
             ys = (
@@ -244,8 +270,8 @@ def build_beam_shift(out_path: Path) -> None:
                 .unsqueeze(0)
                 .expand(h, w)
             )
-            cy = (weights * ys).sum() / total
-            cx = (weights * xs).sum() / total
+            cy = (mask * ys).sum() / total
+            cx = (mask * xs).sum() / total
             # Geometric FOV center of *this* tensor — not a fixed lab pixel.
             dx = cx - (float(w) * 0.5)
             dy = cy - (float(h) * 0.5)
@@ -253,6 +279,61 @@ def build_beam_shift(out_path: Path) -> None:
             return torch.stack([dx, dy, mag])
 
     module = torch.jit.script(BeamShift())
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    module.save(str(out_path))
+    print(f"wrote {out_path}")
+
+
+def build_beam_com(out_path: Path) -> None:
+    """Full-frame unweighted geometric centroid: ``[cx, cy, peak]``.
+
+    Mask = **brightest ~0.5% of pixels** (percentile gate). That stays locked on
+    a faint beam / two-lobe pattern even when background is high and contrast
+    is only a few counts — unlike ``bg + f*(peak-bg)``, which either floods
+    with background or drops the lobes. Equal weight per on-pixel.
+    ``peak`` remains full-frame max for presence latching.
+    """
+    import torch
+    import torch.nn as nn
+
+    class BeamCom(nn.Module):
+        def forward(self, image: torch.Tensor) -> torch.Tensor:
+            if image.dim() == 3:
+                image = image.unsqueeze(0)
+            gray = image[0].mean(dim=0)
+            peak = gray.max()
+            flat = gray.reshape(-1)
+            sorted_vals, _ = torch.sort(flat)
+            n = int(sorted_vals.numel())
+            # Top 0.5% brightest; floor so tiny test frames still have a mask.
+            keep = int(float(n) * 0.005)
+            if keep < 64:
+                keep = 64
+            if keep > n:
+                keep = n
+            if n > 0:
+                thr = sorted_vals[n - keep]
+            else:
+                thr = torch.tensor(0.0, dtype=gray.dtype)
+            mask = (gray >= thr).to(gray.dtype)
+            total = torch.clamp(mask.sum(), min=1e-6)
+            h = int(gray.size(0))
+            w = int(gray.size(1))
+            ys = (
+                torch.arange(h, dtype=gray.dtype, device=gray.device)
+                .unsqueeze(1)
+                .expand(h, w)
+            )
+            xs = (
+                torch.arange(w, dtype=gray.dtype, device=gray.device)
+                .unsqueeze(0)
+                .expand(h, w)
+            )
+            cy = (mask * ys).sum() / total
+            cx = (mask * xs).sum() / total
+            return torch.stack([cx, cy, peak])
+
+    module = torch.jit.script(BeamCom())
     out_path.parent.mkdir(parents=True, exist_ok=True)
     module.save(str(out_path))
     print(f"wrote {out_path}")
@@ -285,8 +366,8 @@ EDGE_MANIFEST = {
             "output_kind": "features",
             "feature_names": ["cx", "cy", "peak"],
             "description": (
-                "Sub-pixel intensity-weighted centroid in the center-half ROI, "
-                "plus full-frame peak for beam-presence latching."
+                "Unweighted geometric centroid in the center-half ROI; mask is "
+                "median_bg + 5% of (peak−bg), plus full-frame peak for presence."
             ),
         },
         {
@@ -305,7 +386,10 @@ EDGE_MANIFEST = {
             "runtime": "torchscript",
             "output_kind": "features",
             "feature_names": ["amplitude", "cx", "cy", "sigma_x", "sigma_y"],
-            "description": "Moment-based Gaussian beam estimate.",
+            "description": (
+                "Unweighted mask moments (median_bg + 5% of peak−bg): amplitude, "
+                "geometric centroid, and spatial widths."
+            ),
         },
         {
             "id": "builtin.beam_shift",
@@ -315,10 +399,23 @@ EDGE_MANIFEST = {
             "output_kind": "features",
             "feature_names": ["dx", "dy", "magnitude"],
             "description": (
-                "Intensity CoM offset from this frame's geometric center "
+                "Unweighted geometric-centroid offset from this frame's center "
                 "(W/2, H/2) as [dx, dy, magnitude] in px — resolution-agnostic, "
                 "no reference capture. Maximize shift with weight=-1 on "
                 "minimize_value(feature_index=2)."
+            ),
+        },
+        {
+            "id": "builtin.beam_com",
+            "label": "Beam CoM (full frame)",
+            "artifact": "builtin_beam_com.pt",
+            "runtime": "torchscript",
+            "output_kind": "features",
+            "feature_names": ["cx", "cy", "peak"],
+            "description": (
+                "Full-frame unweighted geometric centroid of the brightest "
+                "~0.5% of pixels (faint-beam safe) as [cx, cy, peak]. "
+                "Use with signed_axis_offset vs origin / axis / direction."
             ),
         },
     ],
@@ -385,6 +482,7 @@ def main() -> None:
     build_beam_power(OUT_DIR / "builtin_beam_power.pt")
     build_gaussian_beam_fit(OUT_DIR / "builtin_gaussian_beam_fit.pt")
     build_beam_shift(OUT_DIR / "builtin_beam_shift.pt")
+    build_beam_com(OUT_DIR / "builtin_beam_com.pt")
     _update_schemas_manifest()
     if args.seed_edges:
         seed_edges()

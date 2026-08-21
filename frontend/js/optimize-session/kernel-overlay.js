@@ -64,8 +64,12 @@ function _frameHwFromRow(row) {
 function _isCentroidish(kernelId, metric) {
     const k = String(kernelId || '').toLowerCase();
     const m = String(metric || '').toLowerCase();
-    if (m === 'rms_distance' || m === 'rms_distance_px') return true;
-    if (k.includes('roi_centroid') || k.includes('centroid')) return true;
+    if (m === 'rms_distance' || m === 'rms_distance_px' || m === 'signed_axis_offset') {
+        return true;
+    }
+    if (k.includes('roi_centroid') || k.includes('centroid') || k.includes('beam_com')) {
+        return true;
+    }
     if (k.includes('beam_shift')) return true;
     return false;
 }
@@ -148,8 +152,10 @@ export function extractKernelOverlays(row) {
             detected = _xyFromTarget(preview);
         }
         const target =
+            _xyFromTarget(kt.origin_px) ||
             _xyFromTarget(kt.target_px) ||
             _xyFromTarget(kt.target) ||
+            _xyFromTarget(pt.origin_px) ||
             _xyFromTarget(pt.target_px) ||
             _xyFromTarget(pt.target);
         const peakRaw = kt.preview?.[2] ?? pt.features_preview?.[2] ?? pt.peak;
@@ -207,8 +213,11 @@ export function overlayLegendHtml(overlays) {
             const peak =
                 o.peak != null ? ` · peak ${Number(o.peak).toFixed(3)}` : '';
             const absent = o.presenceOk === false ? ' · ABSENT' : '';
+            const isOrigin =
+                String(o.metric || '').includes('signed_axis') ||
+                String(o.kernelId || '').includes('beam_com');
             const tgtChip = o.target
-                ? `<i class="osd-dot osd-dot--target"></i> target ${tgt}`
+                ? `<i class="osd-dot osd-dot--target"></i> ${isOrigin ? 'origin' : 'target'} ${tgt}`
                 : '';
             return `<span class="osd-overlay-chip"><i class="osd-dot osd-dot--detected"></i> detected ${det} ${tgtChip} <small>${o.termId}${peak}${absent}</small></span>`;
         })

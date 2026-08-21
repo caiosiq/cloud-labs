@@ -1,0 +1,2 @@
+{"event": "session_start", "log_path": "C:\\Users\\szist\\Desktop\\josh_robotic_twin_simulation\\cloud-labs-radial-merge\\simulation_edge\\logs\\mujoco_sessions\\mujoco_20260728_130856_35420.jsonl", "pid": 35420, "planner_backend": "radial", "profile": "optical_housings", "timestamp": "2026-07-28T13:08:56.599"}
+{"event": "runtime_init_start", "realtime": true, "request_id": null, "show_viewer": true, "timestamp": "2026-07-28T13:08:56.600"}

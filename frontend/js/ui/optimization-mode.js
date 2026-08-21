@@ -504,6 +504,10 @@ function addEdgeKernelPreset(tagId, presetId) {
     if (!term) return;
     if (b.objectiveTerms.some((t) => t.id === term.id)) return;
     b.objectiveTerms.push(term);
+    const preset = EDGE_OBJECTIVE_PRESETS[presetId];
+    if (preset?.disableStopLoss) {
+        b.stopLossEnabled = false;
+    }
     renderStageContent();
 }
 
@@ -1626,6 +1630,65 @@ function renderStageTune(body) {
             tip.textContent = cameraCenterDefaultHint(term.tag_id);
             grid.appendChild(tip);
         }
+        if (term.kernelId === 'builtin.beam_com' || term.metric === 'signed_axis_offset') {
+            if (!term.centroidTarget) {
+                term.centroidTarget = defaultCentroidTargetForCamera(term.tag_id);
+            }
+            ['x', 'y'].forEach((axis) => {
+                const inp = createOptInput({
+                    value: term.centroidTarget?.[axis] ?? 0,
+                    onChange: (el) => {
+                        if (!term.centroidTarget) {
+                            term.centroidTarget = defaultCentroidTargetForCamera(term.tag_id);
+                        }
+                        term.centroidTarget[axis] = parseFloat(el.value) || 0;
+                    },
+                });
+                grid.appendChild(createFormField(`Origin ${axis.toUpperCase()}`, inp));
+            });
+            const axisSel = document.createElement('select');
+            axisSel.className = 'opt-input';
+            ;[
+                ['x', 'X'],
+                ['y', 'Y'],
+            ].forEach(([val, label]) => {
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.textContent = label;
+                if ((term.pushAxis || 'x') === val) opt.selected = true;
+                axisSel.appendChild(opt);
+            });
+            axisSel.onchange = () => {
+                term.pushAxis = axisSel.value === 'y' ? 'y' : 'x';
+            };
+            grid.appendChild(createFormField('Axis', axisSel));
+
+            const dirSel = document.createElement('select');
+            dirSel.className = 'opt-input';
+            ;[
+                ['1', 'Positive (+)'],
+                ['-1', 'Negative (−)'],
+            ].forEach(([val, label]) => {
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.textContent = label;
+                if (String(Number(term.pushDirection) < 0 ? -1 : 1) === val) {
+                    opt.selected = true;
+                }
+                dirSel.appendChild(opt);
+            });
+            dirSel.onchange = () => {
+                term.pushDirection = Number(dirSel.value) < 0 ? -1 : 1;
+            };
+            grid.appendChild(createFormField('Direction', dirSel));
+
+            const tip = document.createElement('p');
+            tip.className = 'opt-hint';
+            tip.style.cssText = 'grid-column:1/-1;margin:4px 0 0;';
+            tip.textContent =
+                `${cameraCenterDefaultHint(term.tag_id)} Maximizes signed offset along the chosen axis only (not Euclidean distance).`;
+            grid.appendChild(tip);
+        }
         if (term.metric === 'ratio_to_ref' || term.metric === 'ratio_from_ref') {
             const tip = document.createElement('p');
             tip.className = 'opt-hint';
@@ -2602,6 +2665,105 @@ function scrollLivePanelIntoView() {
     });
 }
 
+/**
+ * Trace row that achieved the session best loss (min loss).
+ * @param {object} last
+ * @returns {object|null}
+ */
+function findBestLossTraceRow(last) {
+    const trace = Array.isArray(last?.trace) ? last.trace : [];
+    if (!trace.length) return null;
+    const target =
+        last.best_loss != null && Number.isFinite(Number(last.best_loss))
+            ? Number(last.best_loss)
+            : null;
+    let best = null;
+    for (const row of trace) {
+        if (row?.loss == null || !Number.isFinite(Number(row.loss))) continue;
+        const loss = Number(row.loss);
+        if (target != null && Math.abs(loss - target) < 1e-9) {
+            best = row; // keep last match at this best (final actuators for that loss)
+            continue;
+        }
+        if (target == null && (!best || loss < Number(best.loss))) {
+            best = row;
+        }
+    }
+    if (best) return best;
+    // Fallback: strict min loss in the trace
+    for (const row of trace) {
+        if (row?.loss == null || !Number.isFinite(Number(row.loss))) continue;
+        if (!best || Number(row.loss) < Number(best.loss)) best = row;
+    }
+    return best;
+}
+
+/**
+ * Absolute beam centers (px) from a trace row's kernel/policy stage debug.
+ * @param {object|null} row
+ * @returns {Array<{termId:string,kernelId:string,cx:number,cy:number,eval:number|null}>}
+ */
+function beamCentersFromTraceRow(row) {
+    if (!row || typeof row !== 'object') return [];
+    const kernelTerms =
+        row.stages?.kernel?.terms && typeof row.stages.kernel.terms === 'object'
+            ? row.stages.kernel.terms
+            : {};
+    const policyTerms =
+        row.stages?.policy?.terms && typeof row.stages.policy.terms === 'object'
+            ? row.stages.policy.terms
+            : {};
+    const ids = new Set([...Object.keys(kernelTerms), ...Object.keys(policyTerms)]);
+    /** @type {Array<{termId:string,kernelId:string,cx:number,cy:number,eval:number|null}>} */
+    const out = [];
+    ids.forEach((termId) => {
+        const kt = kernelTerms[termId] || {};
+        const pt = policyTerms[termId] || {};
+        const kernelId = String(kt.kernel_id || pt.kernel_id || '');
+        const metric = String(kt.metric || pt.metric || '');
+        // Skip relative beam_shift (dx,dy) — not an absolute center.
+        if (kernelId.includes('beam_shift') && !kernelId.includes('beam_com')) {
+            return;
+        }
+        let cx = NaN;
+        let cy = NaN;
+        const det = kt.detected_xy || pt.detected_xy;
+        if (Array.isArray(det) && det.length >= 2) {
+            cx = Number(det[0]);
+            cy = Number(det[1]);
+        } else {
+            const prev = kt.preview || pt.features_preview || [];
+            if (Array.isArray(prev) && prev.length >= 2) {
+                // gaussian: [amp, cx, cy, …]
+                if (kernelId.includes('gaussian') && prev.length >= 3) {
+                    cx = Number(prev[1]);
+                    cy = Number(prev[2]);
+                } else {
+                    cx = Number(prev[0]);
+                    cy = Number(prev[1]);
+                }
+            }
+        }
+        const looksCentroid =
+            metric === 'signed_axis_offset' ||
+            metric === 'rms_distance' ||
+            metric === 'rms_distance_px' ||
+            kernelId.includes('beam_com') ||
+            kernelId.includes('roi_centroid') ||
+            kernelId.includes('gaussian');
+        if (!looksCentroid) return;
+        if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
+        out.push({
+            termId,
+            kernelId: kernelId || '—',
+            cx,
+            cy,
+            eval: row.eval != null ? Number(row.eval) : null,
+        });
+    });
+    return out;
+}
+
 function renderStageResults(body) {
     const b = builder();
     const last = store.labState?.last_ensemble_optimization;
@@ -2686,6 +2848,108 @@ function renderStageResults(body) {
         table.appendChild(tbody);
         setCard.appendChild(table);
         body.appendChild(setCard);
+    }
+
+    const bestRow = findBestLossTraceRow(last);
+    const centers = beamCentersFromTraceRow(bestRow);
+    if (centers.length) {
+        const centerCard = document.createElement('div');
+        centerCard.className = 'opt-results-card';
+        const evalBit =
+            centers[0].eval != null && Number.isFinite(centers[0].eval)
+                ? ` <span class="opt-hint" style="font-weight:400">(eval ${centers[0].eval})</span>`
+                : '';
+        const head = document.createElement('div');
+        head.className = 'opt-results-card-head';
+        head.innerHTML = `<h4>Best beam center${evalBit}</h4>`;
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'opt-copy-btn';
+        copyBtn.title = 'Copy table as TSV (paste into spreadsheet)';
+        copyBtn.innerHTML =
+            '<span class="material-icons-round" style="font-size:14px;">content_copy</span> Copy';
+        const tsvHeader = 'Term\tKernel\tX (px)\tY (px)';
+        const tsvRows = centers.map(
+            (c) =>
+                `${c.termId}\t${c.kernelId}\t${c.cx.toFixed(2)}\t${c.cy.toFixed(2)}`,
+        );
+        const tsvText = [tsvHeader, ...tsvRows].join('\n');
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(tsvText);
+                copyBtn.classList.add('is-copied');
+                copyBtn.innerHTML =
+                    '<span class="material-icons-round" style="font-size:14px;">check</span> Copied';
+                setTimeout(() => {
+                    copyBtn.classList.remove('is-copied');
+                    copyBtn.innerHTML =
+                        '<span class="material-icons-round" style="font-size:14px;">content_copy</span> Copy';
+                }, 1400);
+            } catch {
+                copyBtn.textContent = 'Copy failed';
+            }
+        });
+        head.appendChild(copyBtn);
+        centerCard.appendChild(head);
+
+        const wrap = document.createElement('div');
+        wrap.className = 'opt-telemetry-table-wrap opt-beam-center-wrap';
+        const table = document.createElement('table');
+        table.className = 'opt-telemetry-table opt-beam-center-table';
+        table.innerHTML =
+            '<thead><tr><th>Term</th><th>Kernel</th><th>X (px)</th><th>Y (px)</th><th></th></tr></thead>';
+        const tbody = document.createElement('tbody');
+        centers.forEach((c) => {
+            const tr = document.createElement('tr');
+            const x = c.cx.toFixed(2);
+            const y = c.cy.toFixed(2);
+            tr.innerHTML = `
+                <td class="opt-beam-center-id" title="${c.termId}">${c.termId}</td>
+                <td class="opt-beam-center-id" title="${c.kernelId}">${c.kernelId}</td>
+                <td class="opt-beam-center-num">${x}</td>
+                <td class="opt-beam-center-num">${y}</td>
+                <td class="opt-beam-center-actions"></td>`;
+            const rowCopy = document.createElement('button');
+            rowCopy.type = 'button';
+            rowCopy.className = 'opt-copy-btn opt-copy-btn--icon';
+            rowCopy.title = 'Copy this row';
+            rowCopy.innerHTML =
+                '<span class="material-icons-round" style="font-size:13px;">content_copy</span>';
+            const rowTsv = `${c.termId}\t${c.kernelId}\t${x}\t${y}`;
+            rowCopy.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(`${tsvHeader}\n${rowTsv}`);
+                    rowCopy.classList.add('is-copied');
+                    rowCopy.innerHTML =
+                        '<span class="material-icons-round" style="font-size:13px;">check</span>';
+                    setTimeout(() => {
+                        rowCopy.classList.remove('is-copied');
+                        rowCopy.innerHTML =
+                            '<span class="material-icons-round" style="font-size:13px;">content_copy</span>';
+                    }, 1200);
+                } catch {
+                    rowCopy.title = 'Copy failed';
+                }
+            });
+            tr.querySelector('.opt-beam-center-actions')?.appendChild(rowCopy);
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        centerCard.appendChild(wrap);
+        const tip = document.createElement('p');
+        tip.className = 'opt-hint';
+        tip.style.marginTop = '6px';
+        tip.textContent =
+            'Centroid at the eval that achieved best loss (camera pixels). Copy pastes tab-separated values.';
+        centerCard.appendChild(tip);
+        body.appendChild(centerCard);
+    } else if (Array.isArray(last.trace) && last.trace.length) {
+        const miss = document.createElement('p');
+        miss.className = 'opt-hint';
+        miss.textContent =
+            'No beam-center features in the best-eval trace (kernel may not report cx/cy).';
+        body.appendChild(miss);
     }
 
     if (b.lastPostCommit || b.lastPostCommitError) {

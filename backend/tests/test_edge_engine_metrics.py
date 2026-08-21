@@ -110,6 +110,63 @@ class MetricTests(unittest.TestCase):
             metric_minimize_value({"features": [-2.5]}, term), 2.5
         )
 
+    def test_signed_axis_offset_maximize_positive_x(self) -> None:
+        from cloudlabs_edge_dev.optimization.metrics import metric_signed_axis_offset
+
+        term = _term(
+            "signed_axis_offset",
+            feature_index=[0, 1],
+            origin_px={"x": 50.0, "y": 40.0},
+            axis="x",
+            direction=1,
+            value_scale_px=10.0,
+            loss_cap=2.0,
+        )
+        # +20 px in +X → loss = -2.0 (capped)
+        self.assertAlmostEqual(
+            metric_signed_axis_offset({"features": [70.0, 40.0]}, term), -2.0
+        )
+        # at origin → 0
+        self.assertAlmostEqual(
+            metric_signed_axis_offset({"features": [50.0, 40.0]}, term), 0.0
+        )
+        # wrong way (−10 px) → positive loss
+        self.assertAlmostEqual(
+            metric_signed_axis_offset({"features": [40.0, 40.0]}, term), 1.0
+        )
+
+    def test_signed_axis_offset_negative_y(self) -> None:
+        from cloudlabs_edge_dev.optimization.metrics import metric_signed_axis_offset
+
+        term = _term(
+            "signed_axis_offset",
+            feature_index=[0, 1],
+            origin_px={"x": 10.0, "y": 100.0},
+            axis="y",
+            direction=-1,
+            value_scale_px=20.0,
+            loss_cap=2.0,
+        )
+        # cy=60 → signed = -1*(60-100)=40 → loss = -2.0
+        self.assertAlmostEqual(
+            metric_signed_axis_offset({"features": [10.0, 60.0]}, term), -2.0
+        )
+
+    def test_signed_axis_offset_absent(self) -> None:
+        from cloudlabs_edge_dev.optimization.metrics import metric_signed_axis_offset
+
+        term = _term(
+            "signed_axis_offset",
+            origin_px={"x": 0.0, "y": 0.0},
+            loss_cap=2.0,
+        )
+        self.assertAlmostEqual(
+            metric_signed_axis_offset(
+                {"features": [1.0, 2.0], "presence_ok": False}, term
+            ),
+            2.0,
+        )
+
     def test_nan_raises(self) -> None:
         term = _term("one_minus_normalized")
         with self.assertRaises(MeasurementInvalid):

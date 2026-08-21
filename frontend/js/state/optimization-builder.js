@@ -76,6 +76,8 @@ export function createOptimizationBuilder() {
  * @property {number} weight
  * @property {string} label
  * @property {{x:number,y:number}} [centroidTarget]
+ * @property {'x'|'y'} [pushAxis]
+ * @property {1|-1} [pushDirection]
  * @property {number} [normalizeMin]
  * @property {number} [normalizeMax]
  * @property {string} [kernelId] Edge catalog kernel id (torchscript_features)
@@ -312,6 +314,23 @@ export const EDGE_OBJECTIVE_PRESETS = {
         normalizeByFov: true,
         lossCap: 2,
     },
+    'builtin.beam_com': {
+        label: 'Push beam along an axis',
+        summary:
+            'Maximize displacement from a start pixel along X or Y (+/−). Full-frame CoM; fails closed if the beam leaves the camera.',
+        kernelId: 'builtin.beam_com',
+        metric: 'signed_axis_offset',
+        featureIndex: [0, 1],
+        needsOriginPx: true,
+        needsAxisDirection: true,
+        latchPeakRef: true,
+        minPeakRatio: 0.5,
+        peakFeatureIndex: 2,
+        lossCap: 2,
+        normalizeByFov: true,
+        // Prefer running until max evals / Accept (loss goes ≤0 quickly).
+        disableStopLoss: true,
+    },
 };
 
 /** @deprecated */
@@ -459,6 +478,8 @@ export function createEdgeKernelObjectiveTerm(tagId, presetId, existingTerms = [
         label: `${componentDisplayLabel(tagId)} · ${preset.label}`,
         featureIndex: preset.featureIndex,
         centroidTarget: existing?.centroidTarget ?? defaultTarget,
+        pushAxis: existing?.pushAxis ?? preset.pushAxis ?? 'x',
+        pushDirection: existing?.pushDirection ?? preset.pushDirection ?? 1,
         normalizeMin: existing?.normalizeMin ?? preset.normalizeMin ?? 0,
         normalizeMax: existing?.normalizeMax ?? preset.normalizeMax ?? 1,
         latchPeakRef: existing?.latchPeakRef ?? preset.latchPeakRef ?? false,
@@ -467,6 +488,7 @@ export function createEdgeKernelObjectiveTerm(tagId, presetId, existingTerms = [
         latchValueRef: existing?.latchValueRef ?? preset.latchValueRef ?? false,
         lossCap: existing?.lossCap ?? preset.lossCap ?? 2,
         normalizeByFov: existing?.normalizeByFov ?? preset.normalizeByFov ?? false,
+        disableStopLoss: existing?.disableStopLoss ?? preset.disableStopLoss ?? false,
     };
 }
 
@@ -591,12 +613,37 @@ export function buildObjectiveTermPayload(term) {
             source.target_px =
                 term.centroidTarget || defaultCentroidTargetForCamera(term.tag_id);
         }
-        if (term.latchPeakRef !== false && (term.metric === 'rms_distance' || term.metric === 'rms_distance_px' || term.metric === 'beam_presence')) {
+        if (term.metric === 'signed_axis_offset') {
+            const origin =
+                term.centroidTarget || defaultCentroidTargetForCamera(term.tag_id);
+            source.origin_px = { ...origin };
+            source.target_px = { ...origin };
+            source.axis = term.pushAxis === 'y' ? 'y' : 'x';
+            source.direction = Number(term.pushDirection) < 0 ? -1 : 1;
+            source.feature_index = term.featureIndex ?? [0, 1];
+            source.normalize_by_fov = true;
+            source.loss_cap = Number(term.lossCap ?? 2);
+            const { width, height } = parseDeclaredCameraResolution(term.tag_id);
+            source.value_scale_px = Math.min(width, height) / 4;
+            source.frame_hw = [height, width];
+        }
+        if (
+            term.latchPeakRef !== false &&
+            (term.metric === 'rms_distance' ||
+                term.metric === 'rms_distance_px' ||
+                term.metric === 'beam_presence' ||
+                term.metric === 'signed_axis_offset')
+        ) {
             source.latch_peak_ref = true;
             source.min_peak_ratio = Number(term.minPeakRatio ?? 0.5);
             source.peak_feature_index = Number(term.peakFeatureIndex ?? 2);
         }
-        if (term.normalizeByFov || term.metric === 'rms_distance' || term.metric === 'rms_distance_px') {
+        if (
+            term.normalizeByFov ||
+            term.metric === 'rms_distance' ||
+            term.metric === 'rms_distance_px' ||
+            term.metric === 'signed_axis_offset'
+        ) {
             const { width, height } = parseDeclaredCameraResolution(term.tag_id);
             const diag = Math.hypot(width, height);
             const widthScale = Math.min(width, height) / 4;
@@ -610,6 +657,11 @@ export function buildObjectiveTermPayload(term) {
                 source.value_scale_px = widthScale;
                 source.frame_hw = [height, width];
                 source.loss_cap = Number(term.lossCap ?? 2);
+            }
+            if (term.metric === 'signed_axis_offset') {
+                source.normalize_by_fov = true;
+                source.value_scale_px = widthScale;
+                source.frame_hw = [height, width];
             }
         }
         if (term.metric === 'one_minus_normalized') {

@@ -31,9 +31,9 @@ Staged mode: Objective → Variables → Tune → Solver → Run → Results.
 
 | Control | Meaning |
 |---------|---------|
-| Objective goals | Plain-language presets → `builtin.roi_centroid` (center on pixel), `beam_power`, `gaussian_beam_fit`, `beam_shift` when `artifact_present` |
+| Objective goals | Plain-language presets → `builtin.roi_centroid` (center on pixel), `beam_power`, `gaussian_beam_fit`, `beam_shift`, `beam_com` (axis push from origin) when `artifact_present` |
 | Target pixel | Defaults to camera center from library `parameters.resolution` (else assume 1920×1080) |
-| Post-move wait | `solver.settle_ms` — pause after actuate before capture |
+| Post-move wait | `solver.settle_ms` — pause after actuate before capture (**honored on the edge session**; without it CoM can be wrong while motors still move) |
 | Camera preview every N | `telemetry.camera_every_n` — sparse JPEG (first + new-best + every Nth) |
 | Stop when loss ≤ | `solver.stop_loss` — early success when total normalized loss ≤ threshold (default 0.1 ≈ 10% FOV) |
 | **Accept · good enough** | Live panel button while running → `POST /api/jobs/{id}/accept` → edge early_stop (`operator_accept`), job **succeeded**, keep best (not cancel) |

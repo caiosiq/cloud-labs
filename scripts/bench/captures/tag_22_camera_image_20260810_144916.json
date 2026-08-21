@@ -1,0 +1,14 @@
+{
+  "tag_id": "tag_22",
+  "field": "camera_image",
+  "dtype": "uint8",
+  "shape": [
+    3672,
+    5488,
+    3
+  ],
+  "domain": "spatial",
+  "layout": "bgr_hwc_uint8",
+  "npy": "C:\\Users\\szist\\Desktop\\josh_robotic_twin_simulation\\cloud-labs-radial-merge\\scripts\\bench\\captures\\tag_22_camera_image_20260810_144916.npy",
+  "png": "C:\\Users\\szist\\Desktop\\josh_robotic_twin_simulation\\cloud-labs-radial-merge\\scripts\\bench\\captures\\tag_22_camera_image_20260810_144916.png"
+}

@@ -5,7 +5,7 @@ export function renderSetExposure(ctx) {
     const { tagId, comp, catalogRow, hooks } = ctx;
     const caps = normalizeCapabilities(catalogRow?.capabilities);
     const desc = caps.statecontrol?.tunables?.exposure_time_ms || {};
-    const min = Number.isFinite(Number(desc.min)) ? Number(desc.min) : 10;
+    const min = Number.isFinite(Number(desc.min)) ? Number(desc.min) : 0.1;
     const max = Number.isFinite(Number(desc.max)) ? Number(desc.max) : 1000;
     const unit = desc.unit || 'ms';
 
@@ -26,9 +26,10 @@ export function renderSetExposure(ctx) {
     body.appendChild(hint);
 
     const inp = coordInput(`exposure (${unit})`, cur);
-    inp.min = String(min);
-    inp.max = String(max);
-    inp.step = '1';
+    inp.input.min = String(min);
+    inp.input.max = String(max);
+    inp.input.step = '0.1';
+    inp.input.title = `Exposure ${min}–${max} ${unit}`;
     body.appendChild(inp);
 
     const btn = runButton('Set exposure', 'tune');

@@ -200,4 +200,68 @@ def metric_beam_presence(
     return absent
 
 
-__all__ = ["metric_beam_presence", "metric_minimize_value", "metric_rms_distance"]
+@register_metric(metric_id="signed_axis_offset")
+def metric_signed_axis_offset(
+    measurement: Mapping[str, Any],
+    term: ObjectiveTermSpec,
+) -> float:
+    """Maximize signed CoM displacement along one axis (see edge metrics)."""
+    src = term.source
+    extra = _extra(src)
+    if measurement.get("presence_ok") is False:
+        return _loss_cap(src)
+
+    feats = _features_from_measurement(measurement)
+    idx = getattr(src, "feature_index", None)
+    if idx is None:
+        idx = extra.get("feature_index", [0, 1])
+    if isinstance(idx, (list, tuple)) and len(idx) >= 2:
+        i0, i1 = int(idx[0]), int(idx[1])
+    else:
+        i0, i1 = 0, 1
+    if not feats or max(i0, i1) >= len(feats):
+        raise ValueError("empty or incomplete features for signed_axis_offset")
+    cx, cy = float(feats[i0]), float(feats[i1])
+
+    origin = getattr(src, "origin_px", None) or extra.get("origin_px")
+    if origin is None:
+        origin = getattr(src, "target_px", None) or extra.get("target_px")
+    if origin is None:
+        origin = getattr(src, "target", None) or extra.get("target")
+    if isinstance(origin, Mapping):
+        ox = float(origin.get("x", origin.get("0", 0.0)))
+        oy = float(origin.get("y", origin.get("1", 0.0)))
+    elif isinstance(origin, (list, tuple)) and len(origin) >= 2:
+        ox, oy = float(origin[0]), float(origin[1])
+    else:
+        raise ValueError("missing origin_px for signed_axis_offset")
+
+    axis_raw = str(
+        getattr(src, "axis", None) or extra.get("axis", "x") or "x"
+    ).strip().lower()
+    if axis_raw in ("y", "1", "cy"):
+        coord, origin_v = cy, oy
+    else:
+        coord, origin_v = cx, ox
+
+    direction_raw = getattr(src, "direction", None)
+    if direction_raw is None:
+        direction_raw = extra.get("direction", 1)
+    try:
+        direction = float(direction_raw)
+    except (TypeError, ValueError):
+        direction = 1.0
+    direction = 1.0 if direction >= 0 else -1.0
+
+    signed_px = direction * (coord - origin_v)
+    scale = _length_scale(measurement, src)
+    raw = -float(signed_px) / scale
+    return max(raw, -_loss_cap(src))
+
+
+__all__ = [
+    "metric_beam_presence",
+    "metric_minimize_value",
+    "metric_rms_distance",
+    "metric_signed_axis_offset",
+]

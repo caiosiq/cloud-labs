@@ -536,13 +536,13 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.beginPath();
         ctx.arc(0, 0, Math.min(w, h) / 8, 0, Math.PI * 2);
         ctx.fill();
-        // Direction indicator triangle pointing along local +Y (post-rotation).
+        // Direction indicator triangle pointing along local +X (90° CW from −Y).
         ctx.fillStyle = '#ef4444';
         const triH = h / 4;
         ctx.beginPath();
-        ctx.moveTo(0, -halfH - 2);
-        ctx.lineTo(-triH / 2, -halfH - triH - 2);
-        ctx.lineTo(triH / 2, -halfH - triH - 2);
+        ctx.moveTo(halfW + 2, -triH / 2);
+        ctx.lineTo(halfW + triH + 2, 0);
+        ctx.lineTo(halfW + 2, triH / 2);
         ctx.fill();
     } else if (catalogId === 'mirror_curved') {
         // Curved (concave) OC: left semicircle in local space, opening toward +local X.

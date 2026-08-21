@@ -2,6 +2,26 @@
   "schema_version": 1,
   "kernels": [
     {
+      "id": "builtin.beam_com",
+      "label": "Beam CoM (full frame)",
+      "artifact": "builtin_beam_com.pt",
+      "runtime": "torchscript",
+      "output_kind": "features",
+      "feature_names": [
+        "cx",
+        "cy",
+        "peak"
+      ],
+      "description": "Full-frame unweighted geometric centroid of the brightest ~0.5% of pixels (faint-beam safe) as [cx, cy, peak]. Use with signed_axis_offset vs origin / axis / direction.",
+      "backend": "any",
+      "phase": "production",
+      "hooks": [
+        "evaluate",
+        "capture",
+        "tensor"
+      ]
+    },
+    {
       "id": "builtin.beam_power",
       "label": "Beam power features",
       "artifact": "builtin_beam_power.pt",
@@ -32,7 +52,7 @@
         "dy",
         "magnitude"
       ],
-      "description": "Intensity CoM offset from this frame's geometric center (W/2, H/2) as [dx, dy, magnitude] in px \u2014 resolution-agnostic, no reference capture. Maximize shift with weight=-1 on minimize_value(feature_index=2).",
+      "description": "Unweighted geometric-centroid offset from this frame's center (W/2, H/2) as [dx, dy, magnitude] in px \u2014 resolution-agnostic, no reference capture. Maximize shift with weight=-1 on minimize_value(feature_index=2).",
       "backend": "any",
       "phase": "production",
       "hooks": [
@@ -84,7 +104,7 @@
           ]
         }
       ],
-      "description": "Moment-based Gaussian beam estimate."
+      "description": "Unweighted mask moments (median_bg + 5% of peak\u2212bg): amplitude, geometric centroid, and spatial widths."
     },
     {
       "id": "builtin.roi_centroid",
@@ -125,7 +145,7 @@
           ]
         }
       ],
-      "description": "Sub-pixel intensity-weighted centroid in the center-half ROI, plus full-frame peak for beam-presence latching."
+      "description": "Unweighted geometric centroid in the center-half ROI; mask is median_bg + 5% of (peak\u2212bg), plus full-frame peak for presence."
     },
     {
       "id": "demo.image_mean_score",

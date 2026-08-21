@@ -214,6 +214,24 @@ def preflight_objective_term(
                     }
                 ],
             )
+        if term.metric == "signed_axis_offset":
+            extra = getattr(src, "__pydantic_extra__", None) or {}
+            origin = (
+                getattr(src, "origin_px", None)
+                or (extra.get("origin_px") if isinstance(extra, dict) else None)
+                or src.target_px
+            )
+            if origin is None:
+                raise EnsemblePreflightError(
+                    message="signed_axis_offset missing origin_px",
+                    errors=[
+                        {
+                            "term_id": term.id,
+                            "tag_id": tag_id,
+                            "reason": "origin_px (or target_px) required for signed_axis_offset",
+                        }
+                    ],
+                )
         capture_tag = resolve_centroid_capture_tag(catalog_map=catalog_map, term=term)
         if strict_real_objectives and catalog_map is not None:
             capture_row = catalog_map.get(capture_tag)

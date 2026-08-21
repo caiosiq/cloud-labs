@@ -33,6 +33,7 @@ Twin **Wiki → Backends → Kernels** and Optimization mode presets call
 | `builtin.beam_power` | `[flux, peak, sat]` | Maximize flux (`one_minus_normalized` on flux); watch saturation |
 | `builtin.gaussian_beam_fit` | `[amp, cx, cy, σx, σy]` | Minimize σₓ (`minimize_value`) |
 | `builtin.beam_shift` | `[dx, dy, magnitude]` | **Maximize** ‖Δ‖ from **this frame’s** `(W/2, H/2)` — weight −1 on magnitude. No reference capture; resolution-agnostic |
+| `builtin.beam_com` | `[cx, cy, peak]` | Full-frame CoM (same gate as beam_shift). Pair with `signed_axis_offset` + operator origin / axis / ± direction |
 
 If a preset button is disabled in Optimization mode, the edge listed the id but
 `artifact_present` is false — seed/rebuild that edge’s `kernels/` tree.
