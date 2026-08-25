@@ -25,7 +25,7 @@ export default function FloatRange({ fieldName, descriptor, value }) {
         const el = document.createElement('div');
         el.style.fontStyle = 'italic';
         el.style.color = '#475569';
-        el.style.fontSize = '11px';
+        el.style.fontSize = 'var(--text-sm)';
         el.textContent = '\u2014 no value set';
         card.appendChild(el);
         return card;

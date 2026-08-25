@@ -1,0 +1,133 @@
+/**
+ * Cloud Labs UI design tokens (v2 — academic type, readable at 100% zoom).
+ * Floor for chrome labels is 13px; avoid sub-13px UI text.
+ */
+:root {
+    /* Color — scientific dark (Twin / Ops / Wiki share these names where possible) */
+    --bg-dark: #0f1115;
+    --bg-panel: #181b21;
+    --bg-panel-hover: #22262e;
+    --border-color: #2a2e36;
+
+    --primary-accent: #3b82f6;
+    --primary-glow: rgba(59, 130, 246, 0.3);
+
+    --laser-red: #ff3b3b;
+    --laser-glow: rgba(255, 59, 59, 0.4);
+
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+
+    --status-success: #10b981;
+    --status-warning: #f59e0b;
+    --status-error: #ef4444;
+
+    --grid-color: #2a2e36;
+    --grid-major: #3f4451;
+
+    /* Aliases used by Operations / Wiki */
+    --bg: var(--bg-dark);
+    --panel: var(--bg-panel);
+    --border: var(--border-color);
+    --text: var(--text-primary);
+    --muted: var(--text-secondary);
+    --accent: var(--primary-accent);
+
+    /* Type scale — chrome floor 13px; body ~16px */
+    --text-xs: 13px;
+    --text-sm: 14px;
+    --text-md: 15px;
+    --text-base: 16px;
+    --text-lg: 18px;
+    --text-xl: 20px;
+    --text-2xl: 24px;
+
+    --font-ui: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --font-display: "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --font-mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
+    --font-canvas: "Source Sans 3", system-ui, sans-serif;
+    --line-tight: 1.35;
+    --line-body: 1.5;
+
+    /* Spacing */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+
+    /* Layout — fixed sidebar widths; center column shrinks first for a larger canvas. */
+    --sidebar-left-w: 320px;
+    --sidebar-right-w: 320px;
+    --sidebar-rail-w: 40px;
+    --nav-height: 52px;
+    --bottom-chrome-toggle-h: 40px;
+    --control-min-h: 36px;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+
+    --focus-ring: 0 0 0 2px rgba(59, 130, 246, 0.45);
+}
+
+html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+body.cl-app {
+    font-family: var(--font-ui);
+    font-size: var(--text-base);
+    line-height: var(--line-body);
+    color: var(--text-primary);
+    background: var(--bg-dark);
+}
+
+/* Shared top nav (Twin + secondary surfaces) */
+.app-top-nav,
+.cl-top-nav {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    min-height: var(--nav-height);
+    padding: 10px var(--space-5);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-panel);
+    z-index: 40;
+}
+
+.app-top-nav__brand,
+.cl-top-nav__brand {
+    color: var(--text-primary);
+    text-decoration: none;
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.app-top-nav__brand:hover,
+.cl-top-nav__brand:hover {
+    color: var(--primary-accent);
+}
+
+.app-top-nav nav a,
+.cl-top-nav nav a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    margin-left: var(--space-4);
+    font-size: var(--text-md);
+    font-family: var(--font-ui);
+}
+
+.app-top-nav nav a:hover,
+.cl-top-nav nav a:hover,
+.app-top-nav nav a.active,
+.cl-top-nav nav a.active {
+    color: var(--primary-accent);
+}

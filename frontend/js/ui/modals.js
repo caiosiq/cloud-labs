@@ -64,7 +64,7 @@ export function showErrorModal(title, message, options = {}) {
     card.innerHTML = `
         <span class="material-icons-round" style="font-size: 48px; color: #ef4444; margin-bottom: 16px;">report_problem</span>
         <h2 style="margin: 0 0 12px 0; color: #e2e8f0; font-size: 20px;">${title}</h2>
-        <p style="margin: 0 0 24px 0; color: #94a3b8; font-size: 14px; line-height: 1.5; white-space: pre-wrap; text-align: left;">${message}</p>
+        <p style="margin: 0 0 24px 0; color: #94a3b8; font-size: var(--text-base); line-height: 1.5; white-space: pre-wrap; text-align: left;">${message}</p>
         ${actionHtml}
     `;
 
@@ -122,7 +122,7 @@ export function showConfirmationModal(message, onConfirm, onCancel, options = {}
     card.innerHTML = `
         <span class="material-icons-round" style="font-size: 40px; color: #3b82f6; margin-bottom: 12px;">help_outline</span>
         <h3 style="margin: 0 0 12px 0; color: #e2e8f0;">Confirm Action</h3>
-        <p style="margin: 0 0 24px 0; color: #94a3b8; font-size: 14px; line-height: 1.5;">${message}</p>
+        <p style="margin: 0 0 24px 0; color: #94a3b8; font-size: var(--text-base); line-height: 1.5;">${message}</p>
         <div style="display: flex; justify-content: center; gap: 12px;">
             <button id="confirm-no" class="btn btn-secondary" style="width: auto; padding: 8px 20px;">${cancelLabel}</button>
             <button id="confirm-yes" class="btn btn-primary" style="width: auto; padding: 8px 20px;">${confirmLabel}</button>

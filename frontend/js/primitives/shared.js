@@ -16,7 +16,7 @@ export function primitiveRegion(primitiveId, title, opts = {}) {
 
     const header = document.createElement('div');
     header.className = 'prim-region__title';
-    header.style.fontSize = '10px';
+    header.style.fontSize = 'var(--text-xs)';
     header.style.color = '#94a3b8';
     header.style.fontWeight = '600';
     header.style.marginBottom = '6px';
@@ -37,11 +37,11 @@ export function runButton(label, iconName) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn btn-primary';
-    btn.style.fontSize = '11px';
+    btn.style.fontSize = 'var(--text-sm)';
     btn.style.width = '100%';
     if (iconName) {
         btn.innerHTML =
-            `<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">${iconName}</span> ${label}`;
+            `<span class="material-icons-round" style="font-size: var(--text-base);vertical-align:middle;">${iconName}</span> ${label}`;
     } else {
         btn.textContent = label;
     }
@@ -74,11 +74,11 @@ export function secondaryButton(label, iconName) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn btn-secondary';
-    btn.style.fontSize = '11px';
+    btn.style.fontSize = 'var(--text-sm)';
     btn.style.width = '100%';
     if (iconName) {
         btn.innerHTML =
-            `<span class="material-icons-round" style="font-size:14px;vertical-align:middle;">${iconName}</span> ${label}`;
+            `<span class="material-icons-round" style="font-size: var(--text-base);vertical-align:middle;">${iconName}</span> ${label}`;
     } else {
         btn.textContent = label;
     }
@@ -92,9 +92,10 @@ export function secondaryButton(label, iconName) {
  *
  * @param {string} label Always-visible caption (placeholders hide once filled).
  * @param {unknown} [value]
+ * @param {number} [digits] When set, initial display uses fixed decimal places.
  * @returns {HTMLLabelElement & { value: string, input: HTMLInputElement }}
  */
-export function coordInput(label, value) {
+export function coordInput(label, value, digits) {
     const field = document.createElement('label');
     field.className = 'coord-field';
 
@@ -108,7 +109,9 @@ export function coordInput(label, value) {
     inp.placeholder = label;
     inp.setAttribute('aria-label', label);
     if (value !== undefined && value !== null && Number.isFinite(Number(value))) {
-        inp.value = String(value);
+        inp.value = Number.isFinite(Number(digits))
+            ? Number(value).toFixed(Number(digits))
+            : String(value);
     }
 
     field.appendChild(caption);

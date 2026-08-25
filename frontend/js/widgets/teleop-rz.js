@@ -124,7 +124,7 @@ export default function TeleopRz({
 
         toggle.className = 'btn btn-secondary';
 
-        toggle.style.fontSize = '10px';
+        toggle.style.fontSize = 'var(--text-xs)';
 
         toggle.style.padding = '3px 10px';
 
@@ -282,7 +282,7 @@ export default function TeleopRz({
 
     const hint = document.createElement('div');
 
-    hint.style.fontSize = '9px';
+    hint.style.fontSize = 'var(--text-xs)';
 
     hint.style.color = '#475569';
 

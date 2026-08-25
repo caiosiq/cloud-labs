@@ -392,7 +392,7 @@ function renderPinDetail(pin, commitId = null) {
                 <span class="pin-badge">Snapshot pin</span>
                 <strong>${escapeHtml(pin.display_name || pin.pin_id)}</strong>
             </div>
-            <div class="meta" style="margin-top:6px;color:var(--muted);font-size:11px">
+            <div class="meta" style="margin-top:6px;color:var(--muted);font-size: var(--text-sm)">
                 <code>${escapeHtml(pin.pin_id)}</code> ·
                 ${escapeHtml(pin.repo_id)}@${escapeHtml(pin.branch || 'main')} ·
                 <code>${escapeHtml(shortId(pin.configuration_id))}</code>
@@ -447,13 +447,13 @@ function renderPinDetail(pin, commitId = null) {
     pinSnapshot.innerHTML = `
         <div>
             <strong>Local node</strong>
-            <span style="color:var(--muted);font-size:11px;margin-left:6px">not an approved snapshot pin</span>
+            <span style="color:var(--muted);font-size: var(--text-sm);margin-left:6px">not an approved snapshot pin</span>
         </div>
-        <div class="meta" style="margin-top:6px;color:var(--muted);font-size:11px">
+        <div class="meta" style="margin-top:6px;color:var(--muted);font-size: var(--text-sm)">
             ${escapeHtml(selectedRepoId)}@${escapeHtml(selectedBranch)} ·
             <code>${escapeHtml(shortId(commitId))}</code>
         </div>
-        <p style="margin:10px 0 0;color:#fcd34d;font-size:11px;font-family:Inter,sans-serif;line-height:1.4">
+        <p style="margin:10px 0 0;color:#fcd34d;font-size: var(--text-sm);font-family:Inter,sans-serif;line-height:1.4">
             Publish this commit from Twin to create a frozen snapshot pin, or use a local load:
         </p>
         <div class="pin-detail-block">

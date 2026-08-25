@@ -56,7 +56,7 @@ export function renderRecipes() {
     _recipeList.innerHTML = '';
     if (store.availableRecipes.length === 0) {
         _recipeList.innerHTML =
-            '<div style="color: #64748b; font-size: 11px; padding: 10px; text-align: center;">No recipes saved.</div>';
+            '<div style="color: #64748b; font-size: var(--text-sm); padding: 10px; text-align: center;">No recipes saved.</div>';
         return;
     }
 
@@ -73,17 +73,17 @@ export function renderRecipes() {
 
         item.innerHTML = `
             <div style="overflow: hidden;">
-                <div style="font-weight: 500; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${recipe.name}</div>
-                <div style="font-size: 10px; color: #64748b;">${recipe.steps.length} steps</div>
+                <div style="font-weight: 500; font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${recipe.name}</div>
+                <div style="font-size: var(--text-xs); color: #64748b;">${recipe.steps.length} steps</div>
             </div>
         `;
 
         const playBtn = document.createElement('button');
         playBtn.className = 'btn btn-primary';
         playBtn.style.padding = '4px 8px';
-        playBtn.style.fontSize = '10px';
+        playBtn.style.fontSize = 'var(--text-xs)';
         playBtn.style.width = 'auto';
-        playBtn.innerHTML = '<span class="material-icons-round" style="font-size: 14px;">play_arrow</span>';
+        playBtn.innerHTML = '<span class="material-icons-round" style="font-size: var(--text-base);">play_arrow</span>';
         playBtn.title = 'Run Recipe';
         playBtn.onclick = () => playRecipe(recipe.id);
 
@@ -97,7 +97,7 @@ export function updateRecipeEditorList() {
     _recipeStepsContainer.innerHTML = '';
     if (store.currentRecipeSteps.length === 0) {
         _recipeStepsContainer.innerHTML =
-            '<div style="padding: 20px; text-align: center; color: #64748b; font-size: 12px;">No steps recorded yet.</div>';
+            '<div style="padding: 20px; text-align: center; color: #64748b; font-size: var(--text-sm);">No steps recorded yet.</div>';
         return;
     }
 
@@ -284,7 +284,7 @@ function showRecipeRequirementModal(recipeName, reqs) {
             <span class="material-icons-round" style="font-size: 32px; color: #f59e0b;">warning_amber</span>
             <h2 style="margin: 0; color: #e2e8f0; font-size: 18px;">Components Missing</h2>
         </div>
-        <p style="color: #94a3b8; font-size: 13px; margin-bottom: 20px;">
+        <p style="color: #94a3b8; font-size: var(--text-base); margin-bottom: 20px;">
             The recipe <strong>"${recipeName}"</strong> cannot run because some components are not present in the lab.
         </p>
     `;
@@ -292,8 +292,8 @@ function showRecipeRequirementModal(recipeName, reqs) {
     if (reqs.missingUnknown.length > 0) {
         html += `
             <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 6px; padding: 12px; margin-bottom: 16px;">
-                <div style="color: #ef4444; font-weight: 600; font-size: 12px; margin-bottom: 8px;">OUTDATED / UNKNOWN COMPONENTS</div>
-                <div style="font-size: 12px; color: #cbd5e1;">
+                <div style="color: #ef4444; font-weight: 600; font-size: var(--text-sm); margin-bottom: 8px;">OUTDATED / UNKNOWN COMPONENTS</div>
+                <div style="font-size: var(--text-sm); color: #cbd5e1;">
                     The following IDs are not found in the Catalog. The recipe may be outdated.
                     <ul style="margin: 8px 0 0 20px; padding: 0;">
                         ${reqs.missingUnknown.map((id) => `<li>${id}</li>`).join('')}
@@ -306,7 +306,7 @@ function showRecipeRequirementModal(recipeName, reqs) {
     if (reqs.missingRequestable.length > 0) {
         html += `
             <div style="margin-bottom: 16px;">
-                <div style="color: #e2e8f0; font-weight: 600; font-size: 12px; margin-bottom: 8px;">AVAILABLE TO REQUEST</div>
+                <div style="color: #e2e8f0; font-weight: 600; font-size: var(--text-sm); margin-bottom: 8px;">AVAILABLE TO REQUEST</div>
                 <div id="req-list" style="display: flex; flex-direction: column; gap: 8px;">
                 </div>
             </div>
@@ -343,8 +343,8 @@ function showRecipeRequirementModal(recipeName, reqs) {
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span class="material-icons-round" style="color: #64748b; font-size: 18px;">${icon}</span>
                     <div>
-                        <div style="font-size: 12px; color: #e2e8f0; font-weight: 500;">${item.name}</div>
-                        <div style="font-size: 10px; color: #64748b;">${item.tag_id}</div>
+                        <div style="font-size: var(--text-sm); color: #e2e8f0; font-weight: 500;">${item.name}</div>
+                        <div style="font-size: var(--text-xs); color: #64748b;">${item.tag_id}</div>
                     </div>
                 </div>
             `;
@@ -353,7 +353,7 @@ function showRecipeRequirementModal(recipeName, reqs) {
             btn.className = 'btn btn-primary';
             btn.style.width = 'auto';
             btn.style.padding = '4px 10px';
-            btn.style.fontSize = '10px';
+            btn.style.fontSize = 'var(--text-xs)';
             btn.textContent = 'Request';
 
             btn.onclick = async () => {

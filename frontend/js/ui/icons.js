@@ -16,6 +16,13 @@ export function getComponentIcon(type) {
             return 'filter_frames';
         case 'OPTICAL_POLARIZER':
             return 'tonality';
+        case 'LASER_SOURCE':
+            return 'flare';
+        case 'OPTICAL_CRYSTAL':
+            return 'diamond';
+        case 'OPTICAL_BEAM_BLOCK':
+        case 'OPTICAL_BEAMBLOCKER':
+            return 'block';
         default:
             return 'help_outline';
     }

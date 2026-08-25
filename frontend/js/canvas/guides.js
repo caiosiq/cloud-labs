@@ -21,6 +21,8 @@ import {
     getAlignmentIntersectionOutOfBounds,
     refreshAlignmentIntersectionCache,
 } from './alignment-snap.js';
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../config.js';
+import { getRenderTheme } from './render-theme.js';
 
 const GUIDE_LINES_STORAGE_KEY = 'optics_alignment_guides_v1';
 const GUIDE_MIGRATION_FLAG = 'optics_lines_migrated_v1';
@@ -35,8 +37,6 @@ const _guideHistory = new Map();
 
 let _ctx = null;
 let _canvas = null;
-let _canvasWidth = 0;
-let _canvasHeight = 0;
 let _mmToPx = (x, y) => ({ x, y });
 let _pxToMm = (x, y) => ({ x, y });
 let _render = () => {};
@@ -47,8 +47,8 @@ let _refreshControlWorkingState = async () => {};
  * @param {{
  *   canvas: HTMLCanvasElement,
  *   ctx: CanvasRenderingContext2D,
- *   canvasWidth: number,
- *   canvasHeight: number,
+ *   canvasWidth?: number,
+ *   canvasHeight?: number,
  *   mmToPx: (x:number, y:number) => { x:number, y:number },
  *   pxToMm: (x:number, y:number) => { x:number, y:number },
  *   render: () => void,
@@ -58,8 +58,6 @@ let _refreshControlWorkingState = async () => {};
 export function initGuides(deps) {
     _canvas = deps.canvas;
     _ctx = deps.ctx;
-    _canvasWidth = deps.canvasWidth;
-    _canvasHeight = deps.canvasHeight;
     _mmToPx = deps.mmToPx;
     _pxToMm = deps.pxToMm;
     _render = deps.render;
@@ -147,22 +145,23 @@ function drawAlignmentIntersectionDot(px, py, { fill, stroke, r = 4 }) {
 
 export function drawAlignmentIntersectionMarkers() {
     if (!ALIGNMENT_SHOW_INTERSECTION_MARKERS) return;
+    const theme = getRenderTheme();
     const intersections = refreshAlignmentIntersectionCache();
     intersections.forEach((ix) => {
         const p = _mmToPx(ix.x, ix.y);
         drawAlignmentIntersectionDot(p.x, p.y, {
-            fill: '#fbbf24',
-            stroke: '#0f172a',
+            fill: theme.guideIntersectionFill,
+            stroke: theme.guideIntersectionStroke,
         });
     });
     getAlignmentIntersectionOutOfBounds().forEach((ix) => {
         const p = _mmToPx(ix.x, ix.y);
-        if (p.x < -40 || p.x > _canvasWidth + 40 || p.y < -40 || p.y > _canvasHeight + 40) {
+        if (p.x < -40 || p.x > CANVAS_WIDTH + 40 || p.y < -40 || p.y > CANVAS_HEIGHT + 40) {
             return;
         }
         drawAlignmentIntersectionDot(p.x, p.y, {
-            fill: 'rgba(168, 85, 247, 0.55)',
-            stroke: '#c4b5fd',
+            fill: theme.guideOutOfBoundsFill,
+            stroke: theme.guideOutOfBoundsStroke,
             r: 3,
         });
     });
@@ -174,6 +173,7 @@ export function drawAlignmentIntersectionMarkers() {
  *   highlight and no in-progress draw handle. Otherwise render the live set.
  */
 export function drawAlignmentGuides(guidesOverride = null) {
+    const theme = getRenderTheme();
     const isPreview = Array.isArray(guidesOverride);
     const guides = isPreview ? guidesOverride : (store.guideLines || []);
     guides.forEach((g) => {
@@ -181,11 +181,11 @@ export function drawAlignmentGuides(guidesOverride = null) {
         const a = _mmToPx(g.p1.x, g.p1.y);
         const b = _mmToPx(g.p2.x, g.p2.y);
         const selected = !isPreview && g.id && g.id === store.selectedGuideId;
-        _ctx.strokeStyle = selected ? 'rgba(250, 204, 21, 0.95)' : 'rgba(34, 211, 238, 0.9)';
+        _ctx.strokeStyle = selected ? theme.guideSelected : theme.guideStroke;
         _ctx.lineWidth = selected ? 2.5 : 1.5;
         _ctx.setLineDash([4, 6]);
         _ctx.shadowBlur = selected ? 8 : 6;
-        _ctx.shadowColor = selected ? 'rgba(250, 204, 21, 0.5)' : 'rgba(34, 211, 238, 0.45)';
+        _ctx.shadowColor = selected ? theme.guideSelected : theme.guideStroke;
         _ctx.beginPath();
         _ctx.moveTo(a.x, a.y);
         _ctx.lineTo(b.x, b.y);
@@ -194,8 +194,8 @@ export function drawAlignmentGuides(guidesOverride = null) {
         _ctx.shadowBlur = 0;
         if (selected) {
             [a, b].forEach((pt) => {
-                _ctx.fillStyle = '#facc15';
-                _ctx.strokeStyle = '#0f172a';
+                _ctx.fillStyle = theme.guideEndpointSelectedFill;
+                _ctx.strokeStyle = theme.guideEndpointSelectedStroke;
                 _ctx.lineWidth = 1.5;
                 _ctx.beginPath();
                 _ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
@@ -211,7 +211,7 @@ export function drawAlignmentGuides(guidesOverride = null) {
     if (gd && gd.startLab && gd.currentLab) {
         const a = _mmToPx(gd.startLab.x, gd.startLab.y);
         const b = _mmToPx(gd.currentLab.x, gd.currentLab.y);
-        _ctx.strokeStyle = 'rgba(56, 189, 248, 0.95)';
+        _ctx.strokeStyle = theme.guideDrawStroke;
         _ctx.lineWidth = 2;
         _ctx.setLineDash([6, 4]);
         _ctx.beginPath();

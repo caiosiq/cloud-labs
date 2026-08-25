@@ -163,7 +163,7 @@ export async function promptStartVersionControl(deps) {
 
     let html =
         '<h3 style="margin:0 0 6px 0;color:#e2e8f0;font-size:16px;">Start version control</h3>' +
-        '<p style="margin:0 0 14px 0;color:#94a3b8;font-size:12px;line-height:1.45;">' +
+        '<p style="margin:0 0 14px 0;color:#94a3b8;font-size: var(--text-sm);line-height:1.45;">' +
         'Pick a repo to enter. Your physical bench is left untouched — Twin soft-points ' +
         'at <code>main</code> HEAD as the reference (no motion). Preview another node and ' +
         'Set as reference to branch from it, or Apply on bench to move hardware.</p>' +
@@ -175,7 +175,7 @@ export async function promptStartVersionControl(deps) {
             html += `<button type="button" class="btn btn-secondary vc-pick" data-repo="${id}" style="width:100%;justify-content:flex-start;">${name} <span style="opacity:0.5;margin-left:6px;font-family:ui-monospace,monospace;">${id}</span></button>`;
         }
     } else {
-        html += '<div style="color:#64748b;font-size:12px;">No repos yet — create one.</div>';
+        html += '<div style="color:#64748b;font-size: var(--text-sm);">No repos yet — create one.</div>';
     }
     html +=
         '</div><div style="display:flex;gap:8px;margin-top:14px;">' +

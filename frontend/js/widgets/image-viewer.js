@@ -59,7 +59,7 @@ export default function ImageViewer({ tagId, fieldName, descriptor, value }) {
 
     const meta = document.createElement('div');
     meta.style.color = '#64748b';
-    meta.style.fontSize = '9px';
+    meta.style.fontSize = 'var(--text-xs)';
     meta.style.marginBottom = '4px';
     meta.textContent = _caption(value);
     card.appendChild(meta);

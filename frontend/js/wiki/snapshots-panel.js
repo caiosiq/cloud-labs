@@ -66,7 +66,7 @@ export function mountSnapshotsPanel(root, opts) {
                 <div class="graph-panel">
                     <div class="graph-panel-head">
                         <span data-role="graph-label">Commit graph</span>
-                        <span class="empty" data-role="graph-hint" style="font-size:11px"></span>
+                        <span class="empty" data-role="graph-hint" style="font-size: var(--text-sm)"></span>
                     </div>
                     <div class="control-graph-wrap" data-role="graph-wrap">
                         <div class="control-graph-empty">Select a branch.</div>

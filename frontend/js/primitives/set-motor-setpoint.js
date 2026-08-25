@@ -19,7 +19,7 @@ export function renderSetMotorSetpoint(ctx) {
 
     const { section, body } = primitiveRegion('SET_MOTOR_SETPOINT', 'SET MOTOR SETPOINT');
     const hint = document.createElement('p');
-    hint.style.fontSize = '10px';
+    hint.style.fontSize = 'var(--text-xs)';
     hint.style.color = '#94a3b8';
     hint.style.margin = '0 0 4px 0';
     hint.style.lineHeight = '1.35';
@@ -36,7 +36,7 @@ export function renderSetMotorSetpoint(ctx) {
 
         const label = document.createElement('span');
         label.textContent = `M${mid}`;
-        label.style.fontSize = '11px';
+        label.style.fontSize = 'var(--text-sm)';
         label.style.color = '#cbd5e1';
         label.style.minWidth = '28px';
 

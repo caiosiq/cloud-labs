@@ -108,7 +108,7 @@ export function formatPrimitiveConfirmMessage(command) {
         }
     }
 
-    msg += `<br><br><span style="color:#64748b;font-size:12px">Confirm to send this command to the lab.</span>`;
+    msg += `<br><br><span style="color:#64748b;font-size: var(--text-sm)">Confirm to send this command to the lab.</span>`;
     return msg;
 }
 

@@ -165,7 +165,7 @@ function openSessionReconciliationModal(payload) {
         staleEl.style.borderRadius = '6px';
         staleEl.style.background = '#3b2f0b';
         staleEl.style.color = '#fde68a';
-        staleEl.style.fontSize = '12px';
+        staleEl.style.fontSize = 'var(--text-sm)';
         staleEl.style.lineHeight = '1.4';
         const at =
             payload.checkpoint_saved_at != null ? String(payload.checkpoint_saved_at) : 'unknown';
@@ -206,7 +206,7 @@ function openSessionReconciliationModal(payload) {
     const sub = document.createElement('p');
     sub.style.margin = '0 0 14px 0';
     sub.style.color = '#94a3b8';
-    sub.style.fontSize = '13px';
+    sub.style.fontSize = 'var(--text-base)';
     sub.style.lineHeight = '1.5';
     sub.textContent =
         'Measured poses still match within tolerance for these tags; you can reload saved ' +
@@ -214,7 +214,7 @@ function openSessionReconciliationModal(payload) {
         'After you apply or dismiss, Twin saves the current state as the new checkpoint.';
 
     const meta = document.createElement('div');
-    meta.style.fontSize = '11px';
+    meta.style.fontSize = 'var(--text-sm)';
     meta.style.color = '#64748b';
     meta.style.marginBottom = '10px';
     meta.textContent = `Checkpoint ${payload.checkpoint_saved_at || '?'} · age ${payload.age_hours != null ? payload.age_hours.toFixed(1) + ' h' : '—'} · ±${payload.thresholds?.position_mm} mm · ±${payload.thresholds?.yaw_deg}° yaw`;

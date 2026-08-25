@@ -47,7 +47,7 @@ function promptBringBenchWizard(report) {
         title.textContent = 'Bring bench to configuration';
 
         const sub = document.createElement('p');
-        sub.style.cssText = 'margin:0 0 12px 0;color:#94a3b8;font-size:13px;line-height:1.5;';
+        sub.style.cssText = 'margin:0 0 12px 0;color:#94a3b8;font-size: var(--text-base);line-height:1.5;';
         sub.textContent =
             'The live bench must include every component in the saved configuration before applying on the bench. Resolve missing parts below, then continue.';
 
@@ -58,14 +58,14 @@ function promptBringBenchWizard(report) {
         issues.forEach((issue) => {
             const row = document.createElement('div');
             row.style.cssText =
-                'padding:8px 4px;border-bottom:1px solid rgba(42,46,54,0.6);font-size:12px;color:#cbd5e1;';
+                'padding:8px 4px;border-bottom:1px solid rgba(42,46,54,0.6);font-size: var(--text-sm);color:#cbd5e1;';
             const blocking = issue.blocking ? ' · blocking' : '';
             row.textContent = `${issueLabel(issue)}${blocking}`;
             list.appendChild(row);
         });
 
         const hashNote = document.createElement('p');
-        hashNote.style.cssText = 'margin:0 0 12px 0;color:#64748b;font-size:11px;';
+        hashNote.style.cssText = 'margin:0 0 12px 0;color:#64748b;font-size: var(--text-sm);';
         const ch = report.catalog_hash || {};
         if (ch.commit && ch.current && !ch.match) {
             hashNote.textContent = `Catalog hash: commit ${ch.commit.slice(0, 8)}… vs current ${ch.current.slice(0, 8)}…`;

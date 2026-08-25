@@ -176,7 +176,7 @@ function rebuildComponentSidebar() {
     const placedCount = Object.keys(components).length;
     if (placedCount === 0 && libraryOnly.length === 0) {
         componentList.innerHTML =
-            '<div style="padding: 20px; text-align: center; color: #64748b; font-size: 11px;">No components placed.</div>';
+            '<div style="padding: 20px; text-align: center; color: #64748b; font-size: var(--text-sm);">No components placed.</div>';
         _lastSidebarSnapshot = computeSidebarSnapshot();
         return;
     }
@@ -238,7 +238,7 @@ function rebuildComponentSidebar() {
         let motorBadge = '';
         if (catalogRow && catalogRow.motor_ids && catalogRow.motor_ids.length > 0) {
             motorBadge =
-                '<span class="material-icons-round" style="font-size: 12px; color: #f59e0b; margin-right: 4px;" title="Motorized">settings_input_component</span>';
+                '<span class="material-icons-round" style="font-size: var(--text-sm); color: #f59e0b; margin-right: 4px;" title="Motorized">settings_input_component</span>';
         }
 
         let optBadge = '';

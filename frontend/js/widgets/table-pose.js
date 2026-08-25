@@ -16,13 +16,13 @@ export default function TablePose({ fieldName, descriptor, value }) {
         const el = document.createElement('div');
         el.style.fontStyle = 'italic';
         el.style.color = '#475569';
-        el.style.fontSize = '11px';
+        el.style.fontSize = 'var(--text-sm)';
         el.textContent = '\u2014 no pose committed (component is in inventory or storage)';
         card.appendChild(el);
         return card;
     }
-    card.appendChild(row('x (mm)', fmtNum(pose.x, 1)));
-    card.appendChild(row('y (mm)', fmtNum(pose.y, 1)));
-    card.appendChild(row('rotation (\u00b0)', fmtNum(pose.rotation || 0, 1)));
+    card.appendChild(row('x (mm)', fmtNum(pose.x, 2)));
+    card.appendChild(row('y (mm)', fmtNum(pose.y, 2)));
+    card.appendChild(row('rotation (\u00b0)', fmtNum(pose.rotation || 0, 2)));
     return card;
 }

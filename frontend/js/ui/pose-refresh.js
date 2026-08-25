@@ -121,12 +121,12 @@ function promptRefreshPoseOffersModal(payload) {
         titleEl.textContent = 'Refresh poses from camera';
 
         const sub = document.createElement('p');
-        sub.style.cssText = 'margin:0 0 8px 0;color:#94a3b8;font-size:13px;line-height:1.5;';
+        sub.style.cssText = 'margin:0 0 8px 0;color:#94a3b8;font-size: var(--text-base);line-height:1.5;';
         sub.textContent =
             'Checked components will be overwritten via RECORD_TUNABLES → tunables.nominal_pose (top/ceiling camera scan). Unchecked rows stay frozen.';
 
         const meta = document.createElement('p');
-        meta.style.cssText = 'margin:0 0 12px 0;color:#64748b;font-size:12px;';
+        meta.style.cssText = 'margin:0 0 12px 0;color:#64748b;font-size: var(--text-sm);';
         const selectionOnly = !!payload.selection_only;
         if (selectionOnly) {
             meta.textContent =
@@ -153,10 +153,10 @@ function promptRefreshPoseOffersModal(payload) {
             const body = document.createElement('div');
             body.style.flex = '1';
             const name = document.createElement('div');
-            name.style.cssText = 'color:#e2e8f0;font-size:13px;font-weight:600;';
+            name.style.cssText = 'color:#e2e8f0;font-size: var(--text-base);font-weight:600;';
             name.textContent = tid;
             const detail = document.createElement('div');
-            detail.style.cssText = 'color:#94a3b8;font-size:11px;line-height:1.45;margin-top:4px;';
+            detail.style.cssText = 'color:#94a3b8;font-size: var(--text-sm);line-height:1.45;margin-top:4px;';
             const deltaMm = offer.delta_mm != null ? Number(offer.delta_mm).toFixed(2) : '?';
             const deltaYaw =
                 offer.delta_yaw_deg != null ? Number(offer.delta_yaw_deg).toFixed(2) : '?';
@@ -311,7 +311,7 @@ function promptRefreshPosePreserveIds() {
         const sub = document.createElement('p');
         sub.style.margin = '0 0 12px 0';
         sub.style.color = '#94a3b8';
-        sub.style.fontSize = '13px';
+        sub.style.fontSize = 'var(--text-base)';
         sub.style.lineHeight = '1.5';
         sub.textContent =
             'Checked = freeze this tag (skip RECORD). Unchecked = overwrite tunables.nominal_pose from the scan.';

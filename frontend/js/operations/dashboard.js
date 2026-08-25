@@ -182,7 +182,7 @@ function ensureBackendsShell() {
         <label class="empty" for="ops-backend-select" style="display:block;margin-bottom:6px">
             Monitor backend
         </label>
-        <select id="ops-backend-select" style="width:100%;margin-bottom:12px;background:#13151a;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font-size:13px"></select>
+        <select id="ops-backend-select" style="width:100%;margin-bottom:12px;background:#13151a;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font-size: var(--text-base)"></select>
         <div id="ops-backend-detail"></div>
         <p class="empty" style="margin-top:12px">
             Twin + jobs below follow this selection. Unavailable backends are listed but not selectable.

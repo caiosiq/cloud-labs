@@ -14,7 +14,7 @@ export function renderMoveMotorJog(ctx) {
 
     const { section, body } = primitiveRegion('MOVE_MOTOR', 'MOVE MOTOR (relative jog)');
     const hint = document.createElement('p');
-    hint.style.fontSize = '10px';
+    hint.style.fontSize = 'var(--text-xs)';
     hint.style.color = '#94a3b8';
     hint.style.margin = '0 0 4px 0';
     hint.textContent = `Relative jog in ±${step}° steps; updates nominal_motor_positions to match.`;
@@ -29,7 +29,7 @@ export function renderMoveMotorJog(ctx) {
 
         const label = document.createElement('span');
         label.textContent = `M${mid}`;
-        label.style.fontSize = '11px';
+        label.style.fontSize = 'var(--text-sm)';
         label.style.minWidth = '28px';
 
         const bRev = secondaryButton('', 'remove');

@@ -3,7 +3,7 @@
  *
  * When `store.control.viewingCommitId` differs from the applied node, the UI shows:
  *   - orange frame + shield on the optical table (no canvas interaction)
- *   - compact badge beside the canvas with commit id + Set as reference / Apply / Return
+ *   - compact badge overlay on the canvas (top-left) with commit id + Set as reference / Apply / Return
  *
  * During "Apply on bench", the badge switches to a live step list while the
  * orange preview chrome stays up until every step finishes.

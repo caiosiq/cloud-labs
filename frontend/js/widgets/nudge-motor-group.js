@@ -25,7 +25,7 @@ export default function NudgeMotorGroup({ tagId, fieldName, descriptor, comp, ho
         const el = document.createElement('div');
         el.style.fontStyle = 'italic';
         el.style.color = '#475569';
-        el.style.fontSize = '11px';
+        el.style.fontSize = 'var(--text-sm)';
         el.textContent = '\u2014 no motor_ids declared in catalog';
         card.appendChild(el);
         return card;
@@ -41,14 +41,14 @@ export default function NudgeMotorGroup({ tagId, fieldName, descriptor, comp, ho
 
         const label = document.createElement('span');
         label.style.color = '#64748b';
-        label.style.fontSize = '10px';
+        label.style.fontSize = 'var(--text-xs)';
         label.textContent = `M${mid}`;
         r.appendChild(label);
 
         const minus = document.createElement('button');
         minus.type = 'button';
         minus.className = 'btn btn-secondary';
-        minus.style.fontSize = '10px';
+        minus.style.fontSize = 'var(--text-xs)';
         minus.style.padding = '2px 6px';
         minus.title = `MOVE_MOTOR ${tagId} motor=${mid} \u0394=-${step}\u00b0`;
         minus.textContent = `\u2212${step}\u00b0`;
@@ -60,7 +60,7 @@ export default function NudgeMotorGroup({ tagId, fieldName, descriptor, comp, ho
         const plus = document.createElement('button');
         plus.type = 'button';
         plus.className = 'btn btn-secondary';
-        plus.style.fontSize = '10px';
+        plus.style.fontSize = 'var(--text-xs)';
         plus.style.padding = '2px 6px';
         plus.title = `MOVE_MOTOR ${tagId} motor=${mid} \u0394=+${step}\u00b0`;
         plus.textContent = `+${step}\u00b0`;

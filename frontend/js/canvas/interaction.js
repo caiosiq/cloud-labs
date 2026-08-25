@@ -42,6 +42,7 @@ import {
     isStoredComponent,
     shouldRenderOnCanvas,
 } from '../component-model.js';
+import { getViewPrefs } from '../ui/view-prefs.js';
 import { isTeleopActive, isTeleopReady } from '../component-state.js';
 import { isPlacedRegion, labXyToStorageSlot, occupiedStorageSlots, regionMoveBlocked } from '../storage-region.js';
 import {
@@ -283,6 +284,7 @@ function getComponentAtPosition(canvasX, canvasY) {
     for (const [name, pose] of Object.entries(store.ghostState)) {
         const physical = store.labState?.components?.[name];
         if (!physical || !shouldRenderOnCanvas(name, physical)) continue;
+        if (getViewPrefs().hideStorage && isStoredComponent(physical)) continue;
         const p = mmToPx(pose.x, pose.y);
         const dx = canvasX - p.x;
         const dy = canvasY - p.y;

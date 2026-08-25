@@ -29,7 +29,7 @@ export function renderRecordMeasurables(ctx) {
     const { tagId } = ctx;
     const { section, body } = primitiveRegion('RECORD_MEASURABLES', 'RECORD MEASURABLES');
     const status = document.createElement('span');
-    status.style.fontSize = '10px';
+    status.style.fontSize = 'var(--text-xs)';
     status.style.color = '#94a3b8';
 
     const btn = runButton('Capture measurables', 'photo_camera');

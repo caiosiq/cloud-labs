@@ -29,16 +29,16 @@ function paintPose(card, tagId, descriptor) {
         return;
     }
 
-    body.appendChild(row('x (mm)', fmtNum(pose.x, 1)));
-    body.appendChild(row('y (mm)', fmtNum(pose.y, 1)));
-    body.appendChild(row('rotation (°)', fmtNum(pose.rotation || 0, 1)));
+    body.appendChild(row('x (mm)', fmtNum(pose.x, 2)));
+    body.appendChild(row('y (mm)', fmtNum(pose.y, 2)));
+    body.appendChild(row('rotation (°)', fmtNum(pose.rotation || 0, 2)));
     if (Number.isFinite(Number(pose.z))) {
         body.appendChild(row('z (mm)', fmtNum(pose.z, 1)));
     }
 
     const meta = document.createElement('div');
     meta.style.color = '#475569';
-    meta.style.fontSize = '9px';
+    meta.style.fontSize = 'var(--text-xs)';
     meta.style.marginTop = '4px';
     meta.style.fontFamily = 'ui-monospace, monospace';
     const transport = String(descriptor && descriptor.transport || '').toLowerCase();

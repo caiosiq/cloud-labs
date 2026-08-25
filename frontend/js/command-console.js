@@ -110,6 +110,7 @@ export function initCommandConsole(deps) {
         if (chevron) {
             chevron.textContent = on ? 'keyboard_arrow_down' : 'keyboard_arrow_up';
         }
+        window.dispatchEvent(new Event('cloudlabs:layout'));
         if (on) {
             input.focus();
             requestAnimationFrame(refreshHint);

@@ -1512,7 +1512,7 @@ async function onStartFromCatalogPin() {
 
     let html =
         '<h3 style="margin:0 0 6px 0;color:#e2e8f0;font-size:16px;">Start from snapshot pin</h3>' +
-        '<p style="margin:0 0 14px 0;color:#94a3b8;font-size:12px;line-height:1.45;">' +
+        '<p style="margin:0 0 14px 0;color:#94a3b8;font-size: var(--text-sm);line-height:1.45;">' +
         'Frozen approved snapshots — not live local branches. Selecting a pin opens a ' +
         'read-only preview of that commit (same as viewing a graph node).</p>' +
         '<div style="display:flex;flex-direction:column;gap:8px;">';
@@ -1525,8 +1525,8 @@ async function onStartFromCatalogPin() {
         html +=
             `<button type="button" class="btn btn-secondary catalog-pin-pick" data-pin="${id}" ` +
             `style="width:100%;justify-content:flex-start;text-align:left;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;">` +
-            `<span><span style="color:#93c5fd;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;margin-right:6px;">Snapshot pin</span>${name}</span>` +
-            `<span style="opacity:0.65;font-size:11px;font-family:ui-monospace,monospace;">${id} · ${origin} · ${commit}</span>` +
+            `<span><span style="color:#93c5fd;font-size: var(--text-xs);font-weight:700;letter-spacing:0.04em;text-transform:uppercase;margin-right:6px;">Snapshot pin</span>${name}</span>` +
+            `<span style="opacity:0.65;font-size: var(--text-sm);font-family:ui-monospace,monospace;">${id} · ${origin} · ${commit}</span>` +
             `</button>`;
     }
     html +=

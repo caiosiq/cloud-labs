@@ -1,6 +1,12 @@
 /** Canvas and lab geometry (mm ↔ px mapping). Values are set from GET /api/lab-layout at boot. */
-export const CANVAS_WIDTH = 1000;
-export const CANVAS_HEIGHT = 700;
+
+/** Nominal design size; mutable so Twin can fit the viewport while keeping aspect. */
+export let CANVAS_WIDTH = 1000;
+export let CANVAS_HEIGHT = 1000;
+
+/** Locked aspect for fit-to-viewport (square — matches square lab_bounds_mm, no in-canvas letterboxing). */
+export const CANVAS_ASPECT_W = 1000;
+export const CANVAS_ASPECT_H = 1000;
 
 export let LAB_X_MIN = -500;
 export let LAB_X_MAX = 500;
@@ -72,6 +78,25 @@ function recomputeDerived() {
     LAB_HEIGHT_MM = LAB_Y_MAX - LAB_Y_MIN;
     LAB_SCALE = Math.min(CANVAS_WIDTH / LAB_WIDTH_MM, CANVAS_HEIGHT / LAB_HEIGHT_MM);
     LAB_CENTER_PX = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
+}
+
+/**
+ * Resize the drawable canvas while preserving lab mm mapping.
+ * @param {number} w
+ * @param {number} h
+ * @returns {boolean} true if size changed
+ */
+export function setCanvasPixelSize(w, h) {
+    const aspect = CANVAS_ASPECT_W / CANVAS_ASPECT_H;
+    const minW = 320;
+    const minH = Math.max(224, Math.round(minW / aspect));
+    const nw = Math.max(minW, Math.round(Number(w) || CANVAS_ASPECT_W));
+    const nh = Math.max(minH, Math.round(Number(h) || CANVAS_ASPECT_H));
+    if (nw === CANVAS_WIDTH && nh === CANVAS_HEIGHT) return false;
+    CANVAS_WIDTH = nw;
+    CANVAS_HEIGHT = nh;
+    recomputeDerived();
+    return true;
 }
 
 /**
@@ -147,9 +172,6 @@ export function applyLabLayoutFromApiDoc(payload) {
     let srxx = 0;
     let sry = LAB_Y_MIN;
     let sryy = 0;
-    // Prefer edge ``storage.bounds_mm`` (SoT on the layout document). Then
-    // legacy ``extent_from_origin_mm``. Fall back to enriched ``storage_grid.q3``
-    // (must match the active backend — BackendSession rebinds before lab-layout).
     const st = payload.storage;
     const bounds = st && typeof st === 'object' ? st.bounds_mm : null;
     const extent = st && typeof st === 'object' ? st.extent_from_origin_mm : null;

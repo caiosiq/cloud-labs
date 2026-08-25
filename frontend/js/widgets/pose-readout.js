@@ -18,9 +18,9 @@ export default function PoseReadout({ fieldName, descriptor, value }) {
         return card;
     }
 
-    card.appendChild(row('x (mm)', fmtNum(pose.x, 1)));
-    card.appendChild(row('y (mm)', fmtNum(pose.y, 1)));
-    card.appendChild(row('rotation (°)', fmtNum(pose.rotation || 0, 1)));
+    card.appendChild(row('x (mm)', fmtNum(pose.x, 2)));
+    card.appendChild(row('y (mm)', fmtNum(pose.y, 2)));
+    card.appendChild(row('rotation (°)', fmtNum(pose.rotation || 0, 2)));
     if (Number.isFinite(Number(pose.z))) {
         card.appendChild(row('z (mm)', fmtNum(pose.z, 1)));
     }

@@ -19,7 +19,7 @@ export default function JsonInspector({ fieldName, descriptor, value }) {
     pre.style.margin = '0';
     pre.style.color = '#cbd5e1';
     pre.style.fontFamily = 'ui-monospace, monospace';
-    pre.style.fontSize = '10px';
+    pre.style.fontSize = 'var(--text-xs)';
     pre.style.whiteSpace = 'pre-wrap';
     pre.style.wordBreak = 'break-word';
     try {

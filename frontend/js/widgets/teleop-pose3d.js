@@ -136,7 +136,7 @@ export default function TeleopPose3d({
 
         toggle.className = 'btn btn-secondary';
 
-        toggle.style.fontSize = '10px';
+        toggle.style.fontSize = 'var(--text-xs)';
 
         toggle.style.padding = '3px 10px';
 
@@ -305,7 +305,7 @@ export default function TeleopPose3d({
 
     const canvasHint = document.createElement('div');
 
-    canvasHint.style.fontSize = '9px';
+    canvasHint.style.fontSize = 'var(--text-xs)';
 
     canvasHint.style.color = '#475569';
 

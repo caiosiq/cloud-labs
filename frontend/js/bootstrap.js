@@ -47,7 +47,7 @@ function showGate(backends) {
                 const repos = (b.control_repos || []).join(', ') || 'no local repos yet';
                 const detail = b.unavailable_reason || b.init_error || '';
                 const reason = detail
-                    ? `<p style="margin:8px 0 0;font-size:12px;color:#fca5a5;line-height:1.4">${escapeHtml(detail)}</p>`
+                    ? `<p style="margin:8px 0 0;font-size: var(--text-sm);color:#fca5a5;line-height:1.4">${escapeHtml(detail)}</p>`
                     : '';
                 return `
                 <button type="button"
@@ -61,11 +61,11 @@ function showGate(backends) {
                     ">
                     <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
                         <strong style="font-size:16px">${escapeHtml(b.label || b.backend_id)}</strong>
-                        <span style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:${ready ? '#67e8f9' : '#94a3b8'}">${escapeHtml(b.availability)}</span>
+                        <span style="font-size: var(--text-sm);letter-spacing:0.04em;text-transform:uppercase;color:${ready ? '#67e8f9' : '#94a3b8'}">${escapeHtml(b.availability)}</span>
                     </div>
-                    <code style="display:block;margin-top:6px;font-size:12px;color:#94a3b8">${escapeHtml(b.backend_id)}</code>
-                    <p style="margin:10px 0 0;font-size:13px;color:#cbd5e1;line-height:1.45">${escapeHtml(busy)}</p>
-                    <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">Repos: ${escapeHtml(repos)}</p>
+                    <code style="display:block;margin-top:6px;font-size: var(--text-sm);color:#94a3b8">${escapeHtml(b.backend_id)}</code>
+                    <p style="margin:10px 0 0;font-size: var(--text-base);color:#cbd5e1;line-height:1.45">${escapeHtml(busy)}</p>
+                    <p style="margin:6px 0 0;font-size: var(--text-sm);color:#94a3b8">Repos: ${escapeHtml(repos)}</p>
                     ${reason}
                 </button>`;
             })
@@ -73,9 +73,9 @@ function showGate(backends) {
 
         overlay.innerHTML = `
             <div style="width:min(480px,100%)">
-                <p style="margin:0 0 6px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#67e8f9">Cloud Labs</p>
+                <p style="margin:0 0 6px;font-size: var(--text-sm);letter-spacing:0.08em;text-transform:uppercase;color:#67e8f9">Cloud Labs</p>
                 <h1 style="margin:0 0 8px;font-size:28px;font-weight:650;letter-spacing:-0.02em">Choose a lab backend</h1>
-                <p style="margin:0 0 22px;font-size:14px;line-height:1.5;color:#94a3b8">
+                <p style="margin:0 0 22px;font-size: var(--text-base);line-height:1.5;color:#94a3b8">
                     Select which communicator and control tree you want to use.
                     The twin UI will not load until you pick an available backend.
                 </p>

@@ -253,7 +253,7 @@ export function renderPrimitiveRegions(tagId, allowList, ctx) {
         const empty = document.createElement('div');
         empty.style.fontStyle = 'italic';
         empty.style.color = '#475569';
-        empty.style.fontSize = '10px';
+        empty.style.fontSize = 'var(--text-xs)';
         empty.textContent = '\u2014 no primitive actions for this component';
         root.appendChild(empty);
     }

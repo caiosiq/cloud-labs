@@ -1,0 +1,444 @@
+/**
+ * Twin shell v2 — fluid sidebars, bottom chrome, fitted canvas, readable type.
+ * Loaded after tokens.css; Twin index.html keeps legacy rules but these win
+ * for layout + type floors via higher specificity / later cascade.
+ */
+
+body.cl-app.twin-v2 {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    background: var(--bg-dark);
+    color: var(--text-primary);
+}
+
+body.cl-app.twin-v2 .app-shell {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+/* --- Sidebars --- */
+body.cl-app.twin-v2 #sidebar {
+    width: var(--sidebar-left-w);
+    min-width: 0;
+    max-width: var(--sidebar-left-w);
+    flex: 0 0 var(--sidebar-left-w);
+    transition: flex-basis 0.2s ease, width 0.2s ease, opacity 0.15s ease;
+}
+
+body.cl-app.twin-v2 #sidebar-right {
+    width: var(--sidebar-right-w);
+    min-width: 0;
+    max-width: var(--sidebar-right-w);
+    flex: 0 0 var(--sidebar-right-w);
+    transition: flex-basis 0.2s ease, width 0.2s ease, opacity 0.15s ease;
+}
+
+body.cl-app.twin-v2 #sidebar-right-scroll {
+    overflow-y: auto;
+}
+
+body.cl-app.twin-v2.app-shell-left-collapsed #sidebar,
+body.cl-app.twin-v2 .app-shell.left-collapsed #sidebar {
+    flex-basis: 0;
+    width: 0;
+    min-width: 0;
+    opacity: 0;
+    border-right-width: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+body.cl-app.twin-v2.app-shell-right-collapsed #sidebar-right,
+body.cl-app.twin-v2 .app-shell.right-collapsed #sidebar-right {
+    flex-basis: 0;
+    width: 0;
+    min-width: 0;
+    opacity: 0;
+    border-left-width: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+/* Collapse toggles */
+.sidebar-collapse-toggle {
+    position: absolute;
+    z-index: 25;
+    top: 50%;
+    transform: translateY(-50%);
+    width: var(--sidebar-rail-w);
+    height: 56px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    background: var(--bg-panel);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.sidebar-collapse-toggle:hover {
+    color: var(--text-primary);
+    border-color: var(--primary-accent);
+    background: var(--bg-panel-hover);
+}
+
+.sidebar-collapse-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.sidebar-collapse-toggle .material-icons-round {
+    font-size: 20px;
+}
+
+.sidebar-collapse-toggle--left {
+    left: 0;
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    border-left: 0;
+}
+
+.sidebar-collapse-toggle--right {
+    right: 0;
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+    border-right: 0;
+}
+
+body.cl-app.twin-v2 .app-shell:not(.left-collapsed) .sidebar-collapse-toggle--left {
+    left: calc(var(--sidebar-left-w) - 1px);
+}
+
+body.cl-app.twin-v2 .app-shell:not(.right-collapsed) .sidebar-collapse-toggle--right {
+    right: calc(var(--sidebar-right-w) - 1px);
+}
+
+body.cl-app.twin-v2 .app-shell.left-collapsed .sidebar-collapse-toggle--left {
+    left: 0;
+}
+
+body.cl-app.twin-v2 .app-shell.right-collapsed .sidebar-collapse-toggle--right {
+    right: 0;
+}
+
+/* Main canvas column */
+body.cl-app.twin-v2 #main-content {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Stage fills remaining height; bitmap size set by fit-canvas.js */
+body.cl-app.twin-v2 #canvas-stage {
+    align-self: stretch;
+    width: 100%;
+    max-width: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0 2px 2px;
+    box-sizing: border-box;
+}
+
+body.cl-app.twin-v2 #canvas-stage .canvas-stage__row {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    width: 100%;
+}
+
+body.cl-app.twin-v2 #canvas-wrapper {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    width: auto;
+    max-width: 100%;
+    margin: 2px auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+body.cl-app.twin-v2 #optical-table {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+/* --- Full-width bottom chrome (under sidebars) --- */
+body.cl-app.twin-v2 .twin-bottom-chrome {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 0;
+    width: 100%;
+    min-height: var(--bottom-chrome-toggle-h);
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-panel);
+    z-index: 30;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+}
+
+body.cl-app.twin-v2 .twin-bottom-chrome__views {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    min-height: var(--bottom-chrome-toggle-h);
+    border-right: 1px solid var(--border-color);
+    background: var(--bg-panel);
+}
+
+body.cl-app.twin-v2 .twin-bottom-chrome__views-label {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 4px;
+}
+
+body.cl-app.twin-v2 .twin-view-toggle {
+    appearance: none;
+    border: 1px solid var(--border-color);
+    background: var(--bg-dark);
+    color: var(--text-secondary);
+    font-family: var(--font-ui);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    line-height: 1.2;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+body.cl-app.twin-v2 .twin-view-toggle:hover {
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
+
+body.cl-app.twin-v2 .twin-view-toggle.is-active,
+body.cl-app.twin-v2 .twin-view-toggle[aria-pressed="true"] {
+    color: var(--text-primary);
+    border-color: var(--primary-accent);
+    background: rgba(59, 130, 246, 0.15);
+}
+
+body.cl-app.twin-v2 .command-console {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    font-family: var(--font-ui);
+    font-size: var(--text-sm);
+    border-top: none;
+    background: var(--bg-panel);
+    box-shadow: none;
+}
+
+body.cl-app.twin-v2 .command-console__toggle {
+    width: 100%;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: var(--bottom-chrome-toggle-h);
+    padding: 8px 12px;
+    background: var(--bg-panel-hover);
+    border: none;
+    border-top: 1px solid transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    text-align: left;
+    font-family: var(--font-ui);
+}
+
+body.cl-app.twin-v2 .command-console__toggle:hover {
+    background: var(--border-color);
+}
+
+body.cl-app.twin-v2 .command-console--expanded .command-console__toggle {
+    border-top-color: var(--border-color);
+}
+
+body.cl-app.twin-v2 .command-console__panel {
+    display: none;
+    flex-direction: column;
+    max-height: 220px;
+    order: -1; /* expand upward above the toggle */
+}
+
+body.cl-app.twin-v2 .command-console--expanded .command-console__panel {
+    display: flex;
+}
+
+body.cl-app.twin-v2 .command-console__output {
+    flex: 1;
+    min-height: 100px;
+    max-height: 160px;
+    overflow-y: auto;
+    overflow-x: auto;
+    padding: 8px 12px;
+    background: #0f1115;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+body.cl-app.twin-v2 .command-console__line {
+    margin-bottom: 4px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+body.cl-app.twin-v2 .command-console__line--info { color: var(--text-secondary); }
+body.cl-app.twin-v2 .command-console__line--cmd { color: var(--primary-accent); }
+body.cl-app.twin-v2 .command-console__line--warn { color: var(--status-warning); }
+body.cl-app.twin-v2 .command-console__line--error { color: var(--status-error); }
+
+body.cl-app.twin-v2 .command-console__input {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    padding: 8px 12px;
+    background: #0f1115;
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    font-family: var(--font-mono);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+body.cl-app.twin-v2 .command-console__input::placeholder {
+    color: var(--text-muted);
+}
+
+body.cl-app.twin-v2 .command-console__input:focus {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--primary-accent);
+}
+
+body.cl-app.twin-v2 .command-console__hint {
+    border-top: 1px solid var(--border-color);
+    padding: 4px 12px 6px;
+    min-height: 1.25em;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    background: rgba(0, 0, 0, 0.25);
+    font-family: var(--font-mono);
+}
+
+body.cl-app.twin-v2 .command-console__hint:empty {
+    display: none;
+}
+
+/* Compact chrome — hide Bench|Lines and command queue so canvas / live feeds get height */
+body.cl-app.twin-v2.twin-compact-chrome #bench-header,
+body.cl-app.twin-v2.twin-compact-chrome #main-top-chrome {
+    display: none !important;
+}
+
+/* Live feed bar stays visible under compact chrome (moved outside #bench-header) */
+
+/* Workspace tabs — readable */
+body.cl-app.twin-v2 .workspace-tab {
+    font-size: var(--text-xs);
+    padding: 10px 8px 9px;
+    letter-spacing: 0.01em;
+}
+
+body.cl-app.twin-v2 .workspace-tab-list {
+    padding: 10px 10px 0;
+    gap: 4px;
+}
+
+/* Type floor overrides for legacy Twin rules */
+body.cl-app.twin-v2 .comp-meta,
+body.cl-app.twin-v2 .workspace-tab,
+body.cl-app.twin-v2 #layout-warnings,
+body.cl-app.twin-v2 #session-lease-banner {
+    font-size: var(--text-xs) !important;
+    line-height: var(--line-tight);
+}
+
+body.cl-app.twin-v2 .app-top-nav__brand {
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+}
+
+body.cl-app.twin-v2 .app-top-nav nav a {
+    font-size: var(--text-md);
+}
+
+/* Bench chrome */
+body.cl-app.twin-v2 #bench-header,
+body.cl-app.twin-v2 .bench-chrome-bar {
+    font-size: var(--text-sm);
+}
+
+body.cl-app.twin-v2 .bench-chrome-bar__btn {
+    min-height: var(--control-min-h);
+    font-size: var(--text-md);
+    padding: 6px 12px;
+}
+
+body.cl-app.twin-v2 .bench-chrome-bar__label,
+body.cl-app.twin-v2 .bench-tools-strip__label {
+    font-size: var(--text-sm);
+}
+
+body.cl-app.twin-v2 .bench-chrome-bar__name {
+    font-size: var(--text-md);
+}
+
+/* Selected-part / dock labels */
+body.cl-app.twin-v2 .selected-part-dock,
+body.cl-app.twin-v2 .panel-eyebrow,
+body.cl-app.twin-v2 .uc-section-title {
+    font-size: var(--text-xs);
+}
+
+/* Narrow viewports: wrap bottom chrome; sidebars stay fixed width until user collapses them. */
+@media (max-width: 1100px) {
+    body.cl-app.twin-v2 .workspace-tab {
+        font-size: var(--text-xs);
+        padding-left: 4px;
+        padding-right: 4px;
+    }
+
+    body.cl-app.twin-v2 .twin-bottom-chrome {
+        flex-wrap: wrap;
+    }
+
+    body.cl-app.twin-v2 .twin-bottom-chrome__views {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+        flex-wrap: wrap;
+    }
+}

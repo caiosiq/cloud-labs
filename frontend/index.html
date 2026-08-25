@@ -10,7 +10,11 @@
     <!-- Google Fonts for Modern Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,500;0,8..60,600;0,8..60,700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/twin-shell.css">
+    <link rel="stylesheet" href="/static/css/tokens-v3.css">
+    <link rel="stylesheet" href="/static/css/twin-shell-v3.css">
     
     <!-- Material Icons -->
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
@@ -44,7 +48,7 @@
         * { box-sizing: border-box; }
 
         body {
-            font-family: 'Inter', sans-serif;
+            font-family: var(--font-ui);
             margin: 0;
             padding: 0;
             background-color: var(--bg-dark);
@@ -53,7 +57,7 @@
             flex-direction: column;
             height: 100vh;
             overflow: hidden;
-            font-size: 14px;
+            font-size: var(--text-base);
         }
 
         .app-top-nav {
@@ -71,9 +75,10 @@
         .app-top-nav__brand {
             color: var(--text-primary);
             text-decoration: none;
-            font-size: 16px;
+            font-family: var(--font-display);
+            font-size: var(--text-xl);
             font-weight: 600;
-            letter-spacing: -0.02em;
+            letter-spacing: -0.01em;
         }
 
         .app-top-nav__brand:hover {
@@ -84,7 +89,7 @@
             color: var(--text-secondary);
             text-decoration: none;
             margin-left: 16px;
-            font-size: 13px;
+            font-size: var(--text-md);
         }
 
         .app-top-nav nav a:hover,
@@ -110,8 +115,8 @@
 
         /* --- Sidebar (Left) --- */
         #sidebar {
-            width: 260px;
-            min-width: 240px;
+            width: var(--sidebar-left-w);
+            min-width: 0;
             height: auto;
             align-self: stretch;
             min-height: 0;
@@ -126,7 +131,7 @@
 
         /* --- Sidebar (Right) --- */
         #sidebar-right {
-            width: 320px;
+            width: var(--sidebar-right-w);
             height: auto;
             align-self: stretch;
             min-height: 0;
@@ -145,7 +150,7 @@
         #sidebar-right-scroll {
             flex: 1;
             min-height: 0;
-            overflow-y: hidden;
+            overflow-y: auto;
             overflow-x: hidden;
             display: flex;
             flex-direction: column;
@@ -171,13 +176,13 @@
         .workspace-tab {
             min-width: 0;
             flex: 1 1 0;
-            padding: 9px 6px 8px;
+            padding: 10px 8px 9px;
             border: 0;
             border-bottom: 2px solid transparent;
             background: transparent;
             color: var(--text-muted);
             font: inherit;
-            font-size: 10px;
+            font-size: var(--text-xs);
             font-weight: 600;
             cursor: pointer;
             white-space: nowrap;
@@ -242,7 +247,7 @@
         }
 
         .session-notes__title {
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 600;
             color: #94a3b8;
             text-transform: uppercase;
@@ -250,13 +255,13 @@
         }
 
         .session-notes__status {
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: #64748b;
         }
 
         .session-notes__hint {
             margin: 0;
-            font-size: 10px;
+            font-size: var(--text-xs);
             line-height: 1.35;
             color: #64748b;
             flex: 0 0 auto;
@@ -271,7 +276,7 @@
 
         .session-notes__toolbar .btn {
             padding: 5px 8px;
-            font-size: 11px;
+            font-size: var(--text-sm);
         }
 
         .session-notes__editor {
@@ -286,7 +291,7 @@
             background: #0f1115;
             color: #e2e8f0;
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-            font-size: 12px;
+            font-size: var(--text-sm);
             line-height: 1.45;
         }
 
@@ -337,13 +342,13 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 600;
             color: #cbd5e1;
         }
 
         .session-notes-popout__title .material-icons-round {
-            font-size: 14px;
+            font-size: var(--text-base);
         }
 
         .session-notes-popout__actions {
@@ -356,7 +361,7 @@
             background: #1e293b;
             color: #e2e8f0;
             border-radius: 4px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             padding: 3px 7px;
             cursor: pointer;
         }
@@ -378,7 +383,7 @@
             background: transparent;
             color: #e2e8f0;
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-            font-size: 12px;
+            font-size: var(--text-sm);
             line-height: 1.45;
         }
 
@@ -389,7 +394,7 @@
         .session-notes-popout__footer {
             flex: 0 0 auto;
             padding: 4px 8px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: #64748b;
             border-top: 1px solid #1e293b;
         }
@@ -444,7 +449,7 @@
 
         .logo-text {
             font-weight: 600;
-            font-size: 16px;
+            font-size: var(--text-lg);
             letter-spacing: -0.5px;
             white-space: nowrap;
         }
@@ -470,7 +475,7 @@
             border-radius: 5px;
             background: #11141a;
             color: var(--text-primary);
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 600;
             cursor: pointer;
         }
@@ -486,7 +491,7 @@
         }
 
         .runtime-mode-refresh-btn .material-icons-round {
-            font-size: 15px;
+            font-size: var(--text-lg);
         }
 
         .runtime-mode-status {
@@ -522,7 +527,7 @@
         .backend-session-id {
             flex: 1 1 auto;
             min-width: 0;
-            font-size: 11px;
+            font-size: var(--text-sm);
             color: var(--text-muted);
             white-space: nowrap;
             overflow: hidden;
@@ -536,7 +541,7 @@
             border-radius: 5px;
             background: transparent;
             color: var(--text-muted);
-            font-size: 10px;
+            font-size: var(--text-xs);
             cursor: pointer;
         }
 
@@ -552,7 +557,7 @@
         }
 
         .control-panel-head {
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: var(--text-muted);
             margin: 8px 0 6px;
             letter-spacing: 0.04em;
@@ -566,7 +571,7 @@
             border-radius: 5px;
             background: #11141a;
             color: var(--text-primary);
-            font-size: 11px;
+            font-size: var(--text-sm);
             margin-bottom: 8px;
         }
 
@@ -581,7 +586,7 @@
         }
 
         .control-timeline-empty {
-            font-size: 11px;
+            font-size: var(--text-sm);
             color: var(--text-muted);
             line-height: 1.4;
             padding: 8px 4px;
@@ -618,27 +623,32 @@
         }
 
         .control-timeline-node-title {
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 500;
             line-height: 1.3;
             margin-bottom: 2px;
         }
 
         .control-timeline-node-meta {
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: var(--text-muted);
         }
 
         .canvas-stage {
-            align-self: center;
-            width: min(1000px, calc(100% - 24px));
+            align-self: stretch;
+            width: 100%;
             max-width: 100%;
-            flex-shrink: 0;
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
         }
 
         .canvas-stage__row {
             position: relative;
             width: 100%;
+            flex: 1 1 auto;
+            min-height: 0;
         }
 
         .canvas-stage.is-config-view #bench-tools-strip {
@@ -674,19 +684,21 @@
 
         .config-view-badge {
             position: absolute;
-            top: 8px;
-            left: calc(100% + 10px);
+            top: 12px;
+            left: 12px;
+            z-index: 5;
             width: max-content;
-            max-width: 240px;
+            max-width: min(240px, calc(100% - 24px));
             min-width: 168px;
             padding: 8px 10px;
             border-radius: 8px;
             border: 1px solid rgba(245, 158, 11, 0.45);
             background: rgba(15, 18, 24, 0.94);
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-            font-size: 10px;
+            font-size: var(--text-xs);
             line-height: 1.35;
             color: #fcd34d;
+            pointer-events: auto;
         }
 
         .config-view-badge.is-applying {
@@ -699,7 +711,7 @@
 
         .config-view-badge__label {
             display: block;
-            font-size: 9px;
+            font-size: var(--text-xs);
             font-weight: 700;
             letter-spacing: 0.06em;
             text-transform: uppercase;
@@ -710,7 +722,7 @@
         .config-view-badge__id {
             display: block;
             font-family: ui-monospace, monospace;
-            font-size: 11px;
+            font-size: var(--text-sm);
             color: #fde68a;
             margin-bottom: 8px;
             word-break: break-all;
@@ -726,7 +738,7 @@
             width: 100%;
             margin: 0;
             padding: 4px 8px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             border-radius: 4px;
             border: 1px solid rgba(245, 158, 11, 0.4);
             background: transparent;
@@ -747,7 +759,7 @@
         .config-view-reconcile__progress {
             display: block;
             margin: 6px 0 4px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             font-weight: 600;
             color: #93c5fd;
         }
@@ -765,7 +777,7 @@
             align-items: flex-start;
             gap: 6px;
             padding: 3px 0;
-            font-size: 10px;
+            font-size: var(--text-xs);
             line-height: 1.35;
             color: #64748b;
         }
@@ -787,7 +799,7 @@
             flex-shrink: 0;
             width: 14px;
             text-align: center;
-            font-size: 9px;
+            font-size: var(--text-xs);
             line-height: 1.5;
         }
 
@@ -795,20 +807,34 @@
             word-break: break-word;
         }
 
-        /* Command Matrix — per-thread queues (VC-style step lists) */
+        /* Command Matrix — top strip in main column (was left-of-canvas; that sat under the sidebar) */
+        .main-top-chrome {
+            flex-shrink: 0;
+            width: 100%;
+            max-width: 100%;
+            margin: 8px 12px 0;
+            box-sizing: border-box;
+            align-self: stretch;
+        }
+
+        .main-top-chrome:has(#command-matrix-panel[hidden]) {
+            display: none;
+        }
+
         .command-matrix-panel {
-            position: absolute;
-            top: 8px;
-            right: calc(100% + 10px);
-            width: max-content;
-            max-width: min(420px, 46vw);
-            min-width: 168px;
+            position: relative;
+            top: auto;
+            right: auto;
+            left: auto;
+            width: 100%;
+            max-width: none;
+            min-width: 0;
             padding: 8px 10px;
             border-radius: 8px;
             border: 1px solid rgba(148, 163, 184, 0.35);
             background: rgba(15, 18, 24, 0.94);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-            font-size: 10px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+            font-size: var(--text-xs);
             line-height: 1.35;
             color: #cbd5e1;
             z-index: 5;
@@ -836,7 +862,7 @@
         }
 
         .command-matrix-panel__title {
-            font-size: 9px;
+            font-size: var(--text-xs);
             font-weight: 700;
             letter-spacing: 0.06em;
             text-transform: uppercase;
@@ -844,7 +870,7 @@
         }
 
         .command-matrix-panel__meta {
-            font-size: 9px;
+            font-size: var(--text-xs);
             color: #64748b;
             margin-left: auto;
         }
@@ -852,7 +878,7 @@
         .command-matrix-panel__clear {
             margin: 0;
             padding: 2px 6px;
-            font-size: 9px;
+            font-size: var(--text-xs);
             line-height: 1.2;
             border-radius: 4px;
             border: 1px solid rgba(148, 163, 184, 0.35);
@@ -874,7 +900,7 @@
         .command-matrix-panel__empty {
             margin: 0;
             color: #64748b;
-            font-size: 10px;
+            font-size: var(--text-xs);
         }
 
         .command-matrix-panel__grid {
@@ -900,7 +926,7 @@
         }
 
         .command-matrix-panel__col-head {
-            font-size: 9px;
+            font-size: var(--text-xs);
             font-weight: 700;
             letter-spacing: 0.04em;
             text-transform: uppercase;
@@ -939,7 +965,7 @@
             align-items: flex-start;
             gap: 6px;
             padding: 3px 0;
-            font-size: 10px;
+            font-size: var(--text-xs);
             line-height: 1.35;
             color: #64748b;
         }
@@ -984,7 +1010,7 @@
             flex-shrink: 0;
             width: 14px;
             text-align: center;
-            font-size: 9px;
+            font-size: var(--text-xs);
             line-height: 1.5;
         }
 
@@ -994,33 +1020,20 @@
 
         @media (max-width: 1280px) {
             .command-matrix-panel {
-                right: auto;
-                left: 0;
-                top: auto;
-                bottom: calc(100% + 8px);
-                max-width: min(520px, 92vw);
-            }
-        }
-
-        @media (max-width: 1120px) {
-            .config-view-badge {
-                left: auto;
-                right: 0;
-                top: -2px;
-                transform: translateY(-100%);
+                max-width: none;
             }
         }
 
         .btn-control {
             margin-top: 6px;
-            font-size: 11px;
+            font-size: var(--text-sm);
             padding: 7px 8px;
         }
 
         .control-plan-preview {
             margin-top: 8px;
             padding: 8px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             line-height: 1.4;
             color: var(--text-muted);
             background: rgba(15, 23, 42, 0.6);
@@ -1063,18 +1076,8 @@
         }
 
         .control-vc-status {
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            align-self: center;
-            width: min(1000px, calc(100% - 24px));
-            max-width: 100%;
-            margin: 8px auto 0;
-            padding: 6px 10px;
-            border: 1px solid rgba(148, 163, 184, 0.18);
-            border-radius: 8px;
-            background: rgba(20, 24, 32, 0.92);
+            /* Removed from Twin main column — Config lives in the right sidebar. */
+            display: none !important;
         }
 
         .control-vc-status__open {
@@ -1086,7 +1089,7 @@
             color: #cbd5e1;
             border-radius: 6px;
             padding: 5px 10px;
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 600;
             cursor: pointer;
         }
@@ -1097,7 +1100,7 @@
         }
 
         .control-vc-status__open .material-icons-round {
-            font-size: 16px;
+            font-size: var(--text-lg);
             color: #a78bfa;
         }
 
@@ -1117,7 +1120,7 @@
         }
 
         .control-vc-status__branch {
-            font-size: 11px;
+            font-size: var(--text-sm);
             color: #c4b5fd;
             background: rgba(139, 92, 246, 0.12);
             border: 1px solid rgba(139, 92, 246, 0.35);
@@ -1249,7 +1252,7 @@
             border-radius: 6px;
             background: rgba(15, 20, 28, 0.95);
             color: #f1f5f9;
-            font-size: 12px;
+            font-size: var(--text-sm);
             font-weight: 500;
             line-height: 1;
             min-width: 0;
@@ -1323,7 +1326,7 @@
         }
 
         .control-graph-head-pill__tag {
-            font-size: 10px;
+            font-size: var(--text-xs);
             font-weight: 700;
             letter-spacing: 0.08em;
             text-transform: uppercase;
@@ -1332,7 +1335,7 @@
 
         .control-graph-head-pill__id {
             font-family: 'JetBrains Mono', ui-monospace, monospace;
-            font-size: 12px;
+            font-size: var(--text-sm);
             font-weight: 500;
             color: #4ade80;
             letter-spacing: 0.02em;
@@ -1349,7 +1352,7 @@
         .control-graph-head-pill.is-uncommitted .control-graph-head-pill__id {
             color: #e2e8f0;
             font-family: inherit;
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 600;
             letter-spacing: 0;
         }
@@ -1418,7 +1421,7 @@
 
         .config-view-badge__source {
             display: block;
-            font-size: 10px;
+            font-size: var(--text-xs);
             font-weight: 600;
             color: #93c5fd;
             margin-bottom: 4px;
@@ -1485,7 +1488,7 @@
             border-radius: 6px;
             background: transparent;
             color: #94a3b8;
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 600;
             letter-spacing: 0.04em;
             text-transform: uppercase;
@@ -1509,12 +1512,12 @@
         }
 
         .control-stash-present__icon {
-            font-size: 16px;
+            font-size: var(--text-lg);
             color: #fbbf24;
         }
 
         .control-stash-present__label {
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 600;
             letter-spacing: 0.04em;
             text-transform: uppercase;
@@ -1537,7 +1540,7 @@
         }
 
         .control-stash-action .material-icons-round {
-            font-size: 16px;
+            font-size: var(--text-lg);
         }
 
         .control-stash-action:hover:not(:disabled) {
@@ -1612,7 +1615,7 @@
             margin-top: 0;
             min-height: 32px;
             padding: 0 8px;
-            font-size: 11px;
+            font-size: var(--text-sm);
             gap: 0;
             border-radius: 6px;
             box-shadow: none;
@@ -1671,7 +1674,7 @@
 
         .control-graph-empty {
             padding: 6px 2px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: #64748b;
             line-height: 1.3;
             white-space: nowrap;
@@ -1682,7 +1685,7 @@
             z-index: 30;
             max-width: 240px;
             padding: 8px 10px;
-            font-size: 11px;
+            font-size: var(--text-sm);
             line-height: 1.45;
             color: #e2e8f0;
             background: #0f172a;
@@ -1699,7 +1702,7 @@
         #control-plan-preview {
             margin: 0 8px 6px;
             padding: 6px 8px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             border-radius: 4px;
             background: rgba(15, 23, 42, 0.6);
             border: 1px solid rgba(148, 163, 184, 0.2);
@@ -1715,7 +1718,7 @@
             gap: 8px;
             margin: 0 8px 6px;
             padding: 7px 10px;
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 500;
             color: #fbbf24;
             background: rgba(245, 158, 11, 0.12);
@@ -1724,7 +1727,7 @@
         }
 
         .control-adopt-notice .material-icons-round {
-            font-size: 16px;
+            font-size: var(--text-lg);
         }
 
         .control-adopt-notice[hidden] {
@@ -1738,7 +1741,7 @@
         .section-header {
             padding: 20px 24px 10px;
             text-transform: uppercase;
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 700;
             letter-spacing: 1px;
             color: var(--text-muted);
@@ -1791,10 +1794,10 @@
 
         .comp-info { flex-grow: 1; }
         .comp-name { font-weight: 500; display: block; margin-bottom: 2px; }
-        .comp-meta { font-size: 11px; color: var(--text-muted); display: block; }
+        .comp-meta { font-size: var(--text-sm); color: var(--text-muted); display: block; }
 
         .inventory-section-label {
-            font-size: 10px;
+            font-size: var(--text-xs);
             font-weight: 600;
             letter-spacing: 0.06em;
             text-transform: uppercase;
@@ -1838,11 +1841,11 @@
         }
 
         .component-card .track-toggle-btn .material-icons-round {
-            font-size: 14px;
+            font-size: var(--text-base);
         }
 
         .inv-badge {
-            font-size: 9px;
+            font-size: var(--text-xs);
             margin-right: 4px;
             letter-spacing: 0.02em;
         }
@@ -1975,12 +1978,29 @@
         .prim-region--teleop.prim-region--session-active {
             border-left-color: #7c3aed;
         }
+        .prim-region__exposure-row {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+        .prim-region__exposure-row .coord-field {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        .prim-region__exposure-row .btn {
+            width: auto;
+            flex: 0 0 auto;
+            margin-top: 0;
+            padding: 6px 12px;
+            align-self: flex-end;
+        }
+
         .prim-region--live-feed.prim-region--session-active {
             border-left-color: #059669;
         }
 
         .prim-session-hint {
-            font-size: 10px;
+            font-size: var(--text-xs);
             font-style: italic;
             color: #64748b;
             padding: 2px 0 6px;
@@ -2016,8 +2036,46 @@
             box-shadow: 0 2px 16px rgba(0, 0, 0, 0.2);
         }
 
+        .bench-header__row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            min-width: 0;
+            align-items: stretch;
+        }
+
+        .bench-header__col {
+            min-width: 0;
+            display: flex;
+            align-items: stretch;
+        }
+
+        .bench-header__col--bench {
+            border-right: 1px solid rgba(148, 163, 184, 0.14);
+        }
+
+        .bench-header__col--bench #bench-chrome-bar {
+            border-bottom: none;
+            width: 100%;
+        }
+
+        .bench-header__col--lines #bench-tools-strip {
+            width: 100%;
+            background: transparent;
+        }
+
         .bench-header:has(#bench-chrome-bar[hidden]):has(#bench-tools-strip:empty) {
             display: none;
+        }
+
+        @media (max-width: 900px) {
+            .bench-header__row {
+                grid-template-columns: 1fr;
+            }
+            .bench-header__col--bench {
+                border-right: none;
+                border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+            }
         }
 
         #bench-chrome-bar {
@@ -2044,12 +2102,13 @@
             align-items: center;
             gap: 8px;
             padding: 6px 10px;
-            margin: 0 0 4px;
+            margin: 8px 0 0;
             border-radius: 8px;
             border: 1px solid rgba(34, 211, 238, 0.45);
             background: rgba(8, 47, 73, 0.55);
-            font-size: 11px;
+            font-size: var(--text-sm);
             color: #e0f2fe;
+            flex-shrink: 0;
         }
         .live-feed-session-bar[hidden] { display: none !important; }
         .live-feed-session-bar__label {
@@ -2059,10 +2118,10 @@
             font-weight: 700;
             letter-spacing: 0.04em;
             text-transform: uppercase;
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: #67e8f9;
         }
-        .live-feed-session-bar__label .material-icons-round { font-size: 14px; }
+        .live-feed-session-bar__label .material-icons-round { font-size: var(--text-base); }
         .live-feed-session-bar__chip {
             display: inline-flex;
             align-items: center;
@@ -2073,7 +2132,7 @@
             background: rgba(15, 23, 42, 0.55);
         }
         .live-feed-session-bar__chip code {
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: #a5f3fc;
         }
         .live-feed-session-bar__chip button {
@@ -2082,7 +2141,7 @@
             color: #ecfeff;
             border-radius: 4px;
             padding: 2px 6px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             cursor: pointer;
             font-family: inherit;
         }
@@ -2091,7 +2150,7 @@
         }
         .live-feed-session-bar__note {
             color: #94a3b8;
-            font-size: 10px;
+            font-size: var(--text-xs);
         }
         .live-feed-popout {
             position: fixed;
@@ -2132,11 +2191,11 @@
             display: inline-flex;
             align-items: center;
             gap: 4px;
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 700;
             color: #a5f3fc;
         }
-        .live-feed-popout__title .material-icons-round { font-size: 14px; }
+        .live-feed-popout__title .material-icons-round { font-size: var(--text-base); }
         .live-feed-popout__actions { display: inline-flex; gap: 4px; }
         .live-feed-popout__btn {
             border: 1px solid rgba(52, 211, 153, 0.45);
@@ -2144,7 +2203,7 @@
             color: #a7f3d0;
             border-radius: 4px;
             padding: 2px 8px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             cursor: pointer;
             font-family: inherit;
         }
@@ -2155,7 +2214,7 @@
         }
         .live-feed-popout__hint {
             padding: 4px 8px;
-            font-size: 9px;
+            font-size: var(--text-xs);
             color: #94a3b8;
             border-bottom: 1px solid #1e293b;
             flex: 0 0 auto;
@@ -2165,7 +2224,7 @@
             align-items: center;
             gap: 8px;
             padding: 4px 8px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: #cbd5e1;
             border-bottom: 1px solid #1e293b;
             flex: 0 0 auto;
@@ -2184,7 +2243,7 @@
             border-radius: 3px;
             background: #020617;
             color: #e2e8f0;
-            font-size: 11px;
+            font-size: var(--text-sm);
         }
         .live-feed-popout__frame {
             flex: 1 1 auto;
@@ -2230,7 +2289,7 @@
             align-items: center;
             justify-content: center;
             color: #fca5a5;
-            font-size: 11px;
+            font-size: var(--text-sm);
             padding: 12px;
             text-align: center;
             background: rgba(0,0,0,0.7);
@@ -2243,7 +2302,7 @@
             color: #a5f3fc;
             border-radius: 6px;
             padding: 6px 8px;
-            font-size: 11px;
+            font-size: var(--text-sm);
             cursor: pointer;
             font-family: inherit;
             display: inline-flex;
@@ -2272,7 +2331,7 @@
         }
 
         .bench-tools-strip__label {
-            font-size: 9px;
+            font-size: var(--text-sm);
             font-weight: 700;
             letter-spacing: 0.08em;
             text-transform: uppercase;
@@ -2281,7 +2340,7 @@
             white-space: nowrap;
         }
         .bench-chrome-bar__label {
-            font-size: 9px;
+            font-size: var(--text-sm);
             font-weight: 700;
             letter-spacing: 0.08em;
             text-transform: uppercase;
@@ -2291,9 +2350,9 @@
         .bench-chrome-bar__btn {
             display: inline-flex;
             align-items: center;
-            gap: 5px;
-            font-size: 11px;
-            padding: 5px 10px;
+            gap: 6px;
+            font-size: var(--text-md);
+            padding: 6px 12px;
             border-radius: 5px;
             border: 1px solid var(--border-color);
             background: var(--bg-secondary);
@@ -2311,13 +2370,15 @@
             color: #93c5fd;
         }
         .bench-chrome-bar__icon {
-            font-size: 16px !important;
+            font-size: 20px !important;
         }
         .bench-chrome-bar__name {
-            max-width: 140px;
+            max-width: 180px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            font-size: var(--text-md);
+            font-weight: 500;
         }
 
         #canvas-wrapper {
@@ -2327,8 +2388,13 @@
             position: relative;
             background-color: #13151a;
             width: 100%;
-            margin: 8px 0 16px;
-            flex-shrink: 0;
+            margin: 8px 0;
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
         }
 
         /* --- Selected Part dock (right sidebar): full focused + compact companions --- */
@@ -2378,7 +2444,7 @@
             min-width: 0;
         }
         .component-panel__compact-name {
-            font-size: 13px;
+            font-size: var(--text-md);
             font-weight: 600;
             color: var(--primary-accent, #60a5fa);
             white-space: nowrap;
@@ -2386,14 +2452,14 @@
             text-overflow: ellipsis;
         }
         .component-panel__compact-meta {
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: #94a3b8;
             margin-top: 2px;
             font-family: ui-monospace, monospace;
         }
         .component-panel__compact-badge {
             flex-shrink: 0;
-            font-size: 9px;
+            font-size: var(--text-xs);
             font-weight: 700;
             letter-spacing: 0.04em;
             text-transform: uppercase;
@@ -2405,7 +2471,7 @@
         }
         .component-panel__compact-hint {
             margin-top: 6px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: #64748b;
         }
 
@@ -2419,7 +2485,7 @@
             gap: 6px;
         }
         .meas-kernel-strip__title {
-            font-size: 9px;
+            font-size: var(--text-xs);
             font-weight: 600;
             letter-spacing: 0.05em;
             text-transform: uppercase;
@@ -2454,32 +2520,32 @@
             cursor: wait;
         }
         .meas-kernel-chip__label {
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-weight: 600;
             line-height: 1.2;
         }
         .meas-kernel-chip__id {
-            font-size: 9px;
+            font-size: var(--text-xs);
             font-family: ui-monospace, monospace;
             color: #94a3b8;
             word-break: break-all;
         }
         .meas-kernel-strip__status {
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: #64748b;
         }
         .meas-kernel-strip__status--err {
             color: #fca5a5;
         }
         .meas-kernel-strip__result {
-            font-size: 11px;
+            font-size: var(--text-sm);
             font-family: ui-monospace, monospace;
             color: #cbd5e1;
             word-break: break-word;
             line-height: 1.35;
         }
         .meas-kernel-strip__hint {
-            font-size: 9px;
+            font-size: var(--text-xs);
             color: #64748b;
             margin-top: 4px;
             line-height: 1.3;
@@ -2488,7 +2554,7 @@
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: #94a3b8;
         }
         .meas-kernel-legend .osd-overlay-chip {
@@ -2519,7 +2585,7 @@
             min-width: 0;
         }
         .component-panel .coord-field__label {
-            font-size: 9px;
+            font-size: var(--text-xs);
             font-weight: 600;
             letter-spacing: 0.04em;
             text-transform: uppercase;
@@ -2532,7 +2598,7 @@
             color: white;
             padding: 6px;
             border-radius: 4px;
-            font-size: 11px;
+            font-size: var(--text-sm);
             width: 100%;
             box-sizing: border-box;
         }
@@ -2601,7 +2667,7 @@
         }
 
         .system-status {
-            font-size: 11px;
+            font-size: var(--text-sm);
             padding: 4px 8px;
             border-radius: 12px;
             background-color: rgba(255,255,255,0.05);
@@ -2615,7 +2681,7 @@
         .log-container {
             padding: 12px 16px;
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
-            font-size: 11px;
+            font-size: var(--text-sm);
             color: var(--text-secondary);
             height: 150px;
             overflow-y: auto;
@@ -2633,101 +2699,11 @@
         ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-        /* Command Console (scoped; Phases 1–2: shell only — see coding_on_the_ui.md) */
-        .command-console {
-            position: fixed;
-            bottom: 0;
-            left: 260px;
-            right: 320px;
-            z-index: 100;
-            font-family: 'Inter', sans-serif;
-            font-size: 12px;
-            border-top: 1px solid var(--border-color);
-            background: var(--bg-panel);
-            box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
-        }
-        .command-console__toggle {
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            padding: 8px 12px;
-            background: var(--bg-panel-hover);
-            border: none;
-            border-bottom: 1px solid transparent;
-            color: var(--text-primary);
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 600;
-            text-align: left;
-        }
-        .command-console__toggle:hover {
-            background: var(--border-color);
-        }
-        .command-console--expanded .command-console__toggle {
-            border-bottom-color: var(--border-color);
-        }
-        .command-console__panel {
-            display: none;
-            flex-direction: column;
-            max-height: 220px;
-        }
-        .command-console--expanded .command-console__panel {
-            display: flex;
-        }
-        .command-console__output {
-            flex: 1;
-            min-height: 100px;
-            max-height: 160px;
-            overflow-y: auto;
-            overflow-x: auto;
-            padding: 8px 12px;
-            background: #0f1115;
-            font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
-            font-size: 11px;
-            line-height: 1.5;
-            color: var(--text-secondary);
-        }
-        .command-console__line { margin-bottom: 4px; white-space: pre-wrap; word-break: break-word; }
-        .command-console__line--info { color: var(--text-secondary); }
-        .command-console__line--cmd { color: var(--primary-accent); }
-        .command-console__line--warn { color: var(--status-warning); }
-        .command-console__line--error { color: var(--status-error); }
-        .command-console__input {
-            border: none;
-            border-top: 1px solid var(--border-color);
-            padding: 8px 12px;
-            background: #0f1115;
-            color: var(--text-primary);
-            font-size: 12px;
-            font-family: inherit;
-            width: 100%;
-            box-sizing: border-box;
-        }
-        .command-console__input::placeholder {
-            color: var(--text-muted);
-        }
-        .command-console__input:focus {
-            outline: none;
-            box-shadow: inset 0 0 0 1px var(--primary-accent);
-        }
-        .command-console__hint {
-            border-top: 1px solid var(--border-color);
-            padding: 4px 12px 6px;
-            min-height: 1.25em;
-            font-size: 11px;
-            color: var(--text-muted);
-            background: rgba(0, 0, 0, 0.25);
-            font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
-        }
-        .command-console__hint:empty {
-            display: none;
-        }
+        /* Command Console styles live in twin-shell.css (bottom chrome). */
 
     </style>
 </head>
-<body>
+<body class="cl-app twin-v2">
     <header class="app-top-nav">
         <a class="app-top-nav__brand" href="/">Cloud Labs</a>
         <nav>
@@ -2739,6 +2715,13 @@
         </nav>
     </header>
     <div class="app-shell">
+        <button type="button" id="toggle-sidebar-left" class="sidebar-collapse-toggle sidebar-collapse-toggle--left" aria-pressed="false" title="Hide inventory sidebar" aria-label="Hide inventory sidebar">
+            <span class="material-icons-round" aria-hidden="true">chevron_left</span>
+        </button>
+        <button type="button" id="toggle-sidebar-right" class="sidebar-collapse-toggle sidebar-collapse-toggle--right" aria-pressed="false" title="Hide workspace sidebar" aria-label="Hide workspace sidebar">
+            <span class="material-icons-round" aria-hidden="true">chevron_right</span>
+        </button>
+
     <div id="sidebar">
         <div class="logo-area">
             <div class="logo-title-row">
@@ -2758,16 +2741,16 @@
             </div>
         </div>
 
-        <div id="layout-warnings" style="display: none; margin: 0 16px 10px; padding: 8px 10px; font-size: 11px; color: #fcd34d; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; line-height: 1.35;"></div>
+        <div id="layout-warnings" style="display: none; margin: 0 16px 10px; padding: 8px 10px; font-size: var(--text-sm); color: #fcd34d; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; line-height: 1.35;"></div>
 
-        <div id="session-lease-banner" style="display: none; margin: 0 16px 10px; padding: 8px 10px; font-size: 11px; color: #93c5fd; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 6px; line-height: 1.35;"></div>
+        <div id="session-lease-banner" style="display: none; margin: 0 16px 10px; padding: 8px 10px; font-size: var(--text-sm); color: #93c5fd; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 6px; line-height: 1.35;"></div>
 
         <div class="section-header">
             <span>Lab components</span>
         </div>
         <div id="component-list" class="sidebar-component-list">
             <!-- Placed components will appear here -->
-            <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px;">
+            <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: var(--text-sm);">
                 No components placed.
             </div>
         </div>
@@ -2781,12 +2764,12 @@
         <div class="section-header">
             <span>Configuration</span>
         </div>
-        <p style="padding: 0 16px 8px; margin: 0; font-size: 11px; line-height: 1.45; color: var(--text-muted);">
+        <p style="padding: 0 16px 8px; margin: 0; font-size: var(--text-sm); line-height: 1.45; color: var(--text-muted);">
             Branch graph and commits live in the right sidebar <strong>Config</strong> tab.
         </p>
         <div style="padding: 0 16px 12px;">
-            <button type="button" id="control-vc-open-sidebar-btn" class="btn btn-secondary" style="font-size: 11px; padding: 6px 10px;">
-                <span class="material-icons-round" style="font-size: 14px;" aria-hidden="true">account_tree</span>
+            <button type="button" id="control-vc-open-sidebar-btn" class="btn btn-secondary" style="font-size: var(--text-sm); padding: 6px 10px;">
+                <span class="material-icons-round" style="font-size: var(--text-base);" aria-hidden="true">account_tree</span>
                 Open Config
             </button>
         </div>
@@ -2794,69 +2777,64 @@
 
     <!-- MAIN CANVAS AREA -->
     <div id="main-content">
-        <div id="control-vc-status" class="control-vc-status vc-inactive" role="status" aria-label="Version control status">
-            <button type="button" id="control-vc-status-open" class="control-vc-status__open" title="Open Config tab">
-                <span class="material-icons-round" aria-hidden="true">account_tree</span>
-                <span id="control-vc-status-label">Version control</span>
-            </button>
-            <span id="control-vc-status-meta" class="control-vc-status__meta" hidden>
-                <code id="control-vc-status-branch" class="control-vc-status__branch">—</code>
-                <span id="control-vc-status-pill" class="control-graph-head-pill" title="Branch HEAD">
-                    <span class="control-graph-head-pill__tag">HEAD</span>
-                    <code class="control-graph-head-pill__id">—</code>
-                </span>
-            </span>
+        <div id="main-top-chrome" class="main-top-chrome">
+            <aside id="command-matrix-panel" class="command-matrix-panel" hidden aria-live="polite" aria-label="Command queue by thread">
+                <div class="command-matrix-panel__header">
+                    <span class="command-matrix-panel__title">Command queue</span>
+                    <span id="command-matrix-meta" class="command-matrix-panel__meta"></span>
+                    <button type="button" id="command-matrix-clear-btn" class="command-matrix-panel__clear" hidden title="Cancel all queued commands (not the one currently running)">Clear queued</button>
+                </div>
+                <div id="command-matrix-threads"></div>
+            </aside>
         </div>
         <div id="canvas-stage" class="canvas-stage">
             <div id="bench-header" class="bench-header">
-                <div id="bench-chrome-bar" role="toolbar" aria-label="Fixed bench components" hidden></div>
-                <div id="live-feed-session-bar" class="live-feed-session-bar" role="status" hidden aria-label="Active live feeds"></div>
-                <div id="bench-tools-strip" class="bench-tools-strip">
-                    <span class="bench-tools-strip__label">Lines</span>
-                    <div id="laser-lines-dock" role="toolbar" aria-label="Alignment and laser lines">
-                        <div id="alignment-dock-tools" class="alignment-dock-tools">
-                            <button type="button" id="pencil-tool-btn" class="laser-dock-tool-btn" title="Pencil: draw alignment guides on the table. Drag on empty canvas. Hold Shift for horizontal or vertical. Snapping applies to laser lines and guides." aria-pressed="false">
-                                <span class="material-icons-round" aria-hidden="true">edit</span>
-                            </button>
-                            <button type="button" id="clear-guides-btn" class="laser-dock-tool-btn" title="Clear all drawn guides">
-                                <span class="material-icons-round" aria-hidden="true">delete_sweep</span>
-                            </button>
+                <div class="bench-header__row">
+                    <div class="bench-header__col bench-header__col--bench">
+                        <div id="bench-chrome-bar" role="toolbar" aria-label="Fixed bench components" hidden></div>
+                    </div>
+                    <div class="bench-header__col bench-header__col--lines">
+                        <div id="bench-tools-strip" class="bench-tools-strip">
+                            <span class="bench-tools-strip__label">Lines</span>
+                            <div id="laser-lines-dock" role="toolbar" aria-label="Alignment and laser lines">
+                                <div id="alignment-dock-tools" class="alignment-dock-tools">
+                                    <button type="button" id="pencil-tool-btn" class="laser-dock-tool-btn" title="Pencil: draw alignment guides on the table. Drag on empty canvas. Hold Shift for horizontal or vertical. Snapping applies to laser lines and guides." aria-pressed="false">
+                                        <span class="material-icons-round" aria-hidden="true">edit</span>
+                                    </button>
+                                    <button type="button" id="clear-guides-btn" class="laser-dock-tool-btn" title="Clear all drawn guides">
+                                        <span class="material-icons-round" aria-hidden="true">delete_sweep</span>
+                                    </button>
+                                </div>
+                                <div id="laser-lines-list"></div>
+                            </div>
                         </div>
-                        <div id="laser-lines-list"></div>
                     </div>
                 </div>
             </div>
+            <div id="live-feed-session-bar" class="live-feed-session-bar" role="status" hidden aria-label="Active live feeds"></div>
             <div class="canvas-stage__row">
-                <aside id="command-matrix-panel" class="command-matrix-panel" hidden aria-live="polite" aria-label="Command queue by thread">
-                    <div class="command-matrix-panel__header">
-                        <span class="command-matrix-panel__title">Command queue</span>
-                        <span id="command-matrix-meta" class="command-matrix-panel__meta"></span>
-                        <button type="button" id="command-matrix-clear-btn" class="command-matrix-panel__clear" hidden title="Cancel all queued commands (not the one currently running)">Clear queued</button>
-                    </div>
-                    <div id="command-matrix-threads"></div>
-                </aside>
                 <div id="canvas-wrapper">
-                    <canvas id="optical-table" width="1000" height="700"></canvas>
+                    <canvas id="optical-table" width="1000" height="1000"></canvas>
                     <div id="canvas-view-shield" class="canvas-view-shield" hidden aria-hidden="true" title="Read-only configuration preview"></div>
-                </div>
-                <aside id="config-view-badge" class="config-view-badge" hidden aria-live="polite">
-                    <div id="config-view-viewing" class="config-view-badge__viewing">
-                        <span class="config-view-badge__label">Viewing</span>
-                        <span id="config-view-source" class="config-view-badge__source" hidden></span>
-                        <code id="config-view-commit-id" class="config-view-badge__id">—</code>
-                        <div class="config-view-badge__actions">
-                            <button id="config-view-set-ref-btn" type="button" class="config-view-badge__btn config-view-badge__btn--primary">Set as reference</button>
-                            <button id="config-view-apply-btn" type="button" class="config-view-badge__btn">Apply on bench</button>
-                            <button id="config-view-return-btn" type="button" class="config-view-badge__btn">Return to bench</button>
+                    <aside id="config-view-badge" class="config-view-badge" hidden aria-live="polite">
+                        <div id="config-view-viewing" class="config-view-badge__viewing">
+                            <span class="config-view-badge__label">Viewing</span>
+                            <span id="config-view-source" class="config-view-badge__source" hidden></span>
+                            <code id="config-view-commit-id" class="config-view-badge__id">—</code>
+                            <div class="config-view-badge__actions">
+                                <button id="config-view-set-ref-btn" type="button" class="config-view-badge__btn config-view-badge__btn--primary">Set as reference</button>
+                                <button id="config-view-apply-btn" type="button" class="config-view-badge__btn">Apply on bench</button>
+                                <button id="config-view-return-btn" type="button" class="config-view-badge__btn">Return to bench</button>
+                            </div>
                         </div>
-                    </div>
-                    <div id="config-view-applying" class="config-view-badge__applying" hidden>
-                        <span class="config-view-badge__label">Applying</span>
-                        <code id="config-view-applying-id" class="config-view-badge__id">—</code>
-                        <span id="config-view-reconcile-progress" class="config-view-reconcile__progress">Step 1 of 1</span>
-                        <ol id="config-view-reconcile-steps" class="config-view-reconcile__steps"></ol>
-                    </div>
-                </aside>
+                        <div id="config-view-applying" class="config-view-badge__applying" hidden>
+                            <span class="config-view-badge__label">Applying</span>
+                            <code id="config-view-applying-id" class="config-view-badge__id">—</code>
+                            <span id="config-view-reconcile-progress" class="config-view-reconcile__progress">Step 1 of 1</span>
+                            <ol id="config-view-reconcile-steps" class="config-view-reconcile__steps"></ol>
+                        </div>
+                    </aside>
+                </div>
             </div>
         </div>
 
@@ -2865,22 +2843,6 @@
             (``#panel-dock``). Plain click replaces; Ctrl/Cmd+click adds a
             companion (max 3). Focused panel is full; others are compact cards.
         -->
-    </div>
-
-    <!-- Command Console (collapsed by default; js/command-console.js + command-parse.js + command-api.js) -->
-    <div id="command-console-root" class="command-console" aria-label="Command Console">
-        <button type="button" class="command-console__toggle" id="command-console-toggle" aria-expanded="false" title="Show or hide Command Console">
-            <span style="display: flex; align-items: center; gap: 8px;">
-                <span class="material-icons-round command-console__chevron" style="font-size: 18px;">keyboard_arrow_up</span>
-                Command Console
-            </span>
-            <span style="font-size: 10px; font-weight: 500; color: var(--text-muted);">shorthand</span>
-        </button>
-        <div class="command-console__panel" id="command-console-panel">
-            <div class="command-console__output" id="command-console-output" role="log" aria-live="polite"></div>
-            <input type="text" class="command-console__input" id="command-console-input" autocomplete="off" spellcheck="false"
-                placeholder="help | refresh | move tag_22 0 0 0 | motor … | motorhome … | motorset0 … | optimize …" />
-        </div>
     </div>
 
     <!-- RIGHT SIDEBAR (Recipes & Monitor) -->
@@ -2988,7 +2950,7 @@
                 display: flex;
                 flex-wrap: wrap;
                 gap: 8px 12px;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 color: #94a3b8;
                 margin: 0 12px 8px;
                 padding: 6px 8px;
@@ -3008,7 +2970,7 @@
                 padding: 0;
                 border: none;
                 background: transparent;
-                font-size: 10px;
+                font-size: var(--text-xs);
                 color: #cbd5e1;
                 max-height: none;
                 overflow: visible;
@@ -3022,15 +2984,15 @@
                 margin-bottom: 6px;
             }
             .opt-telemetry-head strong {
-                font-size: 10px;
+                font-size: var(--text-xs);
                 color: #e9d5ff;
             }
             .opt-telemetry-head span {
-                font-size: 9px;
+                font-size: var(--text-xs);
                 color: #94a3b8;
             }
             .opt-telemetry-sub {
-                font-size: 9px;
+                font-size: var(--text-xs);
                 color: #64748b;
                 margin-bottom: 6px;
             }
@@ -3046,7 +3008,7 @@
                 background: rgba(8, 47, 73, 0.35);
                 color: #a5f3fc;
                 text-decoration: none;
-                font-size: 11px;
+                font-size: var(--text-sm);
                 font-weight: 600;
                 position: relative;
                 z-index: 2;
@@ -3058,7 +3020,7 @@
             }
             .opt-session-link-hint {
                 margin: 4px 0 0;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 color: #64748b;
             }
             .opt-telemetry-tunables {
@@ -3070,14 +3032,14 @@
             }
             .opt-telemetry-tunables--idle {
                 color: #64748b;
-                font-size: 9px;
+                font-size: var(--text-xs);
             }
             .opt-telemetry-tunables__head {
                 display: flex;
                 justify-content: space-between;
                 gap: 8px;
                 margin-bottom: 6px;
-                font-size: 9px;
+                font-size: var(--text-xs);
             }
             .opt-telemetry-tunables__head strong { color: #e2e8f0; }
             .opt-telemetry-tunables__head span { color: #64748b; }
@@ -3098,7 +3060,7 @@
                 justify-content: space-between;
                 gap: 4px;
                 margin-bottom: 2px;
-                font-size: 8px;
+                font-size: var(--text-xs);
                 color: #94a3b8;
             }
             .opt-tunable-chip__label strong {
@@ -3113,7 +3075,7 @@
                 flex-shrink: 0;
             }
             .opt-tunable-chip__value {
-                font-size: 12px;
+                font-size: var(--text-sm);
                 font-weight: 650;
                 color: #f8fafc;
                 font-variant-numeric: tabular-nums;
@@ -3121,14 +3083,14 @@
             }
             .opt-tunable-unit {
                 margin-left: 3px;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 font-weight: 500;
                 color: #94a3b8;
             }
             .opt-tunable-delta {
                 display: block;
                 margin-top: 2px;
-                font-size: 8px;
+                font-size: var(--text-xs);
                 font-variant-numeric: tabular-nums;
             }
             .opt-tunable-delta--up { color: #38bdf8; }
@@ -3136,7 +3098,7 @@
             .opt-tunable-delta--flat { color: #475569; }
             .opt-telemetry-history-label {
                 margin: 8px 0 2px;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 font-weight: 600;
                 color: #94a3b8;
                 letter-spacing: 0.03em;
@@ -3151,7 +3113,7 @@
             }
             .opt-telemetry-camera--idle {
                 color: #64748b;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 line-height: 1.35;
             }
             .opt-telemetry-camera__head {
@@ -3159,7 +3121,7 @@
                 justify-content: space-between;
                 gap: 8px;
                 margin-bottom: 6px;
-                font-size: 9px;
+                font-size: var(--text-xs);
             }
             .opt-telemetry-camera__head strong { color: #e2e8f0; }
             .opt-telemetry-camera__head span { color: #64748b; }
@@ -3191,7 +3153,7 @@
                 border-radius: 4px;
                 background: rgba(34, 211, 238, 0.12);
                 border: 1px solid rgba(34, 211, 238, 0.35);
-                font-size: 9px;
+                font-size: var(--text-xs);
             }
             .opt-stage-debug {
                 display: flex;
@@ -3202,7 +3164,7 @@
             }
             .opt-stage-debug--idle {
                 display: block;
-                font-size: 10px;
+                font-size: var(--text-xs);
                 color: #94a3b8;
                 padding: 6px 8px;
                 border: 1px dashed #334155;
@@ -3222,7 +3184,7 @@
                 border: 1px solid #334155;
                 background: rgba(15, 23, 42, 0.85);
                 color: #e2e8f0;
-                font-size: 10px;
+                font-size: var(--text-xs);
                 line-height: 1.2;
                 cursor: pointer;
                 font-family: inherit;
@@ -3235,7 +3197,7 @@
             .opt-stage-chip__name {
                 text-transform: uppercase;
                 letter-spacing: 0.04em;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 color: #cbd5e1;
             }
             .opt-stage-chip--ok { border-color: rgba(52, 211, 153, 0.65); }
@@ -3266,19 +3228,19 @@
                 display: block;
                 text-transform: uppercase;
                 letter-spacing: 0.04em;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 margin-bottom: 2px;
                 color: #f8fafc;
             }
             .opt-stage-chip__status {
                 display: block;
-                font-size: 10px;
+                font-size: var(--text-xs);
                 color: #94a3b8;
                 margin-bottom: 4px;
             }
             .opt-stage-chip__detail {
                 color: #cbd5e1;
-                font-size: 10px;
+                font-size: var(--text-xs);
                 line-height: 1.4;
                 word-break: break-word;
             }
@@ -3305,7 +3267,7 @@
                 border: 1px solid rgba(52, 211, 153, 0.55);
                 background: rgba(6, 78, 59, 0.45);
                 color: #a7f3d0;
-                font-size: 12px;
+                font-size: var(--text-sm);
                 font-weight: 600;
                 cursor: pointer;
                 font-family: inherit;
@@ -3322,7 +3284,7 @@
                 cursor: wait;
             }
             .opt-telemetry-stages { font-family: ui-monospace, monospace; white-space: nowrap; }
-            .opt-telemetry-table { width: 100%; border-collapse: collapse; font-size: 9px; margin-top: 6px; }
+            .opt-telemetry-table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); margin-top: 6px; }
             .opt-telemetry-table--wide { min-width: 100%; }
             .opt-telemetry-table-wrap {
                 max-height: 200px;
@@ -3345,7 +3307,7 @@
             .opt-telemetry-var-delta {
                 display: block;
                 color: #64748b;
-                font-size: 8px;
+                font-size: var(--text-xs);
             }
             .opt-telemetry-row--new-best td { background: rgba(52, 211, 153, 0.08); }
             .opt-telemetry-row--best td { box-shadow: inset 2px 0 0 #34d399; }
@@ -3356,7 +3318,7 @@
                 border-radius: 3px;
                 background: rgba(52, 211, 153, 0.2);
                 color: #6ee7b7;
-                font-size: 8px;
+                font-size: var(--text-xs);
                 font-weight: 700;
                 text-transform: uppercase;
             }
@@ -3371,11 +3333,11 @@
                 border: 1px solid #2a2e36;
                 border-radius: 6px;
                 padding: 8px;
-                font-size: 10px;
+                font-size: var(--text-xs);
             }
             .opt-results-card h4 {
                 margin: 0 0 6px;
-                font-size: 10px;
+                font-size: var(--text-xs);
                 color: #94a3b8;
                 font-weight: 600;
             }
@@ -3415,7 +3377,7 @@
                 padding: 8px 12px;
                 line-height: 1.45;
                 color: var(--text-muted);
-                font-size: 12px;
+                font-size: var(--text-sm);
                 text-align: center;
             }
         </style>
@@ -3423,7 +3385,7 @@
             <div class="section-header">
                 <span>Optimization preview</span>
             </div>
-            <p style="padding: 0 12px 6px; margin: 0; font-size: 10px; color: var(--text-muted); line-height: 1.35;">
+            <p style="padding: 0 12px 6px; margin: 0; font-size: var(--text-xs); color: var(--text-muted); line-height: 1.35;">
                 Camera live view, capture, and COBYLA reference: use each camera tag in the component panel
                 (<code>RECORD_MEASURABLES</code>, telemetry widgets).
             </p>
@@ -3432,8 +3394,8 @@
                     <img id="optimization-feed-img" src="" alt="Optimization stream" style="display: none;">
                     <div id="optimization-feed-placeholder">Runs during OPTIMIZE — per-component optimization stream.</div>
                 </div>
-                <div id="optimization-overlay" style="display: none; position: absolute; bottom: 8px; left: 8px; background: rgba(0, 255, 0, 0.15); border: 1px solid #22c55e; padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #22c55e; font-weight: bold; align-items: center; gap: 4px; backdrop-filter: blur(4px);">
-                    <span class="material-icons-round" style="font-size: 14px;">auto_awesome</span>
+                <div id="optimization-overlay" style="display: none; position: absolute; bottom: 8px; left: 8px; background: rgba(0, 255, 0, 0.15); border: 1px solid #22c55e; padding: 4px 8px; border-radius: 4px; font-size: var(--text-sm); color: #22c55e; font-weight: bold; align-items: center; gap: 4px; backdrop-filter: blur(4px);">
+                    <span class="material-icons-round" style="font-size: var(--text-base);">auto_awesome</span>
                     <span id="optimization-step-text">OPTIMIZING (Step 0)</span>
                 </div>
             </div>
@@ -3462,7 +3424,7 @@
             #opt-mode-stage-hint {
                 margin: 0 12px 10px;
                 padding: 8px 10px;
-                font-size: 10px;
+                font-size: var(--text-xs);
                 line-height: 1.45;
                 color: #94a3b8;
                 background: rgba(15, 17, 21, 0.65);
@@ -3472,14 +3434,14 @@
 
             /* —— Typography & hints —— */
             #optimization-mode-section .opt-hint {
-                font-size: 10px;
+                font-size: var(--text-xs);
                 color: var(--text-muted);
                 margin: 0 0 10px;
                 line-height: 1.45;
             }
             #optimization-mode-section .opt-field-label {
                 display: block;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 font-weight: 600;
                 letter-spacing: 0.04em;
                 text-transform: uppercase;
@@ -3496,7 +3458,7 @@
                 border: 1px solid #3f3f46;
                 border-radius: 6px;
                 color: #f1f5f9;
-                font-size: 11px;
+                font-size: var(--text-sm);
                 box-sizing: border-box;
                 transition: border-color 0.15s, box-shadow 0.15s;
             }
@@ -3522,7 +3484,7 @@
             .opt-form-grid .opt-field--full { grid-column: 1 / -1; }
             .opt-field label {
                 display: block;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 color: #94a3b8;
                 margin-bottom: 4px;
             }
@@ -3536,14 +3498,14 @@
                 margin-bottom: 8px;
             }
             .opt-card__title {
-                font-size: 11px;
+                font-size: var(--text-sm);
                 font-weight: 600;
                 color: #e2e8f0;
                 margin: 0 0 8px;
                 line-height: 1.35;
             }
             .opt-card__meta {
-                font-size: 9px;
+                font-size: var(--text-xs);
                 color: #64748b;
                 margin-top: 6px;
             }
@@ -3557,7 +3519,7 @@
             }
             .opt-list-item:last-child { border-bottom: none; padding-bottom: 0; }
             .opt-list-item__text {
-                font-size: 11px;
+                font-size: var(--text-sm);
                 color: #e2e8f0;
                 line-height: 1.35;
                 min-width: 0;
@@ -3580,7 +3542,7 @@
                 background: #18181b;
                 color: #94a3b8;
                 cursor: pointer;
-                font-size: 14px;
+                font-size: var(--text-base);
                 line-height: 1;
             }
             .opt-icon-btn:hover { border-color: #71717a; color: #e2e8f0; }
@@ -3623,13 +3585,13 @@
                 width: 20px;
                 height: 20px;
                 border-radius: 50%;
-                font-size: 10px;
+                font-size: var(--text-xs);
                 font-weight: 700;
                 border: 1px solid #3f3f46;
                 background: #18181b;
             }
             .opt-stage-tab .opt-step-label {
-                font-size: 8px;
+                font-size: var(--text-xs);
                 letter-spacing: 0.02em;
                 white-space: nowrap;
                 overflow: hidden;
@@ -3663,7 +3625,7 @@
                 gap: 4px;
                 padding: 4px 8px;
                 border-radius: 999px;
-                font-size: 10px;
+                font-size: var(--text-xs);
                 border: 1px solid #3f3f46;
                 background: #18181b;
                 color: #cbd5e1;
@@ -3694,7 +3656,7 @@
                 border-radius: 50%;
                 background: rgba(248, 113, 113, 0.15);
                 color: #f87171;
-                font-size: 11px;
+                font-size: var(--text-sm);
                 line-height: 1;
                 cursor: pointer;
             }
@@ -3722,7 +3684,7 @@
                 border: 1px solid #27272a;
             }
             .opt-selected-group__name {
-                font-size: 10px;
+                font-size: var(--text-xs);
                 font-weight: 600;
                 color: #cbd5e1;
                 margin-bottom: 6px;
@@ -3730,7 +3692,7 @@
             }
             .opt-chip--compact {
                 padding: 3px 6px;
-                font-size: 9px;
+                font-size: var(--text-xs);
             }
             .opt-chip--compact .opt-chip-text {
                 max-width: none;
@@ -3757,7 +3719,7 @@
                 border: 1px solid rgba(34, 211, 238, 0.35);
                 background: rgba(34, 211, 238, 0.08);
                 color: #67e8f9;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 font-weight: 600;
                 cursor: pointer;
             }
@@ -3782,7 +3744,7 @@
                 border: 1px solid rgba(34, 211, 238, 0.35);
                 background: rgba(34, 211, 238, 0.1);
                 color: #67e8f9;
-                font-size: 8px;
+                font-size: var(--text-xs);
                 font-weight: 700;
                 letter-spacing: 0.03em;
                 cursor: pointer;
@@ -3803,7 +3765,7 @@
                 left: 8px;
                 top: 50%;
                 transform: translateY(-50%);
-                font-size: 14px !important;
+                font-size: var(--text-base) !important;
                 color: #64748b;
                 pointer-events: none;
             }
@@ -3826,7 +3788,7 @@
             .opt-comp-accordion[hidden] { display: none; }
             .opt-chip[hidden] { display: none !important; }
             .opt-badge {
-                font-size: 9px;
+                font-size: var(--text-xs);
                 font-weight: 700;
                 padding: 2px 6px;
                 border-radius: 999px;
@@ -3855,7 +3817,7 @@
                 justify-content: space-between;
                 gap: 8px;
                 padding: 8px 10px;
-                font-size: 11px;
+                font-size: var(--text-sm);
                 font-weight: 600;
                 color: #cbd5e1;
                 cursor: pointer;
@@ -3865,7 +3827,7 @@
             .opt-comp-accordion summary::-webkit-details-marker { display: none; }
             .opt-comp-accordion summary::after {
                 content: '▾';
-                font-size: 10px;
+                font-size: var(--text-xs);
                 color: #64748b;
                 transition: transform 0.15s;
             }
@@ -3899,7 +3861,7 @@
             }
             .opt-stat-label {
                 display: block;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 text-transform: uppercase;
                 letter-spacing: 0.05em;
                 color: #64748b;
@@ -3922,7 +3884,7 @@
                 display: flex;
                 align-items: flex-start;
                 gap: 8px;
-                font-size: 11px;
+                font-size: var(--text-sm);
                 color: #cbd5e1;
                 line-height: 1.35;
                 cursor: pointer;
@@ -3942,10 +3904,10 @@
                 border: 1px solid #3f3f46;
                 background: #18181b;
                 color: #e2e8f0;
-                font-size: 11px;
+                font-size: var(--text-sm);
             }
             .opt-commit-id {
-                font-size: 10px;
+                font-size: var(--text-xs);
                 color: #93c5fd;
             }
             .opt-hint--warn { color: #fca5a5; }
@@ -3974,7 +3936,7 @@
                 box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.15);
             }
             .opt-telemetry-values {
-                font-size: 8px;
+                font-size: var(--text-xs);
                 color: #94a3b8;
                 max-width: 110px;
                 line-height: 1.3;
@@ -3996,7 +3958,7 @@
                 --osd-chart-dot: #c4b5fd;
             }
             #opt-mode-run-status {
-                font-size: 10px;
+                font-size: var(--text-xs);
                 padding-top: 8px;
                 color: #64748b;
                 text-align: center;
@@ -4013,7 +3975,7 @@
                 background: rgba(88, 28, 135, 0.06);
             }
             .opt-panel-picker-title {
-                font-size: 9px;
+                font-size: var(--text-xs);
                 font-weight: 700;
                 letter-spacing: 0.04em;
                 text-transform: uppercase;
@@ -4032,11 +3994,11 @@
                 border: 1px solid #27272a;
                 border-radius: 8px;
                 padding: 10px;
-                font-size: 10px;
+                font-size: var(--text-xs);
             }
             .opt-results-card h4 {
                 margin: 0 0 6px;
-                font-size: 9px;
+                font-size: var(--text-xs);
                 font-weight: 700;
                 letter-spacing: 0.04em;
                 text-transform: uppercase;
@@ -4048,7 +4010,7 @@
                 display: inline-flex !important;
                 align-items: center;
                 gap: 4px;
-                font-size: 10px !important;
+                font-size: var(--text-xs) !important;
                 padding: 4px 8px !important;
             }
             .opt-mode-exit-btn[hidden] { display: none !important; }
@@ -4058,7 +4020,7 @@
             <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <span>Optimization</span>
                 <button id="opt-mode-exit-btn" type="button" class="btn btn-secondary btn--sidebar-inline opt-mode-exit-btn" hidden>
-                    <span class="material-icons-round" style="font-size:14px;">close</span>
+                    <span class="material-icons-round" style="font-size: var(--text-base);">close</span>
                     Exit
                 </button>
             </div>
@@ -4179,26 +4141,26 @@
         <div style="flex-shrink: 0; display: flex; flex-direction: column;">
              <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <span>Recipe Editor</span>
-                <div id="rec-indicator" style="display: none; color: #ef4444; font-weight: bold; font-size: 10px; align-items: center; gap: 4px;">
-                    <span class="material-icons-round" style="font-size: 10px; animation: pulse 1s infinite;">fiber_manual_record</span> REC
+                <div id="rec-indicator" style="display: none; color: #ef4444; font-weight: bold; font-size: var(--text-xs); align-items: center; gap: 4px;">
+                    <span class="material-icons-round" style="font-size: var(--text-xs); animation: pulse 1s infinite;">fiber_manual_record</span> REC
                 </div>
             </div>
             
             <div style="padding: 0 16px 8px;">
-                 <input type="text" id="recipe-editor-name" placeholder="Recipe Name..." style="width: 100%; padding: 8px; background: #0f1115; border: 1px solid #2a2e36; border-radius: 6px; color: white; font-size: 12px; margin-bottom: 8px;">
+                 <input type="text" id="recipe-editor-name" placeholder="Recipe Name..." style="width: 100%; padding: 8px; background: #0f1115; border: 1px solid #2a2e36; border-radius: 6px; color: white; font-size: var(--text-sm); margin-bottom: 8px;">
                  
                  <div style="display: flex; gap: 8px;">
-                     <button id="record-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: 11px; padding: 6px;">
-                        <span class="material-icons-round" style="font-size: 14px;">fiber_manual_record</span> Record
+                     <button id="record-btn" type="button" class="btn btn-secondary btn--sidebar-inline" style="font-size: var(--text-sm); padding: 6px;">
+                        <span class="material-icons-round" style="font-size: var(--text-base);">fiber_manual_record</span> Record
                     </button>
-                    <button id="recipe-editor-save" type="button" class="btn btn-primary btn--sidebar-inline" style="font-size: 11px; padding: 6px;">
-                        <span class="material-icons-round" style="font-size: 14px;">save</span> Save
+                    <button id="recipe-editor-save" type="button" class="btn btn-primary btn--sidebar-inline" style="font-size: var(--text-sm); padding: 6px;">
+                        <span class="material-icons-round" style="font-size: var(--text-base);">save</span> Save
                     </button>
                  </div>
             </div>
 
             <div id="recipe-steps-container" style="background: rgba(0,0,0,0.2); margin: 0 16px 16px; border: 1px solid #2a2e36; border-radius: 6px; max-height: 280px; overflow-y: auto;">
-                <div style="padding: 20px; text-align: center; color: #64748b; font-size: 12px;">No steps recorded.</div>
+                <div style="padding: 20px; text-align: center; color: #64748b; font-size: var(--text-sm);">No steps recorded.</div>
             </div>
             
             <div class="section-header" style="border-top: 1px solid var(--border-color); padding-top: 12px;">Saved Recipes</div>
@@ -4218,16 +4180,16 @@
                 <p class="session-notes__hint">Scratchpad for measurements, checklist, next steps. Stays on this browser for the selected backend — not lab state.</p>
                 <div class="session-notes__toolbar">
                     <button type="button" id="session-notes-stamp" class="btn btn-secondary btn--sidebar-inline" title="Insert timestamp">
-                        <span class="material-icons-round" style="font-size:14px" aria-hidden="true">schedule</span> Time
+                        <span class="material-icons-round" style="font-size: var(--text-base)" aria-hidden="true">schedule</span> Time
                     </button>
                     <button type="button" id="session-notes-copy" class="btn btn-secondary btn--sidebar-inline" title="Copy all">
-                        <span class="material-icons-round" style="font-size:14px" aria-hidden="true">content_copy</span> Copy
+                        <span class="material-icons-round" style="font-size: var(--text-base)" aria-hidden="true">content_copy</span> Copy
                     </button>
                     <button type="button" id="session-notes-clear" class="btn btn-secondary btn--sidebar-inline" title="Clear notes">
-                        <span class="material-icons-round" style="font-size:14px" aria-hidden="true">delete</span> Clear
+                        <span class="material-icons-round" style="font-size: var(--text-base)" aria-hidden="true">delete</span> Clear
                     </button>
                     <button type="button" id="session-notes-popout" class="btn btn-secondary btn--sidebar-inline" title="Pop out notepad">
-                        <span class="material-icons-round" style="font-size:14px" aria-hidden="true">open_in_new</span> Pop out
+                        <span class="material-icons-round" style="font-size: var(--text-base)" aria-hidden="true">open_in_new</span> Pop out
                     </button>
                 </div>
                 <textarea id="session-notes-editor" class="session-notes__editor" spellcheck="true"
@@ -4244,6 +4206,39 @@
         </div>
     </div>
     </div><!-- /.app-shell -->
+
+    <div id="twin-bottom-chrome" class="twin-bottom-chrome" aria-label="View and command chrome">
+        <div class="twin-bottom-chrome__views" role="toolbar" aria-label="View preferences">
+            <span class="twin-bottom-chrome__views-label">View</span>
+            <button type="button" id="view-pref-hide-storage" class="twin-view-toggle" aria-pressed="false" title="Hide storage zone and stored parts on the canvas">
+                Hide storage
+            </button>
+            <button type="button" id="view-pref-hide-labels" class="twin-view-toggle" aria-pressed="false" title="Hide component name labels on the canvas">
+                Hide labels
+            </button>
+            <button type="button" id="view-pref-compact-chrome" class="twin-view-toggle" aria-pressed="false" title="Hide Bench, Lines, and command queue so the table and live feeds get more vertical space">
+                Compact chrome
+            </button>
+            <button type="button" id="view-pref-studio-v3" class="twin-view-toggle" aria-pressed="false" title="Switch to Studio v3 — dark studio chrome and stylized canvas art">
+                Studio v3
+            </button>
+        </div>
+        <!-- Command Console (collapsed by default; expands upward) -->
+        <div id="command-console-root" class="command-console" aria-label="Command Console">
+            <div class="command-console__panel" id="command-console-panel">
+                <div class="command-console__output" id="command-console-output" role="log" aria-live="polite"></div>
+                <input type="text" class="command-console__input" id="command-console-input" autocomplete="off" spellcheck="false"
+                    placeholder="help | refresh | move tag_22 0 0 0 | motor … | motorhome … | motorset0 … | optimize …" />
+            </div>
+            <button type="button" class="command-console__toggle" id="command-console-toggle" aria-expanded="false" title="Show or hide Command Console">
+                <span style="display: flex; align-items: center; gap: 8px;">
+                    <span class="material-icons-round command-console__chevron" style="font-size: 18px;">keyboard_arrow_up</span>
+                    Command Console
+                </span>
+                <span style="font-size: var(--text-xs); font-weight: 500; color: var(--text-muted);">shorthand</span>
+            </button>
+        </div>
+    </div>
 
     <style>
         /* Unified Panel Styles */
@@ -4274,7 +4269,7 @@
         }
 
         .tab-item {
-            font-size: 12px;
+            font-size: var(--text-sm);
             color: var(--text-muted);
             cursor: pointer;
             padding-bottom: 2px;
@@ -4301,7 +4296,7 @@
             align-items: center;
             padding: 6px 8px;
             border-bottom: 1px solid #2a2e36;
-            font-size: 11px;
+            font-size: var(--text-sm);
             color: #e2e8f0;
         }
         .recipe-step-item:last-child { border-bottom: none; }
@@ -4310,7 +4305,7 @@
         .step-num { width: 24px; color: #64748b; font-weight: 600; }
         .step-action { width: 70px; font-weight: 600; color: #3b82f6; }
         .step-desc { flex-grow: 1; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .step-del { color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; font-size: 14px; }
+        .step-del { color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; font-size: var(--text-base); }
         .step-del:hover { background: rgba(239, 68, 68, 0.1); }
 
         /* --- Laser-lines dock: horizontal strip below bench chrome bar --- */
@@ -4442,7 +4437,7 @@
             gap: 8px;
         }
         #laser-line-edit-modal .laser-edit-grid label {
-            font-size: 10px;
+            font-size: var(--text-xs);
             color: var(--text-muted);
         }
         #laser-line-edit-modal .laser-edit-grid input {
@@ -4453,20 +4448,20 @@
             border: 1px solid var(--border-color);
             border-radius: 4px;
             color: var(--text-primary);
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
     </style>
     <div id="laser-line-edit-modal" style="display: none; position: fixed; inset: 0; z-index: 300; background: rgba(0, 0, 0, 0.55); align-items: center; justify-content: center; padding: 16px;" aria-hidden="true" role="dialog" aria-labelledby="laser-line-edit-title">
         <div style="background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 12px; max-width: 440px; width: 100%; padding: 16px; box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);">
-            <h3 id="laser-line-edit-title" style="margin: 0 0 12px; font-size: 14px;">Edit laser line</h3>
-            <p style="font-size: 11px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.45;">P1 and P2 are two lab-frame points (mm, table center origin) that define the infinite line drawn on the canvas.</p>
+            <h3 id="laser-line-edit-title" style="margin: 0 0 12px; font-size: var(--text-base);">Edit laser line</h3>
+            <p style="font-size: var(--text-sm); color: var(--text-muted); margin: 0 0 12px; line-height: 1.45;">P1 and P2 are two lab-frame points (mm, table center origin) that define the infinite line drawn on the canvas.</p>
             <div class="laser-edit-grid">
                 <label>P1 x<input id="laser-edit-p1x" type="number" step="0.1"></label>
                 <label>P1 y<input id="laser-edit-p1y" type="number" step="0.1"></label>
                 <label>P2 x<input id="laser-edit-p2x" type="number" step="0.1"></label>
                 <label>P2 y<input id="laser-edit-p2y" type="number" step="0.1"></label>
             </div>
-            <label style="display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 11px; cursor: pointer;">
+            <label style="display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: var(--text-sm); cursor: pointer;">
                 <input type="checkbox" id="laser-line-edit-confirm"> I confirm updating these reference points
             </label>
             <div style="display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end;">
@@ -4475,7 +4470,7 @@
             </div>
         </div>
     </div>
-    <script type="module" src="/static/js/main.js?v=10"></script>
-    <script type="module" src="/static/js/command-console.js?v=5"></script>
+    <script type="module" src="/static/js/main.js?v=18"></script>
+    <script type="module" src="/static/js/command-console.js?v=6"></script>
 </body>
 </html>

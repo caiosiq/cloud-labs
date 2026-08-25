@@ -15,7 +15,7 @@ export const DEFAULT_STEP_Z_MM = [1.0, 5.0, 20.0];
 
 export function statusBadge(label, tone) {
     const el = document.createElement('span');
-    el.style.fontSize = '9px';
+    el.style.fontSize = 'var(--text-xs)';
     el.style.fontWeight = '600';
     el.style.padding = '3px 8px';
     el.style.borderRadius = '999px';
@@ -42,7 +42,7 @@ function stepButton(label, delta, onNudge) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'btn btn-secondary';
-    b.style.fontSize = '10px';
+    b.style.fontSize = 'var(--text-xs)';
     b.style.padding = '4px 0';
     b.style.minWidth = '0';
     b.style.flex = '1 1 0';
@@ -63,7 +63,7 @@ function poseReadoutRow(label, color) {
     row.style.marginBottom = '4px';
 
     const name = document.createElement('span');
-    name.style.fontSize = '9px';
+    name.style.fontSize = 'var(--text-xs)';
     name.style.fontWeight = '600';
     name.style.letterSpacing = '0.06em';
     name.style.color = color;
@@ -72,7 +72,7 @@ function poseReadoutRow(label, color) {
 
     const val = document.createElement('span');
     val.style.fontFamily = 'ui-monospace, monospace';
-    val.style.fontSize = '12px';
+    val.style.fontSize = 'var(--text-sm)';
     val.style.color = '#e2e8f0';
     val.textContent = '\u2014';
     row.appendChild(val);
@@ -95,7 +95,7 @@ export function createTeleopPlanAxisPanel({ tagId, axisName, field, unit, steps 
 
     const title = document.createElement('div');
     title.style.color = '#94a3b8';
-    title.style.fontSize = '10px';
+    title.style.fontSize = 'var(--text-xs)';
     title.style.fontWeight = '600';
     title.style.letterSpacing = '0.05em';
     title.style.marginBottom = '8px';
@@ -178,7 +178,7 @@ export function axisPanel(labelText, currentValue, unit, steps, onNudge) {
 
     const label = document.createElement('span');
     label.style.color = '#94a3b8';
-    label.style.fontSize = '10px';
+    label.style.fontSize = 'var(--text-xs)';
     label.style.fontWeight = '600';
     label.style.letterSpacing = '0.05em';
     label.textContent = labelText;
@@ -187,7 +187,7 @@ export function axisPanel(labelText, currentValue, unit, steps, onNudge) {
     const val = document.createElement('span');
     val.style.color = '#e2e8f0';
     val.style.fontFamily = 'ui-monospace, monospace';
-    val.style.fontSize = '12px';
+    val.style.fontSize = 'var(--text-sm)';
     val.textContent = `${fmtNum(currentValue, 2)} ${unit}`;
     head.appendChild(val);
     panel.appendChild(head);
@@ -233,14 +233,14 @@ export function loadingPanel(lastError) {
     wrap.appendChild(spinner);
 
     const msg = document.createElement('div');
-    msg.style.fontSize = '11px';
+    msg.style.fontSize = 'var(--text-sm)';
     msg.style.color = '#cbd5e1';
     msg.style.fontWeight = '500';
     msg.textContent = 'Loading TeleOp…';
     wrap.appendChild(msg);
 
     const hint = document.createElement('div');
-    hint.style.fontSize = '10px';
+    hint.style.fontSize = 'var(--text-xs)';
     hint.style.color = '#64748b';
     hint.style.fontStyle = 'italic';
     hint.style.textAlign = 'center';
@@ -250,7 +250,7 @@ export function loadingPanel(lastError) {
 
     if (lastError) {
         const err = document.createElement('div');
-        err.style.fontSize = '10px';
+        err.style.fontSize = 'var(--text-xs)';
         err.style.color = '#fca5a5';
         err.style.textAlign = 'center';
         err.textContent = String(lastError);
@@ -269,7 +269,7 @@ export function loadingPanel(lastError) {
 
 export function idleHint(showSessionToggle) {
     const hint = document.createElement('div');
-    hint.style.fontSize = '10px';
+    hint.style.fontSize = 'var(--text-xs)';
     hint.style.color = '#64748b';
     hint.style.fontStyle = 'italic';
     hint.style.lineHeight = '1.4';
@@ -293,7 +293,7 @@ function speedInput(label, value, unit, min, max, onChange) {
 
     const lbl = document.createElement('span');
     lbl.style.color = '#94a3b8';
-    lbl.style.fontSize = '10px';
+    lbl.style.fontSize = 'var(--text-xs)';
     lbl.style.fontWeight = '600';
     lbl.style.flex = '1 1 auto';
     lbl.textContent = label;
@@ -307,7 +307,7 @@ function speedInput(label, value, unit, min, max, onChange) {
     inp.value = String(value);
     inp.style.width = '72px';
     inp.style.padding = '4px 6px';
-    inp.style.fontSize = '11px';
+    inp.style.fontSize = 'var(--text-sm)';
     inp.style.fontFamily = 'ui-monospace, monospace';
     inp.style.borderRadius = '4px';
     inp.style.border = '1px solid #334155';
@@ -327,7 +327,7 @@ function speedInput(label, value, unit, min, max, onChange) {
 
     const unitEl = document.createElement('span');
     unitEl.style.color = '#64748b';
-    unitEl.style.fontSize = '10px';
+    unitEl.style.fontSize = 'var(--text-xs)';
     unitEl.style.fontFamily = 'ui-monospace, monospace';
     unitEl.textContent = unit;
     row.appendChild(unitEl);
@@ -351,7 +351,7 @@ export function speedPanel(tagId, opts = {}) {
 
     const head = document.createElement('div');
     head.style.color = '#94a3b8';
-    head.style.fontSize = '10px';
+    head.style.fontSize = 'var(--text-xs)';
     head.style.fontWeight = '600';
     head.style.letterSpacing = '0.05em';
     head.style.marginBottom = '8px';
@@ -389,7 +389,7 @@ export function speedPanel(tagId, opts = {}) {
     }
 
     const hint = document.createElement('div');
-    hint.style.fontSize = '9px';
+    hint.style.fontSize = 'var(--text-xs)';
     hint.style.color = '#475569';
     hint.style.fontStyle = 'italic';
     hint.style.marginTop = '6px';
@@ -405,7 +405,7 @@ export function goButton(label, onGo) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn btn-primary';
-    btn.style.fontSize = '10px';
+    btn.style.fontSize = 'var(--text-xs)';
     btn.style.marginTop = '8px';
     btn.textContent = label || 'Go';
     btn.onclick = () => onGo(btn);
@@ -416,7 +416,7 @@ export function phaseHint(teleop) {
     const phase = teleop?.command?.phase;
     if (phase === 'executing') {
         const el = document.createElement('div');
-        el.style.fontSize = '9px';
+        el.style.fontSize = 'var(--text-xs)';
         el.style.color = '#22d3ee';
         el.style.marginTop = '6px';
         el.textContent = 'Moving…';

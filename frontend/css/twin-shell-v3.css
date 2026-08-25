@@ -1,0 +1,259 @@
+/**
+ * Twin Studio v3 shell — dark chrome + modern blue accents (Twin-only).
+ * Uses tokens from tokens-v3.css; overrides inline index.html dark/light mismatches.
+ */
+
+/* --- Main column & canvas frame --- */
+body.cl-app.twin-v2.twin-style-v3 #main-content {
+    background-image: radial-gradient(
+        circle at 50% 35%,
+        rgba(79, 143, 247, 0.08) 0%,
+        var(--bg-dark) 55%,
+        #080a0f 100%
+    );
+}
+
+body.cl-app.twin-v2.twin-style-v3 #main-top-chrome {
+    background: transparent;
+}
+
+body.cl-app.twin-v2.twin-style-v3 #canvas-wrapper {
+    background-color: #0e1219;
+    border-color: rgba(79, 143, 247, 0.28);
+    box-shadow:
+        0 0 0 1px rgba(79, 143, 247, 0.12),
+        0 8px 40px rgba(0, 0, 0, 0.45),
+        0 0 48px rgba(79, 143, 247, 0.08);
+}
+
+/* --- Sidebars --- */
+body.cl-app.twin-v2.twin-style-v3 #sidebar,
+body.cl-app.twin-v2.twin-style-v3 #sidebar-right {
+    background: var(--bg-panel);
+    border-color: var(--border-color);
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.25);
+}
+
+body.cl-app.twin-v2.twin-style-v3 #sidebar-right-pinned {
+    background: var(--bg-panel);
+    border-color: var(--border-color);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .section-header {
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+    background: var(--bg-panel);
+}
+
+/* Left inventory cards (Twin uses .component-card, not .comp-item) */
+body.cl-app.twin-v2.twin-style-v3 .component-card {
+    background-color: rgba(79, 143, 247, 0.04);
+    border-color: var(--border-color);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .component-card:hover {
+    background-color: var(--bg-panel-hover);
+    border-color: var(--primary-accent);
+    box-shadow: 0 4px 16px rgba(79, 143, 247, 0.12);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .comp-icon {
+    background-color: rgba(79, 143, 247, 0.08);
+    color: var(--text-secondary);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .comp-item {
+    background: var(--bg-panel-hover) !important;
+    border-color: var(--border-color) !important;
+}
+
+body.cl-app.twin-v2.twin-style-v3 .comp-item:hover {
+    border-color: var(--primary-accent) !important;
+    background: rgba(79, 143, 247, 0.08) !important;
+}
+
+body.cl-app.twin-v2.twin-style-v3 .comp-item.selected {
+    border-color: var(--primary-accent) !important;
+    background: rgba(79, 143, 247, 0.12) !important;
+}
+
+/* --- Bench / command queue --- */
+body.cl-app.twin-v2.twin-style-v3 .bench-header {
+    background: rgba(19, 23, 34, 0.96);
+    border-color: rgba(79, 143, 247, 0.18);
+    box-shadow: 0 2px 16px rgba(0, 0, 0, 0.25);
+}
+
+body.cl-app.twin-v2.twin-style-v3 #bench-header {
+    background: rgba(19, 23, 34, 0.96);
+    border-color: rgba(79, 143, 247, 0.18);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .command-matrix-panel {
+    background: var(--bg-panel);
+    border-color: rgba(79, 143, 247, 0.28);
+    color: var(--text-primary);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .command-matrix-panel__title {
+    color: var(--primary-accent);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .live-feed-session-bar {
+    background: rgba(19, 23, 34, 0.95);
+    border-color: rgba(79, 143, 247, 0.28);
+    color: var(--text-primary);
+}
+
+/* --- Workspace tabs & panels --- */
+body.cl-app.twin-v2.twin-style-v3 .workspace-tab-list {
+    background: var(--bg-panel);
+    border-bottom-color: var(--border-color);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .workspace-tab {
+    color: var(--text-secondary);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .workspace-tab.is-active,
+body.cl-app.twin-v2.twin-style-v3 .workspace-tab[aria-selected="true"] {
+    color: var(--primary-accent);
+    border-bottom-color: var(--primary-accent);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .component-panel {
+    background: var(--bg-panel);
+    border-color: rgba(79, 143, 247, 0.22);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .component-panel--focused {
+    border-color: rgba(79, 143, 247, 0.55);
+    box-shadow: 0 0 0 1px rgba(79, 143, 247, 0.2);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .component-panel--compact {
+    background: rgba(19, 23, 34, 0.92);
+    border-color: rgba(79, 143, 247, 0.28);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .component-panel--compact:hover {
+    background: var(--bg-panel-hover);
+    border-color: rgba(79, 143, 247, 0.5);
+}
+
+/* --- Bottom chrome --- */
+body.cl-app.twin-v2.twin-style-v3 .twin-bottom-chrome {
+    background: var(--bg-panel);
+    border-top-color: var(--border-color);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .twin-view-toggle {
+    background: var(--bg-panel-hover);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .twin-view-toggle.is-active,
+body.cl-app.twin-v2.twin-style-v3 .twin-view-toggle[aria-pressed="true"] {
+    color: #93c5fd;
+    border-color: var(--primary-accent);
+    background: rgba(79, 143, 247, 0.12);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .command-console__toggle {
+    background: var(--bg-panel-hover);
+    border-color: var(--border-color);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .command-console__output,
+body.cl-app.twin-v2.twin-style-v3 .command-console__input {
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
+/* --- Buttons --- */
+body.cl-app.twin-v2.twin-style-v3 .btn-primary {
+    background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+    border-color: #1d4ed8;
+}
+
+body.cl-app.twin-v2.twin-style-v3 .btn-primary:hover {
+    background: linear-gradient(180deg, #4f8ff7 0%, #1d4ed8 100%);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .btn-secondary {
+    background: var(--bg-panel-hover);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .bench-chrome-bar__btn {
+    background: var(--bg-panel-hover);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .bench-chrome-bar__btn--active {
+    border-color: var(--primary-accent);
+    background: rgba(79, 143, 247, 0.12);
+    color: #93c5fd;
+}
+
+body.cl-app.twin-v2.twin-style-v3 .bench-chrome-bar__btn--active .material-icons-round {
+    color: var(--primary-accent);
+}
+
+/* --- Log / monitor --- */
+body.cl-app.twin-v2.twin-style-v3 .log-container {
+    background: var(--bg-panel);
+    color: var(--text-secondary);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .system-status {
+    color: var(--text-primary);
+}
+
+/* --- Collapse toggles --- */
+body.cl-app.twin-v2.twin-style-v3 .sidebar-collapse-toggle {
+    background: var(--bg-panel);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .sidebar-collapse-toggle:hover {
+    border-color: var(--primary-accent);
+    color: var(--primary-accent);
+}
+
+/* --- Generic inputs (not optimization-mode purple blocks) --- */
+body.cl-app.twin-v2.twin-style-v3 .session-notes__editor {
+    background: var(--bg-dark);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .session-notes__editor:focus {
+    border-color: var(--primary-accent);
+}
+
+body.cl-app.twin-v2.twin-style-v3 input[type="text"],
+body.cl-app.twin-v2.twin-style-v3 input[type="number"],
+body.cl-app.twin-v2.twin-style-v3 select,
+body.cl-app.twin-v2.twin-style-v3 textarea {
+    background: var(--bg-dark);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+body.cl-app.twin-v2.twin-style-v3 input[type="text"]:focus,
+body.cl-app.twin-v2.twin-style-v3 input[type="number"]:focus,
+body.cl-app.twin-v2.twin-style-v3 select:focus,
+body.cl-app.twin-v2.twin-style-v3 textarea:focus {
+    border-color: var(--primary-accent);
+    outline: none;
+    box-shadow: var(--focus-ring);
+}

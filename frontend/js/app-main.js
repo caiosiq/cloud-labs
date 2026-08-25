@@ -52,6 +52,8 @@ import { initBenchChromeBar, initBenchChromeBarInteraction } from './ui/bench-ch
 import { initBackendPicker } from './ui/backend-picker.js';
 import { initRuntimeMode } from './ui/runtime-mode.js';
 import { initWorkspaceTabs } from './ui/workspace-tabs.js';
+import { initSidebarCollapse } from './ui/sidebar-collapse.js';
+import { initViewPrefs } from './ui/view-prefs.js';
 import { initSessionNotes } from './ui/session-notes.js';
 import { initOptimizationMode } from './ui/optimization-mode.js';
 import { initUpdateUI, initComponentSidebarInteraction, updateUI } from './ui/updateUI.js';
@@ -67,6 +69,7 @@ import {
 } from './ui/context-panel.js';
 import { checkCollision, initCanvasInteraction } from './canvas/interaction.js';
 import { initRender, render } from './canvas/render.js';
+import { initFitCanvas } from './canvas/fit-canvas.js';
 import { loadPlatformRegistries } from './lab-capabilities.js';
 import { initControlPanel, refreshControlWorkingState } from './ui/control-panel.js';
 import { initInventoryAdd } from './ui/inventory-add.js';
@@ -126,6 +129,12 @@ void initRuntimeMode({
     showErrorModal,
 });
 initWorkspaceTabs();
+initSidebarCollapse();
+initViewPrefs();
+initFitCanvas({
+    onFitted: () => render(),
+});
+window.addEventListener('cloudlabs:viewprefs', () => render());
 initSessionNotes();
 initOptimizationMode({ sendCommand, log });
 

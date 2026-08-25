@@ -10,7 +10,8 @@
 
     <title>Cloud Labs | Operations</title>
 
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
 
     <style>
 
@@ -42,7 +43,7 @@
 
             margin: 0;
 
-            font-family: Inter, sans-serif;
+            font-family: var(--font-ui);
 
             background: var(--bg);
 
@@ -68,7 +69,7 @@
 
         }
 
-        header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+        header h1 { margin: 0; font-size: var(--text-xl); font-weight: 600; }
 
         header nav a {
 
@@ -78,7 +79,7 @@
 
             margin-left: 16px;
 
-            font-size: 13px;
+            font-size: var(--text-md);
 
         }
 
@@ -89,7 +90,7 @@
 
             display: grid;
 
-            grid-template-columns: 300px minmax(520px, 1fr) 340px;
+            grid-template-columns: minmax(240px, 280px) minmax(0, 1fr) minmax(280px, 360px);
 
             gap: 16px;
 
@@ -115,7 +116,7 @@
 
             margin: 0 0 12px;
 
-            font-size: 14px;
+            font-size: var(--text-base);
 
             text-transform: uppercase;
 
@@ -165,7 +166,7 @@
 
         .twin-subtitle {
 
-            font-size: 11px;
+            font-size: var(--text-xs);
 
             color: var(--muted);
 
@@ -243,7 +244,7 @@
 
         .system-status {
 
-            font-size: 11px;
+            font-size: var(--text-xs);
 
             padding: 4px 10px;
 
@@ -259,7 +260,7 @@
 
             gap: 4px;
 
-            font-family: "JetBrains Mono", monospace;
+            font-family: var(--font-mono);
 
         }
 
@@ -267,11 +268,11 @@
 
         #twin-lease-holder {
 
-            font-size: 11px;
+            font-size: var(--text-xs);
 
             color: var(--muted);
 
-            font-family: "JetBrains Mono", monospace;
+            font-family: var(--font-mono);
 
         }
 
@@ -279,7 +280,7 @@
 
             color: var(--err);
 
-            font-size: 12px;
+            font-size: var(--text-sm);
 
             margin-bottom: 8px;
 
@@ -301,7 +302,7 @@
 
             margin: 0 0 10px;
 
-            font-size: 14px;
+            font-size: var(--text-base);
 
             font-weight: 600;
 
@@ -315,13 +316,13 @@
 
             gap: 4px 10px;
 
-            font-size: 13px;
+            font-size: var(--text-md);
 
         }
 
         .backend-grid dt { color: var(--muted); }
 
-        .backend-grid dd { margin: 0 0 8px; font-family: "JetBrains Mono", monospace; font-size: 12px; }
+        .backend-grid dd { margin: 0 0 8px; font-family: var(--font-mono); font-size: var(--text-sm); }
 
         .backend-card--unavailable {
             border-color: rgba(239, 68, 68, 0.45);
@@ -340,13 +341,13 @@
             background: rgba(239, 68, 68, 0.1);
             border: 1px solid rgba(239, 68, 68, 0.35);
             color: #fca5a5;
-            font-size: 12px;
+            font-size: var(--text-sm);
             line-height: 1.45;
         }
 
         #jobs-error {
             color: var(--err);
-            font-size: 12px;
+            font-size: var(--text-sm);
             margin-bottom: 8px;
             line-height: 1.4;
         }
@@ -361,7 +362,7 @@
 
             border-collapse: collapse;
 
-            font-size: 12px;
+            font-size: var(--text-sm);
 
         }
 
@@ -387,7 +388,7 @@
 
             border-radius: 999px;
 
-            font-size: 11px;
+            font-size: var(--text-xs);
 
             font-weight: 600;
 
@@ -422,7 +423,7 @@
         .job-raw-summary {
             cursor: pointer;
             padding: 8px 12px;
-            font-size: 11px;
+            font-size: var(--text-xs);
             font-weight: 600;
             letter-spacing: 0.04em;
             text-transform: uppercase;
@@ -445,8 +446,8 @@
         .job-raw-pre {
             margin: 0;
             padding: 0 12px 12px;
-            font-family: "JetBrains Mono", monospace;
-            font-size: 11px;
+            font-family: var(--font-mono);
+            font-size: var(--text-xs);
             line-height: 1.45;
             max-height: 220px;
             overflow: auto;
@@ -487,7 +488,7 @@
 
         .job-mode-pill {
             display: inline-block;
-            font-size: 10px;
+            font-size: var(--text-xs);
             font-weight: 600;
             letter-spacing: 0.03em;
             color: #94a3b8;
@@ -497,7 +498,7 @@
         }
 
         #job-telemetry {
-            font-size: 12px;
+            font-size: var(--text-sm);
             margin: 14px 0 0;
             padding-top: 12px;
             border-top: 1px solid var(--border);
@@ -525,7 +526,7 @@
 
         .job-metric__label {
             display: block;
-            font-size: 10px;
+            font-size: var(--text-xs);
             font-weight: 600;
             letter-spacing: 0.05em;
             text-transform: uppercase;
@@ -535,8 +536,8 @@
 
         .job-metric__value {
             display: block;
-            font-family: "JetBrains Mono", monospace;
-            font-size: 13px;
+            font-family: var(--font-mono);
+            font-size: var(--text-md);
             color: var(--text);
             overflow: hidden;
             text-overflow: ellipsis;
@@ -546,7 +547,7 @@
         .job-note {
             margin: 0;
             color: var(--muted);
-            font-size: 11px;
+            font-size: var(--text-xs);
             line-height: 1.4;
         }
 
@@ -567,8 +568,8 @@
         .job-trace-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 11px;
-            font-family: "JetBrains Mono", monospace;
+            font-size: var(--text-xs);
+            font-family: var(--font-mono);
             margin: 0;
         }
 
@@ -599,7 +600,7 @@
         .job-step-list {
             margin: 0;
             padding-left: 18px;
-            font-size: 11px;
+            font-size: var(--text-xs);
             max-height: 160px;
             overflow: auto;
         }
@@ -629,7 +630,7 @@
 
             padding: 6px 12px;
 
-            font-size: 12px;
+            font-size: var(--text-sm);
 
             cursor: pointer;
 
@@ -649,9 +650,9 @@
 
         }
 
-        .empty { color: var(--muted); font-size: 13px; }
+        .empty { color: var(--muted); font-size: var(--text-md); }
 
-        .config-form { display: grid; gap: 12px; font-size: 13px; }
+        .config-form { display: grid; gap: 12px; font-size: var(--text-md); }
 
         .field-row {
 
@@ -665,7 +666,7 @@
 
         }
 
-        .field-row label { color: var(--muted); font-size: 12px; }
+        .field-row label { color: var(--muted); font-size: var(--text-sm); }
 
         select, textarea {
 
@@ -679,9 +680,9 @@
 
             color: var(--text);
 
-            font-family: "JetBrains Mono", monospace;
+            font-family: var(--font-mono);
 
-            font-size: 12px;
+            font-size: var(--text-sm);
 
             padding: 8px;
 
@@ -691,9 +692,9 @@
 
         .commit-display {
 
-            font-family: "JetBrains Mono", monospace;
+            font-family: var(--font-mono);
 
-            font-size: 11px;
+            font-size: var(--text-xs);
 
             word-break: break-all;
 
@@ -701,7 +702,7 @@
 
         .config-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-        .config-status { font-size: 12px; color: var(--muted); min-height: 1.2em; }
+        .config-status { font-size: var(--text-sm); color: var(--muted); min-height: 1.2em; }
 
         .plan-list {
 
@@ -709,7 +710,7 @@
 
             padding-left: 20px;
 
-            font-size: 12px;
+            font-size: var(--text-sm);
 
             max-height: 160px;
 
@@ -733,7 +734,7 @@
 
             margin: 0 0 8px;
 
-            font-size: 12px;
+            font-size: var(--text-sm);
 
             color: var(--muted);
 
@@ -763,7 +764,7 @@
 
 </head>
 
-<body>
+<body class="cl-app">
 
     <header>
 

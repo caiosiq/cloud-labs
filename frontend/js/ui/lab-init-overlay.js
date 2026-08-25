@@ -59,11 +59,11 @@ function _ensureOverlay() {
     ].join(';');
     el.innerHTML = `
       <div style="width:min(420px,100%);text-align:center">
-        <p style="margin:0 0 6px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#67e8f9">Cloud Labs</p>
+        <p style="margin:0 0 6px;font-size: var(--text-sm);letter-spacing:0.08em;text-transform:uppercase;color:#67e8f9">Cloud Labs</p>
         <h2 id="lab-init-title" style="margin:0 0 10px;font-size:26px;font-weight:650;letter-spacing:-0.02em">Initializing lab…</h2>
-        <p id="lab-init-subtitle" style="margin:0;font-size:14px;line-height:1.5;color:#94a3b8"></p>
-        <div id="lab-init-errors" style="display:none;margin:14px 0 0;text-align:left;font-size:12px;line-height:1.45;color:#fca5a5;max-height:120px;overflow:auto"></div>
-        <button type="button" id="lab-init-retry" style="display:none;margin-top:18px;padding:10px 16px;border-radius:8px;border:1px solid rgba(56,189,248,0.4);background:rgba(15,23,42,0.9);color:#e2e8f0;cursor:pointer;font-size:13px">
+        <p id="lab-init-subtitle" style="margin:0;font-size: var(--text-base);line-height:1.5;color:#94a3b8"></p>
+        <div id="lab-init-errors" style="display:none;margin:14px 0 0;text-align:left;font-size: var(--text-sm);line-height:1.45;color:#fca5a5;max-height:120px;overflow:auto"></div>
+        <button type="button" id="lab-init-retry" style="display:none;margin-top:18px;padding:10px 16px;border-radius:8px;border:1px solid rgba(56,189,248,0.4);background:rgba(15,23,42,0.9);color:#e2e8f0;cursor:pointer;font-size: var(--text-base)">
           Retry SYNC_RUNTIME
         </button>
       </div>`;

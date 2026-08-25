@@ -42,7 +42,7 @@ export default function MJPEGViewer({ tagId, fieldName, descriptor, comp }) {
         img.style.display = 'none';
         const msg = document.createElement('div');
         msg.style.color = '#64748b';
-        msg.style.fontSize = '10px';
+        msg.style.fontSize = 'var(--text-xs)';
         msg.style.fontStyle = 'italic';
         msg.textContent = `\u2014 stream unavailable (${url})`;
         card.appendChild(msg);
@@ -51,7 +51,7 @@ export default function MJPEGViewer({ tagId, fieldName, descriptor, comp }) {
 
     const meta = document.createElement('div');
     meta.style.color = '#475569';
-    meta.style.fontSize = '9px';
+    meta.style.fontSize = 'var(--text-xs)';
     meta.style.marginTop = '4px';
     meta.style.fontFamily = 'ui-monospace, monospace';
     meta.textContent = url;

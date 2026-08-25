@@ -58,7 +58,7 @@ export function renderComponentPanel(tagId, deps = {}) {
         panel.appendChild(_renderHeader(tagId, { name: tagId, properties: {}, hint: '' }, deps));
         const missing = document.createElement('div');
         missing.style.padding = '10px 0';
-        missing.style.fontSize = '11px';
+        missing.style.fontSize = 'var(--text-sm)';
         missing.style.color = '#94a3b8';
         missing.textContent = `Catalog not loaded for ${tagId}.`;
         panel.appendChild(missing);
@@ -190,7 +190,7 @@ function _renderHeader(tagId, { name, properties, hint }, deps) {
     info.style.minWidth = '0';
 
     const eyebrow = document.createElement('div');
-    eyebrow.style.fontSize = '10px';
+    eyebrow.style.fontSize = 'var(--text-xs)';
     eyebrow.style.color = 'var(--text-muted)';
     eyebrow.style.letterSpacing = '0.06em';
     eyebrow.style.textTransform = 'uppercase';
@@ -207,7 +207,7 @@ function _renderHeader(tagId, { name, properties, hint }, deps) {
 
     const tagRow = document.createElement('div');
     tagRow.style.marginTop = '4px';
-    tagRow.style.fontSize = '10px';
+    tagRow.style.fontSize = 'var(--text-xs)';
     tagRow.style.color = 'var(--text-muted)';
     tagRow.style.letterSpacing = '0.04em';
     const tagLabel = document.createElement('span');
@@ -215,7 +215,7 @@ function _renderHeader(tagId, { name, properties, hint }, deps) {
     tagLabel.textContent = 'Tag ID:';
     const tagValue = document.createElement('span');
     tagValue.style.color = 'var(--text-secondary)';
-    tagValue.style.fontFamily = "'JetBrains Mono', 'Fira Code', monospace";
+    tagValue.style.fontFamily = "var(--font-mono)";
     tagValue.style.marginLeft = '4px';
     tagValue.textContent = tagId;
     tagRow.appendChild(tagLabel);
@@ -224,7 +224,7 @@ function _renderHeader(tagId, { name, properties, hint }, deps) {
 
     const propsBox = document.createElement('div');
     propsBox.style.marginTop = '6px';
-    propsBox.style.fontSize = '11px';
+    propsBox.style.fontSize = 'var(--text-sm)';
     propsBox.style.fontStyle = 'italic';
     propsBox.style.color = 'var(--text-muted)';
     propsBox.style.fontWeight = '400';
@@ -244,7 +244,7 @@ function _renderHeader(tagId, { name, properties, hint }, deps) {
     if (hint) {
         const hintEl = document.createElement('div');
         hintEl.style.marginTop = '8px';
-        hintEl.style.fontSize = '10px';
+        hintEl.style.fontSize = 'var(--text-xs)';
         hintEl.style.color = '#94a3b8';
         hintEl.style.lineHeight = '1.35';
         hintEl.innerHTML = hint;
@@ -289,7 +289,7 @@ function _renderBody(tagId, comp, catalogRow, deps) {
         primBlock.className = 'component-popup__primitives';
 
         const title = document.createElement('div');
-        title.style.fontSize = '10px';
+        title.style.fontSize = 'var(--text-xs)';
         title.style.color = '#94a3b8';
         title.style.fontWeight = '600';
         title.style.letterSpacing = '0.05em';
@@ -362,7 +362,7 @@ function _renderBody(tagId, comp, catalogRow, deps) {
 
     if (PRIMITIVE_DEV_HINTS) {
         const dev = document.createElement('div');
-        dev.style.fontSize = '9px';
+        dev.style.fontSize = 'var(--text-xs)';
         dev.style.color = '#475569';
         dev.style.marginTop = '6px';
         dev.innerHTML =

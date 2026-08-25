@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cloud Labs | Optimization session</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
     <style>
         :root {
@@ -20,7 +22,7 @@
         * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: Inter, system-ui, sans-serif;
+            font-family: var(--font-ui);
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
@@ -37,19 +39,19 @@
             top: 0;
             z-index: 10;
         }
-        header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+        header h1 { margin: 0; font-size: var(--text-lg); font-weight: 600; }
         header nav a {
             color: var(--muted);
             text-decoration: none;
             margin-left: 14px;
-            font-size: 13px;
+            font-size: var(--text-md);
         }
         header nav a:hover, header nav a.active { color: var(--accent); }
         .header-meta {
             display: flex;
             align-items: center;
             gap: 10px;
-            font-size: 12px;
+            font-size: var(--text-sm);
             color: var(--muted);
         }
         .header-meta select {
@@ -73,12 +75,12 @@
         .osd-kicker {
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            font-size: 11px;
+            font-size: var(--text-xs);
             color: var(--accent);
             font-weight: 600;
         }
         .osd-hero h1 { margin: 4px 0 0; font-size: 22px; }
-        .osd-sub { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+        .osd-sub { margin: 6px 0 0; color: var(--muted); font-size: var(--text-md); }
         .osd-sub code { color: #a5f3fc; }
         .osd-progress {
             height: 8px;
@@ -133,17 +135,17 @@
         }
         .osd-panel h2 {
             margin: 0 0 10px;
-            font-size: 13px;
+            font-size: var(--text-md);
             text-transform: uppercase;
             letter-spacing: 0.06em;
             color: var(--muted);
         }
         .osd-section-title {
-            font-size: 12px;
+            font-size: var(--text-sm);
             color: var(--muted);
             margin-bottom: 8px;
         }
-        .osd-idle { color: var(--muted); font-size: 13px; }
+        .osd-idle { color: var(--muted); font-size: var(--text-md); }
         .osd-chip-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -155,16 +157,16 @@
             padding: 8px 10px;
             background: #0f141b;
         }
-        .osd-chip strong { font-size: 11px; color: #cbd5e1; }
-        .osd-chip__val { font-size: 16px; font-variant-numeric: tabular-nums; margin-top: 4px; }
-        .osd-delta { display: block; font-size: 11px; color: #67e8f9; margin-top: 2px; }
+        .osd-chip strong { font-size: var(--text-xs); color: #cbd5e1; }
+        .osd-chip__val { font-size: var(--text-lg); font-variant-numeric: tabular-nums; margin-top: 4px; }
+        .osd-delta { display: block; font-size: var(--text-xs); color: #67e8f9; margin-top: 2px; }
         .osd-terms { display: flex; flex-wrap: wrap; gap: 6px; }
         .osd-term {
             padding: 4px 8px;
             border-radius: 6px;
             border: 1px solid rgba(34, 211, 238, 0.35);
             background: rgba(8, 47, 73, 0.35);
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
         .osd-stages {
             display: grid;
@@ -176,7 +178,7 @@
             border-radius: 8px;
             padding: 10px;
             background: #0f141b;
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
         .osd-stage--ok { border-color: rgba(52, 211, 153, 0.45); }
         .osd-stage--fail { border-color: rgba(248, 113, 113, 0.55); }
@@ -184,7 +186,7 @@
             display: block;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            font-size: 11px;
+            font-size: var(--text-xs);
             margin-bottom: 4px;
         }
         .osd-stage pre {
@@ -193,7 +195,7 @@
             word-break: break-word;
             color: #cbd5e1;
             font-family: "JetBrains Mono", ui-monospace, monospace;
-            font-size: 11px;
+            font-size: var(--text-xs);
         }
         .osd-camera img {
             width: 100%;
@@ -221,7 +223,7 @@
             flex-wrap: wrap;
             gap: 8px;
             margin-top: 8px;
-            font-size: 11px;
+            font-size: var(--text-xs);
             color: var(--muted);
         }
         .osd-overlay-chip {
@@ -251,7 +253,7 @@
         .osd-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
         .osd-table th, .osd-table td {
             padding: 6px 8px;
@@ -269,15 +271,15 @@
             border-radius: 4px;
             background: rgba(52, 211, 153, 0.2);
             color: var(--ok);
-            font-size: 10px;
+            font-size: var(--text-xs);
         }
-        .osd-var-delta { display: block; color: #64748b; font-size: 10px; }
+        .osd-var-delta { display: block; color: #64748b; font-size: var(--text-xs); }
         .osd-mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
         .osd-log {
             max-height: 280px;
             overflow: auto;
             font-family: "JetBrains Mono", ui-monospace, monospace;
-            font-size: 11px;
+            font-size: var(--text-xs);
             background: #0f141b;
             border-radius: 8px;
             border: 1px solid var(--border);
@@ -291,7 +293,7 @@
             color: #a7f3d0;
             border-radius: 6px;
             padding: 6px 10px;
-            font-size: 12px;
+            font-size: var(--text-sm);
             cursor: pointer;
             font-family: inherit;
         }
@@ -303,13 +305,13 @@
         }
         #osd-error {
             color: var(--fail);
-            font-size: 13px;
+            font-size: var(--text-md);
             margin: 0 22px 8px;
             min-height: 1.2em;
         }
     </style>
 </head>
-<body>
+<body class="cl-app">
     <header>
         <div>
             <h1>Optimization session</h1>

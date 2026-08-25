@@ -23,13 +23,13 @@ export function row(label, value, opts) {
     r.style.alignItems = 'baseline';
     const k = document.createElement('span');
     k.style.color = '#64748b';
-    k.style.fontSize = '10px';
+    k.style.fontSize = 'var(--text-xs)';
     k.textContent = label;
     const v = document.createElement('span');
     v.style.color = dim ? '#475569' : '#cbd5e1';
     v.style.fontFamily = mono ? 'ui-monospace, monospace' : 'inherit';
     v.style.fontStyle = dim ? 'italic' : 'normal';
-    v.style.fontSize = '11px';
+    v.style.fontSize = 'var(--text-sm)';
     v.textContent = value;
     r.appendChild(k);
     r.appendChild(v);
@@ -42,7 +42,7 @@ export function row(label, value, opts) {
  */
 export function widgetTitle(fieldName, descriptor) {
     const el = document.createElement('div');
-    el.style.fontSize = '9px';
+    el.style.fontSize = 'var(--text-xs)';
     el.style.color = '#94a3b8';
     el.style.fontWeight = '600';
     el.style.letterSpacing = '0.05em';
@@ -69,7 +69,7 @@ export function widgetCard() {
     box.style.border = '1px solid #2a2e36';
     box.style.borderRadius = '6px';
     box.style.padding = '8px';
-    box.style.fontSize = '10px';
+    box.style.fontSize = 'var(--text-xs)';
     box.style.lineHeight = '1.5';
     box.style.color = '#cbd5e1';
     return box;
@@ -109,7 +109,7 @@ export function nullPlaceholder(text) {
     const el = document.createElement('div');
     el.style.fontStyle = 'italic';
     el.style.color = '#475569';
-    el.style.fontSize = '11px';
+    el.style.fontSize = 'var(--text-sm)';
     el.textContent = text || '\u2014 null';
     return el;
 }

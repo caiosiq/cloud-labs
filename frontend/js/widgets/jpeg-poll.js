@@ -48,7 +48,7 @@ export default function JPEGPoll({ tagId, fieldName, descriptor, comp, hooks }) 
     let consecutiveErrors = 0;
     const errHint = document.createElement('div');
     errHint.style.color = '#fca5a5';
-    errHint.style.fontSize = '10px';
+    errHint.style.fontSize = 'var(--text-xs)';
     errHint.style.fontStyle = 'italic';
     errHint.style.display = 'none';
     const refresh = () => {
@@ -98,7 +98,7 @@ export default function JPEGPoll({ tagId, fieldName, descriptor, comp, hooks }) 
     pop.type = 'button';
     pop.className = 'live-feed-pop-btn';
     pop.innerHTML =
-        '<span class="material-icons-round" style="font-size:14px" aria-hidden="true">open_in_new</span> Pop out';
+        '<span class="material-icons-round" style="font-size: var(--text-base)" aria-hidden="true">open_in_new</span> Pop out';
     pop.onclick = () => {
         openLiveFeedPopout(tagId, { fetchLabState: hooks?.fetchLabState });
     };
@@ -106,7 +106,7 @@ export default function JPEGPoll({ tagId, fieldName, descriptor, comp, hooks }) 
 
     const meta = document.createElement('div');
     meta.style.color = '#475569';
-    meta.style.fontSize = '9px';
+    meta.style.fontSize = 'var(--text-xs)';
     meta.style.marginTop = '4px';
     meta.style.fontFamily = 'ui-monospace, monospace';
     meta.textContent = `${url}  \u2022  ${fps} fps`;

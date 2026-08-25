@@ -221,7 +221,7 @@ function ensureHoldingBannerEl() {
     el = document.createElement('div');
     el.id = 'holding-banner';
     el.style.cssText =
-        'display: none; margin: 0 16px 10px; padding: 10px 12px; font-size: 11px; ' +
+        'display: none; margin: 0 16px 10px; padding: 10px 12px; font-size: var(--text-sm); ' +
         'color: #f3e8ff; background: rgba(168, 85, 247, 0.12); ' +
         'border: 1px solid rgba(168, 85, 247, 0.45); border-radius: 6px; line-height: 1.4;';
     if (anchor && anchor.parentNode) {
@@ -260,10 +260,10 @@ export function updateHoldingBanner() {
         el.style.color = '#f3e8ff';
         const pose = hld.nominal_pose || {};
         const poseStr = [
-            Number.isFinite(Number(pose.x)) ? `x=${Number(pose.x).toFixed(1)}` : null,
-            Number.isFinite(Number(pose.y)) ? `y=${Number(pose.y).toFixed(1)}` : null,
-            Number.isFinite(Number(pose.rotation)) ? `rot=${Number(pose.rotation).toFixed(1)}°` : null,
-            Number.isFinite(Number(pose.z)) ? `z=${Number(pose.z).toFixed(1)}` : null,
+            Number.isFinite(Number(pose.x)) ? `x=${Number(pose.x).toFixed(2)}` : null,
+            Number.isFinite(Number(pose.y)) ? `y=${Number(pose.y).toFixed(2)}` : null,
+            Number.isFinite(Number(pose.rotation)) ? `rot=${Number(pose.rotation).toFixed(2)}°` : null,
+            Number.isFinite(Number(pose.z)) ? `z=${Number(pose.z).toFixed(2)}` : null,
         ].filter(Boolean).join(' ');
         el.innerHTML =
             '<div style="display:flex; align-items:flex-start; gap:8px;">' +
@@ -271,7 +271,7 @@ export function updateHoldingBanner() {
             '<div style="flex:1;">' +
             `<div style="font-weight:600; margin-bottom:2px;">HOLDING ${hld.tag_id || '<tag>'}</div>` +
             (poseStr
-                ? `<div style="color:#c4b5fd; font-family: monospace; font-size: 10px;">${poseStr}</div>`
+                ? `<div style="color:#c4b5fd; font-family: monospace; font-size: var(--text-xs);">${poseStr}</div>`
                 : '') +
             '<div style="margin-top:4px;">' +
             'Only <strong>HOVER</strong>, <strong>PLACE_FROM_HOVER</strong>, or ' +

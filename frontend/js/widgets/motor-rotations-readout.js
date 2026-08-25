@@ -23,12 +23,12 @@ export default function MotorRotationsReadout({ fieldName, descriptor, value }) 
         r.style.gap = '8px';
         const k = document.createElement('span');
         k.style.color = '#64748b';
-        k.style.fontSize = '10px';
+        k.style.fontSize = 'var(--text-xs)';
         k.textContent = `\u03b8_${mid}`;
         const v = document.createElement('span');
         v.style.color = '#cbd5e1';
         v.style.fontFamily = 'ui-monospace, monospace';
-        v.style.fontSize = '11px';
+        v.style.fontSize = 'var(--text-sm)';
         v.textContent = `${fmtNum(ang, 2)}\u00b0`;
         r.appendChild(k);
         r.appendChild(v);

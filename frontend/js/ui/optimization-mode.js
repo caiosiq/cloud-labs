@@ -195,7 +195,7 @@ function appendVariableSearchBoundsEditor(body, b) {
         row.style.cssText = 'margin:0 0 8px;padding:10px 12px;box-shadow:none;';
 
         const title = document.createElement('div');
-        title.style.cssText = 'font-weight:600;font-size:12px;margin-bottom:6px;';
+        title.style.cssText = 'font-weight:600;font-size: var(--text-sm);margin-bottom:6px;';
         title.textContent = v.label || v.id;
         row.appendChild(title);
 
@@ -1036,7 +1036,7 @@ function renderOptimizationTelemetry(root) {
         <div class="opt-telemetry-sub">${advancing} · latest loss ${lastLoss}</div>
         <a class="opt-session-link" href="${_escapeHtml(sessionHref)}" target="_blank" rel="noopener" data-opt-session-link="1">
             Open full session page
-            <span class="material-icons-round" style="font-size:14px;">open_in_new</span>
+            <span class="material-icons-round" style="font-size: var(--text-base);">open_in_new</span>
         </a>
         <p class="opt-session-link-hint">Tunables, kernels, camera frames, and iteration log live there — opens immediately, even before eval 1.</p>
     `;
@@ -1191,7 +1191,7 @@ function renderIdleLastRunCard(root) {
         </button>
         <a class="opt-session-link" href="${_escapeHtml(sessionHref)}" target="_blank" rel="noopener" style="margin-top:8px;">
             Open full session page
-            <span class="material-icons-round" style="font-size:14px;">open_in_new</span>
+            <span class="material-icons-round" style="font-size: var(--text-base);">open_in_new</span>
         </a>
     `;
     card.querySelector('.opt-view-last-btn').onclick = () => {
@@ -1405,15 +1405,15 @@ function renderStageObjective(body) {
                     'width:100%;text-align:left;padding:10px 12px;white-space:normal;height:auto;';
                 row.disabled = !present || !presetTagSel.value;
                 const title = document.createElement('span');
-                title.style.cssText = 'font-weight:600;font-size:13px;line-height:1.3;';
+                title.style.cssText = 'font-weight:600;font-size: var(--text-base);line-height:1.3;';
                 title.textContent = cfg.label;
                 const summary = document.createElement('span');
                 summary.className = 'opt-hint';
-                summary.style.cssText = 'margin:0;font-size:12px;line-height:1.35;opacity:0.9;';
+                summary.style.cssText = 'margin:0;font-size: var(--text-sm);line-height:1.35;opacity:0.9;';
                 summary.textContent = cfg.summary || '';
                 const meta = document.createElement('span');
                 meta.style.cssText =
-                    'font-size:11px;opacity:0.65;font-family:ui-monospace,monospace;margin-top:2px;';
+                    'font-size: var(--text-sm);opacity:0.65;font-family:ui-monospace,monospace;margin-top:2px;';
                 meta.textContent = present
                     ? `Kernel: ${kernelId}`
                     : `Kernel: ${kernelId} (not on this edge)`;
@@ -2646,7 +2646,7 @@ function renderStageResults(body) {
     sessionLink.target = '_blank';
     sessionLink.rel = 'noopener';
     sessionLink.innerHTML =
-        'Open full session page <span class="material-icons-round" style="font-size:14px;">open_in_new</span>';
+        'Open full session page <span class="material-icons-round" style="font-size: var(--text-base);">open_in_new</span>';
     body.appendChild(sessionLink);
     const sessionHint = document.createElement('p');
     sessionHint.className = 'opt-session-link-hint';

@@ -562,7 +562,7 @@ function renderDetail() {
                                             layout: m.tensor?.layout,
                                         }),
                                     )}</td>
-                                    <td class="mono" style="white-space:pre-line;font-size:11px;line-height:1.45">${escapeHtml(m.tensorText || '—')}</td>
+                                    <td class="mono" style="white-space:pre-line;font-size: var(--text-sm);line-height:1.45">${escapeHtml(m.tensorText || '—')}</td>
                                     <td>${escapeHtml(m.domain)}</td>
                                     <td><pre class="snippet">${escapeHtml(m.snippet)}</pre></td>
                                     <td><button type="button" class="copy" data-copy-measurable="${i}">Copy</button></td>

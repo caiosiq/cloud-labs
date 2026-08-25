@@ -16,7 +16,7 @@ export function renderSetExposure(ctx) {
 
     const { section, body } = primitiveRegion('SET_EXPOSURE', 'SET EXPOSURE');
     const hint = document.createElement('p');
-    hint.style.fontSize = '10px';
+    hint.style.fontSize = 'var(--text-xs)';
     hint.style.color = '#94a3b8';
     hint.style.margin = '0';
     hint.style.lineHeight = '1.35';

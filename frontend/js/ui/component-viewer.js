@@ -19,7 +19,7 @@ function valueForField(comp, scope, fieldName) {
 function sectionTitle(text, count) {
     const el = document.createElement('div');
     el.className = 'component-panel__section-title';
-    el.style.fontSize = '10px';
+    el.style.fontSize = 'var(--text-xs)';
     el.style.color = '#94a3b8';
     el.style.fontWeight = '600';
     el.style.letterSpacing = '0.05em';
@@ -36,7 +36,7 @@ function sectionTitle(text, count) {
     if (typeof count === 'number') {
         const c = document.createElement('span');
         c.style.color = '#475569';
-        c.style.fontFamily = 'ui-monospace, monospace';
+        c.style.fontFamily = 'var(--font-mono)';
         c.style.fontWeight = '400';
         c.textContent = `${count}`;
         el.appendChild(c);
@@ -48,7 +48,7 @@ function renderEmptyHint(text) {
     const el = document.createElement('div');
     el.style.fontStyle = 'italic';
     el.style.color = '#475569';
-    el.style.fontSize = '10px';
+    el.style.fontSize = 'var(--text-xs)';
     el.style.padding = '4px 0';
     el.textContent = text;
     return el;
@@ -87,7 +87,7 @@ function renderScope(scope, declaration, comp, tagId, hooks, { gateLiveFeed = fa
             console.error(`[component-viewer] widget ${widgetName} for ${scope}.${fieldName} threw:`, e);
             card = document.createElement('div');
             card.style.color = '#fca5a5';
-            card.style.fontSize = '10px';
+            card.style.fontSize = 'var(--text-xs)';
             card.textContent = `${scope}.${fieldName}: widget failed (${e && e.message ? e.message : e})`;
         }
         if (card instanceof HTMLElement) {

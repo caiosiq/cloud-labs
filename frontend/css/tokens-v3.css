@@ -1,0 +1,42 @@
+/**
+ * Twin Studio v3 — token overrides (dark cool-slate + modern blue).
+ * Scoped to Twin only; v2 tokens in tokens.css remain default.
+ */
+body.cl-app.twin-v2.twin-style-v3 {
+    --bg-dark: #0b0e14;
+    --bg-panel: #131722;
+    --bg-panel-hover: #1a2233;
+    --border-color: #2a3548;
+
+    --primary-accent: #4f8ff7;
+    --primary-glow: rgba(79, 143, 247, 0.32);
+
+    --laser-red: #ff3b3b;
+    --laser-glow: rgba(255, 59, 59, 0.4);
+
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+
+    --status-success: #10b981;
+    --status-warning: #f59e0b;
+    --status-error: #ef4444;
+
+    --grid-color: #1e293b;
+    --grid-major: #334155;
+
+    --bg: var(--bg-dark);
+    --panel: var(--bg-panel);
+    --border: var(--border-color);
+    --text: var(--text-primary);
+    --muted: var(--text-secondary);
+    --accent: var(--primary-accent);
+
+    --focus-ring: 0 0 0 2px rgba(79, 143, 247, 0.45);
+}
+
+body.cl-app.twin-v2.twin-style-v3 .app-top-nav__brand:hover,
+body.cl-app.twin-v2.twin-style-v3 .app-top-nav nav a:hover,
+body.cl-app.twin-v2.twin-style-v3 .app-top-nav nav a.active {
+    color: var(--primary-accent);
+}

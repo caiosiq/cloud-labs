@@ -14,9 +14,9 @@ function poseInputs(ctx) {
     grid.style.display = 'grid';
     grid.style.gridTemplateColumns = '1fr 1fr 1fr';
     grid.style.gap = '6px';
-    const xInp = coordInput('X (mm)', p.x);
-    const yInp = coordInput('Y (mm)', p.y);
-    const rInp = coordInput('θ (°)', p.rotation ?? 0);
+    const xInp = coordInput('X (mm)', p.x, 2);
+    const yInp = coordInput('Y (mm)', p.y, 2);
+    const rInp = coordInput('θ (°)', p.rotation ?? 0, 2);
     grid.appendChild(xInp);
     grid.appendChild(yInp);
     grid.appendChild(rInp);
@@ -48,7 +48,7 @@ export function renderConfirmHolding(ctx) {
 
     const { section, body } = primitiveRegion('CONFIRM_HOLDING_TAG', 'CONFIRM HOLDING');
     const p = document.createElement('p');
-    p.style.fontSize = '10px';
+    p.style.fontSize = 'var(--text-xs)';
     p.style.color = '#fca5a5';
     p.style.lineHeight = '1.35';
     p.style.margin = '0 0 6px 0';
@@ -144,7 +144,7 @@ export function renderHoldingNotice(ctx) {
     const held = getHolding(labState).tag_id;
     const { section, body } = primitiveRegion('HOLDING_NOTICE', 'HOLDING');
     const p = document.createElement('p');
-    p.style.fontSize = '10px';
+    p.style.fontSize = 'var(--text-xs)';
     p.style.color = '#c4b5fd';
     p.style.margin = '0';
     p.textContent = `Robot is holding ${held || 'another part'}. Release before interacting with ${tagId}.`;

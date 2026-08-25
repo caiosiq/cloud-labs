@@ -47,7 +47,7 @@ export function updateLayoutWarningBanner() {
     }
     el.style.display = 'block';
     el.innerHTML =
-        '<span class="material-icons-round" style="font-size:14px;vertical-align:middle;color:#f59e0b;">warning</span> ' +
+        '<span class="material-icons-round" style="font-size: var(--text-base);vertical-align:middle;color:#f59e0b;">warning</span> ' +
         '<strong>Layout</strong>: ' +
         lines.map((w) => `<span style="display:block;margin-top:4px;">${w}</span>`).join('');
 }
@@ -106,15 +106,15 @@ export function updateLayoutConflictModal() {
     const kind = next.kind;
     const tid = next.tag_id;
     let bodyHtml = `<h3 style="margin:0 0 8px 0;color:#e2e8f0;font-size:16px;display:flex;align-items:center;gap:8px;"><span class="material-icons-round" style="color:#f59e0b;font-size:22px;">warning</span> Inventory layout</h3>`;
-    bodyHtml += `<p style="margin:0 0 16px 0;color:#94a3b8;font-size:13px;line-height:1.45;">${next.message}</p>`;
+    bodyHtml += `<p style="margin:0 0 16px 0;color:#94a3b8;font-size: var(--text-base);line-height:1.45;">${next.message}</p>`;
 
     if (kind === 'PLACED_IN_Q3') {
         const d = layoutConflictMoveDefaults(tid);
-        bodyHtml += `<div style="font-size:11px;color:#64748b;margin-bottom:8px;">Move to a breadboard pose (mm, degrees):</div>`;
+        bodyHtml += `<div style="font-size: var(--text-sm);color:#64748b;margin-bottom:8px;">Move to a breadboard pose (mm, degrees):</div>`;
         bodyHtml += `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">`;
-        bodyHtml += `<label style="font-size:10px;color:#94a3b8;">X<br><input id="lconf-tx" type="number" step="0.1" value="${d.x.toFixed(1)}" style="width:100%;padding:6px;border-radius:6px;border:1px solid #334155;background:#0f1115;color:#e2e8f0;"></label>`;
-        bodyHtml += `<label style="font-size:10px;color:#94a3b8;">Y<br><input id="lconf-ty" type="number" step="0.1" value="${d.y.toFixed(1)}" style="width:100%;padding:6px;border-radius:6px;border:1px solid #334155;background:#0f1115;color:#e2e8f0;"></label>`;
-        bodyHtml += `<label style="font-size:10px;color:#94a3b8;">Rot<br><input id="lconf-tr" type="number" step="0.1" value="${d.rotation.toFixed(1)}" style="width:100%;padding:6px;border-radius:6px;border:1px solid #334155;background:#0f1115;color:#e2e8f0;"></label>`;
+        bodyHtml += `<label style="font-size: var(--text-xs);color:#94a3b8;">X<br><input id="lconf-tx" type="number" step="0.1" value="${d.x.toFixed(1)}" style="width:100%;padding:6px;border-radius:6px;border:1px solid #334155;background:#0f1115;color:#e2e8f0;"></label>`;
+        bodyHtml += `<label style="font-size: var(--text-xs);color:#94a3b8;">Y<br><input id="lconf-ty" type="number" step="0.1" value="${d.y.toFixed(1)}" style="width:100%;padding:6px;border-radius:6px;border:1px solid #334155;background:#0f1115;color:#e2e8f0;"></label>`;
+        bodyHtml += `<label style="font-size: var(--text-xs);color:#94a3b8;">Rot<br><input id="lconf-tr" type="number" step="0.1" value="${d.rotation.toFixed(1)}" style="width:100%;padding:6px;border-radius:6px;border:1px solid #334155;background:#0f1115;color:#e2e8f0;"></label>`;
         bodyHtml += `</div>`;
         bodyHtml += `<div style="display:flex;flex-direction:column;gap:8px;">`;
         bodyHtml += `<button type="button" id="lconf-move" class="btn btn-primary" style="width:100%;justify-content:center;">Move to target</button>`;

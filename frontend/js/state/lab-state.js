@@ -578,7 +578,7 @@ async function _fetchLabStateBody() {
                     if (feedPlaceholder) {
                         feedPlaceholder.style.display = 'flex';
                         const runBit2 = store.labState.optimization_run_dir
-                            ? `<br><span style="font-size:9px;opacity:0.85">${store.labState.optimization_run_dir}</span>`
+                            ? `<br><span style="font-size: var(--text-xs);opacity:0.85">${store.labState.optimization_run_dir}</span>`
                             : '';
                         feedPlaceholder.innerHTML = `<span class="material-icons-round" style="font-size: 18px; margin-bottom: 2px;">auto_awesome</span><div>Optimizing... (Step ${store.labState.optimization_step || 0})${runBit2}</div>`;
                     }
@@ -638,9 +638,9 @@ async function _fetchLabStateBody() {
             componentList.innerHTML = `
             <div style="padding: 20px; text-align: center; color: #ef4444;">
                 <span class="material-icons-round" style="font-size: 24px;">error_outline</span>
-                <p style="margin-top: 8px; font-size: 12px;">Connection Failed</p>
-                <p style="font-size: 10px; opacity: 0.7;">${error.message}</p>
-                <button onclick="location.reload()" class="btn btn-secondary" style="margin-top: 12px; font-size: 10px;">Retry</button>
+                <p style="margin-top: 8px; font-size: var(--text-sm);">Connection Failed</p>
+                <p style="font-size: var(--text-xs); opacity: 0.7;">${error.message}</p>
+                <button onclick="location.reload()" class="btn btn-secondary" style="margin-top: 12px; font-size: var(--text-xs);">Retry</button>
             </div>
         `;
         }

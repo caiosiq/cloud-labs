@@ -25,7 +25,7 @@ export function renderStartLiveFeed(ctx) {
     const { section, body } = primitiveRegion('START_LIVE_FEED', 'START LIVE FEED', { accent: 'live-feed' });
 
     const hint = document.createElement('p');
-    hint.style.fontSize = '10px';
+    hint.style.fontSize = 'var(--text-xs)';
     hint.style.color = '#94a3b8';
     hint.style.margin = '0';
     hint.style.lineHeight = '1.35';
@@ -34,9 +34,9 @@ export function renderStartLiveFeed(ctx) {
     body.appendChild(hint);
 
     const inp = coordInput(`preview exposure (${unit})`, cur);
-    inp.min = String(min);
-    inp.max = String(max);
-    inp.step = '1';
+    inp.input.min = String(min);
+    inp.input.max = String(max);
+    inp.input.step = '1';
     body.appendChild(inp);
 
     const btn = sessionStartButton('live-feed', 'Turn live feed on', 'videocam');
@@ -70,7 +70,7 @@ export function renderEndLiveFeed(ctx) {
     const { section, body } = primitiveRegion('END_LIVE_FEED', 'END LIVE FEED', { accent: 'live-feed', active: true });
 
     const hint = document.createElement('p');
-    hint.style.fontSize = '10px';
+    hint.style.fontSize = 'var(--text-xs)';
     hint.style.color = '#94a3b8';
     hint.style.margin = '0';
     hint.style.lineHeight = '1.35';
@@ -79,21 +79,18 @@ export function renderEndLiveFeed(ctx) {
     body.appendChild(hint);
 
     const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.gap = '6px';
-    row.style.alignItems = 'flex-end';
+    row.className = 'prim-region__exposure-row';
 
     const inp = coordInput(`preview (${unit})`, cur);
-    inp.min = String(min);
-    inp.max = String(max);
-    inp.step = '1';
-    inp.style.flex = '1';
+    inp.input.min = String(min);
+    inp.input.max = String(max);
+    inp.input.step = '1';
     row.appendChild(inp);
 
     const applyBtn = document.createElement('button');
     applyBtn.type = 'button';
-    applyBtn.className = 'btn btn-secondary';
-    applyBtn.style.fontSize = '11px';
+    applyBtn.className = 'btn btn-secondary prim-region__exposure-apply';
+    applyBtn.style.fontSize = 'var(--text-sm)';
     applyBtn.style.whiteSpace = 'nowrap';
     applyBtn.textContent = 'Apply';
     applyBtn.onclick = () => {
@@ -144,7 +141,7 @@ function _popOutButton(tagId, hooks) {
     btn.type = 'button';
     btn.className = 'live-feed-pop-btn';
     btn.innerHTML =
-        '<span class="material-icons-round" style="font-size:14px" aria-hidden="true">open_in_new</span> Pop out live preview';
+        '<span class="material-icons-round" style="font-size: var(--text-base)" aria-hidden="true">open_in_new</span> Pop out live preview';
     btn.title = 'Detach preview so you can teleop other components while watching';
     btn.onclick = () => {
         openLiveFeedPopout(tagId, {

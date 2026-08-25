@@ -1,10 +1,41 @@
 <svg width="640" height="480" xmlns="http://www.w3.org/2000/svg">
-  <rect width="100%" height="100%" fill="#111"/>
-  <text x="50%" y="50%" font-family="monospace" font-size="24" fill="#0f0" text-anchor="middle">
-      LAB LIVE FEED
-  </text>
-  <rect x="10" y="10" width="20" height="20" fill="red">
-      <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
-  </rect>
-  <text x="40" y="25" font-family="Arial" font-size="12" fill="white">LIVE</text>
+  <defs>
+    <radialGradient id="spotGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff8e8"/>
+      <stop offset="35%" stop-color="#ffb347"/>
+      <stop offset="70%" stop-color="#e03020" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#e03020" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="beam" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff6040" stop-opacity="0"/>
+      <stop offset="25%" stop-color="#ff8060" stop-opacity="0.35"/>
+      <stop offset="55%" stop-color="#ffd080" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#fff0d0"/>
+    </linearGradient>
+    <filter id="blur">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+  </defs>
+  <rect width="100%" height="100%" fill="#0a0c10"/>
+  <!-- faint bench grid -->
+  <g stroke="#161a22" stroke-width="1">
+    <path d="M0 60 H640 M0 120 H640 M0 180 H640 M0 240 H640 M0 300 H640 M0 360 H640 M0 420 H640"/>
+    <path d="M80 0 V480 M160 0 V480 M240 0 V480 M320 0 V480 M400 0 V480 M480 0 V480 M560 0 V480"/>
+  </g>
+  <!-- laser beam -->
+  <line x1="0" y1="210" x2="520" y2="250" stroke="url(#beam)" stroke-width="8" stroke-linecap="round" filter="url(#blur)"/>
+  <line x1="0" y1="210" x2="520" y2="250" stroke="#ffe8c0" stroke-width="2" stroke-linecap="round"/>
+  <!-- impact spot -->
+  <circle cx="430" cy="268" r="72" fill="url(#spotGlow)">
+    <animate attributeName="r" values="68;76;68" dur="2.4s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="430" cy="268" r="8" fill="#fff"/>
+  <circle cx="430" cy="268" r="3" fill="#fff"/>
+  <!-- HUD -->
+  <rect x="12" y="12" width="640" height="456" fill="none" stroke="#222830" stroke-width="1"/>
+  <circle cx="28" cy="28" r="5" fill="#e03020">
+    <animate attributeName="opacity" values="1;0.35;1" dur="1.2s" repeatCount="indefinite"/>
+  </circle>
+  <text x="42" y="32" font-family="system-ui, sans-serif" font-size="13" fill="#c8d0dc">LIVE · MOCK CAM</text>
+  <text x="42" y="50" font-family="system-ui, sans-serif" font-size="11" fill="#7a8494">laser spot on sensor</text>
 </svg>

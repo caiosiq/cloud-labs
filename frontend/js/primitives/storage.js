@@ -13,7 +13,7 @@ export function renderStoreComponent(ctx) {
 
     const tip = document.createElement('p');
     tip.className = 'opt-hint';
-    tip.style.cssText = 'margin:0 0 4px;font-size:11px;color:#94a3b8;';
+    tip.style.cssText = 'margin:0 0 4px;font-size: var(--text-sm);color:#94a3b8;';
     tip.textContent =
         'Auto pack fills the next free cell (bottom row, left→right). Or pick a free cell on the canvas.';
     body.appendChild(tip);
@@ -49,7 +49,7 @@ export function renderStoreComponent(ctx) {
         body.appendChild(btnCancel);
         const occ = occupiedStorageSlots(tagId);
         const hint = document.createElement('p');
-        hint.style.cssText = 'margin:0;font-size:11px;color:#67e8f9;';
+        hint.style.cssText = 'margin:0;font-size: var(--text-sm);color:#67e8f9;';
         hint.textContent = `Choose mode on — ${occ.size} cell(s) occupied. Click empty grid square.`;
         body.appendChild(hint);
     } else {
@@ -77,9 +77,9 @@ export function renderPlaceFromStorage(ctx) {
     grid.style.display = 'grid';
     grid.style.gridTemplateColumns = '1fr 1fr 1fr';
     grid.style.gap = '6px';
-    const xInp = coordInput('X (mm)', p.x);
-    const yInp = coordInput('Y (mm)', p.y);
-    const rInp = coordInput('θ (°)', p.rotation ?? 0);
+    const xInp = coordInput('X (mm)', p.x, 2);
+    const yInp = coordInput('Y (mm)', p.y, 2);
+    const rInp = coordInput('θ (°)', p.rotation ?? 0, 2);
     grid.appendChild(xInp);
     grid.appendChild(yInp);
     grid.appendChild(rInp);

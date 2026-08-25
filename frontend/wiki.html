@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cloud Labs | Wiki</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
     <style>
         :root {
             --bg: #0a0e14;
@@ -23,7 +24,7 @@
         * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: Inter, system-ui, sans-serif;
+            font-family: var(--font-ui);
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
@@ -57,10 +58,10 @@
             background: linear-gradient(180deg, rgba(24, 27, 33, 0.92), rgba(15, 17, 21, 0.75));
             backdrop-filter: blur(10px);
         }
-        header h1 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+        header h1 { margin: 0; font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; }
         header .sub {
             margin: 3px 0 0;
-            font-size: 12px;
+            font-size: var(--text-sm);
             color: var(--muted);
             max-width: 440px;
             line-height: 1.45;
@@ -69,7 +70,7 @@
             color: var(--muted);
             text-decoration: none;
             margin-left: 16px;
-            font-size: 13px;
+            font-size: var(--text-md);
             transition: color var(--motion);
         }
         header nav a:hover,
@@ -91,7 +92,7 @@
             color: var(--muted);
             border-radius: 999px;
             padding: 6px 14px;
-            font-size: 13px;
+            font-size: var(--text-md);
             cursor: pointer;
             transition: color var(--motion), border-color var(--motion), background var(--motion), transform var(--motion);
         }
@@ -132,7 +133,7 @@
         }
         .sidebar label {
             display: block;
-            font-size: 11px;
+            font-size: var(--text-xs);
             text-transform: uppercase;
             letter-spacing: 0.06em;
             color: var(--muted);
@@ -146,7 +147,7 @@
             color: var(--text);
             border-radius: 6px;
             padding: 8px 10px;
-            font-size: 13px;
+            font-size: var(--text-md);
         }
         .sidebar-tabs {
             display: flex;
@@ -160,7 +161,7 @@
             border-radius: 6px;
             padding: 7px 8px;
             cursor: pointer;
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
         .sidebar-tabs button.active {
             color: var(--text);
@@ -187,7 +188,7 @@
             color: var(--text);
             padding: 8px 10px;
             cursor: pointer;
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
         .comp-item:hover { border-color: var(--border); background: #13151a; }
         .comp-item.active {
@@ -197,8 +198,8 @@
         .comp-item .name { font-weight: 600; display: block; }
         .comp-item .meta {
             color: var(--muted);
-            font-family: "JetBrains Mono", monospace;
-            font-size: 11px;
+            font-family: var(--font-mono);
+            font-size: var(--text-xs);
             margin-top: 2px;
         }
         .guide-item {
@@ -234,7 +235,7 @@
         }
         .badge {
             display: inline-block;
-            font-size: 10px;
+            font-size: var(--text-xs);
             padding: 1px 6px;
             border-radius: 999px;
             border: 1px solid var(--border);
@@ -256,14 +257,14 @@
             background: #3a4050;
             border-radius: 5px;
         }
-        .empty { color: var(--muted); font-size: 13px; }
+        .empty { color: var(--muted); font-size: var(--text-md); }
         .detail-header h2 { margin: 0 0 6px; font-size: 22px; }
-        .detail-header code { font-size: 12px; color: var(--muted); margin-right: 8px; }
-        .connect-hint { font-size: 13px; color: var(--muted); line-height: 1.5; }
+        .detail-header code { font-size: var(--text-sm); color: var(--muted); margin-right: 8px; }
+        .connect-hint { font-size: var(--text-md); color: var(--muted); line-height: 1.5; }
         .section { margin-top: 22px; }
         .section h3 {
             margin: 0 0 10px;
-            font-size: 13px;
+            font-size: var(--text-md);
             text-transform: uppercase;
             letter-spacing: 0.05em;
             color: var(--muted);
@@ -281,14 +282,14 @@
             border: 1px solid rgba(56, 189, 248, 0.35);
             background: rgba(14, 165, 233, 0.1);
             color: #e0f2fe;
-            font-family: "JetBrains Mono", monospace;
+            font-family: var(--font-mono);
             font-size: 11.5px;
             line-height: 1.2;
         }
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 12px;
+            font-size: var(--text-sm);
         }
         th, td {
             border-bottom: 1px solid var(--border);
@@ -297,15 +298,15 @@
             vertical-align: top;
         }
         th { color: var(--muted); font-weight: 500; }
-        .mono { font-family: "JetBrains Mono", monospace; font-size: 11px; }
+        .mono { font-family: var(--font-mono); font-size: var(--text-xs); }
         pre.snippet {
             margin: 0;
             padding: 12px 14px;
             background: var(--code-bg);
             border: 1px solid var(--border);
             border-radius: 8px;
-            font-family: "JetBrains Mono", monospace;
-            font-size: 12px;
+            font-family: var(--font-mono);
+            font-size: var(--text-sm);
             overflow: auto;
             white-space: pre-wrap;
         }
@@ -316,7 +317,7 @@
             border-radius: 6px;
             padding: 4px 8px;
             cursor: pointer;
-            font-size: 11px;
+            font-size: var(--text-xs);
         }
         button.copy.copied { color: var(--ok); border-color: rgba(16, 185, 129, 0.45); }
 
@@ -324,8 +325,8 @@
         .guide-article {
             max-width: 48rem;
             margin: 0 auto;
-            font-family: Inter, system-ui, sans-serif;
-            font-size: 15px;
+            font-family: var(--font-ui);
+            font-size: var(--text-lg);
             line-height: 1.68;
             color: #d5dee9;
             animation: articleIn 0.4s ease;
@@ -343,7 +344,7 @@
             letter-spacing: -0.03em;
         }
         .guide-article h2 {
-            font-size: 16px;
+            font-size: var(--text-lg);
             font-weight: 650;
             margin: 28px 0 10px;
             padding-bottom: 6px;
@@ -352,7 +353,7 @@
             letter-spacing: 0.01em;
         }
         .guide-article h3 {
-            font-size: 14px;
+            font-size: var(--text-base);
             font-weight: 600;
             margin: 20px 0 8px;
             text-transform: none;
@@ -375,7 +376,7 @@
         .guide-article a:hover { text-decoration: underline; }
         .guide-article table {
             margin: 12px 0 20px;
-            font-size: 13px;
+            font-size: var(--text-md);
             border: 1px solid var(--border);
             border-radius: 8px;
             overflow: hidden;
@@ -386,7 +387,7 @@
         }
         .guide-article td { padding: 10px 12px; }
         .guide-article code {
-            font-family: "JetBrains Mono", monospace;
+            font-family: var(--font-mono);
             font-size: 0.86em;
             background: rgba(59, 130, 246, 0.1);
             border: 1px solid rgba(59, 130, 246, 0.2);
@@ -400,7 +401,7 @@
             background: var(--code-bg);
             border: 1px solid var(--border);
             border-radius: 8px;
-            font-family: "JetBrains Mono", monospace;
+            font-family: var(--font-mono);
             font-size: 12.5px;
             overflow: auto;
             white-space: pre-wrap;
@@ -431,7 +432,7 @@
         .guide-article img.guide-figure + p,
         .guide-article svg.guide-figure + p {
             margin: 0 0 20px;
-            font-size: 13px;
+            font-size: var(--text-md);
             color: var(--muted);
             line-height: 1.45;
             max-width: 40rem;
@@ -451,8 +452,8 @@
             border-radius: 8px;
             padding: 10px 14px;
             cursor: pointer;
-            font-size: 13px;
-            font-family: Inter, sans-serif;
+            font-size: var(--text-md);
+            font-family: var(--font-ui);
             transition: border-color var(--motion), color var(--motion), background var(--motion), transform var(--motion);
         }
         .guide-nav button:hover:not(:disabled) {
@@ -495,7 +496,7 @@
         }
         .backends-gallery-intro .eyebrow {
             margin: 0 0 6px;
-            font-size: 11px;
+            font-size: var(--text-xs);
             letter-spacing: 0.12em;
             text-transform: uppercase;
             color: #67e8f9;
@@ -510,7 +511,7 @@
         .backends-gallery-intro .lede {
             margin: 0 0 22px;
             color: var(--muted);
-            font-size: 14px;
+            font-size: var(--text-base);
             line-height: 1.55;
             max-width: 40rem;
         }
@@ -592,11 +593,11 @@
         }
         .backend-card-top h3 {
             margin: 0;
-            font-size: 16px;
+            font-size: var(--text-lg);
             font-weight: 650;
         }
         .backend-pill {
-            font-size: 10px;
+            font-size: var(--text-xs);
             font-weight: 700;
             letter-spacing: 0.06em;
             text-transform: uppercase;
@@ -623,18 +624,18 @@
         .backend-id {
             display: block;
             margin-top: 6px;
-            font-size: 11px;
+            font-size: var(--text-xs);
             color: #94a3b8;
         }
         .backend-desc {
             margin: 10px 0 0;
-            font-size: 13px;
+            font-size: var(--text-md);
             line-height: 1.45;
             color: #cbd5e1;
         }
         .backend-meta {
             margin: 8px 0 0;
-            font-size: 12px;
+            font-size: var(--text-sm);
             color: var(--muted);
         }
         .backend-back {
@@ -642,7 +643,7 @@
             background: transparent;
             color: #67e8f9;
             cursor: pointer;
-            font-size: 13px;
+            font-size: var(--text-md);
             padding: 0;
             margin-bottom: 16px;
         }
@@ -678,7 +679,7 @@
             margin: 10px 0 0;
             color: var(--muted);
             line-height: 1.5;
-            font-size: 14px;
+            font-size: var(--text-base);
         }
         .backend-tabs {
             display: flex;
@@ -692,7 +693,7 @@
             color: var(--muted);
             border-radius: 999px;
             padding: 7px 14px;
-            font-size: 13px;
+            font-size: var(--text-md);
             cursor: pointer;
             transition: background 0.2s, border-color 0.2s, color 0.2s;
         }
@@ -709,17 +710,17 @@
             margin: 0;
         }
         .backend-overview-dl dt {
-            font-size: 11px;
+            font-size: var(--text-xs);
             text-transform: uppercase;
             letter-spacing: 0.06em;
             color: var(--muted);
             margin: 0 0 4px;
         }
-        .backend-overview-dl dd { margin: 0; font-size: 14px; }
+        .backend-overview-dl dd { margin: 0; font-size: var(--text-base); }
         .backend-warn {
             margin-top: 14px;
             color: #fca5a5;
-            font-size: 13px;
+            font-size: var(--text-md);
         }
         .backend-cta-row {
             display: flex;
@@ -736,7 +737,7 @@
             background: rgba(14, 165, 233, 0.2);
             color: #e0f2fe;
             text-decoration: none;
-            font-size: 13px;
+            font-size: var(--text-md);
             cursor: pointer;
         }
         .backend-cta.ghost {
@@ -766,8 +767,8 @@
             overflow: auto;
             max-height: 70vh;
         }
-        .snap-panel .snap-lede { color: var(--muted); font-size: 13px; line-height: 1.5; }
-        .snap-panel .snap-heading { margin: 16px 0 8px; font-size: 15px; }
+        .snap-panel .snap-lede { color: var(--muted); font-size: var(--text-md); line-height: 1.5; }
+        .snap-panel .snap-heading { margin: 16px 0 8px; font-size: var(--text-lg); }
         .snap-panel .snap-queue {
             margin: 12px 0;
             padding: 10px 12px;
@@ -777,7 +778,7 @@
         }
         .snap-panel .snap-queue summary {
             cursor: pointer;
-            font-size: 12px;
+            font-size: var(--text-sm);
             text-transform: uppercase;
             letter-spacing: 0.05em;
             color: var(--muted);
@@ -799,11 +800,11 @@
             color: inherit;
         }
         .snap-panel .pick-card:hover { border-color: var(--accent); }
-        .snap-panel .pick-card h3 { margin: 0 0 6px; font-size: 14px; }
-        .snap-panel .meta { font-size: 11px; color: var(--muted); font-family: "JetBrains Mono", monospace; }
+        .snap-panel .pick-card h3 { margin: 0 0 6px; font-size: var(--text-base); }
+        .snap-panel .meta { font-size: var(--text-xs); color: var(--muted); font-family: var(--font-mono); }
         .snap-panel .pin-badge {
             display: inline-block;
-            font-size: 10px;
+            font-size: var(--text-xs);
             font-weight: 600;
             letter-spacing: 0.04em;
             text-transform: uppercase;
@@ -818,7 +819,7 @@
             flex-wrap: wrap;
             gap: 6px;
             margin-bottom: 12px;
-            font-size: 13px;
+            font-size: var(--text-md);
             color: var(--muted);
         }
         .snap-panel .breadcrumb button.linkish {
@@ -827,7 +828,7 @@
             color: var(--accent);
             cursor: pointer;
             padding: 0;
-            font-size: 13px;
+            font-size: var(--text-md);
         }
         .snap-panel .breadcrumb .current { color: var(--text); font-weight: 600; }
         .snap-panel .graph-panel {
@@ -843,7 +844,7 @@
             gap: 10px;
             padding: 8px 12px;
             border-bottom: 1px solid rgba(148, 163, 184, 0.08);
-            font-size: 12px;
+            font-size: var(--text-sm);
             color: var(--muted);
         }
         .snap-panel .control-graph-wrap {
@@ -852,8 +853,8 @@
             padding: 6px 8px;
         }
         .snap-panel .pin-detail {
-            font-family: "JetBrains Mono", monospace;
-            font-size: 11px;
+            font-family: var(--font-mono);
+            font-size: var(--text-xs);
             background: #13151a;
             border: 1px solid var(--border);
             border-radius: 8px;
@@ -862,14 +863,14 @@
         .snap-panel .pin-detail-block { margin-top: 10px; }
         .snap-panel .pin-detail-block h4 {
             margin: 0 0 6px;
-            font-size: 11px;
-            font-family: Inter, sans-serif;
+            font-size: var(--text-xs);
+            font-family: var(--font-ui);
             color: var(--muted);
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
         .snap-panel .pin-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
-        .snap-panel table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .snap-panel table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
         .snap-panel th, .snap-panel td {
             text-align: left;
             padding: 8px 6px;
@@ -878,7 +879,7 @@
         }
     </style>
 </head>
-<body>
+<body class="cl-app">
     <div class="wiki-atmosphere" aria-hidden="true"></div>
     <header>
         <div>
