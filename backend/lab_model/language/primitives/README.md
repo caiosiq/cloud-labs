@@ -15,7 +15,7 @@ Platform map: [`../ARCHITECTURE.md`](../ARCHITECTURE.md). Surfaces/VC: [`../../.
 | Call site | What runs |
 |-----------|-----------|
 | **`main.py`** `POST /api/command` | `parse_command_payload` → `schedule_validated_command` → `execute_validated_command` → atomic `lab.*` calls (see macros below). **`RECORD_MEASURABLES`** and **`EVAL_KERNEL`** are awaited inline and return payloads. |
-| **`main.py`** GET tunables/measurables | `fetch_read_primitive` → `return_tunables_for_tag` / `return_measurables_for_tag` (saved state only) |
+| **`main.py`** GET tunables / measurables / parameters | `fetch_read_primitive` → `return_tunables_for_tag` / `return_measurables_for_tag` (saved state) / `return_parameters_for_tag` (catalog identity) |
 | **`main.py`** `POST /api/components/{tag_id}/measurables/record` | `record_measurables_for_tag` then same slice as GET measurables |
 | **`main.py`** TeleOp / live feed routes | `POST .../teleop/start\|end`, `POST .../telemetry/jog`, `POST .../telemetry/live-feed/start\|end` |
 | **`execute_recipe`** | same parse + **await** `execute_validated_command` |
@@ -48,10 +48,12 @@ Platform map: [`../ARCHITECTURE.md`](../ARCHITECTURE.md). Surfaces/VC: [`../../.
 | Enum of primitive ids, kind (`ATOMIC` / `MACRO`), read-only flag | **Yes** — `ids.py`, `registry.py` |
 | Validate `POST /api/command` JSON (and recipe-shaped dicts) | **Yes** — `schemas.py` + `parse_command_payload` |
 | Schedule async work on `LabCommunicator` (HTTP) or await it (recipes) | **Yes** — `execute_validated_command`, `schedule_validated_command` |
-| Read tunables/measurables for one tag (GET routes) | **Yes** — `fetch_read_primitive` + `TagQuery` |
+| Read tunables / measurables / parameters for one tag (GET routes) | **Yes** — `fetch_read_primitive` + `TagQuery` |
 | Implement moves, optimization, mock vs real hardware | **No** — that is **`lab_communicator`** |
 
-Domain shapes for components (tunables/measurables, storage geometry) are in [**`../lab_model/`**](../lab_model/README.md).
+Domain shapes for components (**parameters** / tunables / measurables, storage
+geometry) are in [**`../README.md`**](../../README.md) and
+[`parameters.py`](../parameters.py).
 
 ---
 
@@ -96,13 +98,22 @@ Flow:
 
 ### 2. Read primitives — GET routes
 
-Not part of the POST union. **`GET /api/components/{tag_id}/tunables`** and **`.../measurables`** call:
+Not part of the POST union. Per-tag reads:
+
+| Route | Primitive | Handler |
+|-------|-----------|---------|
+| `GET .../tunables` | `GET_TUNABLES` | `return_tunables_for_tag` (saved state) |
+| `GET .../measurables` | `GET_MEASURABLES` | `return_measurables_for_tag` (saved state) |
+| `GET .../parameters` | `GET_PARAMETERS` | `return_parameters_for_tag` (catalog identity bag) |
 
 ```text
 fetch_read_primitive(lab, PrimitiveId.GET_TUNABLES | GET_MEASURABLES | GET_PARAMETERS, tag_id)
 ```
 
-which validates **`tag_id`** with **`TagQuery`** and calls **`get_tunables_for_tag` / `get_measurables_for_tag`** on the communicator.
+validates **`tag_id`** with **`TagQuery`** and dispatches to the matching
+communicator method. UC **parameters** are static identity (not DOFs and not
+captures) — see Wiki Learn → Components and
+[`../parameters.py`](../parameters.py).
 
 ---
 
@@ -126,7 +137,7 @@ The recipe executor builds the same envelope as HTTP (`action`, `target_id`, `pa
 | `parse_command_payload` | Validate incoming command dict → typed body |
 | `schedule_validated_command` | HTTP: background + response message |
 | `execute_validated_command` | Recipes: await one command |
-| `fetch_read_primitive` | GET tunables/measurables |
+| `fetch_read_primitive` | GET tunables / measurables / parameters |
 | `PRIMITIVE_REGISTRY`, `PrimitiveId`, `PrimitiveKind`, `MACRO_PRIMITIVE_IDS` | Docs, tooling, future tests |
 
 For the conceptual inventory (pick/place family, hover gap, etc.), see [`../../primitives.md`](../../primitives.md).

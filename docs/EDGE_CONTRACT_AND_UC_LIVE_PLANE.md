@@ -16,11 +16,15 @@
 | Concept | Role |
 |---------|------|
 | **Primitives** | The only verbs (see Wiki inventory / `lab_model.language.primitives`) |
-| **Tunables** | Commanded DOFs |
+| **Parameters** | Static component identity (type, geometry hints, hardware binding, resolution, …) — catalog-authored; read via **`GET_PARAMETERS`**; not tunables and not measurables |
+| **Tunables** | Commanded DOFs (pose, exposure, motors, …); lab observe may recalculate the **same** tunable |
 | **Measurables** | Observations (analysis tensors / scalars); wire formats are *of* a measurable |
 | **Telemetry capabilities** | Catalog-declared live channels for a tag (teleop widgets, live_feed) — **armed by primitives**, not free-form APIs |
 | **Kernels** | Measurement artifacts; inputs to `EVAL_KERNEL` / `OPTIMIZE`, not verbs |
 | **Configuration / VC** | ControlManager on the coordinator; edge only executes reconcile primitives |
+
+Wiki Learn → Components is the teaching surface for the **parameters / tunables /
+measurables** triple (`frontend/wiki/guides/03-lab-model-components.md`).
 
 There is **no** first-class `get_table_top_feed`, `get_video_stream`, or lab_automation-only helper in the product API. If Twin needs a live picture of `tag_22`, that is:
 
@@ -186,7 +190,7 @@ Today’s `lab_view/` bundle mixes several lifetimes. In the new model, split th
 |------|------------------|----------------------|-----|
 | **Static geometry / map** | `layout.json` (bounds, danger zone, storage grid, breadboard spacing) | Edge **`GET /bench`** (file e.g. `cloudlabs_edge/bench/layout.json`), cached by coordinator for Twin/SDK | UI must draw the table; scripts may ask once. Rarely changes. |
 | **Runtime abilities** | Supported primitives, stream paths, torchscript yes/no | **`GET /capabilities`** | Hot, versioned with the edge process; not geometry. |
-| **Product catalog (UC)** | `component_library.json`, `active_catalog.json` | Prefer **coordinator** (or synced from edge at register time into coordinator catalog store) | Language of tags/tunables/measurables is cloud-labs product; edge must *honor* it, not own a second Wiki. |
+| **Product catalog (UC)** | `component_library.json` / edge `library.json`, `active_catalog.json` / inventory | Prefer **coordinator** (or synced from edge at register time into coordinator catalog store) | Language of tags/**parameters**/tunables/measurables is cloud-labs product; edge must *honor* it, not own a second Wiki. |
 | **Overlays** | `laser_lines.json` | Optional under `/bench` | Twin guides; static-ish. |
 | **Stream tuning** | `table_cam_preview.json` profiles | Inside **capabilities** (`telemetry_channels` / wire profiles: fps, scale, Q) | Describes live channels, not table geometry. |
 | **VC / commits** | `control/` | **Coordinator only** | Not an edge concern. |

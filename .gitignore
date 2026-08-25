@@ -1,5 +1,9 @@
 .env
 
+# Local virtualenv
+.venv/
+*.egg-info/
+
 # Python bytecode / caches (do not commit; regenerate from .py locally)
 __pycache__/
 *.py[cod]

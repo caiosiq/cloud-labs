@@ -97,6 +97,13 @@ something script authors configure. Bundles and scaffolding are explained in
 4. The Twin polls lab state so solids (measured poses) and ghosts (intent)
    stay honest.
 
+Each component on the bench is a **Universal Component** with three noun bags
+(see Wiki Learn → Components): **parameters** (static identity — type, size,
+hardware binding, …; read with `GET_PARAMETERS`), **tunables** (commanded DOFs
+such as pose, exposure, motors), and **measurables** (observations without a
+setpoint, e.g. `camera_image`). Pose and motor angles stay tunables even when
+the lab rescans them; camera frames are measurables.
+
 **Kernels** (TorchScript scores and feature extractors) are not separate verbs.
 They are **measurement functions** you attach as *inputs* to actions such as
 OPTIMIZE — the same way a spectrometer is an instrument the optimizer may use,

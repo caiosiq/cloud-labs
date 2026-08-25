@@ -47,7 +47,13 @@ The script above already used the whole vocabulary, even if the words were not y
 
 The verbs of the system are called **primitives**: the only operations that change or observe the world. Moving a component and recording measurables are primitives. There is deliberately no private side door such as `get_video_feed()` outside that vocabulary, because a lab-specific shortcut would break the promise that mock, simulation, and real speak the same language.
 
-Against those verbs stand a few kinds of nouns. **Tunables** are the commanded degrees of freedom — a component's nominal pose, a camera exposure, a laser power, a motor angle. In the script, `tunables.nominal_pose.x` is a tunable: you set it, and the bench tries to make it true. **Measurables** are observations with no commanded counterpart. A camera image is a measurable: you do not set the pixels; you capture them. That distinction is easy to miss and important for optics. A pose is still a tunable even when you read back a reported pose, because it has a setpoint; a camera frame is a measurable because it does not.
+Against those verbs stand a few kinds of nouns. Each named part on the table is a **component** with three bags that must not be mixed.
+
+**Parameters** are static identity: what the part *is*. Type, size, optical density, camera resolution, hardware binding to a recorder port, and similar constants live in the component library under `parameters`. They do not change because you jogged a motor or took a picture; they change when the part definition or wiring changes. Read them with `GET_PARAMETERS` (in the SDK, `lab.components.tag_22.parameters()`).
+
+**Tunables** are the commanded degrees of freedom — a component's nominal pose, a camera exposure, a laser power, a motor angle. In the script, `tunables.nominal_pose.x` is a tunable: you set it, and the bench tries to make it true. When the lab rescans a pose or reads a motor tracker, it **recalculates that same tunable**; that refresh is not a measurable and not a second “reported” field.
+
+**Measurables** are observations with no commanded counterpart. A camera image is a measurable: you do not set the pixels; you capture them. That distinction is easy to miss and important for optics. A pose is still a tunable even when you read it back after a scan, because it has a setpoint; a camera frame is a measurable because it does not.
 
 **Telemetry channels** are the live feeds the catalog declares — a video stream, a teleop pose stream — and you may open them only after running the primitive that arms them. **Kernels** are small compiled scoring functions, usually TorchScript, that turn a camera frame into a number or a few features; they are the subject of a later section, because they are what make closed-loop optimization practical.
 

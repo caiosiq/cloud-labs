@@ -156,9 +156,13 @@ Index: [`scripts/language/README.md`](../../scripts/language/README.md).
 
 ## Mental checklist
 
-1. **Speak primitives** — actions on the lab.  
-2. **Attach kernels** — how some actions measure.  
-3. **Choose the mode** — imperative when you need Python between steps;
+1. **Know the component** — **parameters** (static identity via `GET_PARAMETERS` /
+   `lab.components.tag_X.parameters()`), **tunables** (DOFs you set; observe may
+   recalculate the same field), **measurables** (capture-only observations such as
+   `camera_image`). See Wiki Learn → Components.
+2. **Speak primitives** — actions on the lab.
+3. **Attach kernels** — how some actions measure.
+4. **Choose the mode** — imperative when you need Python between steps;
    closed-loop when the edge must own the inner optimization.
 
 That is the scripting language of the Optical Processing Unit.

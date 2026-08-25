@@ -16,6 +16,7 @@ lab_model/
   language/        # what Twin / SDK speak
     domain/
     primitives/
+    parameters.py  # static UC identity (GET_PARAMETERS)
     tunables/  measurables/  telemetry/
   execution/       # how verbs run (still no drivers)
     orchestration/
@@ -40,9 +41,19 @@ lab_model/
 
 **ControlManager** is configuration version history — not a lab-side experiment manager.
 
-## Component state shape
+## Component shape (UC triple + telemetry)
 
-Each entry in `components[tag_id]` uses `statecontrol` (tunables + measurables)
-and `telemetry` (teleop + live_feed). Mutations go through **primitives** only.
+Each catalogued part is a **Universal Component** with three noun bags (Wiki Learn →
+Components):
+
+| Bag | Role | Read / write |
+|-----|------|----------------|
+| **Parameters** | Static identity (type, size, hardware binding, …) | `GET_PARAMETERS`; authored in the library, not by jogs/captures |
+| **Tunables** | Commanded DOFs (pose, exposure, motors, …) | Write primitives; observe may recalculate the **same** tunable |
+| **Measurables** | Observations without a setpoint (`camera_image`, …) | `RECORD_MEASURABLES` / resolve |
+
+Runtime entries in `components[tag_id]` use `statecontrol` (tunables + measurables)
+and `telemetry` (teleop + live_feed); parameters come from the catalog (often
+mirrored for Twin display). Mutations of live state go through **primitives** only.
 
 See Wiki Learn and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full UC model.

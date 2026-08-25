@@ -1,22 +1,39 @@
 # Lab platform architecture (`lab_model`)
 
 This document is the master map for how the optics digital twin backend is organized.
-It describes the **Universal Component** model as implemented today: **StateControl** +
-**Telemetry** on each component, one catalog per bench, and Edge Contract southbound.
+It describes the **Universal Component** model as implemented today: catalog
+**parameters** (identity) plus live **StateControl** + **Telemetry** on each
+component, one catalog per bench, and Edge Contract southbound.
 
-## Four domains (two slow, two live)
+Canonical teaching surface: Wiki Learn → Components
+(`frontend/wiki/guides/03-lab-model-components.md`) — the
+**parameters / tunables / measurables** triple.
+
+## Component nouns (identity + live state)
+
+| Concept | Meaning | Changed by | Where it lives |
+|---------|---------|------------|----------------|
+| **Parameters** | Static identity (type, size, hardware binding, resolution, OD, …) | Library / part definition edits — **not** jogs or captures | Catalog row `parameters` (+ structural fields); read via **`GET_PARAMETERS`** |
+| **Tunables** | Commanded DOFs (nominal pose, exposure, motors, storage, …) | Named **write primitives**; lab observe may **recalculate the same** tunable | `components[tag].statecontrol.tunables` |
+| **Measurables** | Observations with no matching setpoint (`camera_image`, scores, …) | `RECORD_MEASURABLES` + commits | `components[tag].statecontrol.measurables` |
+
+Pose and motor angles are **tunables**, not measurables — a scan refreshes
+`nominal_pose` / `nominal_motor_positions`, it does not invent a second field.
+
+## Four live domains (two slow, two streaming)
 
 | Domain | Sub-pillar | Meaning | Changed by | Stored in state |
 |--------|------------|---------|------------|-----------------|
 | **StateControl** | **Tunables** | Commanded intent (nominal pose, exposure, storage, …) | Named **write primitives** | `components[tag].statecontrol.tunables` |
-| **StateControl** | **Measurables** | Recorded observations (pose, camera_image, scores, …) | `RECORD_MEASURABLES` + commits | `components[tag].statecontrol.measurables` |
+| **StateControl** | **Measurables** | Recorded observations (`camera_image`, scores, …) | `RECORD_MEASURABLES` + commits | `components[tag].statecontrol.measurables` |
 | **Telemetry** | **TeleOp** | Fast per-component control lease | `START_TELEOP` / `END_TELEOP` / `TELEOP_JOG` | `components[tag].telemetry.teleop` |
 | **Telemetry** | **Live feed** | Streaming camera sessions | `START_LIVE_FEED` / `END_LIVE_FEED` | `components[tag].telemetry.live_feed` |
 
 **Golden rules**
 
 - UI **read-only** panels for StateControl and Telemetry (see `component-viewer.js`).
-- Every mutation goes through a **primitive** with explicit parameters (no `{}` stubs).
+- Every mutation goes through a **primitive** with an explicit argument body (no `{}` stubs).
+  (Do not confuse command-body args with UC **parameters** — the identity bag above.)
 - Catalog JSON is the **per-bench allow-list**; Python registries define **global meaning**.
 - `RECORD_MEASURABLES` tears down live feed first (camera exclusivity).
 
@@ -29,9 +46,13 @@ Legacy lab state may still expose flat `tunables` / `measurables` at the compone
 {
   "id": "cam_gripper_1",
   "type": "OPTICAL_CAMERA",
+  "parameters": {
+    "resolution": "1920x1080",
+    "hardware_binding": { "backend": "recorder_tcp", "recorder_cam_id": 1 }
+  },
   "statecontrol": {
     "tunables": { "nominal_pose": { }, "exposure_time_ms": 200, "storage": { }, "placement": { } },
-    "measurables": { "pose": { }, "camera_image": null }
+    "measurables": { "camera_image": null }
   },
   "telemetry": {
     "teleop": {
