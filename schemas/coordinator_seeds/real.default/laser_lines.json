@@ -17,8 +17,8 @@
       }
     },
     {
-      "id": "ne_he",
-      "name": "Ne\u2013He",
+      "id": "he_ne",
+      "name": "He\u2013Ne",
       "color": "#ff5c33",
       "enabled": true,
       "p1": {

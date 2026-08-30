@@ -54,6 +54,7 @@ import { initRuntimeMode } from './ui/runtime-mode.js';
 import { initWorkspaceTabs } from './ui/workspace-tabs.js';
 import { initSessionNotes } from './ui/session-notes.js';
 import { initOptimizationMode } from './ui/optimization-mode.js';
+import { initParameterScanMode } from './ui/parameter-scan-mode.js';
 import { initUpdateUI, initComponentSidebarInteraction, updateUI } from './ui/updateUI.js';
 import { initCommandMatrixPanel } from './ui/command-matrix-panel.js';
 import {
@@ -128,6 +129,7 @@ void initRuntimeMode({
 initWorkspaceTabs();
 initSessionNotes();
 initOptimizationMode({ sendCommand, log });
+initParameterScanMode({ log });
 
 // Guides are now versioned server state: they arrive via lab-state polling
 // (synced into store.guideLines) rather than localStorage.
@@ -342,7 +344,19 @@ window.__commandConsoleDeps = {
     },
     render,
     getCatalogEntry: (tagId) => store.catalogMap[tagId] || null,
+    getCatalogMap: () => store.catalogMap,
     getLabState: () => store.labState
 };
+
+// command-console.js often evaluates before the backend gate finishes; kick it now.
+import('./command-console.js')
+    .then((mod) => {
+        if (mod && typeof mod.startCommandConsole === 'function') {
+            mod.startCommandConsole(window.__commandConsoleDeps);
+        }
+    })
+    .catch((err) => {
+        console.warn('[Command Console] failed to start from app-main:', err);
+    });
 
 init();

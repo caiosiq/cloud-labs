@@ -90,6 +90,8 @@ export const store = {
     ensembleLossTrace: [],
     /** Staged optimization mode builder (UI); see `optimization-mode.js`. */
     optimizationBuilder: null,
+    /** Parameter scan (1D sweep) builder (UI); see `parameter-scan-mode.js`. */
+    parameterScanBuilder: null,
     isRecording: false,
     currentRecipeSteps: [],
     /**

@@ -258,9 +258,36 @@ export function initCommandConsole(deps) {
     refreshHint();
 }
 
-const deps = typeof window !== 'undefined' ? window.__commandConsoleDeps : null;
-if (deps) {
-    initCommandConsole(deps);
-} else {
-    console.warn('[Command Console] window.__commandConsoleDeps missing — ensure js/main.js (app bundle) runs before this module.');
+/**
+ * Boot after the backend gate + app-main set ``window.__commandConsoleDeps``.
+ * ``main.js`` finishes before the gate (bootstrap ``start()`` is not awaited),
+ * so this module often loads first — wait rather than giving up once.
+ */
+let _commandConsoleStarted = false;
+
+export function startCommandConsole(deps) {
+    const resolved = deps || (typeof window !== 'undefined' ? window.__commandConsoleDeps : null);
+    if (!resolved) return false;
+    if (_commandConsoleStarted) return true;
+    _commandConsoleStarted = true;
+    initCommandConsole(resolved);
+    return true;
 }
+
+function waitForCommandConsoleDeps() {
+    if (startCommandConsole()) return;
+    let attempts = 0;
+    const timer = setInterval(() => {
+        attempts += 1;
+        if (startCommandConsole() || attempts >= 600) {
+            clearInterval(timer);
+            if (!_commandConsoleStarted) {
+                console.warn(
+                    '[Command Console] window.__commandConsoleDeps never arrived — console toggle will not open.',
+                );
+            }
+        }
+    }, 100);
+}
+
+waitForCommandConsoleDeps();

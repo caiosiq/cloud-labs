@@ -110,7 +110,7 @@ export function renderPlaceFromStorage(ctx) {
     };
     body.appendChild(bPlace);
 
-    const bRecenter = secondaryButton('Re-center in cell (0°)', 'center_focus_strong');
+    const bRecenter = secondaryButton('Re-center (ArUco top → +X)', 'center_focus_strong');
     bRecenter.onclick = async () => {
         store.dragFromStorageTag = null;
         store.dragFromStorageStartPose = null;

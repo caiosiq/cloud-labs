@@ -396,8 +396,8 @@ class CoordinatorDataEnsureTests(unittest.TestCase):
                             "p2": {"x": 392.6, "y": 500.0},
                         },
                         {
-                            "id": "ne_he",
-                            "name": "Ne-He",
+                            "id": "he_ne",
+                            "name": "He-Ne",
                             "enabled": True,
                             "p1": {"x": 360.0, "y": -193.3},
                             "p2": {"x": 360.4, "y": 206.7},
@@ -415,7 +415,7 @@ class CoordinatorDataEnsureTests(unittest.TestCase):
         )
         doc = json.loads(Path(paths.laser_lines_json).read_text(encoding="utf-8"))
         self.assertEqual(doc.get("snap_line_id"), "diode")
-        self.assertEqual([ln["id"] for ln in doc["lines"]], ["diode", "ne_he"])
+        self.assertEqual([ln["id"] for ln in doc["lines"]], ["diode", "he_ne"])
 
 
 if __name__ == "__main__":

@@ -3,11 +3,14 @@
  * @see coding_on_the_ui.md
  */
 
-import { isOnTableComponent } from './component-model.js';
+import { componentRefCompletions } from './command-resolve.js';
+import { isStoredComponent } from './component-model.js';
+import { store } from './state/store.js';
 
 const VERBS = [
     '?',
     'help',
+    'lasers',
     'refresh',
     'tunables',
     'get_tunables',
@@ -16,6 +19,18 @@ const VERBS = [
     'record',
     'record_measurables',
     'move',
+    'movelaser',
+    'move-laser',
+    'stitch',
+    'store',
+    'storecell',
+    'tostorage',
+    'place',
+    'fromstorage',
+    'drag',
+    'placelaser',
+    'place-laser',
+    'draglaser',
     'motor',
     'motorhome',
     'motorset0',
@@ -32,14 +47,6 @@ function filterPrefix(list, prefix) {
     return list.filter((x) => String(x).toLowerCase().startsWith(p));
 }
 
-function placedTagIds(deps) {
-    const ls = deps.getLabState && deps.getLabState();
-    if (!ls || !ls.components) return [];
-    return Object.keys(ls.components)
-        .filter((id) => isOnTableComponent(ls.components[id]))
-        .sort();
-}
-
 /** All component keys in current lab state (for tunables/measurables queries). */
 function allTagIds(deps) {
     const ls = deps.getLabState && deps.getLabState();
@@ -51,6 +58,108 @@ function motorIdStrings(deps, tagId) {
     const entry = deps.getCatalogEntry && deps.getCatalogEntry(tagId);
     if (!entry || !entry.motor_ids || !entry.motor_ids.length) return [];
     return entry.motor_ids.map(String);
+}
+
+function laserLineCompletions() {
+    const doc = store.laserLinesDoc;
+    if (!doc || !Array.isArray(doc.lines)) return [];
+    const out = [];
+    doc.lines.forEach((ln) => {
+        if (!ln || !ln.id) return;
+        out.push(String(ln.id));
+        const name = ln.name && String(ln.name).trim();
+        if (!name) return;
+        if (/\s/.test(name) || name.includes('"')) {
+            out.push(`"${name}"`);
+        } else {
+            out.push(name);
+        }
+    });
+    return out.sort();
+}
+
+function placedComponentCompletions(deps) {
+    return componentRefCompletions(deps);
+}
+
+/** Completions for parts currently in storage (place / placelaser). */
+function storedComponentCompletions(deps) {
+    const ls = deps.getLabState && deps.getLabState();
+    const catalog = store.catalogMap || {};
+    if (!ls || !ls.components) return [];
+    const tags = Object.keys(ls.components)
+        .filter((id) => isStoredComponent(ls.components[id]))
+        .sort();
+    const out = [...tags];
+    tags.forEach((tagId) => {
+        const name = catalog[tagId]?.name;
+        if (!name || typeof name !== 'string') return;
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        if (/\s/.test(trimmed) || trimmed.includes('"')) {
+            out.push(`"${trimmed}"`);
+        } else {
+            out.push(trimmed);
+        }
+    });
+    return out;
+}
+
+/** Completions for on-table parts not already stored (store). */
+function storableComponentCompletions(deps) {
+    const ls = deps.getLabState && deps.getLabState();
+    const catalog = store.catalogMap || {};
+    if (!ls || !ls.components) return [];
+    const tags = Object.keys(ls.components)
+        .filter((id) => ls.components[id] && !isStoredComponent(ls.components[id]))
+        .sort();
+    const out = [...tags];
+    tags.forEach((tagId) => {
+        const name = catalog[tagId]?.name;
+        if (!name || typeof name !== 'string') return;
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        if (/\s/.test(trimmed) || trimmed.includes('"')) {
+            out.push(`"${trimmed}"`);
+        } else {
+            out.push(trimmed);
+        }
+    });
+    return out;
+}
+
+function allComponentCompletions(deps) {
+    const ls = deps.getLabState && deps.getLabState();
+    const catalog = store.catalogMap || {};
+    const tags = allTagIds(deps);
+    const out = [...tags];
+    tags.forEach((tagId) => {
+        const name = catalog[tagId]?.name;
+        if (!name || typeof name !== 'string') return;
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        if (/\s/.test(trimmed) || trimmed.includes('"')) {
+            out.push(`"${trimmed}"`);
+        } else {
+            out.push(trimmed);
+        }
+    });
+    if (ls) {
+        Object.keys(catalog).forEach((tagId) => {
+            if (tags.includes(tagId)) return;
+            const name = catalog[tagId]?.name;
+            if (!name || typeof name !== 'string') return;
+            const trimmed = name.trim();
+            if (!trimmed) return;
+            out.push(tagId);
+            if (/\s/.test(trimmed) || trimmed.includes('"')) {
+                out.push(`"${trimmed}"`);
+            } else {
+                out.push(trimmed);
+            }
+        });
+    }
+    return out;
 }
 
 /**
@@ -89,6 +198,22 @@ export function getCompletionSlot(line, caret) {
     return { start, end: caret };
 }
 
+function isMoveLaserVerb(verb) {
+    return verb === 'movelaser' || verb === 'move-laser' || verb === 'stitch';
+}
+
+function isStoreVerb(verb) {
+    return verb === 'store' || verb === 'storecell' || verb === 'tostorage';
+}
+
+function isPlaceVerb(verb) {
+    return verb === 'place' || verb === 'fromstorage' || verb === 'drag';
+}
+
+function isPlaceLaserVerb(verb) {
+    return verb === 'placelaser' || verb === 'place-laser' || verb === 'draglaser';
+}
+
 /**
  * Return candidate strings to insert in place of `current` (or after `prefix` when starting a new token).
  * @param {string} line
@@ -99,8 +224,10 @@ export function getCompletionSlot(line, caret) {
 export function getTabCompletions(line, caret, deps) {
     const before = line.slice(0, caret);
     const { endsWithSpace, tokens, current } = parsePartialLine(before);
-    const tags = placedTagIds(deps);
-    const allTags = allTagIds(deps);
+    const placed = placedComponentCompletions(deps);
+    const stored = storedComponentCompletions(deps);
+    const storable = storableComponentCompletions(deps);
+    const allComps = allComponentCompletions(deps);
 
     if (tokens.length === 0) {
         return filterPrefix(VERBS, current);
@@ -115,7 +242,7 @@ export function getTabCompletions(line, caret, deps) {
 
     if (tokens.length === 1 && endsWithSpace) {
         const v = verb;
-        if (v === 'json' || v === 'help' || v === '?' || v === 'refresh') {
+        if (v === 'json' || v === 'help' || v === '?' || v === 'refresh' || v === 'lasers') {
             return [];
         }
         if (
@@ -126,23 +253,27 @@ export function getTabCompletions(line, caret, deps) {
             v === 'record' ||
             v === 'record_measurables'
         ) {
-            return allTags;
+            return allComps;
         }
-        if (v === 'move' || v === 'motor' || v === 'motorhome' || v === 'motorset0') {
-            return tags;
+        if (isStoreVerb(v)) return storable;
+        if (isPlaceVerb(v) || isPlaceLaserVerb(v)) return stored;
+        if (
+            v === 'move' ||
+            isMoveLaserVerb(v) ||
+            v === 'motor' ||
+            v === 'motorhome' ||
+            v === 'motorset0' ||
+            v === 'pick' ||
+            v === 'hover' ||
+            v === 'placehover' ||
+            v === 'confirmhold'
+        ) {
+            return placed;
         }
         return [];
     }
 
-    if (verb === 'json') {
-        return [];
-    }
-
-    if (verb === 'help' || verb === '?') {
-        return [];
-    }
-
-    if (verb === 'refresh') {
+    if (verb === 'json' || verb === 'help' || verb === '?' || verb === 'refresh' || verb === 'lasers') {
         return [];
     }
 
@@ -154,31 +285,62 @@ export function getTabCompletions(line, caret, deps) {
         verb === 'record' ||
         verb === 'record_measurables'
     ) {
-        if (tokens.length === 1 && endsWithSpace) {
-            return allTags;
-        }
         if (tokens.length === 2 && !endsWithSpace) {
-            return filterPrefix(allTags, current);
+            return filterPrefix(allComps, current);
         }
         return [];
     }
 
     if (verb === 'move') {
-        if (tokens.length === 1 && endsWithSpace) {
-            return tags;
-        }
         if (tokens.length === 2 && !endsWithSpace) {
-            return filterPrefix(tags, current);
+            return filterPrefix(placed, current);
+        }
+        return [];
+    }
+
+    if (isMoveLaserVerb(verb)) {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(placed, current);
+        }
+        if (tokens.length === 4 && endsWithSpace) {
+            return laserLineCompletions();
+        }
+        if (tokens.length === 5 && !endsWithSpace) {
+            return filterPrefix(laserLineCompletions(), current);
+        }
+        return [];
+    }
+
+    if (isStoreVerb(verb)) {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(storable, current);
+        }
+        return [];
+    }
+
+    if (isPlaceVerb(verb)) {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(stored, current);
+        }
+        return [];
+    }
+
+    if (isPlaceLaserVerb(verb)) {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(stored, current);
+        }
+        if (tokens.length === 4 && endsWithSpace) {
+            return laserLineCompletions();
+        }
+        if (tokens.length === 5 && !endsWithSpace) {
+            return filterPrefix(laserLineCompletions(), current);
         }
         return [];
     }
 
     if (verb === 'motor') {
-        if (tokens.length === 1 && endsWithSpace) {
-            return tags;
-        }
         if (tokens.length === 2 && !endsWithSpace) {
-            return filterPrefix(tags, current);
+            return filterPrefix(placed, current);
         }
         if (tokens.length === 2 && endsWithSpace) {
             const mids = motorIdStrings(deps, tokens[1]);
@@ -191,11 +353,8 @@ export function getTabCompletions(line, caret, deps) {
     }
 
     if (verb === 'motorhome' || verb === 'motorset0') {
-        if (tokens.length === 1 && endsWithSpace) {
-            return tags;
-        }
         if (tokens.length === 2 && !endsWithSpace) {
-            return filterPrefix(tags, current);
+            return filterPrefix(placed, current);
         }
         if (tokens.length === 2 && endsWithSpace) {
             const mids = motorIdStrings(deps, tokens[1]);
@@ -203,6 +362,20 @@ export function getTabCompletions(line, caret, deps) {
         }
         if (tokens.length === 3 && !endsWithSpace) {
             return filterPrefix(motorIdStrings(deps, tokens[1]), current);
+        }
+        return [];
+    }
+
+    if (verb === 'pick' || verb === 'confirmhold') {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(placed, current);
+        }
+        return [];
+    }
+
+    if (verb === 'hover' || verb === 'placehover') {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(placed, current);
         }
         return [];
     }

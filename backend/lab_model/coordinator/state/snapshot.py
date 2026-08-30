@@ -50,7 +50,7 @@ class LabPose:
     - ``x``, ``y`` -- millimeters on the breadboard, lab axes.
     - ``z`` -- millimeters above the **lab floor** (``z_lab = 0`` is on
       the floor; ``z_lab ≈ 215`` is resting on the breadboard).
-    - ``rotation`` -- degrees, lab top-down rotation.
+    - ``rotation`` -- degrees clockwise, with ArUco top toward lab +X at zero.
 
     Backends with a robot frame (real) transform these into robot frame
     inside their hook implementation; backends without (mock) leave

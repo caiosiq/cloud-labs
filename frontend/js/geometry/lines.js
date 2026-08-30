@@ -102,6 +102,21 @@ export function projectPointToLineModel(x, y, m) {
 }
 
 /**
+ * Lab-frame X (mm) on line model `m` at a given Y.
+ * Returns null when underdetermined (horizontal) or invalid.
+ * @param {LineModel | null | undefined} m
+ * @param {number} y
+ * @returns {number | null}
+ */
+export function xAtYOnLineModel(m, y) {
+    if (!m || !Number.isFinite(y)) return null;
+    if (m.kind === 'vertical') return m.x0;
+    if (m.kind === 'horizontal') return null;
+    if (m.kind === 'ab') return m.a * y + m.b;
+    return null;
+}
+
+/**
  * Closest point on finite segment A–B to P, with chord distance.
  * Returns `{ x, y, dist }` in lab mm.
  */

@@ -88,13 +88,18 @@ export function showErrorModal(title, message, options = {}) {
  * @param {string} message HTML allowed.
  * @param {() => void} [onConfirm]
  * @param {() => void} [onCancel]
- * @param {{ confirmLabel?: string, cancelLabel?: string }} [options]
+ * @param {{
+ *   confirmLabel?: string,
+ *   cancelLabel?: string,
+ *   placement?: 'center' | 'top-left',
+ * }} [options]
  */
 export function showConfirmationModal(message, onConfirm, onCancel, options = {}) {
     if (document.getElementById('confirm-modal')) return;
 
     const confirmLabel = options.confirmLabel || 'Confirm';
     const cancelLabel = options.cancelLabel || 'Cancel';
+    const placement = options.placement === 'center' ? 'center' : 'top-left';
 
     const overlay = document.createElement('div');
     overlay.id = 'confirm-modal';
@@ -103,29 +108,42 @@ export function showConfirmationModal(message, onConfirm, onCancel, options = {}
     overlay.style.left = '0';
     overlay.style.width = '100vw';
     overlay.style.height = '100vh';
-    overlay.style.backgroundColor = 'rgba(0,0,0,0.85)';
+    // Light dim so the canvas / ghost stay visible behind the dialog.
+    overlay.style.backgroundColor = 'rgba(15, 23, 42, 0.28)';
     overlay.style.zIndex = '3000';
     overlay.style.display = 'flex';
-    overlay.style.alignItems = 'center';
-    overlay.style.justifyContent = 'center';
-    overlay.style.backdropFilter = 'blur(5px)';
+    if (placement === 'top-left') {
+        overlay.style.alignItems = 'flex-start';
+        overlay.style.justifyContent = 'flex-start';
+        // Below top nav; inset past the left sidebar so the card sits over the table.
+        overlay.style.padding = '56px 16px 16px 276px';
+    } else {
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.padding = '16px';
+    }
+    overlay.style.boxSizing = 'border-box';
 
     const card = document.createElement('div');
-    card.style.backgroundColor = '#181b21';
+    card.style.backgroundColor = 'rgba(24, 27, 33, 0.94)';
     card.style.border = '1px solid #3b82f6';
     card.style.borderRadius = '8px';
-    card.style.padding = '24px';
-    card.style.width = '400px';
-    card.style.textAlign = 'center';
-    card.style.boxShadow = '0 20px 50px rgba(0,0,0,0.7)';
+    card.style.padding = '20px';
+    card.style.width = '360px';
+    card.style.maxWidth = 'min(360px, calc(100vw - 300px))';
+    card.style.textAlign = 'left';
+    card.style.boxShadow = '0 12px 40px rgba(0,0,0,0.45)';
+    card.style.backdropFilter = 'blur(2px)';
 
     card.innerHTML = `
-        <span class="material-icons-round" style="font-size: 40px; color: #3b82f6; margin-bottom: 12px;">help_outline</span>
-        <h3 style="margin: 0 0 12px 0; color: #e2e8f0;">Confirm Action</h3>
-        <p style="margin: 0 0 24px 0; color: #94a3b8; font-size: 14px; line-height: 1.5;">${message}</p>
-        <div style="display: flex; justify-content: center; gap: 12px;">
-            <button id="confirm-no" class="btn btn-secondary" style="width: auto; padding: 8px 20px;">${cancelLabel}</button>
-            <button id="confirm-yes" class="btn btn-primary" style="width: auto; padding: 8px 20px;">${confirmLabel}</button>
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+            <span class="material-icons-round" style="font-size: 28px; color: #3b82f6;">help_outline</span>
+            <h3 style="margin: 0; color: #e2e8f0; font-size: 16px;">Confirm Action</h3>
+        </div>
+        <p style="margin: 0 0 18px 0; color: #94a3b8; font-size: 13px; line-height: 1.5;">${message}</p>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button id="confirm-no" class="btn btn-secondary" style="width: auto; padding: 8px 16px;">${cancelLabel}</button>
+            <button id="confirm-yes" class="btn btn-primary" style="width: auto; padding: 8px 16px;">${confirmLabel}</button>
         </div>
     `;
 

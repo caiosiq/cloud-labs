@@ -15,7 +15,11 @@ class TagQuery(BaseModel):
 
 
 class PoseTargetParameters(BaseModel):
-    """Breadboard pose in lab mm / degrees (MOVE_COMPONENT, PLACE_FROM_STORAGE)."""
+    """Breadboard pose in lab mm and public Cloud Labs rotation.
+
+    Rotation is clockwise when viewed from above. Zero means the top of the
+    component's ArUco pattern faces lab +X.
+    """
 
     model_config = ConfigDict(extra="allow")
 

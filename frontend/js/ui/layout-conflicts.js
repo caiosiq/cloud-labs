@@ -127,7 +127,7 @@ export function updateLayoutConflictModal() {
         // Off-slot / outside-rect with a stored assignment → re-center on the
         // assigned cell (same as panel "Re-center in cell"). REPACK would move
         // to a *different* free cell and was still a stub on real edge.
-        bodyHtml += `<button type="button" id="lconf-recenter" class="btn btn-secondary" style="width:100%;justify-content:center;">Re-center in cell (0°)</button>`;
+        bodyHtml += `<button type="button" id="lconf-recenter" class="btn btn-secondary" style="width:100%;justify-content:center;">Re-center (ArUco top → +X)</button>`;
         bodyHtml += `<button type="button" id="lconf-dismiss" class="btn btn-secondary" style="width:100%;opacity:0.85;">Dismiss</button>`;
         bodyHtml += `</div>`;
     } else {

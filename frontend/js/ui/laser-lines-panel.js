@@ -18,6 +18,9 @@ import { twoPointsToLineModel } from '../geometry/lines.js';
 import { refreshAlignmentIntersectionCache } from '../canvas/alignment-snap.js';
 import { isBenchHeaderHovered, onBenchHeaderPointerLeave } from './bench-chrome-bar.js';
 import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
+import { resolveLaserStitchPose } from '../laser-stitch.js';
+
+export { resolveLaserStitchPose };
 
 let _render = () => {};
 let _refreshControlWorkingState = async () => {};

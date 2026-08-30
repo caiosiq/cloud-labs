@@ -4,19 +4,35 @@
  * Closing the floater does **not** end the feed; End live feed does.
  * Pop-outs survive switching the focused component panel so teleop on one
  * tag can run while watching another camera.
+ *
+ * "Measure beam CoM" briefly pauses the live stream, runs the same science
+ * RECORD path as the camera panel, evaluates ``builtin.beam_com``, then
+ * restarts live — without changing the normal RECORD_MEASURABLES UI.
  */
 import { store } from '../state/store.js';
-import { isLiveFeedActive } from '../component-state.js';
+import {
+    applyComponentTelemetryFromServer,
+    isLiveFeedActive,
+} from '../component-state.js';
 import { withBackendQuery } from '../state/backend-selection.js';
 import { endLiveFeed, setLiveExposure } from '../api/live-feed.js';
+import { labClient } from '../cloudlabs/client.js';
+import { probeKernel } from '../api/kernels.js';
+import { overlaysFromProbeResult } from './measurable-kernels.js';
+import { paintKernelOverlays } from '../optimize-session/kernel-overlay.js';
 import { getCatalogRow } from '../component-model.js';
 import { registerJpegPollStop } from '../widgets/jpeg-poll-registry.js';
+import { log } from './log.js';
 
-/** @type {Map<string, { el: HTMLElement, stop: () => void, channel: string }>} */
+/** @type {Map<string, { el: HTMLElement, stop: () => void, channel: string, resumePoll?: () => void }>} */
 const _open = new Map();
+
+/** Tags mid pause→RECORD→kernel→resume; reconcile must not close their pop-out. */
+const _snapshotHold = new Set();
 
 const FPS = 8;
 const INTERVAL_MS = Math.round(1000 / FPS);
+const BEAM_COM_KERNEL = 'builtin.beam_com';
 
 export function listActiveLiveFeedTags(labState = store.labState) {
     const comps = labState?.components || {};
@@ -107,16 +123,19 @@ export function openLiveFeedPopout(tagId, opts = {}) {
                 <button type="button" class="live-feed-popout__btn live-feed-popout__btn--ghost" data-action="close" title="Hide pop-out (feed stays on)">Hide</button>
             </span>
         </div>
-        <div class="live-feed-popout__hint">RECORD / OPTIMIZE blocked on this camera while live · ${_escape(_displayName(id))}</div>
+        <div class="live-feed-popout__hint">OPTIMIZE blocked while live · Measure beam CoM pauses briefly for a science capture · ${_escape(_displayName(id))}</div>
         <div class="live-feed-popout__exposure">
             <label title="Preview only (VEXP) — not science SET_EXPOSURE">
                 Preview ms
                 <input type="number" min="0.1" max="1000" step="0.1" value="${exp0}" data-live-exp />
             </label>
             <button type="button" class="live-feed-popout__btn" data-action="apply-exp">Apply</button>
+            <button type="button" class="live-feed-popout__btn live-feed-popout__btn--measure" data-action="measure-com" title="Pause live, science RECORD, measure beam CoM, resume live">Measure beam CoM</button>
         </div>
+        <div class="live-feed-popout__measure-status" data-measure-status aria-live="polite"></div>
         <div class="live-feed-popout__frame" tabindex="-1">
             <img alt="Live feed ${id}" class="live-feed-popout__img"/>
+            <canvas class="live-feed-popout__overlay" hidden aria-hidden="true"></canvas>
             <div class="live-feed-popout__err" hidden></div>
             <div class="live-feed-popout__resize-hint" aria-hidden="true" title="Drag corner to resize"></div>
         </div>
@@ -129,19 +148,37 @@ export function openLiveFeedPopout(tagId, opts = {}) {
     el.style.height = `${Math.min(560, Math.round(vh * 0.78))}px`;
 
     const img = el.querySelector('.live-feed-popout__img');
+    const overlay = el.querySelector('.live-feed-popout__overlay');
     const err = el.querySelector('.live-feed-popout__err');
+    const statusEl = el.querySelector('[data-measure-status]');
     const url = _previewUrl(id);
     let consecutiveErrors = 0;
     let timer = null;
+    /** @type {ReturnType<typeof setTimeout>|null} */
+    let overlayRedrawTimer = null;
+    /** @type {object[]} */
+    let lastOverlays = [];
 
     const refresh = () => {
         if (!img) return;
         img.src = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
     };
+    const paintOverlay = () => {
+        if (!overlay || !img) return;
+        if (!lastOverlays.length) {
+            overlay.hidden = true;
+            const ctx = overlay.getContext('2d');
+            if (ctx) ctx.clearRect(0, 0, overlay.width, overlay.height);
+            return;
+        }
+        overlay.hidden = false;
+        paintKernelOverlays(overlay, img, lastOverlays);
+    };
     img.onload = () => {
         consecutiveErrors = 0;
         if (err) err.hidden = true;
         img.hidden = false;
+        paintOverlay();
     };
     img.onerror = () => {
         consecutiveErrors += 1;
@@ -158,15 +195,32 @@ export function openLiveFeedPopout(tagId, opts = {}) {
         }
     }
 
+    function resumePoll() {
+        if (timer) return;
+        refresh();
+        timer = setInterval(refresh, INTERVAL_MS);
+    }
+
     const unregister = registerJpegPollStop(id, stop);
     refresh();
     timer = setInterval(refresh, INTERVAL_MS);
 
+    const frame = el.querySelector('.live-feed-popout__frame');
+    if (frame && typeof ResizeObserver !== 'undefined') {
+        const ro = new ResizeObserver(() => {
+            if (overlayRedrawTimer) clearTimeout(overlayRedrawTimer);
+            overlayRedrawTimer = setTimeout(paintOverlay, 40);
+        });
+        ro.observe(frame);
+    }
+
     const closePopoutOnly = () => {
         stop();
         unregister();
+        if (overlayRedrawTimer) clearTimeout(overlayRedrawTimer);
         el.remove();
         _open.delete(id);
+        _snapshotHold.delete(id);
         syncLiveFeedSessionChrome();
     };
 
@@ -214,10 +268,24 @@ export function openLiveFeedPopout(tagId, opts = {}) {
                 if (btn) btn.disabled = false;
             });
     });
+    el.querySelector('[data-action="measure-com"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void _measureBeamComFromLive(id, {
+            el,
+            stop,
+            resumePoll,
+            statusEl,
+            setOverlays: (list) => {
+                lastOverlays = Array.isArray(list) ? list : [];
+                paintOverlay();
+            },
+            fetchLabState: opts.fetchLabState,
+        });
+    });
 
     _makeDraggable(el, el.querySelector('[data-drag-handle]'));
     layer.appendChild(el);
-    _open.set(id, { el, stop, channel });
+    _open.set(id, { el, stop, channel, resumePoll });
     syncLiveFeedSessionChrome();
 }
 
@@ -228,15 +296,172 @@ export function closeLiveFeedPopout(tagId) {
     entry.stop();
     entry.el.remove();
     _open.delete(id);
+    _snapshotHold.delete(id);
 }
 
 /** Close pop-outs whose live session has ended; keep open ones in sync. */
 export function reconcileLiveFeedPopouts(labState = store.labState) {
     const live = new Set(listActiveLiveFeedTags(labState));
     for (const tagId of [..._open.keys()]) {
+        if (_snapshotHold.has(tagId)) continue;
         if (!live.has(tagId)) closeLiveFeedPopout(tagId);
     }
     syncLiveFeedSessionChrome();
+}
+
+/**
+ * Pause live → science RECORD → builtin.beam_com → resume live.
+ * Keeps the pop-out open; does not change the normal camera RECORD button flow.
+ *
+ * @param {string} tagId
+ * @param {{
+ *   el: HTMLElement,
+ *   stop: () => void,
+ *   resumePoll: () => void,
+ *   statusEl?: HTMLElement|null,
+ *   setOverlays?: (list: object[]) => void,
+ *   fetchLabState?: () => Promise<unknown>,
+ * }} ctx
+ */
+async function _measureBeamComFromLive(tagId, ctx) {
+    const id = String(tagId || '').trim();
+    if (!id || !ctx?.el) return;
+    if (_snapshotHold.has(id)) return;
+
+    const measureBtn = ctx.el.querySelector('[data-action="measure-com"]');
+    const applyBtn = ctx.el.querySelector('[data-action="apply-exp"]');
+    const endBtn = ctx.el.querySelector('[data-action="end"]');
+    const setBusy = (busy) => {
+        if (measureBtn) measureBtn.disabled = busy;
+        if (applyBtn) applyBtn.disabled = busy;
+        if (endBtn) endBtn.disabled = busy;
+    };
+    const setStatus = (text, isErr = false) => {
+        if (!ctx.statusEl) return;
+        ctx.statusEl.textContent = text || '';
+        ctx.statusEl.classList.toggle('live-feed-popout__measure-status--err', !!isErr);
+    };
+
+    const previewMs = (() => {
+        const inp = ctx.el.querySelector('[data-live-exp]');
+        const v = parseFloat(inp?.value);
+        if (Number.isFinite(v) && v > 0) return v;
+        return _liveExposureMs(id);
+    })();
+
+    setBusy(true);
+    _snapshotHold.add(id);
+    ctx.stop();
+    ctx.setOverlays?.([]);
+    setStatus('Pausing live feed…');
+
+    let resumed = false;
+    try {
+        // Soft end: do not close the pop-out (unlike api/live-feed.endLiveFeed).
+        const endBody = await labClient.endLiveFeed(id, 'all');
+        applyComponentTelemetryFromServer(id, endBody?.telemetry);
+
+        setStatus('Science capture (RECORD)…');
+        const recorded = await labClient.recordMeasurables(id);
+        const frameHw = _shapeHw(recorded?.measurables?.camera_image);
+
+        setStatus('Measuring beam CoM…');
+        const probe = await probeKernel(id, {
+            kernel_id: BEAM_COM_KERNEL,
+            field: 'camera_image',
+            skipConfirm: true,
+        });
+        if (!probe.ok) {
+            throw new Error(probe.error || 'beam CoM probe failed');
+        }
+
+        const result = probe.result || {};
+        const feats = Array.isArray(result.features) ? result.features : [];
+        const names = Array.isArray(result.feature_names) ? result.feature_names : ['cx', 'cy', 'peak'];
+        const summary = _formatBeamCom(feats, names);
+        setStatus(`Beam CoM · ${summary}`);
+
+        const img = ctx.el.querySelector('.live-feed-popout__img');
+        const overlays = overlaysFromProbeResult({
+            kernelId: BEAM_COM_KERNEL,
+            features: feats,
+            featureNames: names,
+            frameHw,
+            natW: img?.naturalWidth,
+            natH: img?.naturalHeight,
+        });
+        ctx.setOverlays?.(overlays);
+
+        setStatus(`Resuming live… · ${summary}`);
+        const startBody = await labClient.startLiveFeed(id, 'stream', {
+            exposure_time_ms: previewMs,
+        });
+        applyComponentTelemetryFromServer(id, startBody?.telemetry);
+        resumed = true;
+        ctx.resumePoll?.();
+        setStatus(`Beam CoM · ${summary}`);
+        log(`Live measure beam CoM on ${id}: ${summary}`, 'info');
+
+        if (typeof ctx.fetchLabState === 'function') {
+            await ctx.fetchLabState();
+        }
+    } catch (errObj) {
+        const msg = String(errObj?.message || errObj);
+        console.warn('[live-feed-popout] measure beam CoM failed', errObj);
+        setStatus(msg, true);
+        log(`Live measure beam CoM failed (${id}): ${msg}`, 'error');
+        ctx.setOverlays?.([]);
+        if (!resumed) {
+            try {
+                const startBody = await labClient.startLiveFeed(id, 'stream', {
+                    exposure_time_ms: previewMs,
+                });
+                applyComponentTelemetryFromServer(id, startBody?.telemetry);
+                ctx.resumePoll?.();
+                if (typeof ctx.fetchLabState === 'function') await ctx.fetchLabState();
+            } catch (resumeErr) {
+                console.warn('[live-feed-popout] resume live after measure failed', resumeErr);
+                setStatus(
+                    `${msg} · resume failed: ${resumeErr?.message || resumeErr}`,
+                    true,
+                );
+            }
+        }
+    } finally {
+        _snapshotHold.delete(id);
+        setBusy(false);
+        syncLiveFeedSessionChrome();
+    }
+}
+
+function _shapeHw(value) {
+    if (!value || typeof value !== 'object') return null;
+    const shape = value.shape;
+    if (Array.isArray(shape) && shape.length >= 2) {
+        const h = Number(shape[0]);
+        const w = Number(shape[1]);
+        if (Number.isFinite(h) && Number.isFinite(w) && h > 0 && w > 0) {
+            return /** @type {[number, number]} */ ([h, w]);
+        }
+    }
+    return null;
+}
+
+function _formatBeamCom(feats, names) {
+    const get = (name, idx) => {
+        const i = Array.isArray(names) ? names.indexOf(name) : -1;
+        const v = i >= 0 ? Number(feats[i]) : Number(feats[idx]);
+        return Number.isFinite(v) ? v : null;
+    };
+    const cx = get('cx', 0);
+    const cy = get('cy', 1);
+    const peak = get('peak', 2);
+    const fmt = (n) => (n == null ? '—' : Number(n).toFixed(1));
+    const peakFmt =
+        peak == null
+            ? ''
+            : ` · peak=${Number(peak).toFixed(3).replace(/\.?0+$/, '')}`;
+    return `cx=${fmt(cx)} cy=${fmt(cy)}${peakFmt}`;
 }
 
 /**
@@ -270,7 +495,7 @@ export function syncLiveFeedSessionChrome(hooks = {}) {
                 </span>`;
             })
             .join('')}
-        <span class="live-feed-session-bar__note">RECORD/OPTIMIZE blocked on these cameras</span>
+        <span class="live-feed-session-bar__note">OPTIMIZE blocked · use Measure beam CoM in pop-out</span>
     `;
 
     host.querySelectorAll('.live-feed-session-bar__chip').forEach((chip) => {

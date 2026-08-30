@@ -32,6 +32,10 @@ import {
     optimizationHighlightColor,
     isOptimizationPlanningActive,
 } from '../state/optimization-builder.js';
+import {
+    getParameterScanHighlightForTag,
+    isParameterScanPlanningActive,
+} from '../state/parameter-scan-builder.js';
 
 let _deps = {
     placementUiLabel: () => 'PLACED',
@@ -141,6 +145,7 @@ export function syncComponentSidebarHighlights() {
             'opt-plan-objective',
             'opt-plan-variable',
             'opt-plan-both',
+            'scan-plan-axis',
         );
         if (isOptimizationPlanningActive()) {
             const role = getOptimizationHighlightForTag(tagId);
@@ -152,6 +157,10 @@ export function syncComponentSidebarHighlights() {
                 card.style.borderColor = '';
                 card.style.boxShadow = '';
             }
+        } else if (isParameterScanPlanningActive() && getParameterScanHighlightForTag(tagId)) {
+            card.classList.add('scan-plan-axis');
+            card.style.borderColor = '#a78bfa';
+            card.style.boxShadow = '0 0 10px #a78bfa55';
         } else if (store.openPanels.includes(tagId)) {
             card.style.borderColor = 'rgba(59, 130, 246, 0.45)';
             card.style.boxShadow = '';

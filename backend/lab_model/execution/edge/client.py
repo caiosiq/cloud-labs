@@ -13,6 +13,7 @@ one semantics surface (no teleop/video side doors around the edge).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
@@ -326,12 +327,52 @@ class HttpEdgeClient:
         try:
             async with httpx.AsyncClient(base_url=self.base_url, timeout=timeout_s) as client:
                 resp = await client.post("/execute", json=body)
-                data = resp.json() if resp.content else {}
         except Exception as exc:  # noqa: BLE001
             return EdgeExecuteResult(
                 ok=False,
                 transport=self.transport,
                 error=str(exc),
+            )
+        if not resp.content or not resp.content.strip():
+            # A mutating command may already have reached the robot.  Never
+            # retry it just because the HTTP response was lost or malformed.
+            return EdgeExecuteResult(
+                ok=False,
+                transport=self.transport,
+                error=(
+                    "edge returned an empty response to POST /execute "
+                    f"(HTTP {resp.status_code}); command outcome is unknown; "
+                    "do not retry until the edge state has been checked"
+                ),
+                status="invalid_response",
+            )
+        try:
+            data = resp.json()
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+            content_type = str(resp.headers.get("content-type") or "unknown")
+            preview = resp.text.strip().replace("\r", " ").replace("\n", " ")
+            if len(preview) > 300:
+                preview = preview[:297] + "..."
+            if not preview:
+                preview = "<empty>"
+            _LOG.error(
+                "Edge POST /execute returned invalid JSON: http=%s "
+                "content_type=%s body=%r parse_error=%s",
+                resp.status_code,
+                content_type,
+                preview,
+                exc,
+            )
+            return EdgeExecuteResult(
+                ok=False,
+                transport=self.transport,
+                error=(
+                    "edge returned a non-JSON response to POST /execute "
+                    f"(HTTP {resp.status_code}, content-type={content_type}, "
+                    f"body={preview!r}); command outcome is unknown; "
+                    "do not retry until the edge state has been checked"
+                ),
+                status="invalid_response",
             )
         if not isinstance(data, dict):
             return EdgeExecuteResult(

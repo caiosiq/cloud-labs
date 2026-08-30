@@ -254,6 +254,106 @@ class PickupQuarterAdapterTests(unittest.TestCase):
         self.assertLess(wrist_travel_deg, 60.0)
         self.assertAlmostEqual(wrist_travel_deg, 52.1609, places=3)
 
+    def test_cord_limited_joint1_uses_equivalent_long_way_route(self):
+        class FakeModel:
+            jnt_limited = np.ones(7, dtype=bool)
+            jnt_range = np.tile(np.array((-2.0 * np.pi, 2.0 * np.pi)), (7, 1))
+            jnt_range[0] = np.deg2rad((-10.0, 359.9))
+
+            @staticmethod
+            def joint(name):
+                return SimpleNamespace(id=int(name.removeprefix("joint")) - 1)
+
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = FakeModel()
+        runtime.home_tcp_rotation = np.eye(3)
+        runtime._validate_radial_pose_target = lambda *args, **kwargs: None
+        runtime._load_radial_motion_library = lambda: SimpleNamespace(carry_z_m=0.550)
+        runtime._log = lambda *args, **kwargs: None
+
+        current = np.zeros(7)
+        current[0] = np.deg2rad(10.0)
+        plan = runtime._plan_radial_coordinated_rotation(
+            name="radial coordinated rotate",
+            tag_id="tag_0",
+            radius_m=0.330,
+            source_theta=np.deg2rad(10.0),
+            target_theta=np.deg2rad(-20.0),
+            source_rotation=runtime._target_rotation(0.0),
+            target_rotation=runtime._target_rotation(0.0),
+            current=current,
+        )
+
+        self.assertIsNotNone(plan)
+        joint1_deg = np.rad2deg([waypoint[0] for waypoint in plan.waypoints])
+        self.assertTrue(np.all(joint1_deg >= -10.0 - 1e-9))
+        self.assertTrue(np.all(joint1_deg <= 359.9 + 1e-9))
+        self.assertAlmostEqual(joint1_deg[0], 10.0)
+        self.assertAlmostEqual(joint1_deg[-1], 340.0)
+        self.assertGreater(joint1_deg[-1] - joint1_deg[0], 300.0)
+
+    def test_cord_limited_ordinary_route_remains_the_short_route(self):
+        class FakeModel:
+            jnt_limited = np.ones(7, dtype=bool)
+            jnt_range = np.tile(np.array((-2.0 * np.pi, 2.0 * np.pi)), (7, 1))
+            jnt_range[0] = np.deg2rad((-10.0, 359.9))
+
+            @staticmethod
+            def joint(name):
+                return SimpleNamespace(id=int(name.removeprefix("joint")) - 1)
+
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = FakeModel()
+        runtime.home_tcp_rotation = np.eye(3)
+        runtime._validate_radial_pose_target = lambda *args, **kwargs: None
+        runtime._load_radial_motion_library = lambda: SimpleNamespace(carry_z_m=0.550)
+        runtime._log = lambda *args, **kwargs: None
+
+        current = np.zeros(7)
+        current[0] = np.deg2rad(10.0)
+        plan = runtime._plan_radial_coordinated_rotation(
+            name="radial coordinated rotate",
+            tag_id="tag_0",
+            radius_m=0.330,
+            source_theta=np.deg2rad(10.0),
+            target_theta=np.deg2rad(40.0),
+            source_rotation=runtime._target_rotation(0.0),
+            target_rotation=runtime._target_rotation(0.0),
+            current=current,
+        )
+
+        self.assertIsNotNone(plan)
+        joint1_deg = np.rad2deg([waypoint[0] for waypoint in plan.waypoints])
+        self.assertAlmostEqual(joint1_deg[0], 10.0)
+        self.assertAlmostEqual(joint1_deg[-1], 40.0)
+        self.assertTrue(np.all(np.diff(joint1_deg) >= -1e-9))
+        self.assertLessEqual(float(np.max(joint1_deg) - np.min(joint1_deg)), 30.0)
+
+    def test_cord_limited_rebase_preserves_physical_joint1_representation(self):
+        class FakeModel:
+            jnt_limited = np.ones(7, dtype=bool)
+            jnt_range = np.tile(np.array((-2.0 * np.pi, 2.0 * np.pi)), (7, 1))
+            jnt_range[0] = np.deg2rad((-10.0, 359.9))
+
+            @staticmethod
+            def joint(name):
+                return SimpleNamespace(id=int(name.removeprefix("joint")) - 1)
+
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = FakeModel()
+        runtime.data = SimpleNamespace(qpos=np.zeros(7), ctrl=np.zeros(7))
+        runtime.current_joint_target = np.zeros(7)
+        runtime.current_joint_target[0] = np.deg2rad(350.0)
+        runtime.data.qpos[:] = runtime.current_joint_target
+        runtime.data.ctrl[:] = runtime.current_joint_target
+        runtime._radial_joint1_route_limits_overridden = True
+        runtime._log = lambda *args, **kwargs: None
+
+        runtime._rebase_radial_periodic_joint_branches(reason="test")
+
+        self.assertAlmostEqual(
+            np.rad2deg(runtime.current_joint_target[0]), 350.0)
+
 
 if __name__ == "__main__":
     unittest.main()

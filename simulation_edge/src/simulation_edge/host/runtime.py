@@ -89,6 +89,8 @@ RADIAL_CARRY_Z_M_ENV_VAR = "CLOUDLAB_RADIAL_CARRY_Z_M"
 RADIAL_MIN_VERTICAL_Z_M_ENV_VAR = "CLOUDLAB_RADIAL_MIN_VERTICAL_Z_M"
 RADIAL_HEIGHT_ZONE_MARGIN_M_ENV_VAR = "CLOUDLAB_RADIAL_HEIGHT_ZONE_MARGIN_M"
 RADIAL_HEIGHT_ZONE_MIN_RADIUS_MM_ENV_VAR = "CLOUDLAB_RADIAL_HEIGHT_ZONE_MIN_RADIUS_MM"
+RADIAL_JOINT1_MIN_DEG_ENV_VAR = "CLOUDLAB_RADIAL_JOINT1_MIN_DEG"
+RADIAL_JOINT1_MAX_DEG_ENV_VAR = "CLOUDLAB_RADIAL_JOINT1_MAX_DEG"
 RADIAL_DEFAULT_MIN_RADIUS_MM = 134.0
 RADIAL_DEFAULT_MAX_RADIUS_MM = 513.0
 RADIAL_DEFAULT_STEP_MM = 5.0
@@ -731,6 +733,47 @@ class MuJoCoRobotRuntime:
             playback_rate=self.playback_rate,
         )
         self.model = mujoco.MjModel.from_xml_string(scene.xml)
+        self._radial_joint1_route_limits_overridden = False
+        joint1_min_override = os.getenv(RADIAL_JOINT1_MIN_DEG_ENV_VAR, "").strip()
+        joint1_max_override = os.getenv(RADIAL_JOINT1_MAX_DEG_ENV_VAR, "").strip()
+        if bool(joint1_min_override) != bool(joint1_max_override):
+            raise SimulatorError(
+                f"{RADIAL_JOINT1_MIN_DEG_ENV_VAR} and "
+                f"{RADIAL_JOINT1_MAX_DEG_ENV_VAR} must be set together"
+            )
+        if joint1_min_override:
+            joint1_min_deg = float(joint1_min_override)
+            joint1_max_deg = float(joint1_max_override)
+            if (
+                not math.isfinite(joint1_min_deg)
+                or not math.isfinite(joint1_max_deg)
+                or joint1_min_deg >= joint1_max_deg
+            ):
+                raise SimulatorError(
+                    "radial joint-1 override limits must be finite and increasing"
+                )
+            joint1_id = self.model.joint("joint1").id
+            model_min, model_max = (
+                math.degrees(float(value))
+                for value in self.model.jnt_range[joint1_id]
+            )
+            if (
+                joint1_min_deg < model_min - 1e-6
+                or joint1_max_deg > model_max + 1e-6
+            ):
+                raise SimulatorError(
+                    "radial joint-1 override limits must remain inside the "
+                    f"MuJoCo model range [{model_min:.3f}, {model_max:.3f}] deg"
+                )
+            self.model.jnt_range[joint1_id] = np.deg2rad(
+                (joint1_min_deg, joint1_max_deg)
+            )
+            self._radial_joint1_route_limits_overridden = True
+            self._log(
+                "radial_joint1_route_limits_applied",
+                minimum_deg=joint1_min_deg,
+                maximum_deg=joint1_max_deg,
+            )
         self.model.actuator_gainprm[:ARM_DOF, 0] *= ARM_SERVO_STIFFNESS_SCALE
         self.model.actuator_biasprm[:ARM_DOF, 1] *= ARM_SERVO_STIFFNESS_SCALE
         self.model.actuator_biasprm[:ARM_DOF, 2] *= math.sqrt(
@@ -2140,11 +2183,26 @@ class MuJoCoRobotRuntime:
                 lower, upper = (
                     float(limit) for limit in self.model.jnt_range[joint_id]
                 )
-            canonical = _canonical_equivalent_angle_rad(
-                float(previous[joint_index]),
-                lower=lower,
-                upper=upper,
-            )
+            if (
+                joint_index == 0
+                and getattr(
+                    self, "_radial_joint1_route_limits_overridden", False
+                )
+                and lower is not None
+                and upper is not None
+                and lower - 1e-9 <= float(previous[joint_index]) <= upper + 1e-9
+            ):
+                # The selected representation is the physical cable state.
+                # Replacing 350 deg with its equivalent -10 deg would be a
+                # zero-pose-change teleport in MuJoCo but a full-turn mismatch
+                # for the real controller and the subsequent streamed route.
+                canonical = float(previous[joint_index])
+            else:
+                canonical = _canonical_equivalent_angle_rad(
+                    float(previous[joint_index]),
+                    lower=lower,
+                    upper=upper,
+                )
             shift = canonical - float(previous[joint_index])
             shifted_qpos = float(self.data.qpos[joint_index]) + shift
             if lower is not None and upper is not None and not (

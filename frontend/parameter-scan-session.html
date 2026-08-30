@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Labs | Parameter scan session</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b0f14;
+            --panel: #141a22;
+            --border: #2a3340;
+            --text: #e8eef6;
+            --muted: #94a3b8;
+            --accent: #22d3ee;
+            --ok: #34d399;
+            --fail: #f87171;
+            --warn: #fbbf24;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Inter, system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 14px 22px;
+            border-bottom: 1px solid var(--border);
+            background: var(--panel);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+        header nav a {
+            color: var(--muted);
+            text-decoration: none;
+            margin-left: 14px;
+            font-size: 13px;
+        }
+        header nav a:hover, header nav a.active { color: var(--accent); }
+        .header-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+        main { padding: 20px 22px 48px; max-width: 1400px; margin: 0 auto; }
+        .psd-hero {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 18px;
+            padding: 16px 18px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: linear-gradient(180deg, #15202b, #121820);
+        }
+        .psd-kicker {
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 11px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .psd-hero h2 { margin: 0; font-size: 20px; font-weight: 600; }
+        .psd-meta { color: var(--muted); font-size: 13px; }
+        .psd-progress {
+            height: 6px;
+            border-radius: 999px;
+            background: #0f141b;
+            overflow: hidden;
+            margin-top: 6px;
+        }
+        .psd-progress > span {
+            display: block;
+            height: 100%;
+            background: linear-gradient(90deg, #0891b2, #22d3ee);
+            width: 0%;
+            transition: width 0.2s ease;
+        }
+        .psd-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 960px) {
+            .psd-grid { grid-template-columns: 1fr; }
+        }
+        .psd-panel {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--panel);
+            padding: 14px 16px;
+        }
+        .psd-panel h3 {
+            margin: 0 0 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .psd-camera-wrap {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            min-height: 240px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .psd-camera-wrap img {
+            max-width: 100%;
+            max-height: 420px;
+            display: block;
+        }
+        .psd-camera-stage {
+            position: relative;
+            display: inline-block;
+            max-width: 100%;
+            line-height: 0;
+        }
+        .psd-camera-overlay {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .psd-camera-empty { color: var(--muted); font-size: 13px; padding: 24px; text-align: center; }
+        .psd-feats {
+            margin-top: 10px;
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+            font-size: 12px;
+            color: #a7f3d0;
+        }
+        .psd-track-stats {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(167, 139, 250, 0.4);
+            background: rgba(88, 28, 135, 0.2);
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+            font-size: 12px;
+            color: #e9d5ff;
+            line-height: 1.5;
+        }
+        .psd-track-stats strong { color: #ddd6fe; }
+        #psd-chart {
+            width: 100%;
+            height: auto;
+            display: block;
+            background: #0f141b;
+            border-radius: 8px;
+        }
+        .psd-table-wrap {
+            max-height: 360px;
+            overflow: auto;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+        }
+        th, td {
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border);
+            text-align: right;
+        }
+        th {
+            position: sticky;
+            top: 0;
+            background: #101820;
+            color: var(--muted);
+            font-weight: 600;
+            text-align: right;
+        }
+        tr.is-err td { color: var(--fail); }
+        tr.is-latest td { background: rgba(34, 211, 238, 0.08); }
+        #psd-error {
+            color: var(--fail);
+            font-size: 13px;
+            margin: 0 22px 8px;
+            min-height: 1.2em;
+        }
+        .psd-empty {
+            padding: 48px 12px;
+            text-align: center;
+            color: var(--muted);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <h1>Parameter scan session</h1>
+        </div>
+        <div class="header-meta">
+            <span id="psd-poll-hint">waiting for Twin…</span>
+            <nav>
+                <a href="/">Twin</a>
+                <a href="/parameter-scan-session" class="active">Scan</a>
+                <a href="/optimize-session">Optimize</a>
+                <a href="/operations">Operations</a>
+            </nav>
+        </div>
+    </header>
+    <p id="psd-error"></p>
+    <main id="psd-root">
+        <div class="psd-empty">
+            <p>Open a scan from Twin (<strong>Parameter Scan → Start scan</strong>), or pass <code>?scan_id=…</code>.</p>
+        </div>
+    </main>
+    <script type="module" src="/static/js/parameter-scan-session/dashboard.js"></script>
+</body>
+</html>

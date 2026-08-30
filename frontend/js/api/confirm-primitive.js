@@ -82,9 +82,43 @@ export function formatPrimitiveConfirmMessage(command) {
         const x = Number(params.target_x);
         const y = Number(params.target_y);
         const r = Number(params.rotation);
+        const laserName = params.laser_line_name || params.laser_line_id;
         if (Number.isFinite(x) && Number.isFinite(y)) {
-            msg += `<br><br>X: ${x.toFixed(1)} mm<br>Y: ${y.toFixed(1)} mm`;
-            if (Number.isFinite(r)) msg += `<br>Rot: ${r.toFixed(1)}°`;
+            msg += `<br><br><strong>This component will move to:</strong>`;
+            msg += `<br>X: ${x.toFixed(1)} mm`;
+            if (laserName) {
+                msg += ` <span style="color:#64748b">(from laser ${_escapeHtml(String(laserName))})</span>`;
+            }
+            msg += `<br>Y: ${y.toFixed(1)} mm`;
+            if (Number.isFinite(r)) msg += `<br>θ: ${r.toFixed(1)}°`;
+            if (laserName) {
+                msg += `<br><br>Stitched onto laser line <strong>${_escapeHtml(String(laserName))}</strong>.`;
+            }
+        }
+    } else if (action === 'STORE_COMPONENT' && params) {
+        const i = params.slot_i;
+        const j = params.slot_j;
+        if (Number.isInteger(i) && Number.isInteger(j)) {
+            msg += `<br><br><strong>This component will be stored in cell (${i}, ${j}).</strong>`;
+        } else {
+            msg += `<br><br><strong>This component will be autopacked into a free storage cell.</strong>`;
+        }
+    } else if (action === 'PLACE_FROM_STORAGE' && params) {
+        const x = Number(params.target_x);
+        const y = Number(params.target_y);
+        const r = Number(params.rotation);
+        const laserName = params.laser_line_name || params.laser_line_id;
+        msg += `<br><br><strong>This component will leave storage and place on the table at:</strong>`;
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+            msg += `<br>X: ${x.toFixed(1)} mm`;
+            if (laserName) {
+                msg += ` <span style="color:#64748b">(from laser ${_escapeHtml(String(laserName))})</span>`;
+            }
+            msg += `<br>Y: ${y.toFixed(1)} mm`;
+            if (Number.isFinite(r)) msg += `<br>θ: ${r.toFixed(1)}°`;
+        }
+        if (laserName) {
+            msg += `<br><br>Stitched onto laser line <strong>${_escapeHtml(String(laserName))}</strong>.`;
         }
     } else if (action === 'SET_EXPOSURE' || action === 'SET_LIVE_EXPOSURE') {
         const exp = Number(params.exposure_time_ms);

@@ -26,7 +26,7 @@
       "communicator": "real",
       "lab_mode": "REAL",
       "enabled": true,
-      "notes": "Start the lab_automation edge on port 8200 before connecting. Coordinator store is auto-created under coordinator_data/real.default (VC + working state only). Library, inventory, and layout come from the edge. Twin laser lines seed from schemas/coordinator_seeds/real.default (historical diode + Ne–He geometry).",
+      "notes": "Start the lab_automation edge on port 8200 before connecting. Coordinator store is auto-created under coordinator_data/real.default (VC + working state only). Library, inventory, and layout come from the edge. Twin laser lines seed from schemas/coordinator_seeds/real.default (historical diode + He–Ne geometry).",
       "edge": {
         "base_url": "http://127.0.0.1:8200",
         "contract_version": "1.0.0",

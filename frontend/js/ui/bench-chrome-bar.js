@@ -17,6 +17,10 @@ import {
     optimizationHighlightColor,
     isOptimizationPlanningActive,
 } from '../state/optimization-builder.js';
+import {
+    getParameterScanHighlightForTag,
+    isParameterScanPlanningActive,
+} from '../state/parameter-scan-builder.js';
 
 let _onSelect = () => {};
 let _lastSnapshot = '';
@@ -94,6 +98,7 @@ export function syncBenchChromeHighlights() {
             'opt-plan-objective',
             'opt-plan-variable',
             'opt-plan-both',
+            'scan-plan-axis',
         );
         btn.style.borderColor = '';
         btn.style.boxShadow = '';
@@ -105,6 +110,10 @@ export function syncBenchChromeHighlights() {
                 btn.style.borderColor = color;
                 btn.style.boxShadow = `0 0 8px ${color}66`;
             }
+        } else if (isParameterScanPlanningActive() && getParameterScanHighlightForTag(tagId)) {
+            btn.classList.add('scan-plan-axis');
+            btn.style.borderColor = '#a78bfa';
+            btn.style.boxShadow = '0 0 8px #a78bfa66';
         }
     });
 }

@@ -957,7 +957,7 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
         path = request.scope.get("path", "")
-        if path == "/" or path == "/twin" or path == "/debug" or path == "/operations" or path == "/optimize-session" or path.startswith("/static"):
+        if path == "/" or path == "/twin" or path == "/debug" or path == "/operations" or path == "/optimize-session" or path == "/parameter-scan-session" or path.startswith("/static"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
@@ -6122,6 +6122,19 @@ async def read_operations():
 async def read_optimize_session():
     """Full-detail OPTIMIZE run page (Twin sidebar stays minimal)."""
     path = os.path.join(frontend_path, "optimize-session.html")
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    return Response(content=html, media_type="text/html", headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
+
+
+@app.get("/parameter-scan-session")
+async def read_parameter_scan_session():
+    """Full-detail Parameter Scan viewer (Twin sidebar stays minimal)."""
+    path = os.path.join(frontend_path, "parameter-scan-session.html")
     with open(path, "r", encoding="utf-8") as f:
         html = f.read()
     return Response(content=html, media_type="text/html", headers={

@@ -140,6 +140,83 @@ class HttpEdgeClientSmokeTests(unittest.TestCase):
         asyncio.run(_run())
 
 
+class _ExecuteStubHandler(BaseHTTPRequestHandler):
+    response_body: bytes = b""
+    response_status: int = 500
+    response_content_type: str = "text/plain"
+    post_count: int = 0
+
+    def log_message(self, *args) -> None:  # silence test server noise
+        return
+
+    def do_POST(self) -> None:  # noqa: N802 (stdlib name)
+        type(self).post_count += 1
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
+        body = type(self).response_body
+        self.send_response(type(self).response_status)
+        self.send_header("Content-Type", type(self).response_content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+
+class HttpEdgeInvalidExecuteResponseTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _ExecuteStubHandler.post_count = 0
+        self.server = HTTPServer(("127.0.0.1", 0), _ExecuteStubHandler)
+        self.port = self.server.server_address[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2.0)
+
+    def _execute(self):
+        client = HttpEdgeClient(base_url=f"http://127.0.0.1:{self.port}")
+        return asyncio.run(
+            client.execute_command(
+                {
+                    "action": "PLACE_FROM_STORAGE",
+                    "target_id": "tag_0",
+                    "parameters": {"target_x": 100.0, "target_y": 50.0, "rotation": 0.0},
+                }
+            )
+        )
+
+    def test_plain_text_500_is_actionable_and_is_not_retried(self) -> None:
+        _ExecuteStubHandler.response_body = b"Internal Server Error"
+        _ExecuteStubHandler.response_status = 500
+        _ExecuteStubHandler.response_content_type = "text/plain; charset=utf-8"
+
+        result = self._execute()
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.status, "invalid_response")
+        self.assertIn("non-JSON response", result.error or "")
+        self.assertIn("HTTP 500", result.error or "")
+        self.assertIn("Internal Server Error", result.error or "")
+        self.assertIn("outcome is unknown", result.error or "")
+        self.assertEqual(_ExecuteStubHandler.post_count, 1)
+
+    def test_empty_response_is_actionable_and_is_not_retried(self) -> None:
+        _ExecuteStubHandler.response_body = b""
+        _ExecuteStubHandler.response_status = 500
+        _ExecuteStubHandler.response_content_type = "text/plain"
+
+        result = self._execute()
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.status, "invalid_response")
+        self.assertIn("empty response", result.error or "")
+        self.assertIn("outcome is unknown", result.error or "")
+        self.assertEqual(_ExecuteStubHandler.post_count, 1)
+
+
 def _jpeg_bytes(h: int = 4, w: int = 6) -> bytes:
     import cv2  # noqa: PLC0415
     import numpy as np  # noqa: PLC0415

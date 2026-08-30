@@ -52,6 +52,7 @@ import {
     getOptimizationHighlightForTag,
     optimizationHighlightColor,
 } from '../state/optimization-builder.js';
+import { getParameterScanHighlightForTag } from '../state/parameter-scan-builder.js';
 
 let _ctx = null;
 
@@ -363,6 +364,10 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     const p = mmToPx(pose.x, pose.y);
     const x = p.x;
     const y = p.y;
+    // Script 21 public convention: 0° leaves the component artwork in its
+    // canonical right-side-up orientation, with its ArUco top toward lab +X.
+    // Positive public angles are clockwise; positive canvas rotation is also
+    // clockwise because canvas Y points downward while lab +Y points upward.
     const rotation = pose.rotation * (Math.PI / 180);
 
     // LAB_SCALE is px/mm, so width_px = width_mm × LAB_SCALE.
@@ -372,6 +377,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     const halfW = w / 2;
     const halfH = h / 2;
     const optRole = getOptimizationHighlightForTag(name);
+    const scanRole = getParameterScanHighlightForTag(name);
 
     ctx.save();
     ctx.translate(x, y);
@@ -419,6 +425,20 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.shadowBlur = optRole === 'scope' ? 6 : 14;
         ctx.beginPath();
         ctx.arc(0, 0, rOpt, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.shadowBlur = 0;
+    } else if (scanRole) {
+        // Parameter Scan: purple dotted ring around the axis component (matches OPTIMIZE "on table" look).
+        const scanColor = '#a78bfa';
+        const rScan = Math.sqrt(halfW * halfW + halfH * halfH) + 10;
+        ctx.strokeStyle = scanColor;
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([5, 4]);
+        ctx.shadowColor = scanColor;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(0, 0, rScan, 0, Math.PI * 2);
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.shadowBlur = 0;
@@ -692,6 +712,10 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         const label =
             optRole === 'both' ? 'OBJ · VAR' : optRole === 'objective' ? 'OBJECTIVE' : 'VARIABLE';
         ctx.fillText(label, 0, halfH + 15);
+    } else if (scanRole) {
+        ctx.fillStyle = '#a78bfa';
+        ctx.font = 'bold 9px Inter, sans-serif';
+        ctx.fillText('SCAN AXIS', 0, halfH + 15);
     }
 
     ctx.restore();

@@ -108,6 +108,7 @@ class TestExplicitStorageBounds(unittest.TestCase):
         self.assertTrue(is_storage_region(-46.0, -46.0))
         self.assertFalse(is_storage_region(0.0, -46.0))
         self.assertEqual(storage_grid_spec()["q3"]["x_max"], -1.0)
+        self.assertEqual(storage_grid_spec()["nominal_storage_rotation_deg"], 0.0)
 
     def test_grid_provides_15_clear_housing_slots(self) -> None:
         components = {}

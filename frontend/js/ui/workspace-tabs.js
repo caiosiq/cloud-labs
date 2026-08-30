@@ -1,7 +1,7 @@
 import { store } from '../state/store.js';
 import { onNotesTabActivated } from './session-notes.js';
 
-const TAB_NAMES = ['optimization', 'config', 'recipes', 'notes', 'component'];
+const TAB_NAMES = ['optimization', 'parameter-scan', 'config', 'recipes', 'notes', 'component'];
 
 let activeTab = 'optimization';
 let lastNonComponentTab = 'optimization';

@@ -193,6 +193,9 @@ def storage_grid_ny() -> int:
     return get_lab_layout_snapshot().storage_grid_ny
 
 
+# Script 21's public convention: 0 degrees means the top of the ArUco pattern
+# faces lab +X. Keep this public state value synchronized with the real edge;
+# the radial service performs its private planner-yaw conversion at execution.
 STORAGE_NOMINAL_ROTATION_DEG = 0.0
 
 
