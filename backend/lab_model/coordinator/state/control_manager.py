@@ -206,6 +206,9 @@ class ControlManager:
         #: ``plan_batch`` collision (same mm Twin uses). Bound from the active
         #: edge catalog in ``main._get_control_manager``.
         self.size_fn: Optional[Callable[[str], Tuple[float, float]]] = None
+        #: ``tag_id -> bool``: whether SET_EXPOSURE is a declared primitive.
+        #: Bound from the edge library (HTTP backends have no lab_view).
+        self.supports_set_exposure_fn: Optional[Callable[[str], bool]] = None
 
     def reconcile_staging_seats(self) -> List[Dict[str, float]]:
         """Park buffers from the active edge bench layout (any backend).
@@ -236,6 +239,15 @@ class ControlManager:
     ) -> None:
         """Bind catalog footprints for seat-DAG collision checks."""
         self.size_fn = size_fn
+
+    def bind_supports_set_exposure_fn(
+        self, supports_set_exposure: Optional[Callable[[str], bool]]
+    ) -> None:
+        """Bind catalog SET_EXPOSURE capability checks for reconcile plans."""
+        self.supports_set_exposure_fn = supports_set_exposure
+
+    def _supports_set_exposure(self) -> Optional[Callable[[str], bool]]:
+        return self.supports_set_exposure_fn
 
     def _refs(self) -> Dict[str, Any]:
         # utf-8-sig tolerates a stray BOM (e.g. a file hand-edited on Windows).
@@ -648,6 +660,7 @@ class ControlManager:
             lab_configuration(to_doc.get("configuration") or {}),
             staging_seats=seats,
             size_fn=size_fn if size_fn is not None else self.size_fn,
+            supports_set_exposure=self._supports_set_exposure(),
         )
 
     def plan_checkout_from_runtime(
@@ -678,6 +691,7 @@ class ControlManager:
             lab_configuration(to_doc.get("configuration") or {}),
             staging_seats=seats,
             size_fn=size_fn if size_fn is not None else self.size_fn,
+            supports_set_exposure=self._supports_set_exposure(),
         )
 
     def plan_checkout_from_runtime_detailed(
@@ -700,6 +714,7 @@ class ControlManager:
             lab_configuration(to_doc.get("configuration") or {}),
             staging_seats=seats,
             size_fn=size_fn if size_fn is not None else self.size_fn,
+            supports_set_exposure=self._supports_set_exposure(),
         )
         if not result.ready:
             raise BatchPlanError(result.report)
@@ -728,6 +743,7 @@ class ControlManager:
             lab_configuration(target_configuration or {}),
             staging_seats=seats,
             size_fn=size_fn if size_fn is not None else self.size_fn,
+            supports_set_exposure=self._supports_set_exposure(),
         )
 
     def checkout_compatibility_report(

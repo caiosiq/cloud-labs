@@ -124,11 +124,27 @@ export function catalogDeclaresTablePose(tagId) {
 
 export function isChromeComponent(tagId) {
     const row = getCatalogRow(tagId);
+    if (!row || catalogDeclaresTablePose(tagId)) return false;
+    // Fixed overview camera (table-top): may declare no tunables on purpose.
+    const params = row.parameters || row.properties || {};
+    if (params.stream_source === 'overhead' || row.id === 'cam_table_top') {
+        return true;
+    }
+    if (params.fixture === true) return true;
     const caps = normalizeCapabilities(row?.capabilities);
     const tun = caps.statecontrol.tunables || {};
     const keys = Object.keys(tun);
     if (!keys.length) return false;
-    return !catalogDeclaresTablePose(tagId);
+    return true;
+}
+
+/** Fixed ceiling / table-overview camera (not a placeable science cam). */
+export function isOverviewCamera(tagId) {
+    const row = getCatalogRow(tagId);
+    if (!row) return false;
+    if (row.id === 'cam_table_top') return true;
+    const params = row.parameters || row.properties || {};
+    return params.stream_source === 'overhead';
 }
 
 /** Whether this in-lab component should be drawn on the optical table canvas. */

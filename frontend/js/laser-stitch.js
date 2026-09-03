@@ -10,6 +10,49 @@ import {
     xAtYOnLineModel,
 } from './geometry/lines.js';
 
+/** Legacy command / VC id → canonical Helium–Neon line id. */
+const LASER_LINE_ID_ALIASES = Object.freeze({ ne_he: 'he_ne' });
+
+/**
+ * @param {string | null | undefined} lineId
+ * @returns {string}
+ */
+export function canonicalizeLaserLineId(lineId) {
+    const raw = lineId != null ? String(lineId).trim() : '';
+    if (!raw) return '';
+    return LASER_LINE_ID_ALIASES[raw] || raw;
+}
+
+/**
+ * Rewrite legacy ``ne_he`` ids/names in a laser-lines doc (UI + console).
+ * @param {object | null | undefined} doc
+ * @returns {object | null | undefined}
+ */
+export function migrateLaserLinesDoc(doc) {
+    if (!doc || typeof doc !== 'object' || !Array.isArray(doc.lines)) return doc;
+    const lines = [];
+    const seen = new Set();
+    for (const ln of doc.lines) {
+        if (!ln || !ln.id) continue;
+        const id = canonicalizeLaserLineId(ln.id);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const next = { ...ln, id };
+        if (id === 'he_ne') {
+            const n = String(next.name || '')
+                .replace(/[\u2013\u2014]/g, '-')
+                .trim()
+                .toLowerCase();
+            if (!next.name || n === 'ne-he' || n === 'ne_he' || n === 'nehe') {
+                next.name = 'He\u2013Ne';
+            }
+        }
+        lines.push(next);
+    }
+    const snap = canonicalizeLaserLineId(doc.snap_line_id) || doc.snap_line_id;
+    return { ...doc, snap_line_id: snap, lines };
+}
+
 /**
  * @param {number} yMm
  * @param {number} rotationDeg
@@ -23,7 +66,7 @@ export function resolveLaserStitchPose(yMm, rotationDeg, lineId) {
     if (!Number.isFinite(y) || !Number.isFinite(rotation)) {
         return { ok: false, error: 'Y and rotation must be numbers.' };
     }
-    const doc = store.laserLinesDoc;
+    const doc = migrateLaserLinesDoc(store.laserLinesDoc);
     if (!doc || !Array.isArray(doc.lines) || doc.lines.length === 0) {
         return { ok: false, error: 'No laser lines loaded. Open laser lines or refresh lab state.' };
     }
@@ -32,10 +75,12 @@ export function resolveLaserStitchPose(yMm, rotationDeg, lineId) {
         if (ln && ln.id) byId[ln.id] = ln;
     });
 
-    const requested = lineId != null && String(lineId).trim() ? String(lineId).trim() : '';
+    const requestedRaw =
+        lineId != null && String(lineId).trim() ? String(lineId).trim() : '';
+    const requested = canonicalizeLaserLineId(requestedRaw) || requestedRaw;
     let chosen = null;
     if (requested) {
-        chosen = byId[requested] || null;
+        chosen = byId[requested] || byId[requestedRaw] || null;
         if (!chosen) {
             const needle = requested.toLowerCase().replace(/[\u2013\u2014]/g, '-');
             const nameHits = doc.lines.filter((ln) => {
@@ -68,7 +113,7 @@ export function resolveLaserStitchPose(yMm, rotationDeg, lineId) {
             };
         }
     } else {
-        const snapId = doc.snap_line_id;
+        const snapId = canonicalizeLaserLineId(doc.snap_line_id) || doc.snap_line_id;
         if (snapId && byId[snapId] && byId[snapId].enabled !== false) {
             chosen = byId[snapId];
         }

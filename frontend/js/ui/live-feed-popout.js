@@ -13,6 +13,7 @@ import { store } from '../state/store.js';
 import {
     applyComponentTelemetryFromServer,
     isLiveFeedActive,
+    normalizeCapabilities,
 } from '../component-state.js';
 import { withBackendQuery } from '../state/backend-selection.js';
 import { endLiveFeed, setLiveExposure } from '../api/live-feed.js';
@@ -33,6 +34,15 @@ const _snapshotHold = new Set();
 const FPS = 8;
 const INTERVAL_MS = Math.round(1000 / FPS);
 const BEAM_COM_KERNEL = 'builtin.beam_com';
+
+/** Science cameras declare exposure; overhead table-top does not. */
+function _supportsLiveExposure(tagId) {
+    const row = getCatalogRow(tagId);
+    const caps = normalizeCapabilities(row?.capabilities);
+    if (caps.statecontrol?.tunables?.exposure_time_ms) return true;
+    const prims = caps.primitives || [];
+    return prims.includes('SET_LIVE_EXPOSURE') || prims.includes('SET_EXPOSURE');
+}
 
 export function listActiveLiveFeedTags(labState = store.labState) {
     const comps = labState?.components || {};
@@ -106,12 +116,33 @@ export function openLiveFeedPopout(tagId, opts = {}) {
     const layer = _ensureLayer();
     const offset = _nextOffset();
     const exp0 = _liveExposureMs(id);
+    const showExp = _supportsLiveExposure(id);
+    const showBeamCom = showExp; // beam CoM is for science cams, not overhead overview
 
     const el = document.createElement('div');
     el.className = 'live-feed-popout';
     el.dataset.tagId = id;
     el.style.left = `${offset.left}px`;
     el.style.top = `${offset.top}px`;
+    const hintParts = ['OPTIMIZE blocked while live'];
+    if (showBeamCom) {
+        hintParts.push('Measure beam CoM pauses briefly for a science capture');
+    }
+    hintParts.push(_escape(_displayName(id)));
+    const exposureRow = showExp
+        ? `<div class="live-feed-popout__exposure">
+            <label title="Preview only (VEXP) — not science SET_EXPOSURE">
+                Preview ms
+                <input type="number" min="0.1" max="1000" step="0.1" value="${exp0}" data-live-exp />
+            </label>
+            <button type="button" class="live-feed-popout__btn" data-action="apply-exp">Apply</button>
+            ${
+                showBeamCom
+                    ? `<button type="button" class="live-feed-popout__btn live-feed-popout__btn--measure" data-action="measure-com" title="Pause live, science RECORD, measure beam CoM, resume live">Measure beam CoM</button>`
+                    : ''
+            }
+        </div>`
+        : '';
     el.innerHTML = `
         <div class="live-feed-popout__header" data-drag-handle>
             <span class="live-feed-popout__title">
@@ -123,15 +154,8 @@ export function openLiveFeedPopout(tagId, opts = {}) {
                 <button type="button" class="live-feed-popout__btn live-feed-popout__btn--ghost" data-action="close" title="Hide pop-out (feed stays on)">Hide</button>
             </span>
         </div>
-        <div class="live-feed-popout__hint">OPTIMIZE blocked while live · Measure beam CoM pauses briefly for a science capture · ${_escape(_displayName(id))}</div>
-        <div class="live-feed-popout__exposure">
-            <label title="Preview only (VEXP) — not science SET_EXPOSURE">
-                Preview ms
-                <input type="number" min="0.1" max="1000" step="0.1" value="${exp0}" data-live-exp />
-            </label>
-            <button type="button" class="live-feed-popout__btn" data-action="apply-exp">Apply</button>
-            <button type="button" class="live-feed-popout__btn live-feed-popout__btn--measure" data-action="measure-com" title="Pause live, science RECORD, measure beam CoM, resume live">Measure beam CoM</button>
-        </div>
+        <div class="live-feed-popout__hint">${hintParts.join(' · ')}</div>
+        ${exposureRow}
         <div class="live-feed-popout__measure-status" data-measure-status aria-live="polite"></div>
         <div class="live-feed-popout__frame" tabindex="-1">
             <img alt="Live feed ${id}" class="live-feed-popout__img"/>

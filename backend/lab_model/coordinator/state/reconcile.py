@@ -22,6 +22,7 @@ def plan_reconcile(
     storage_capacity: Optional[int] = None,
     size_fn: Optional[Any] = None,
     pad_mm: Optional[float] = None,
+    supports_set_exposure: Optional[Any] = None,
     raise_if_not_ready: bool = True,
 ) -> List[Dict[str, Any]]:
     """Return command envelopes that move from ``current_cfg`` toward ``target_cfg``.
@@ -44,6 +45,7 @@ def plan_reconcile(
         storage_capacity=storage_capacity,
         size_fn=size_fn,
         pad_mm=pad_mm,
+        supports_set_exposure=supports_set_exposure,
     )
     if not result.ready:
         if raise_if_not_ready:
@@ -61,6 +63,7 @@ def plan_reconcile_detailed(
     storage_capacity: Optional[int] = None,
     size_fn: Optional[Any] = None,
     pad_mm: Optional[float] = None,
+    supports_set_exposure: Optional[Any] = None,
 ) -> BatchPlanResult:
     """Same as :func:`plan_reconcile` but always returns the full result + report."""
     return plan_batch(
@@ -71,6 +74,7 @@ def plan_reconcile_detailed(
         storage_capacity=storage_capacity,
         size_fn=size_fn,
         pad_mm=pad_mm,
+        supports_set_exposure=supports_set_exposure,
     )
 
 

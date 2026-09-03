@@ -99,7 +99,7 @@ def build_peak_intensity(out_path: Path) -> None:
 
 
 def build_roi_centroid(out_path: Path) -> None:
-    """Unweighted geometric centroid in the center-half ROI (full-frame coords).
+    """Unweighted geometric centroid over the full frame.
 
     Mask is background-relative: ``gray > bg + 0.05*(peak-bg)`` (median bg),
     so a dimmer second lobe is not dropped the way ``0.1*peak`` often does.
@@ -113,16 +113,9 @@ def build_roi_centroid(out_path: Path) -> None:
         def forward(self, image: torch.Tensor) -> torch.Tensor:
             if image.dim() == 3:
                 image = image.unsqueeze(0)
-            _n, _c, h, w = image.shape
-            full_gray = image[0].mean(dim=0)
-            peak = full_gray.max()
-            y0 = h // 4
-            y1 = (3 * h) // 4
-            x0 = w // 4
-            x1 = (3 * w) // 4
-            crop = image[0, :, y0:y1, x0:x1]
-            gray = crop.mean(dim=0)
-            local_peak = torch.clamp(gray.max(), min=1e-6)
+            gray = image[0].mean(dim=0)
+            peak = gray.max()
+            local_peak = torch.clamp(peak, min=1e-6)
             flat = gray.reshape(-1)
             sorted_vals, _ = torch.sort(flat)
             n = int(sorted_vals.numel())
@@ -132,20 +125,20 @@ def build_roi_centroid(out_path: Path) -> None:
             thr = bg + (0.05 * contrast)
             mask = (gray > thr).to(gray.dtype)
             total = torch.clamp(mask.sum(), min=1e-6)
-            ch = int(gray.size(0))
-            cw = int(gray.size(1))
+            h = int(gray.size(0))
+            w = int(gray.size(1))
             ys = (
-                torch.arange(ch, dtype=gray.dtype, device=gray.device)
+                torch.arange(h, dtype=gray.dtype, device=gray.device)
                 .unsqueeze(1)
-                .expand(ch, cw)
+                .expand(h, w)
             )
             xs = (
-                torch.arange(cw, dtype=gray.dtype, device=gray.device)
+                torch.arange(w, dtype=gray.dtype, device=gray.device)
                 .unsqueeze(0)
-                .expand(ch, cw)
+                .expand(h, w)
             )
-            cy = (mask * ys).sum() / total + float(y0)
-            cx = (mask * xs).sum() / total + float(x0)
+            cy = (mask * ys).sum() / total
+            cx = (mask * xs).sum() / total
             return torch.stack([cx, cy, peak])
 
     module = torch.jit.script(RoiCentroid())
@@ -360,13 +353,13 @@ EDGE_MANIFEST = {
         },
         {
             "id": "builtin.roi_centroid",
-            "label": "ROI centroid (center half)",
+            "label": "ROI centroid (full frame)",
             "artifact": "builtin_roi_centroid.pt",
             "runtime": "torchscript",
             "output_kind": "features",
             "feature_names": ["cx", "cy", "peak"],
             "description": (
-                "Unweighted geometric centroid in the center-half ROI; mask is "
+                "Unweighted geometric centroid over the full frame; mask is "
                 "median_bg + 5% of (peak−bg), plus full-frame peak for presence."
             ),
         },

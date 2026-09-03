@@ -23,7 +23,11 @@ except ImportError:
         from enum import StrEnum
     except ImportError:  # Python < 3.11
         class StrEnum(str, Enum):
-            pass
+            def __str__(self) -> str:
+                return str(self.value)
+
+            def __format__(self, format_spec: str) -> str:
+                return str(self.value).__format__(format_spec)
 
     class PrimitiveId(StrEnum):
         """Mirror of ``lab_model.language.primitives.ids.PrimitiveId`` (fallback)."""

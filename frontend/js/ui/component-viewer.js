@@ -230,6 +230,16 @@ export function renderReadOnlyPanel(tagId, comp, catalogRow, hooks = {}) {
     root.style.flexDirection = 'column';
     root.style.gap = '12px';
 
+    // Overview / table-top: hide tunables, measurables (kernels), and telemetry
+    // so the panel feels control-free; live feed + RECORD stay under PRIMITIVES.
+    const params = catalogRow?.parameters || catalogRow?.properties || {};
+    if (
+        catalogRow?.id === 'cam_table_top' ||
+        params.stream_source === 'overhead'
+    ) {
+        return root;
+    }
+
     const caps = normalizeCapabilities(catalogRow?.capabilities);
     if (!catalogRow?.capabilities) {
         root.appendChild(renderEmptyHint(`\u2014 ${tagId} has no capabilities block.`));

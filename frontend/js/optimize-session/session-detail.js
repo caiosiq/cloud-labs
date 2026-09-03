@@ -238,6 +238,34 @@ export function formatTraceTableHtml(rowsChronological) {
     </div>`;
 }
 
+/** Plain-text (TSV) export of iteration history — newest first, matches the table. */
+export function formatTraceTableText(rowsChronological) {
+    const display = [...(rowsChronological || [])].reverse();
+    if (!display.length) return '';
+    const varIds = orderedVarIds(display.map((r) => r.values));
+    const header = ['Eval', 'Loss', 'Best', ...varIds, 'Stages'];
+    const lines = [header.join('\t')];
+    for (const row of display) {
+        const lossShown =
+            row.loss != null && Number.isFinite(Number(row.loss))
+                ? Number(row.loss).toFixed(4)
+                : '';
+        const bestShown =
+            row.best_loss != null && Number.isFinite(Number(row.best_loss))
+                ? Number(row.best_loss).toFixed(4)
+                : '';
+        const vals = varIds.map((id) => {
+            const values = row.values || {};
+            if (!(id in values)) return '';
+            return formatTunableNumber(values[id], 6);
+        });
+        lines.push(
+            [row.eval ?? '', lossShown, bestShown, ...vals, stageMarks(row.stages)].join('\t'),
+        );
+    }
+    return `${lines.join('\n')}\n`;
+}
+
 export function formatStagesDetailHtml(stages) {
     if (!stages || typeof stages !== 'object') {
         return `<div class="osd-idle">Stage debug waiting for first eval</div>`;
@@ -475,7 +503,10 @@ export function renderSessionDetailHtml(labState, { jobId = '', maxEvals = null 
                 ${formatStagesDetailHtml(last?.stages)}
             </section>
             <section class="osd-panel osd-panel--wide">
-                <h2>Iteration history</h2>
+                <div class="osd-panel__head">
+                    <h2>Iteration history</h2>
+                    <button type="button" class="osd-btn osd-btn--ghost osd-btn--small" id="osd-save-history" ${rows.length ? '' : 'disabled'}>Save</button>
+                </div>
                 ${formatTraceTableHtml(rows)}
             </section>
             <section class="osd-panel osd-panel--wide">

@@ -191,6 +191,42 @@ class MembershipDiffReconcileTests(unittest.TestCase):
         self.assertIn(PrimitiveId.PLACE_FROM_STORAGE, actions)
         self.assertIn(PrimitiveId.SET_EXPOSURE, actions)
 
+    def test_place_extras_skips_exposure_without_catalog_primitive(self) -> None:
+        """Junk exposure_time_ms on lenses must not become SET_EXPOSURE."""
+        from unittest.mock import patch
+
+        target = {
+            "components": {
+                "tag_15": {
+                    "statecontrol": {
+                        "tunables": {
+                            "presence": PRESENCE_BREADBOARD,
+                            "nominal_pose": {"x": 1.0, "y": 2.0, "rotation": 0.0},
+                            "exposure_time_ms": 50.0,
+                        }
+                    }
+                }
+            },
+            "holding": {"tag_id": None, "nominal_pose": None},
+        }
+        lens_row = {
+            "tag_id": "tag_15",
+            "type": "OPTICAL_LENS",
+            "capabilities": {
+                "statecontrol": {"tunables": {}, "measurables": {}},
+                "telemetry": {},
+                "primitives": ["MOVE_COMPONENT", "STORE_COMPONENT", "PLACE_FROM_STORAGE"],
+            },
+        }
+        with patch(
+            "lab_model.coordinator.catalog.bundle.library_by_tag",
+            return_value={"tag_15": lens_row},
+        ):
+            plan = plan_reconcile(EMPTY_CONFIGURATION, target)
+        actions = [c["action"] for c in plan]
+        self.assertIn(PrimitiveId.PLACE_FROM_STORAGE, actions)
+        self.assertNotIn(PrimitiveId.SET_EXPOSURE, actions)
+
     def test_store_to_explicit_slot(self) -> None:
         current = _cfg_component("tag_a", x=10.0, y=20.0)
         target = {

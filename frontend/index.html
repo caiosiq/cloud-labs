@@ -673,20 +673,24 @@
         }
 
         .config-view-badge {
-            position: absolute;
-            top: 8px;
-            left: calc(100% + 10px);
-            width: max-content;
-            max-width: 240px;
-            min-width: 168px;
-            padding: 8px 10px;
-            border-radius: 8px;
+            position: relative;
+            top: auto;
+            left: auto;
+            right: auto;
+            transform: none;
+            width: 100%;
+            max-width: min(920px, 100%);
+            min-width: 0;
+            margin: 12px auto 0;
+            padding: 10px 14px;
+            border-radius: 10px;
             border: 1px solid rgba(245, 158, 11, 0.45);
-            background: rgba(15, 18, 24, 0.94);
+            background: rgba(15, 18, 24, 0.96);
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-            font-size: 10px;
+            font-size: 11px;
             line-height: 1.35;
             color: #fcd34d;
+            z-index: 5;
         }
 
         .config-view-badge.is-applying {
@@ -697,41 +701,52 @@
             display: none !important;
         }
 
+        .config-view-badge__viewing,
+        .config-view-badge__applying {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 14px;
+        }
+
         .config-view-badge__label {
-            display: block;
-            font-size: 9px;
+            display: inline-block;
+            font-size: 10px;
             font-weight: 700;
             letter-spacing: 0.06em;
             text-transform: uppercase;
             color: #fbbf24;
-            margin-bottom: 2px;
+            margin: 0;
         }
 
         .config-view-badge__id {
-            display: block;
+            display: inline-block;
             font-family: ui-monospace, monospace;
-            font-size: 11px;
+            font-size: 12px;
             color: #fde68a;
-            margin-bottom: 8px;
+            margin: 0;
             word-break: break-all;
         }
 
         .config-view-badge__actions {
             display: flex;
-            flex-direction: column;
-            gap: 4px;
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-left: auto;
         }
 
         .config-view-badge__btn {
-            width: 100%;
+            width: auto;
             margin: 0;
-            padding: 4px 8px;
-            font-size: 10px;
-            border-radius: 4px;
+            padding: 6px 12px;
+            font-size: 11px;
+            border-radius: 6px;
             border: 1px solid rgba(245, 158, 11, 0.4);
             background: transparent;
             color: #fcd34d;
             cursor: pointer;
+            white-space: nowrap;
         }
 
         .config-view-badge__btn:hover {
@@ -745,9 +760,9 @@
         }
 
         .config-view-reconcile__progress {
-            display: block;
-            margin: 6px 0 4px;
-            font-size: 10px;
+            display: inline-block;
+            margin: 0;
+            font-size: 11px;
             font-weight: 600;
             color: #93c5fd;
         }
@@ -756,8 +771,9 @@
             list-style: none;
             margin: 0;
             padding: 0;
-            max-height: 220px;
+            max-height: 120px;
             overflow-y: auto;
+            flex: 1 1 100%;
         }
 
         .config-view-reconcile__step {
@@ -1005,9 +1021,10 @@
         @media (max-width: 1120px) {
             .config-view-badge {
                 left: auto;
-                right: 0;
-                top: -2px;
-                transform: translateY(-100%);
+                right: auto;
+                top: auto;
+                transform: none;
+                max-width: 100%;
             }
         }
 
@@ -1417,11 +1434,11 @@
         }
 
         .config-view-badge__source {
-            display: block;
+            display: inline-block;
             font-size: 10px;
             font-weight: 600;
             color: #93c5fd;
-            margin-bottom: 4px;
+            margin: 0;
             line-height: 1.3;
         }
 
@@ -2352,6 +2369,35 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        .bench-chrome-bar__live {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            padding: 5px 10px;
+            border-radius: 5px;
+            border: 1px solid #065f46;
+            background: rgba(4, 120, 87, 0.18);
+            color: #6ee7b7;
+            cursor: pointer;
+            transition: border-color 0.12s ease, background 0.12s ease;
+        }
+        .bench-chrome-bar__live:hover {
+            border-color: #34d399;
+            background: rgba(4, 120, 87, 0.32);
+        }
+        .bench-chrome-bar__live--on {
+            border-color: #34d399;
+            background: rgba(16, 185, 129, 0.35);
+            color: #a7f3d0;
+        }
+        .bench-chrome-bar__live .material-icons-round {
+            font-size: 16px !important;
+        }
+        .bench-chrome-bar__live:disabled {
+            opacity: 0.55;
+            cursor: wait;
+        }
 
         #canvas-wrapper {
             box-shadow: 0 0 50px rgba(0,0,0,0.5);
@@ -2872,25 +2918,25 @@
                     <canvas id="optical-table" width="1000" height="700"></canvas>
                     <div id="canvas-view-shield" class="canvas-view-shield" hidden aria-hidden="true" title="Read-only configuration preview"></div>
                 </div>
-                <aside id="config-view-badge" class="config-view-badge" hidden aria-live="polite">
-                    <div id="config-view-viewing" class="config-view-badge__viewing">
-                        <span class="config-view-badge__label">Viewing</span>
-                        <span id="config-view-source" class="config-view-badge__source" hidden></span>
-                        <code id="config-view-commit-id" class="config-view-badge__id">—</code>
-                        <div class="config-view-badge__actions">
-                            <button id="config-view-set-ref-btn" type="button" class="config-view-badge__btn config-view-badge__btn--primary">Set as reference</button>
-                            <button id="config-view-apply-btn" type="button" class="config-view-badge__btn">Apply on bench</button>
-                            <button id="config-view-return-btn" type="button" class="config-view-badge__btn">Return to bench</button>
-                        </div>
-                    </div>
-                    <div id="config-view-applying" class="config-view-badge__applying" hidden>
-                        <span class="config-view-badge__label">Applying</span>
-                        <code id="config-view-applying-id" class="config-view-badge__id">—</code>
-                        <span id="config-view-reconcile-progress" class="config-view-reconcile__progress">Step 1 of 1</span>
-                        <ol id="config-view-reconcile-steps" class="config-view-reconcile__steps"></ol>
-                    </div>
-                </aside>
             </div>
+            <aside id="config-view-badge" class="config-view-badge" hidden aria-live="polite">
+                <div id="config-view-viewing" class="config-view-badge__viewing">
+                    <span class="config-view-badge__label">Viewing</span>
+                    <span id="config-view-source" class="config-view-badge__source" hidden></span>
+                    <code id="config-view-commit-id" class="config-view-badge__id">—</code>
+                    <div class="config-view-badge__actions">
+                        <button id="config-view-set-ref-btn" type="button" class="config-view-badge__btn config-view-badge__btn--primary">Set as reference</button>
+                        <button id="config-view-apply-btn" type="button" class="config-view-badge__btn">Apply on bench</button>
+                        <button id="config-view-return-btn" type="button" class="config-view-badge__btn">Return to bench</button>
+                    </div>
+                </div>
+                <div id="config-view-applying" class="config-view-badge__applying" hidden>
+                    <span class="config-view-badge__label">Applying</span>
+                    <code id="config-view-applying-id" class="config-view-badge__id">—</code>
+                    <span id="config-view-reconcile-progress" class="config-view-reconcile__progress">Step 1 of 1</span>
+                    <ol id="config-view-reconcile-steps" class="config-view-reconcile__steps"></ol>
+                </div>
+            </aside>
         </div>
 
         <!--

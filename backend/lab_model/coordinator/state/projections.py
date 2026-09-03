@@ -492,17 +492,32 @@ def normalize_alignment_guides(guides: Any) -> list:
 
 
 def normalize_laser_lines_doc(doc: Any) -> Dict[str, Any]:
-    """Canonical laser overlay slice: ``{snap_line_id, lines:[...]}``."""
+    """Canonical laser overlay slice: ``{snap_line_id, lines:[...]}``.
+
+    Migrates legacy id ``ne_he`` → ``he_ne`` (and display name Ne–He → He–Ne)
+    so Twin / command console / dock stay consistent without breaking geometry.
+    """
     src = doc if isinstance(doc, dict) else {}
+    # Historical typo / swap: Neon–Helium id → Helium–Neon.
+    id_aliases = {"ne_he": "he_ne"}
     lines_out = []
     src_lines = src.get("lines")
     if isinstance(src_lines, list):
         for ln in src_lines:
             if not isinstance(ln, dict) or not ln.get("id"):
                 continue
-            entry: Dict[str, Any] = {"id": str(ln["id"])}
+            raw_id = str(ln["id"])
+            canon_id = id_aliases.get(raw_id, raw_id)
+            entry: Dict[str, Any] = {"id": canon_id}
             if "name" in ln:
                 entry["name"] = ln.get("name")
+            if canon_id == "he_ne":
+                raw_name = str(entry.get("name") or "")
+                normalized = (
+                    raw_name.replace("\u2013", "-").replace("\u2014", "-").strip().lower()
+                )
+                if not raw_name or normalized in ("ne-he", "ne_he", "nehe"):
+                    entry["name"] = "He\u2013Ne"
             if "color" in ln:
                 entry["color"] = ln.get("color")
             entry["enabled"] = bool(ln.get("enabled", True))
@@ -514,8 +529,16 @@ def normalize_laser_lines_doc(doc: Any) -> Dict[str, Any]:
                     except (KeyError, TypeError, ValueError):
                         entry[key] = pt
             lines_out.append(entry)
+    # Dedupe if both ne_he and he_ne were present (keep he_ne).
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for entry in lines_out:
+        by_id[str(entry["id"])] = entry
+    lines_out = list(by_id.values())
     lines_out.sort(key=lambda item: item["id"])
-    return {"snap_line_id": src.get("snap_line_id"), "lines": lines_out}
+    snap = src.get("snap_line_id")
+    if isinstance(snap, str) and snap in id_aliases:
+        snap = id_aliases[snap]
+    return {"snap_line_id": snap, "lines": lines_out}
 
 
 def extract_observations(runtime: Mapping[str, Any]) -> Dict[str, Any]:

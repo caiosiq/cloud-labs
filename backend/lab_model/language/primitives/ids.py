@@ -7,9 +7,18 @@ except ImportError:  # Python < 3.11
     from enum import Enum
 
     class StrEnum(str, Enum):
-        """Subset of stdlib StrEnum (3.11+); enough for string-valued enums here."""
+        """Subset of stdlib StrEnum (3.11+); enough for string-valued enums here.
 
-        pass
+        Plain ``(str, Enum)`` makes ``str(member)`` return ``'Class.NAME'``, which
+        breaks Pydantic tagged-union discriminators. Mirror 3.11+ and return the
+        value string instead.
+        """
+
+        def __str__(self) -> str:
+            return str(self.value)
+
+        def __format__(self, format_spec: str) -> str:
+            return str(self.value).__format__(format_spec)
 
 
 class PrimitiveKind(StrEnum):

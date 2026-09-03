@@ -13,12 +13,14 @@ import {
     sessionContext,
     collectTrace,
     resolveCameraPreviewSource,
+    formatTraceTableText,
 } from './session-detail.js';
 import { attachLossChart, lossPointsFromTrace } from './loss-chart.js';
 import {
     bindKernelOverlayStage,
     extractKernelOverlays,
 } from './kernel-overlay.js';
+import { promptAndSaveTextFile } from '../util/save-text-file.js';
 
 const root = document.getElementById('osd-root');
 const lossShell = document.getElementById('osd-loss-shell');
@@ -91,6 +93,33 @@ function remountKernelOverlay(labState) {
         ]),
     );
     _kernelOverlay = bindKernelOverlayStage(root, overlays);
+}
+
+function bindSaveHistoryButton(labState) {
+    const btn = root?.querySelector('#osd-save-history');
+    if (!btn) return;
+    btn.onclick = async () => {
+        const text = formatTraceTableText(collectTrace(labState));
+        if (!text.trim()) {
+            setError('No iteration rows to save yet');
+            return;
+        }
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        const result = await promptAndSaveTextFile({
+            title: 'File name',
+            defaultName: `optimization-history-${stamp}.txt`,
+            content: text,
+        });
+        if (result.error === 'cancelled') return;
+        if (!result.ok) {
+            setError(result.error || 'Save failed');
+            return;
+        }
+        setError('');
+        if (pollHint) {
+            pollHint.textContent = `Saved ${result.filename}`;
+        }
+    };
 }
 
 function syncKernelOverlay(labState) {
@@ -188,8 +217,10 @@ async function refresh() {
                 };
             }
             remountKernelOverlay(_labState);
+            bindSaveHistoryButton(_labState);
         } else {
             syncKernelOverlay(_labState);
+            bindSaveHistoryButton(_labState);
         }
 
         updateLossChart(_labState);

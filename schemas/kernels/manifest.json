@@ -108,7 +108,7 @@
     },
     {
       "id": "builtin.roi_centroid",
-      "label": "ROI centroid (center half)",
+      "label": "ROI centroid (full frame)",
       "artifact": "builtin_roi_centroid.pt",
       "runtime": "torchscript",
       "backend": "any",
@@ -145,7 +145,7 @@
           ]
         }
       ],
-      "description": "Unweighted geometric centroid in the center-half ROI; mask is median_bg + 5% of (peak\u2212bg), plus full-frame peak for presence."
+      "description": "Unweighted geometric centroid over the full frame; mask is median_bg + 5% of (peak\u2212bg), plus full-frame peak for presence."
     },
     {
       "id": "demo.image_mean_score",

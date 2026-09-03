@@ -18,7 +18,7 @@ import { twoPointsToLineModel } from '../geometry/lines.js';
 import { refreshAlignmentIntersectionCache } from '../canvas/alignment-snap.js';
 import { isBenchHeaderHovered, onBenchHeaderPointerLeave } from './bench-chrome-bar.js';
 import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
-import { resolveLaserStitchPose } from '../laser-stitch.js';
+import { migrateLaserLinesDoc, resolveLaserStitchPose } from '../laser-stitch.js';
 
 export { resolveLaserStitchPose };
 
@@ -46,11 +46,12 @@ export function syncLaserLinesFromLabState() {
     const incoming = store.labState && store.labState.laser_lines;
     if (!incoming || !Array.isArray(incoming.lines)) return;
     const prev = store.laserLinesDoc || {};
+    const migrated = migrateLaserLinesDoc(incoming) || incoming;
     const next = {
         ...prev,
-        version: incoming.version != null ? incoming.version : prev.version,
-        snap_line_id: incoming.snap_line_id,
-        lines: incoming.lines,
+        version: migrated.version != null ? migrated.version : prev.version,
+        snap_line_id: migrated.snap_line_id,
+        lines: migrated.lines,
     };
     if (JSON.stringify(next) === JSON.stringify(prev)) return;
     store.laserLinesDoc = next;
@@ -230,7 +231,7 @@ export async function fetchLaserLines() {
             headers: backendHeaders(),
         });
         if (response.ok) {
-            store.laserLinesDoc = await response.json();
+            store.laserLinesDoc = migrateLaserLinesDoc(await response.json());
             store.laserLineCoeffs = coeffsFromLaserLinesDoc(store.laserLinesDoc);
             refreshAlignmentIntersectionCache();
             renderLaserLinesPanel();
@@ -329,7 +330,7 @@ async function toggleLaserLineEnabled(id, nextEnabled) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || res.statusText);
-        store.laserLinesDoc = data;
+        store.laserLinesDoc = migrateLaserLinesDoc(data);
         store.laserLineCoeffs = coeffsFromLaserLinesDoc(store.laserLinesDoc);
         _lastPanelSnapshot = computeLaserPanelSnapshot(store.laserLinesDoc);
         syncLaserLinesPanelHighlights();

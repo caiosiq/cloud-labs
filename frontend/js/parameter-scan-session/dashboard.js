@@ -14,6 +14,8 @@ import {
 import { overlaysFromProbeResult } from '../ui/measurable-kernels.js';
 import { paintKernelOverlays } from '../optimize-session/kernel-overlay.js';
 
+import { promptAndSaveTextFile } from '../util/save-text-file.js';
+
 const root = document.getElementById('psd-root');
 const errorEl = document.getElementById('psd-error');
 const pollHint = document.getElementById('psd-poll-hint');
@@ -189,6 +191,53 @@ function paintComOverlay(snap) {
     else img.addEventListener('load', draw, { once: true });
 }
 
+function formatScanTableText(snap) {
+    const names = Array.isArray(snap?.feature_names) ? snap.feature_names : ['cx', 'cy', 'peak'];
+    const rows = Array.isArray(snap?.results) ? snap.results : [];
+    if (!rows.length) return '';
+    const header = ['#', 'value', ...names, 'ok'];
+    const lines = [header.join('\t')];
+    rows.forEach((r, idx) => {
+        const f = Array.isArray(r.features) ? r.features : [];
+        lines.push(
+            [
+                (r.i ?? idx) + 1,
+                Number.isFinite(Number(r.value)) ? String(r.value) : '',
+                ...names.map((_, i) =>
+                    Number.isFinite(Number(f[i])) ? String(f[i]) : '',
+                ),
+                r.ok ? 'ok' : 'fail',
+            ].join('\t'),
+        );
+    });
+    return `${lines.join('\n')}\n`;
+}
+
+function bindSaveScanButton(snap) {
+    const btn = root?.querySelector('#psd-save-table');
+    if (!btn) return;
+    btn.onclick = async () => {
+        const text = formatScanTableText(snap);
+        if (!text.trim()) {
+            setError('No scan steps to save yet');
+            return;
+        }
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        const result = await promptAndSaveTextFile({
+            title: 'File name',
+            defaultName: `parameter-scan-${stamp}.txt`,
+            content: text,
+        });
+        if (result.error === 'cancelled') return;
+        if (!result.ok) {
+            setError(result.error || 'Save failed');
+            return;
+        }
+        setError('');
+        if (pollHint) pollHint.textContent = `Saved ${result.filename}`;
+    };
+}
+
 function trackStatsHtml(snap) {
     const stats = snap.trackStats;
     const feature = snap.trackFeature || stats?.feature || 'cy';
@@ -273,7 +322,10 @@ function renderSnapshot(snap) {
             </section>
         </div>
         <section class="psd-panel" style="margin-top:16px;">
-            <h3>Step table</h3>
+            <div class="psd-panel__head">
+                <h3>Step table</h3>
+                <button type="button" class="psd-btn" id="psd-save-table" ${rows.length ? '' : 'disabled'}>Save</button>
+            </div>
             <div class="psd-table-wrap">
                 <table>
                     <thead>
@@ -309,6 +361,7 @@ function renderSnapshot(snap) {
 
     paintChart(document.getElementById('psd-chart'), rows);
     paintComOverlay(snap);
+    bindSaveScanButton(snap);
     if (pollHint) {
         const t = snap.updatedAt ? new Date(snap.updatedAt).toLocaleTimeString() : '';
         pollHint.textContent = `${statusLabel(snap.status)}${t ? ` · ${t}` : ''}`;

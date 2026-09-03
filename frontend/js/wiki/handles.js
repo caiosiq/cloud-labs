@@ -160,7 +160,7 @@ export function kernelPhysicalInterpretation(row = {}) {
         'demo.peak_intensity':
             'Brightest normalized pixel in the frame — a crude peak-power proxy for demos.',
         'builtin.roi_centroid':
-            'Sub-pixel center of the spot inside the center-half ROI, returned as (cx, cy) in full-frame pixels. Pair with a pixel target to align a beam on camera.',
+            'Sub-pixel center of the spot over the full frame, returned as (cx, cy) in full-frame pixels. Pair with a pixel target to align a beam on camera.',
         'builtin.beam_power':
             'Power proxy features: flux above background, peak, and saturated-fraction. Maximize flux with ratio_to_ref (first-eval flux is the scale); treat saturation as a hard health flag (pin exposure).',
         'builtin.gaussian_beam_fit':

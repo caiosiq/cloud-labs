@@ -14,6 +14,7 @@ import copy
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
+from pathlib import Path
 import io
 import logging
 import functools
@@ -2762,6 +2763,55 @@ async def refresh_lab_pose_from_camera(
     return _schedule_pose_refresh(background_tasks, payload)
 
 
+class SaveTextBody(BaseModel):
+    filename: str
+    content: str
+
+
+def _user_desktop_dir() -> Path:
+    home = Path.home()
+    candidates = [
+        home / "Desktop",
+        home / "OneDrive" / "Desktop",
+    ]
+    userprofile = os.environ.get("USERPROFILE") or os.environ.get("HOME") or ""
+    if userprofile:
+        candidates.append(Path(userprofile) / "Desktop")
+        candidates.append(Path(userprofile) / "OneDrive" / "Desktop")
+    for path in candidates:
+        if path.is_dir():
+            return path
+    return home
+
+
+def _safe_export_filename(raw: str) -> str:
+    name = Path(str(raw or "").strip()).name
+    name = re.sub(r"[^\w.\- ()\[\]]+", "_", name).strip(" .")
+    if not name:
+        name = "export.txt"
+    if not name.lower().endswith(".txt"):
+        name = f"{name}.txt"
+    return name
+
+
+@app.post("/api/local/save-text")
+async def save_local_text_file(payload: SaveTextBody):
+    """Write a plain-text export to the operator machine Desktop (lab Twin host)."""
+    filename = _safe_export_filename(payload.filename)
+    content = payload.content if isinstance(payload.content, str) else ""
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="content is empty")
+    if len(content.encode("utf-8")) > 8_000_000:
+        raise HTTPException(status_code=413, detail="content too large")
+    dest_dir = _user_desktop_dir()
+    dest = dest_dir / filename
+    try:
+        dest.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"could not write file: {exc}") from exc
+    return {"status": "ok", "filename": filename}
+
+
 @app.post("/api/lab-state/refresh")
 async def refresh_lab_state_legacy(
     background_tasks: BackgroundTasks,
@@ -2867,13 +2917,30 @@ def _get_control_manager(repo_id: str):
             catalog_map_from_resolved,
             resolve_edge_catalog,
         )
+        from lab_model.coordinator.catalog.schema import catalog_declared_primitives
+        from lab_model.language.primitives.ids import PrimitiveId
 
-        cat_map = catalog_map_from_resolved(resolve_edge_catalog(rt))
+        resolved = resolve_edge_catalog(rt)
+        cat_map = catalog_map_from_resolved(resolved)
+        lib_map: Dict[str, Any] = {}
+        for row in resolved.all_library_rows():
+            if not isinstance(row, dict):
+                continue
+            tid = str(row.get("tag_id") or row.get("id") or "").strip()
+            if tid:
+                lib_map[tid] = row
 
         def _size_fn(tag_id: str, _map=cat_map):
             return catalog_wh(lambda tid: _map.get(tid), tag_id)
 
+        def _supports_set_exposure(tag_id: str, _map=lib_map) -> bool:
+            row = _map.get(str(tag_id))
+            if not isinstance(row, dict):
+                return False
+            return PrimitiveId.SET_EXPOSURE.value in catalog_declared_primitives(row)
+
         mgr.bind_catalog_size_fn(_size_fn)
+        mgr.bind_supports_set_exposure_fn(_supports_set_exposure)
     except Exception:
         host = getattr(rt, "lab", None)
         if host is not None and hasattr(host, "_catalog_wh"):

@@ -9,6 +9,7 @@
 import { store } from '../state/store.js';
 import {
     getCatalogRow,
+    isOverviewCamera,
     listChromeComponentTags,
 } from '../component-model.js';
 import { getComponentIcon } from './icons.js';
@@ -21,6 +22,11 @@ import {
     getParameterScanHighlightForTag,
     isParameterScanPlanningActive,
 } from '../state/parameter-scan-builder.js';
+import { isLiveFeedActive, normalizeCapabilities } from '../component-state.js';
+import { startLiveFeed, endLiveFeed } from '../api/live-feed.js';
+import { openLiveFeedPopout } from './live-feed-popout.js';
+import { fetchLabState } from '../state/lab-state.js';
+import { log } from './log.js';
 
 let _onSelect = () => {};
 let _lastSnapshot = '';
@@ -73,6 +79,13 @@ export function initBenchChromeBarInteraction() {
     });
 }
 
+function _declaresLiveFeed(tagId) {
+    const row = getCatalogRow(tagId);
+    const caps = normalizeCapabilities(row?.capabilities);
+    const prims = caps.primitives || [];
+    return prims.includes('START_LIVE_FEED');
+}
+
 function computeBenchChromeSnapshot() {
     const tags = listChromeComponentTags(store.labState);
     const parts = [tags.join(',')];
@@ -80,7 +93,10 @@ function computeBenchChromeSnapshot() {
         const comp = store.labState?.components?.[tagId];
         const row = getCatalogRow(tagId);
         const displayName = (row && row.name) || tagId;
-        parts.push(`${tagId}=${displayName}:${comp?.type || ''}:${getComponentIcon(comp?.type)}`);
+        const live = isLiveFeedActive(comp, 'stream') ? '1' : '0';
+        parts.push(
+            `${tagId}=${displayName}:${comp?.type || ''}:${getComponentIcon(comp?.type)}:live${live}`,
+        );
     });
     return parts.join('|');
 }
@@ -115,6 +131,55 @@ export function syncBenchChromeHighlights() {
             btn.style.borderColor = '#a78bfa';
             btn.style.boxShadow = '0 0 8px #a78bfa66';
         }
+    });
+    bar.querySelectorAll('.bench-chrome-bar__live[data-tag-id]').forEach((btn) => {
+        const tagId = btn.dataset.tagId;
+        const comp = store.labState?.components?.[tagId];
+        const live = isLiveFeedActive(comp, 'stream');
+        btn.classList.toggle('bench-chrome-bar__live--on', live);
+        btn.setAttribute('aria-pressed', live ? 'true' : 'false');
+        btn.title = live
+            ? 'End table-top live feed'
+            : 'Turn on table-top live feed';
+        const label = btn.querySelector('.bench-chrome-bar__live-label');
+        if (label) label.textContent = live ? 'Live on' : 'Live feed';
+    });
+}
+
+function _bindLiveToggle(btn, tagId) {
+    btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const comp = store.labState?.components?.[tagId];
+        const live = isLiveFeedActive(comp, 'stream');
+        btn.disabled = true;
+        const done = () => {
+            btn.disabled = false;
+            syncBenchChromeHighlights();
+        };
+        if (live) {
+            void endLiveFeed(tagId, 'all', { skipConfirm: true })
+                .then(async () => {
+                    await fetchLabState();
+                    log(`Table-top live feed off (${tagId})`, 'info');
+                })
+                .catch((e) => {
+                    if (String(e?.message || e) === 'cancelled') return;
+                    log(`End live feed failed: ${e.message || e}`, 'error');
+                })
+                .finally(done);
+            return;
+        }
+        void startLiveFeed(tagId, 'stream', { skipConfirm: true })
+            .then(async () => {
+                await fetchLabState();
+                openLiveFeedPopout(tagId, { fetchLabState });
+                log(`Table-top live feed on (${tagId})`, 'info');
+            })
+            .catch((e) => {
+                if (String(e?.message || e) === 'cancelled') return;
+                log(`Start live feed failed: ${e.message || e}`, 'error');
+            })
+            .finally(done);
     });
 }
 
@@ -157,6 +222,25 @@ function rebuildBenchChromeBar() {
             _onSelect(tagId, { add });
         });
         bar.appendChild(btn);
+
+        if (_declaresLiveFeed(tagId) && isOverviewCamera(tagId)) {
+            const live = isLiveFeedActive(comp, 'stream');
+            const liveBtn = document.createElement('button');
+            liveBtn.type = 'button';
+            liveBtn.className = 'bench-chrome-bar__live';
+            if (live) liveBtn.classList.add('bench-chrome-bar__live--on');
+            liveBtn.dataset.tagId = tagId;
+            liveBtn.setAttribute('aria-pressed', live ? 'true' : 'false');
+            liveBtn.title = live
+                ? 'End table-top live feed'
+                : 'Turn on table-top live feed';
+            liveBtn.innerHTML = `
+                <span class="material-icons-round" aria-hidden="true">videocam</span>
+                <span class="bench-chrome-bar__live-label">${live ? 'Live on' : 'Live feed'}</span>
+            `;
+            _bindLiveToggle(liveBtn, tagId);
+            bar.appendChild(liveBtn);
+        }
     });
     _lastSnapshot = computeBenchChromeSnapshot();
 }

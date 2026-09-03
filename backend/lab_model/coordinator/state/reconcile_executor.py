@@ -33,11 +33,15 @@ def validate_reconcile_plan(plan: Sequence[Mapping[str, Any]]) -> List[Dict[str,
     normalized: List[Dict[str, Any]] = []
     for index, envelope in enumerate(plan):
         action = envelope.get("action")
-        if not isinstance(action, str) or action not in RECONCILE_ACTIONS:
+        action_s = getattr(action, "value", action)
+        if not isinstance(action_s, str) or action_s not in RECONCILE_ACTIONS:
             raise ReconcilePlanError(
                 f"Step {index + 1}: unsupported reconcile action {action!r}"
             )
         bare = strip_plan_meta(envelope)
+        # Pydantic tagged unions on Py3.10 reject Enum members even when values
+        # match Literals — always hand plain strings to the adapter.
+        bare = {**bare, "action": action_s}
         try:
             parse_command_payload(bare)
         except ValidationError as exc:

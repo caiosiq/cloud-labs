@@ -108,6 +108,25 @@
             text-transform: uppercase;
             letter-spacing: 0.06em;
         }
+        .psd-panel__head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .psd-panel__head h3 { margin: 0; }
+        .psd-btn {
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--muted);
+            border-radius: 8px;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .psd-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+        .psd-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .psd-camera-wrap {
             position: relative;
             background: #000;

@@ -18,33 +18,47 @@ function _exposureDefaults(ctx) {
     return { min, max, unit, cur };
 }
 
+/** Science cameras declare exposure / SET_LIVE_EXPOSURE; overhead table-top does not. */
+function _supportsLiveExposure(ctx) {
+    const caps = normalizeCapabilities(ctx.catalogRow?.capabilities);
+    if (caps.statecontrol?.tunables?.exposure_time_ms) return true;
+    const prims = caps.primitives || [];
+    return prims.includes('SET_LIVE_EXPOSURE') || prims.includes('SET_EXPOSURE');
+}
+
 export function renderStartLiveFeed(ctx) {
     const { tagId, hooks } = ctx;
     const channel = ctx.liveFeedChannel || 'stream';
-    const { min, max, unit, cur } = _exposureDefaults(ctx);
+    const showExp = _supportsLiveExposure(ctx);
     const { section, body } = primitiveRegion('START_LIVE_FEED', 'START LIVE FEED', { accent: 'live-feed' });
 
-    const hint = document.createElement('p');
-    hint.style.fontSize = '10px';
-    hint.style.color = '#94a3b8';
-    hint.style.margin = '0';
-    hint.style.lineHeight = '1.35';
-    hint.textContent =
-        `Preview exposure (${min}–${max} ${unit}) applies to live video only — not science SET_EXPOSURE / RECORD.`;
-    body.appendChild(hint);
+    let inp = null;
+    if (showExp) {
+        const { min, max, unit, cur } = _exposureDefaults(ctx);
+        const hint = document.createElement('p');
+        hint.style.fontSize = '10px';
+        hint.style.color = '#94a3b8';
+        hint.style.margin = '0';
+        hint.style.lineHeight = '1.35';
+        hint.textContent =
+            `Preview exposure (${min}–${max} ${unit}) applies to live video only — not science SET_EXPOSURE / RECORD.`;
+        body.appendChild(hint);
 
-    const inp = coordInput(`preview exposure (${unit})`, cur);
-    inp.input.min = String(min);
-    inp.input.max = String(max);
-    inp.input.step = '0.1';
-    body.appendChild(inp);
+        inp = coordInput(`preview exposure (${unit})`, cur);
+        inp.input.min = String(min);
+        inp.input.max = String(max);
+        inp.input.step = '0.1';
+        body.appendChild(inp);
+    }
 
     const btn = sessionStartButton('live-feed', 'Turn live feed on', 'videocam');
     btn.onclick = () => {
-        const v = parseFloat(inp.value);
         const opts = {};
-        if (Number.isFinite(v) && v > 0) {
-            opts.exposure_time_ms = v;
+        if (showExp && inp) {
+            const v = parseFloat(inp.value);
+            if (Number.isFinite(v) && v > 0) {
+                opts.exposure_time_ms = v;
+            }
         }
         btn.disabled = true;
         void startLiveFeed(tagId, channel, opts)
@@ -66,58 +80,61 @@ export function renderStartLiveFeed(ctx) {
 
 export function renderEndLiveFeed(ctx) {
     const { tagId, hooks } = ctx;
-    const { min, max, unit, cur } = _exposureDefaults(ctx);
+    const showExp = _supportsLiveExposure(ctx);
     const { section, body } = primitiveRegion('END_LIVE_FEED', 'END LIVE FEED', { accent: 'live-feed', active: true });
 
-    const hint = document.createElement('p');
-    hint.style.fontSize = '10px';
-    hint.style.color = '#94a3b8';
-    hint.style.margin = '0';
-    hint.style.lineHeight = '1.35';
-    hint.textContent =
-        'Adjust preview exposure while live (VEXP). Science SET_EXPOSURE is separate.';
-    body.appendChild(hint);
+    if (showExp) {
+        const { min, max, unit, cur } = _exposureDefaults(ctx);
+        const hint = document.createElement('p');
+        hint.style.fontSize = '10px';
+        hint.style.color = '#94a3b8';
+        hint.style.margin = '0';
+        hint.style.lineHeight = '1.35';
+        hint.textContent =
+            'Adjust preview exposure while live (VEXP). Science SET_EXPOSURE is separate.';
+        body.appendChild(hint);
 
-    const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.gap = '6px';
-    row.style.alignItems = 'flex-end';
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.gap = '6px';
+        row.style.alignItems = 'flex-end';
 
-    const inp = coordInput(`preview (${unit})`, cur);
-    inp.input.min = String(min);
-    inp.input.max = String(max);
-    inp.input.step = '0.1';
-    inp.style.flex = '1';
-    row.appendChild(inp);
+        const inp = coordInput(`preview (${unit})`, cur);
+        inp.input.min = String(min);
+        inp.input.max = String(max);
+        inp.input.step = '0.1';
+        inp.style.flex = '1';
+        row.appendChild(inp);
 
-    const applyBtn = document.createElement('button');
-    applyBtn.type = 'button';
-    applyBtn.className = 'btn btn-secondary';
-    applyBtn.style.fontSize = '11px';
-    applyBtn.style.whiteSpace = 'nowrap';
-    applyBtn.textContent = 'Apply';
-    applyBtn.onclick = () => {
-        const v = parseFloat(inp.value);
-        if (!Number.isFinite(v) || v <= 0) {
-            hooks.log('Invalid preview exposure (need a positive number).', 'error');
-            return;
-        }
-        applyBtn.disabled = true;
-        void setLiveExposure(tagId, v)
-            .then(async () => {
-                await afterCommandDispatch(hooks, tagId, { fetchLabState: true });
-                hooks.log?.(`Live preview exposure → ${v} ms`, 'info');
-            })
-            .catch((e) => {
-                if (String(e?.message || e) === 'cancelled') return;
-                hooks.log(`Live exposure failed: ${e.message || e}`, 'error');
-            })
-            .finally(() => {
-                applyBtn.disabled = false;
-            });
-    };
-    row.appendChild(applyBtn);
-    body.appendChild(row);
+        const applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.className = 'btn btn-secondary';
+        applyBtn.style.fontSize = '11px';
+        applyBtn.style.whiteSpace = 'nowrap';
+        applyBtn.textContent = 'Apply';
+        applyBtn.onclick = () => {
+            const v = parseFloat(inp.value);
+            if (!Number.isFinite(v) || v <= 0) {
+                hooks.log('Invalid preview exposure (need a positive number).', 'error');
+                return;
+            }
+            applyBtn.disabled = true;
+            void setLiveExposure(tagId, v)
+                .then(async () => {
+                    await afterCommandDispatch(hooks, tagId, { fetchLabState: true });
+                    hooks.log?.(`Live preview exposure → ${v} ms`, 'info');
+                })
+                .catch((e) => {
+                    if (String(e?.message || e) === 'cancelled') return;
+                    hooks.log(`Live exposure failed: ${e.message || e}`, 'error');
+                })
+                .finally(() => {
+                    applyBtn.disabled = false;
+                });
+        };
+        row.appendChild(applyBtn);
+        body.appendChild(row);
+    }
 
     const btn = sessionEndButton('live-feed', 'Turn live feed off', 'videocam_off');
     btn.onclick = () => {

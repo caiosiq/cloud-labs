@@ -31,6 +31,7 @@ _DEFAULT_FOOTPRINT_PAD_MM = 5.0
 _DEFAULT_FOOTPRINT_WH_MM = (90.0, 90.0)
 
 SizeFn = Callable[[str], Tuple[float, float]]
+SupportsSetExposureFn = Callable[[str], bool]
 
 
 class BatchPlanError(ValueError):
@@ -632,7 +633,34 @@ def _build_move_deps(
     return preds, issues
 
 
-def _place_extras(target_cfg: Mapping[str, Any], tag_id: str) -> List[Dict[str, Any]]:
+def _tag_supports_set_exposure(tag_id: str) -> bool:
+    """True only when the catalog declares ``SET_EXPOSURE`` for ``tag_id``.
+
+    Spurious ``exposure_time_ms`` values appear on old VC commits for lenses
+    and other non-cameras; reconcile must not emit SET_EXPOSURE for those.
+    If lab_view is not bootstrapped (unit tests), keep legacy emit behavior.
+    Prefer an injected ``supports_set_exposure`` from the edge library for
+    HTTP backends where ``lab_view`` is none (e.g. ``real.default``).
+    """
+    try:
+        from lab_model.coordinator.catalog.bundle import library_by_tag
+        from lab_model.coordinator.catalog.schema import catalog_declared_primitives
+
+        by_tag = library_by_tag()
+    except Exception:
+        return True
+    row = by_tag.get(str(tag_id))
+    if not isinstance(row, dict):
+        return False
+    return PrimitiveId.SET_EXPOSURE.value in catalog_declared_primitives(row)
+
+
+def _place_extras(
+    target_cfg: Mapping[str, Any],
+    tag_id: str,
+    *,
+    supports_set_exposure: SupportsSetExposureFn,
+) -> List[Dict[str, Any]]:
     extras: List[Dict[str, Any]] = []
     tun = _entry_tunables(target_cfg, tag_id)
     motors = tun.get("nominal_motor_positions")
@@ -641,7 +669,7 @@ def _place_extras(target_cfg: Mapping[str, Any], tag_id: str) -> List[Dict[str, 
             try:
                 extras.append(
                     {
-                        "action": PrimitiveId.SET_MOTOR_SETPOINT,
+                        "action": PrimitiveId.SET_MOTOR_SETPOINT.value,
                         "target_id": tag_id,
                         "parameters": {
                             "motor_id": int(motor_id),
@@ -652,11 +680,11 @@ def _place_extras(target_cfg: Mapping[str, Any], tag_id: str) -> List[Dict[str, 
             except (TypeError, ValueError):
                 continue
     exposure = tun.get("exposure_time_ms")
-    if exposure is not None:
+    if exposure is not None and supports_set_exposure(tag_id):
         try:
             extras.append(
                 {
-                    "action": PrimitiveId.SET_EXPOSURE,
+                    "action": PrimitiveId.SET_EXPOSURE.value,
                     "target_id": tag_id,
                     "parameters": {"exposure_time_ms": float(exposure)},
                 }
@@ -671,6 +699,7 @@ def _emit_tunes(
     target_cfg: Mapping[str, Any],
     *,
     skip_tags: Set[str],
+    supports_set_exposure: SupportsSetExposureFn,
 ) -> List[Dict[str, Any]]:
     """Non-spatial tunable diffs (motors / exposure / pose already handled)."""
     commands: List[Dict[str, Any]] = []
@@ -701,9 +730,11 @@ def _emit_tunes(
         if path == "tunables.exposure_time_ms" and new_val is not None:
             if tag_id in skip_tags:
                 continue
+            if not supports_set_exposure(tag_id):
+                continue
             commands.append(
                 {
-                    "action": PrimitiveId.SET_EXPOSURE,
+                    "action": PrimitiveId.SET_EXPOSURE.value,
                     "target_id": tag_id,
                     "parameters": {"exposure_time_ms": float(new_val)},
                 }
@@ -719,7 +750,7 @@ def _emit_tunes(
                     continue
                 commands.append(
                     {
-                        "action": PrimitiveId.SET_MOTOR_SETPOINT,
+                        "action": PrimitiveId.SET_MOTOR_SETPOINT.value,
                         "target_id": tag_id,
                         "parameters": {
                             "motor_id": int(motor_id),
@@ -739,6 +770,7 @@ def plan_batch(
     storage_capacity: Optional[int] = None,
     size_fn: Optional[SizeFn] = None,
     pad_mm: Optional[float] = None,
+    supports_set_exposure: Optional[SupportsSetExposureFn] = None,
 ) -> BatchPlanResult:
     """Plan a seat DAG from ``current_cfg`` toward ``target_cfg``.
 
@@ -747,10 +779,13 @@ def plan_batch(
     ``storage_capacity``: total cells; used with occupation when free is omitted.
     ``size_fn``: ``tag_id -> (width_mm, height_mm)`` for footprint collision
     (defaults to Twin's 90×90 mm). ``pad_mm`` defaults to layout padding or 5 mm.
+    ``supports_set_exposure``: ``tag_id -> bool``; when omitted, fall back to
+    lab_view ``library_by_tag`` (or legacy emit if lab_view is unbound).
     """
     seats = parse_staging_seats(list(staging_seats or ()))
     sizes = size_fn or _default_size
     pad = float(pad_mm) if pad_mm is not None else _layout_pad_mm()
+    exposure_ok = supports_set_exposure or _tag_supports_set_exposure
     intents, issues = _classify_spatial(
         current_cfg, target_cfg, size_fn=sizes, pad_mm=pad
     )
@@ -874,9 +909,13 @@ def plan_batch(
         nonlocal step_counter
         sid = f"s{step_counter}"
         step_counter += 1
+        # Always store plain action strings. On Python <3.11 the StrEnum polyfill
+        # used to stringify as ``PrimitiveId.STORE_COMPONENT``, which Pydantic
+        # tagged unions reject during in-process init reconcile.
+        action_s = getattr(action, "value", action)
         step = _PlanStep(
             step_id=sid,
-            action=action,
+            action=str(action_s),
             target_id=target_id,
             parameters=dict(parameters),
             role=role,
@@ -1060,7 +1099,9 @@ def plan_batch(
         )
         st.predecessors = list(dict.fromkeys(pred_ids))
         add_step_ids[add.tag_id] = st.step_id
-        for extra in _place_extras(target_cfg, add.tag_id):
+        for extra in _place_extras(
+            target_cfg, add.tag_id, supports_set_exposure=exposure_ok
+        ):
             ex = _alloc(
                 extra["action"],
                 extra["target_id"],
@@ -1102,7 +1143,12 @@ def plan_batch(
 
     # Phase 6: remaining tunes (skip tags that got place extras)
     skip_tune_tags = {a.tag_id for a in adds}
-    tune_cmds = _emit_tunes(current_cfg, target_cfg, skip_tags=skip_tune_tags)
+    tune_cmds = _emit_tunes(
+        current_cfg,
+        target_cfg,
+        skip_tags=skip_tune_tags,
+        supports_set_exposure=exposure_ok,
+    )
     # Spatial ops already emitted; suppress pose/presence/storage from old path via skip.
     # Link tunes after last spatial step for their tag when possible.
     last_spatial: Dict[str, str] = {}
