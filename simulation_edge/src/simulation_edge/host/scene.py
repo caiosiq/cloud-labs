@@ -41,6 +41,8 @@ DEFAULT_HEIGHT_MM = 60.0
 MIN_BOX_DIMENSION_M = 0.012
 DEFAULT_PROFILE_ID = "demo_boxes"
 SPAWN_CLEARANCE_MM = 1.0
+COMPONENT_VISUAL_REFERENCE_YAW_DEG = -90.0
+COMPONENT_VISUAL_TARGET_FRONT_WORLD_AXIS = (0.0, 1.0, 0.0)
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_]+")
 _SAFE_PROFILE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -343,6 +345,17 @@ def _mat_vec_mul(
     )
 
 
+def _rotate_vector_about_z(
+    vector: tuple[float, float, float],
+    yaw_deg: float,
+) -> tuple[float, float, float]:
+    yaw = math.radians(yaw_deg)
+    c = math.cos(yaw)
+    s = math.sin(yaw)
+    x, y, z = vector
+    return (c * x - s * y, s * x + c * y, z)
+
+
 def _parse_component_visuals(
     profile_path: Path,
     document: Mapping[str, Any],
@@ -408,12 +421,20 @@ def _parse_component_visuals(
             raise SceneValidationError(f"{label}.front_axis_xyz must be non-zero")
         normalized_front_axis = tuple(value / axis_norm for value in front_axis)
         mounted_front_axis = _mat_vec_mul(rotation, normalized_front_axis)
+        reference_world_front_axis = _rotate_vector_about_z(
+            mounted_front_axis,
+            COMPONENT_VISUAL_REFERENCE_YAW_DEG,
+        )
         if any(
             abs(actual - expected) > 1e-6
-            for actual, expected in zip(mounted_front_axis, (0.0, 1.0, 0.0))
+            for actual, expected in zip(
+                reference_world_front_axis,
+                COMPONENT_VISUAL_TARGET_FRONT_WORLD_AXIS,
+            )
         ):
             raise SceneValidationError(
-                f"{label} front axis must point toward +lab-Y after rotation"
+                f"{label} front axis must point toward +lab-Y when the "
+                f"component yaw is {COMPONENT_VISUAL_REFERENCE_YAW_DEG:.0f} degrees"
             )
         support_plane_mm = _finite_float(
             raw_visual.get("support_plane_from_bottom_mm"),

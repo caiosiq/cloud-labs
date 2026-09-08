@@ -6,32 +6,75 @@
     "mesh": "meshes/component_housing.stl",
     "mesh_scale": 0.001,
     "mesh_bounds_mm": {
-      "min": [-320.8658, -334.7062, -265.4498],
-      "max": [-248.8658, -270.4179, -44.0378]
+      "min": [
+        -320.8658,
+        -334.7062,
+        -265.4498
+      ],
+      "max": [
+        -248.8658,
+        -270.4179,
+        -44.0378
+      ]
     },
-    "collision_size_mm": [72.0, 64.2883, 221.412],
-    "visual_clearance_size_mm": [50.0, 50.0, 100.0],
+    "collision_size_mm": [
+      72.0,
+      64.2883,
+      221.412
+    ],
+    "visual_clearance_size_mm": [
+      50.0,
+      50.0,
+      100.0
+    ],
     "base_collision_cylinder_mm": {
       "diameter": 75.0,
       "height": 19.0
     },
     "mass_kg": 0.25,
     "grasp_height_mm": 180.0,
-    "rgba": [0.55, 0.58, 0.64, 1.0]
+    "rgba": [
+      0.55,
+      0.58,
+      0.64,
+      1.0
+    ]
   },
   "component_visuals": {
-    "tag_9": {
+    "tag_20": {
       "asset_id": "NE10A",
       "mesh": "meshes/components/NE10A/NE10A.stl",
       "mesh_scale": 0.001,
       "mesh_bounds_mm": {
-        "min": [-40.9920387, -0.8686498, -1.8896722],
-        "max": [-10.5120373, 29.6113262, 9.540328]
+        "min": [
+          -40.9920387,
+          -0.8686498,
+          -1.8896722
+        ],
+        "max": [
+          -10.5120373,
+          29.6113262,
+          9.540328
+        ]
       },
-      "quat_wxyz": [0.0, 0.0, 0.7071067812, 0.7071067812],
-      "front_axis_xyz": [0.0, 0.0, 1.0],
+      "quat_wxyz": [
+        0.5,
+        0.5,
+        -0.5,
+        -0.5
+      ],
+      "front_axis_xyz": [
+        0.0,
+        0.0,
+        1.0
+      ],
       "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.055, 0.07, 0.08, 1.0],
+      "rgba": [
+        0.055,
+        0.07,
+        0.08,
+        1.0
+      ],
       "specular": 0.35,
       "shininess": 0.4,
       "source": {
@@ -43,203 +86,40 @@
         "render_sha256": "D44DDE9D715FE92045584F7FC5863E9B531B5460CCF54FBDDC3FB310A1DA935E"
       }
     },
-    "tag_2": {
-      "asset_id": "LB1",
-      "mesh": "meshes/components/LB1/LB1.stl",
-      "mesh_scale": 0.001,
-      "mesh_bounds_mm": {
-        "min": [-44.3993607, -74.686348, -7.046608],
-        "max": [-0.9653607, 22.0876541, 15.8133926]
-      },
-      "quat_wxyz": [0.0, 0.0, 0.7071067812, 0.7071067812],
-      "front_axis_xyz": [0.0, 0.0, 1.0],
-      "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.025, 0.025, 0.028, 1.0],
-      "specular": 0.12,
-      "shininess": 0.2,
-      "source": {
-        "manufacturer": "Thorlabs",
-        "part_number": "LB1",
-        "product_url": "https://www.thorlabs.com/item/LB1",
-        "cad_file": "0179-E0W.step",
-        "sha256": "ABAF04E9CB6A9B4DDD2043CD01DB809CA82FB6F780412FDCAB4F6A1D81AC04AC",
-        "render_sha256": "378CB12059F3D8943A003F0070149DD5CE43C04F9D11AF5D14C2C572459277AD"
-      }
-    },
-    "tag_20": {
-      "asset_id": "BB1-E03",
-      "mesh": "meshes/components/BB1-E03/BB1-E03.stl",
-      "mesh_scale": 0.001,
-      "mesh_bounds_mm": {
-        "min": [-47.11204, -1.8807163, 7.8109856],
-        "max": [-21.712042, 23.511389, 13.810986]
-      },
-      "quat_wxyz": [0.7071067812, -0.7071067812, 0.0, 0.0],
-      "front_axis_xyz": [0.0, 0.0, 1.0],
-      "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.24, 0.42, 0.68, 1.0],
-      "specular": 1.0,
-      "shininess": 0.95,
-      "source": {
-        "manufacturer": "Thorlabs",
-        "part_number": "BB1-E03",
-        "product_url": "https://www.thorlabs.com/item/BB1-E03",
-        "cad_file": "3544-E0W.step",
-        "sha256": "014EA3295D648282BFC9DAE4EAE54AA685583883CC356CC98097A472C0BDCA6B",
-        "render_sha256": "032CFE0E12B9B41BC393A168FC7AD54BCCBE9DE6F5BA82E0C25E7B4D91B48295"
-      }
-    },
-    "tag_99": {
-      "asset_id": "CS165MU",
-      "mesh": "meshes/components/CS165MU/CS165MU.stl",
-      "mesh_scale": 0.001,
-      "mesh_bounds_mm": {
-        "min": [-21.8439999, -23.6219997, -3.937],
-        "max": [21.8439999, 23.6219997, 11.0489998]
-      },
-      "quat_wxyz": [0.0, 0.0, 0.7071067812, 0.7071067812],
-      "front_axis_xyz": [0.0, 0.0, 1.0],
-      "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.075, 0.085, 0.105, 1.0],
-      "specular": 0.4,
-      "shininess": 0.45,
-      "source": {
-        "manufacturer": "Thorlabs",
-        "part_number": "CS165MU",
-        "product_url": "https://www.thorlabs.com/item/CS165MU",
-        "cad_file": "ITN004347-E0W.step",
-        "sha256": "A3ACBA941B7F82D84FF6E099DBF37AC0DEEBE840D53895CE9F766BB530A20B21",
-        "render_sha256": "4713EADF4375E32BC1CAE91321BCDB46663C4ADE4D02C81ABCA98F53A6821737"
-      }
-    },
-    "tag_19": {
-      "asset_id": "NLC02",
-      "mesh": "meshes/components/NLC02/NLC02.stl",
-      "mesh_scale": 0.001,
-      "mesh_bounds_mm": {
-        "min": [-12.6999998, 19.2467117, 0.88957],
-        "max": [12.6999998, 44.6467133, 12.82757]
-      },
-      "quat_wxyz": [0.0, 0.0, 0.7071067812, 0.7071067812],
-      "front_axis_xyz": [0.0, 0.0, 1.0],
-      "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.52, 0.34, 0.78, 0.82],
-      "specular": 0.8,
-      "shininess": 0.75,
-      "source": {
-        "manufacturer": "Thorlabs",
-        "part_number": "NLC02",
-        "product_url": "https://www.thorlabs.com/item/NLC02",
-        "cad_file": "TTN309071-E0W.step",
-        "sha256": "26D9AE5AC2CE2DE3B7B7EC0841B1A21922ED4FF1B87C42CF7A411B6DBCD94DE8",
-        "render_sha256": "A29225D23775F692E7DA51DC899D501F338BC0B67A4E643011959B2C0A1C7861"
-      }
-    },
-    "tag_21": {
-      "asset_id": "CS165MU",
-      "mesh": "meshes/components/CS165MU/CS165MU.stl",
-      "mesh_scale": 0.001,
-      "mesh_bounds_mm": {
-        "min": [-21.8439999, -23.6219997, -3.937],
-        "max": [21.8439999, 23.6219997, 11.0489998]
-      },
-      "quat_wxyz": [0.0, 0.0, 0.7071067812, 0.7071067812],
-      "front_axis_xyz": [0.0, 0.0, 1.0],
-      "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.075, 0.085, 0.105, 1.0],
-      "specular": 0.4,
-      "shininess": 0.45,
-      "source": {
-        "manufacturer": "Thorlabs",
-        "part_number": "CS165MU",
-        "product_url": "https://www.thorlabs.com/item/CS165MU",
-        "cad_file": "ITN004347-E0W.step",
-        "sha256": "A3ACBA941B7F82D84FF6E099DBF37AC0DEEBE840D53895CE9F766BB530A20B21",
-        "render_sha256": "4713EADF4375E32BC1CAE91321BCDB46663C4ADE4D02C81ABCA98F53A6821737"
-      }
-    },
-    "tag_22": {
-      "asset_id": "CS165MU",
-      "mesh": "meshes/components/CS165MU/CS165MU.stl",
-      "mesh_scale": 0.001,
-      "mesh_bounds_mm": {
-        "min": [-21.8439999, -23.6219997, -3.937],
-        "max": [21.8439999, 23.6219997, 11.0489998]
-      },
-      "quat_wxyz": [0.0, 0.0, 0.7071067812, 0.7071067812],
-      "front_axis_xyz": [0.0, 0.0, 1.0],
-      "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.075, 0.085, 0.105, 1.0],
-      "specular": 0.4,
-      "shininess": 0.45,
-      "source": {
-        "manufacturer": "Thorlabs",
-        "part_number": "CS165MU",
-        "product_url": "https://www.thorlabs.com/item/CS165MU",
-        "cad_file": "ITN004347-E0W.step",
-        "sha256": "A3ACBA941B7F82D84FF6E099DBF37AC0DEEBE840D53895CE9F766BB530A20B21",
-        "render_sha256": "4713EADF4375E32BC1CAE91321BCDB46663C4ADE4D02C81ABCA98F53A6821737"
-      }
-    },
-    "tag_50": {
-      "asset_id": "CPS635R-laser-head",
-      "mesh": "meshes/components/CPS635R/CPS635R.stl",
-      "mesh_scale": 0.001,
-      "mesh_bounds_mm": {
-        "min": [-17.326704, 16.0033932, 19.0241013],
-        "max": [21.173296, 26.703495, 29.7242031]
-      },
-      "quat_wxyz": [0.7071067812, 0.0, 0.0, 0.7071067812],
-      "front_axis_xyz": [1.0, 0.0, 0.0],
-      "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.11, 0.115, 0.12, 1.0],
-      "specular": 0.55,
-      "shininess": 0.55,
-      "source": {
-        "manufacturer": "Thorlabs",
-        "part_number": "CPS635R",
-        "product_url": "https://www.thorlabs.com/item/CPS635R",
-        "cad_file": "QTN010326-E0W.step",
-        "sha256": "24EB76DD1D50DAA04B4D6D5753C9F718429D6B4844AB71512AFB429E1DD46DDD",
-        "render_scope": "laser head only; cable omitted to fit housing",
-        "render_sha256": "0A406E6941CC56733E035184017CBF655E2926ED440A01B7ABE77155EFD51DD5"
-      }
-    },
-    "tag_10": {
-      "asset_id": "PBS251",
-      "mesh": "meshes/components/PBS251/PBS251.stl",
-      "mesh_scale": 0.001,
-      "mesh_bounds_mm": {
-        "min": [0.0, 0.0, -25.3999996],
-        "max": [25.3999996, 25.3999996, 0.0]
-      },
-      "quat_wxyz": [0.0, 0.0, 0.7071067812, 0.7071067812],
-      "front_axis_xyz": [0.0, 0.0, 1.0],
-      "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.38, 0.72, 0.9, 0.72],
-      "specular": 0.95,
-      "shininess": 0.9,
-      "source": {
-        "manufacturer": "Thorlabs",
-        "part_number": "PBS251",
-        "product_url": "https://www.thorlabs.com/item/PBS251",
-        "cad_file": "19034-E0W.step",
-        "sha256": "2C4FC298642F80C19B476868E1071E0F7C012A5642563DD9F2C2709FF3D51088",
-        "render_sha256": "605DD7BAF1D4B73616F49D98A31BC5887CEF91E3720833C3BF97CA1DED220A88"
-      }
-    },
-    "tag_11": {
+    "tag_9": {
       "asset_id": "LA1509-A",
       "mesh": "meshes/components/LA1509-A/LA1509-A.stl",
       "mesh_scale": 0.001,
       "mesh_bounds_mm": {
-        "min": [-12.6999998, -12.6999998, -1.795],
-        "max": [12.6999998, 12.6999998, 1.795]
+        "min": [
+          -12.6999998,
+          -12.6999998,
+          -1.795
+        ],
+        "max": [
+          12.6999998,
+          12.6999998,
+          1.795
+        ]
       },
-      "quat_wxyz": [0.0, 0.0, 0.7071067812, 0.7071067812],
-      "front_axis_xyz": [0.0, 0.0, 1.0],
+      "quat_wxyz": [
+        0.5,
+        0.5,
+        -0.5,
+        -0.5
+      ],
+      "front_axis_xyz": [
+        0.0,
+        0.0,
+        1.0
+      ],
       "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.38, 0.7, 0.9, 0.55],
+      "rgba": [
+        0.38,
+        0.7,
+        0.9,
+        0.55
+      ],
       "specular": 0.9,
       "shininess": 0.85,
       "source": {
@@ -251,27 +131,229 @@
         "render_sha256": "CE5DD51A58BB53D478EC602F31F135D0A4F678B118B292E3F7D26376EEBBF80A"
       }
     },
-    "tag_18": {
-      "asset_id": "CM254-050-E02",
-      "mesh": "meshes/components/CM254-050-E02/CM254-050-E02.stl",
+    "tag_11": {
+      "asset_id": "NE10A",
+      "mesh": "meshes/components/NE10A/NE10A.stl",
       "mesh_scale": 0.001,
       "mesh_bounds_mm": {
-        "min": [-12.6999998, -12.6960526, -3.0],
-        "max": [12.6999998, 12.6960526, 3.7845047]
+        "min": [
+          -40.9920387,
+          -0.8686498,
+          -1.8896722
+        ],
+        "max": [
+          -10.5120373,
+          29.6113262,
+          9.540328
+        ]
       },
-      "quat_wxyz": [0.0, 0.0, 0.7071067812, 0.7071067812],
-      "front_axis_xyz": [0.0, 0.0, 1.0],
+      "quat_wxyz": [
+        0.5,
+        0.5,
+        -0.5,
+        -0.5
+      ],
+      "front_axis_xyz": [
+        0.0,
+        0.0,
+        1.0
+      ],
       "support_plane_from_bottom_mm": 121.412,
-      "rgba": [0.72, 0.48, 0.16, 1.0],
-      "specular": 1.0,
-      "shininess": 0.95,
+      "rgba": [
+        0.055,
+        0.07,
+        0.08,
+        1.0
+      ],
+      "specular": 0.35,
+      "shininess": 0.4,
       "source": {
         "manufacturer": "Thorlabs",
-        "part_number": "CM254-050-E02",
-        "product_url": "https://www.thorlabs.com/item/CM254-050-E02",
-        "cad_file": "22627-E0W.step",
-        "sha256": "C4E56271499BF71C1338EA1DC1331CD8A7315F6751D3199B7FD4899725DC17D1",
-        "render_sha256": "F2433CA35E3C84DF91B9B8F40291FBC84FB198A272BF5F388CC4662AB1DBC764"
+        "part_number": "NE10A",
+        "product_url": "https://www.thorlabs.com/item/NE10A",
+        "cad_file": "5129-E0W.step",
+        "sha256": "D6B398B71017879B09693DB3079EFB96ED7CBF2B0D665EC2820CD274B881EDF8",
+        "render_sha256": "D44DDE9D715FE92045584F7FC5863E9B531B5460CCF54FBDDC3FB310A1DA935E"
+      }
+    },
+    "tag_14": {
+      "asset_id": "LA1509-A",
+      "mesh": "meshes/components/LA1509-A/LA1509-A.stl",
+      "mesh_scale": 0.001,
+      "mesh_bounds_mm": {
+        "min": [
+          -12.6999998,
+          -12.6999998,
+          -1.795
+        ],
+        "max": [
+          12.6999998,
+          12.6999998,
+          1.795
+        ]
+      },
+      "quat_wxyz": [
+        0.5,
+        0.5,
+        -0.5,
+        -0.5
+      ],
+      "front_axis_xyz": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "support_plane_from_bottom_mm": 121.412,
+      "rgba": [
+        0.38,
+        0.7,
+        0.9,
+        0.55
+      ],
+      "specular": 0.9,
+      "shininess": 0.85,
+      "source": {
+        "manufacturer": "Thorlabs",
+        "part_number": "LA1509-A",
+        "product_url": "https://www.thorlabs.com/item/LA1509-A",
+        "cad_file": "4435-E0W.step",
+        "sha256": "FF8F6690B38D9C9F3031569728CCEFA439EED49AD51E270BFF24BCC6D570256A",
+        "render_sha256": "CE5DD51A58BB53D478EC602F31F135D0A4F678B118B292E3F7D26376EEBBF80A"
+      }
+    },
+    "tag_13": {
+      "asset_id": "NE10A",
+      "mesh": "meshes/components/NE10A/NE10A.stl",
+      "mesh_scale": 0.001,
+      "mesh_bounds_mm": {
+        "min": [
+          -40.9920387,
+          -0.8686498,
+          -1.8896722
+        ],
+        "max": [
+          -10.5120373,
+          29.6113262,
+          9.540328
+        ]
+      },
+      "quat_wxyz": [
+        0.5,
+        0.5,
+        -0.5,
+        -0.5
+      ],
+      "front_axis_xyz": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "support_plane_from_bottom_mm": 121.412,
+      "rgba": [
+        0.055,
+        0.07,
+        0.08,
+        1.0
+      ],
+      "specular": 0.35,
+      "shininess": 0.4,
+      "source": {
+        "manufacturer": "Thorlabs",
+        "part_number": "NE10A",
+        "product_url": "https://www.thorlabs.com/item/NE10A",
+        "cad_file": "5129-E0W.step",
+        "sha256": "D6B398B71017879B09693DB3079EFB96ED7CBF2B0D665EC2820CD274B881EDF8",
+        "render_sha256": "D44DDE9D715FE92045584F7FC5863E9B531B5460CCF54FBDDC3FB310A1DA935E"
+      }
+    },
+    "tag_22": {
+      "asset_id": "CS165MU",
+      "mesh": "meshes/components/CS165MU/CS165MU.stl",
+      "mesh_scale": 0.001,
+      "mesh_bounds_mm": {
+        "min": [
+          -21.8439999,
+          -23.6219997,
+          -3.937
+        ],
+        "max": [
+          21.8439999,
+          23.6219997,
+          11.0489998
+        ]
+      },
+      "quat_wxyz": [
+        0.5,
+        0.5,
+        -0.5,
+        -0.5
+      ],
+      "front_axis_xyz": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "support_plane_from_bottom_mm": 121.412,
+      "rgba": [
+        0.075,
+        0.085,
+        0.105,
+        1.0
+      ],
+      "specular": 0.4,
+      "shininess": 0.45,
+      "source": {
+        "manufacturer": "Thorlabs",
+        "part_number": "CS165MU",
+        "product_url": "https://www.thorlabs.com/item/CS165MU",
+        "cad_file": "ITN004347-E0W.step",
+        "sha256": "A3ACBA941B7F82D84FF6E099DBF37AC0DEEBE840D53895CE9F766BB530A20B21",
+        "render_sha256": "4713EADF4375E32BC1CAE91321BCDB46663C4ADE4D02C81ABCA98F53A6821737"
+      }
+    },
+    "tag_15": {
+      "asset_id": "LA1509-A",
+      "mesh": "meshes/components/LA1509-A/LA1509-A.stl",
+      "mesh_scale": 0.001,
+      "mesh_bounds_mm": {
+        "min": [
+          -12.6999998,
+          -12.6999998,
+          -1.795
+        ],
+        "max": [
+          12.6999998,
+          12.6999998,
+          1.795
+        ]
+      },
+      "quat_wxyz": [
+        0.5,
+        0.5,
+        -0.5,
+        -0.5
+      ],
+      "front_axis_xyz": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "support_plane_from_bottom_mm": 121.412,
+      "rgba": [
+        0.38,
+        0.7,
+        0.9,
+        0.55
+      ],
+      "specular": 0.9,
+      "shininess": 0.85,
+      "source": {
+        "manufacturer": "Thorlabs",
+        "part_number": "LA1509-A",
+        "product_url": "https://www.thorlabs.com/item/LA1509-A",
+        "cad_file": "4435-E0W.step",
+        "sha256": "FF8F6690B38D9C9F3031569728CCEFA439EED49AD51E270BFF24BCC6D570256A",
+        "render_sha256": "CE5DD51A58BB53D478EC602F31F135D0A4F678B118B292E3F7D26376EEBBF80A"
       }
     }
   },
@@ -280,12 +362,34 @@
       "visual_mesh": "meshes/full_frame_camera.STL",
       "visual_mesh_scale": 0.001,
       "visual_mesh_bounds_mm": {
-        "min": [0.0, 357.6925964, 324.3125916],
-        "max": [1257.3000488, 1614.9926758, 1543.5125732]
+        "min": [
+          0.0,
+          357.6925964,
+          324.3125916
+        ],
+        "max": [
+          1257.3000488,
+          1614.9926758,
+          1543.5125732
+        ]
       },
-      "visual_quat_wxyz": [0.5, 0.5, -0.5, -0.5],
-      "visual_rgba": [0.72, 0.74, 0.76, 1.0],
-      "outer_size_in": [48.0, 49.5, 49.5],
+      "visual_quat_wxyz": [
+        0.5,
+        0.5,
+        -0.5,
+        -0.5
+      ],
+      "visual_rgba": [
+        0.72,
+        0.74,
+        0.76,
+        1.0
+      ],
+      "outer_size_in": [
+        48.0,
+        49.5,
+        49.5
+      ],
       "beam_size_in": 0.75,
       "safety_margin_in": 3.0,
       "camera_reserved_depth_in": 6.0

@@ -104,8 +104,11 @@ class ViewerOverlayTests(unittest.TestCase):
 
     def test_scene_preserves_catalog_component_names(self):
         runtime = make_runtime()
-        self.assertEqual(runtime.scene.components["tag_9"].display_name, "ND Filter")
-        self.assertEqual(runtime.scene.components["tag_2"].display_name, "Beam Block")
+        self.assertEqual(runtime.scene.components["tag_9"].display_name, "150mm Lens")
+        self.assertEqual(
+            runtime.scene.components["tag_20"].display_name,
+            "Front Polarizer",
+        )
 
     def test_labels_include_components_only(self):
         runtime = make_runtime()
@@ -135,17 +138,17 @@ class ViewerOverlayTests(unittest.TestCase):
 
     def test_completed_ruler_is_retained_when_next_ruler_starts(self):
         runtime = make_runtime()
-        runtime._measurement_tags = ["tag_9", "tag_2"]
-        runtime._viewer_entered.perturb.select = runtime._component_body_ids["tag_10"]
+        runtime._measurement_tags = ["tag_9", "tag_20"]
+        runtime._viewer_entered.perturb.select = runtime._component_body_ids["tag_11"]
         runtime._measurement_mark_requested = True
 
         runtime._handle_viewer_measurement_requests()
 
-        self.assertEqual(runtime._measurement_tags, ["tag_9", "tag_2", "tag_10"])
+        self.assertEqual(runtime._measurement_tags, ["tag_9", "tag_20", "tag_11"])
 
     def test_multiple_rulers_render_and_clear_together(self):
         runtime = make_runtime()
-        runtime._measurement_tags = ["tag_9", "tag_2", "tag_10", "tag_11"]
+        runtime._measurement_tags = ["tag_9", "tag_20", "tag_11", "tag_14"]
         runtime._refresh_viewer_overlays()
         scene = runtime._viewer_entered.user_scn
 
@@ -165,7 +168,7 @@ class ViewerOverlayTests(unittest.TestCase):
 
     def test_ruler_tracks_optic_height_and_reports_millimetres(self):
         runtime = make_runtime()
-        first_tag, second_tag = "tag_9", "tag_2"
+        first_tag, second_tag = "tag_9", "tag_20"
         runtime._measurement_tags = [first_tag, second_tag]
         runtime._refresh_viewer_overlays()
         scene = runtime._viewer_entered.user_scn

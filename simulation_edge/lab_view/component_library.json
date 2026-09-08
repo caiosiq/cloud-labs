@@ -79,13 +79,13 @@
       }
     },
     "tag_9": {
-      "id": "nd_filter",
-      "type": "OPTICAL_FILTER",
-      "name": "ND Filter",
+      "id": "lens_150mm",
+      "type": "OPTICAL_LENS",
+      "name": "150mm Lens",
       "tag_id": "tag_9",
       "size": {
-        "width": 72.0,
-        "height": 64.2883
+        "width": 62,
+        "height": 62
       },
       "height_mm": 60,
       "parameters": {
@@ -148,7 +148,10 @@
           "RECORD_MEASURABLES",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_GOTO"
+          "TELEOP_GOTO",
+          "RECORD_TUNABLES",
+          "SYNC_RUNTIME",
+          "LOCALIZE_COMPONENTS"
         ]
       }
     },
@@ -158,20 +161,20 @@
       "name": "Gripper Camera 1",
       "tag_id": "tag_22",
       "size": {
-        "width": 72.0,
-        "height": 64.2883
+        "width": 62,
+        "height": 62
       },
       "height_mm": 175,
       "parameters": {
         "placeable_on_table": true,
-        "resolution": "1920x1080",
+        "resolution": "5488x3672",
         "fov": 60,
         "hardware_binding": {
           "backend": "recorder_tcp",
           "recorder_cam_id": 1,
           "recorder_port": 9999
         },
-        "vision_device_index": 1
+        "vision_device_index": 0
       },
       "capabilities": {
         "statecontrol": {
@@ -262,7 +265,10 @@
           "TELEOP_GOTO",
           "SET_LIVE_EXPOSURE",
           "START_LIVE_FEED",
-          "END_LIVE_FEED"
+          "END_LIVE_FEED",
+          "RECORD_TUNABLES",
+          "SYNC_RUNTIME",
+          "LOCALIZE_COMPONENTS"
         ]
       }
     },
@@ -628,49 +634,28 @@
       }
     },
     "tag_11": {
-      "id": "lens_main",
-      "type": "OPTICAL_LENS",
-      "name": "Main Lens",
+      "id": "tilted_polarizer",
+      "type": "OPTICAL_FILTER",
+      "name": "Middle Polarizer",
       "tag_id": "tag_11",
       "size": {
-        "width": 72.0,
-        "height": 64.2883
+        "width": 62,
+        "height": 62
       },
       "height_mm": 60,
       "parameters": {
-        "focal_length": "50mm",
-        "material": "BK7",
-        "coating": "AR 400-700nm"
+        "optical_density": 1.0,
+        "transmission": 0.1
       },
-      "motor_ids": [
-        1,
-        3
-      ],
-      "motor_controller": "wifi_stepper1",
       "capabilities": {
         "statecontrol": {
           "tunables": {
             "nominal_pose": {
               "widget": "TablePose",
               "recordable": true
-            },
-            "nominal_motor_positions": {
-              "widget": "JsonInspector",
-              "unit": "deg",
-              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable \u2014 it is not a measurable.",
-              "recordable": true
             }
           },
-          "measurables": {
-            "last_optimization_score": {
-              "widget": "NumberBadge",
-              "format": ".3f",
-              "dtype": "float64",
-              "layout": "scalar",
-              "domain": "scalar",
-              "physical_interpretation": "Last closed-loop / optimize scalar for this part. Captured, not commanded."
-            }
-          }
+          "measurables": {}
         },
         "telemetry": {
           "teleop": {
@@ -710,43 +695,46 @@
         },
         "primitives": [
           "MOVE_COMPONENT",
-          "SET_MOTOR_SETPOINT",
-          "MOVE_MOTOR",
-          "MOTOR_SEND_HOME",
-          "MOTOR_SET_ZERO",
           "STORE_COMPONENT",
           "PLACE_FROM_STORAGE",
           "PICK_COMPONENT",
           "HOVER",
           "PLACE_FROM_HOVER",
           "RECORD_MEASURABLES",
-          "OPTIMIZE",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_GOTO"
+          "TELEOP_GOTO",
+          "RECORD_TUNABLES",
+          "SYNC_RUNTIME",
+          "LOCALIZE_COMPONENTS"
         ]
       }
     },
     "tag_20": {
-      "id": "mirror_planar",
-      "type": "OPTICAL_MIRROR",
-      "name": "Planar Mirror (IC)",
+      "id": "P1",
+      "type": "OPTICAL_POLARIZER",
+      "name": "Front Polarizer",
       "tag_id": "tag_20",
       "size": {
-        "width": 72.0,
-        "height": 64.2883
+        "width": 62,
+        "height": 62
       },
       "height_mm": 60,
       "parameters": {
         "radius_of_curvature": "Infinity",
         "reflectivity": 0.99,
-        "surface_flatness": "lambda/10"
+        "surface_flatness": "lambda/10",
+        "hardware_binding": {
+          "backend": "thorlabs_k10cr2",
+          "serial": "55539884",
+          "units": "deg",
+          "scale": "k10cr1_deg"
+        }
       },
       "motor_ids": [
-        1,
-        3
+        1
       ],
-      "motor_controller": "wifi_stepper2",
+      "motor_controller": "k10cr2_polarizer",
       "capabilities": {
         "statecontrol": {
           "tunables": {
@@ -820,10 +808,12 @@
           "HOVER",
           "PLACE_FROM_HOVER",
           "RECORD_MEASURABLES",
-          "OPTIMIZE",
           "START_TELEOP",
           "END_TELEOP",
-          "TELEOP_GOTO"
+          "TELEOP_GOTO",
+          "RECORD_TUNABLES",
+          "SYNC_RUNTIME",
+          "LOCALIZE_COMPONENTS"
         ]
       }
     },
@@ -1164,6 +1154,267 @@
         "primitives": [
           "SET_LASER_OUTPUT",
           "RECORD_MEASURABLES"
+        ]
+      }
+    },
+    "tag_14": {
+      "id": "lens_100mm",
+      "type": "OPTICAL_LENS",
+      "name": "100mm Lens",
+      "tag_id": "tag_14",
+      "size": {
+        "width": 62,
+        "height": 62
+      },
+      "height_mm": 60,
+      "parameters": {
+        "optical_density": 1.0,
+        "transmission": 0.1
+      },
+      "capabilities": {
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose",
+              "recordable": true
+            }
+          },
+          "measurables": {}
+        },
+        "telemetry": {
+          "teleop": {
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
+          },
+          "live_feed": {}
+        },
+        "primitives": [
+          "MOVE_COMPONENT",
+          "STORE_COMPONENT",
+          "PLACE_FROM_STORAGE",
+          "PICK_COMPONENT",
+          "HOVER",
+          "PLACE_FROM_HOVER",
+          "RECORD_MEASURABLES",
+          "START_TELEOP",
+          "END_TELEOP",
+          "TELEOP_GOTO",
+          "RECORD_TUNABLES",
+          "SYNC_RUNTIME",
+          "LOCALIZE_COMPONENTS"
+        ]
+      }
+    },
+    "tag_13": {
+      "id": "P2",
+      "type": "OPTICAL_POLARIZER",
+      "name": "Back Polarizer",
+      "tag_id": "tag_13",
+      "size": {
+        "width": 62,
+        "height": 62
+      },
+      "height_mm": 60,
+      "parameters": {
+        "radius_of_curvature": "Infinity",
+        "reflectivity": 0.99,
+        "surface_flatness": "lambda/10",
+        "hardware_binding": {
+          "backend": "thorlabs_k10cr2",
+          "serial": "55539954",
+          "units": "deg",
+          "scale": "k10cr1_deg"
+        }
+      },
+      "motor_ids": [
+        1
+      ],
+      "motor_controller": "k10cr2_polarizer",
+      "capabilities": {
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose",
+              "recordable": true
+            },
+            "nominal_motor_positions": {
+              "widget": "JsonInspector",
+              "unit": "deg",
+              "physical_interpretation": "Motor angles for this mount (degrees). Lab observe / tracker recalculates this same tunable \u2014 it is not a measurable.",
+              "recordable": true
+            }
+          },
+          "measurables": {
+            "last_optimization_score": {
+              "widget": "NumberBadge",
+              "format": ".3f",
+              "dtype": "float64",
+              "layout": "scalar",
+              "domain": "scalar",
+              "physical_interpretation": "Last closed-loop / optimize scalar for this part. Captured, not commanded."
+            }
+          }
+        },
+        "telemetry": {
+          "teleop": {
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
+          },
+          "live_feed": {}
+        },
+        "primitives": [
+          "MOVE_COMPONENT",
+          "SET_MOTOR_SETPOINT",
+          "MOVE_MOTOR",
+          "MOTOR_SEND_HOME",
+          "MOTOR_SET_ZERO",
+          "STORE_COMPONENT",
+          "PLACE_FROM_STORAGE",
+          "PICK_COMPONENT",
+          "HOVER",
+          "PLACE_FROM_HOVER",
+          "RECORD_MEASURABLES",
+          "START_TELEOP",
+          "END_TELEOP",
+          "TELEOP_GOTO",
+          "RECORD_TUNABLES",
+          "SYNC_RUNTIME",
+          "LOCALIZE_COMPONENTS"
+        ]
+      }
+    },
+    "tag_15": {
+      "id": "lens_60mm",
+      "type": "OPTICAL_LENS",
+      "name": "60mm Lens",
+      "tag_id": "tag_15",
+      "size": {
+        "width": 62,
+        "height": 62
+      },
+      "height_mm": 60,
+      "parameters": {
+        "optical_density": 1.0,
+        "transmission": 0.1
+      },
+      "capabilities": {
+        "statecontrol": {
+          "tunables": {
+            "nominal_pose": {
+              "widget": "TablePose",
+              "recordable": true
+            }
+          },
+          "measurables": {}
+        },
+        "telemetry": {
+          "teleop": {
+            "rz": {
+              "widget": "TeleopRz",
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ]
+            },
+            "pose3d": {
+              "widget": "TeleopPose3d",
+              "step_mm": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_deg": [
+                0.5,
+                2.0,
+                10.0
+              ],
+              "step_z_mm": [
+                1.0,
+                5.0,
+                20.0
+              ]
+            },
+            "live_pose": {
+              "widget": "LivePosePoll",
+              "url": "/api/components/{tag_id}/telemetry/live-pose",
+              "default_fps": 20
+            }
+          },
+          "live_feed": {}
+        },
+        "primitives": [
+          "MOVE_COMPONENT",
+          "STORE_COMPONENT",
+          "PLACE_FROM_STORAGE",
+          "PICK_COMPONENT",
+          "HOVER",
+          "PLACE_FROM_HOVER",
+          "RECORD_MEASURABLES",
+          "START_TELEOP",
+          "END_TELEOP",
+          "TELEOP_GOTO",
+          "RECORD_TUNABLES",
+          "SYNC_RUNTIME",
+          "LOCALIZE_COMPONENTS"
         ]
       }
     }

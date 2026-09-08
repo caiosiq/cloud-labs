@@ -51,7 +51,7 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
         host = make_host()
         original_session = host.edge_session_id
         requested = host.get_lab_state()
-        requested["components"]["tag_18"]["statecontrol"]["tunables"][
+        requested["components"]["tag_14"]["statecontrol"]["tunables"][
             "nominal_pose"
         ] = {"x": 217.0, "y": -173.0, "rotation": 180.0}
         requested["active_backend_id"] = "sim.default"
@@ -66,10 +66,10 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
         start_mujoco.assert_called_once_with(show_viewer=None, realtime=None)
         self.assertEqual(host.edge_session_id, original_session)
         self.assertEqual(
-            tunables(host, "tag_18")["nominal_pose"],
+            tunables(host, "tag_14")["nominal_pose"],
             {"x": 217.0, "y": -173.0, "rotation": 180.0},
         )
-        self.assertEqual(host._poses["tag_18"]["x"], 217.0)
+        self.assertEqual(host._poses["tag_14"]["x"], 217.0)
         self.assertNotIn("active_backend_id", host.current_state)
         self.assertNotIn("simulator", host.current_state)
 
@@ -99,9 +99,9 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
 
         result = await host.store_component("tag_11")
 
-        self.assertEqual(result["storage"]["slot"], {"i": 0, "j": 1})
-        self.assertEqual((result["x"], result["y"]), (-100.0, -220.0))
-        self.assertEqual((result["slot_i"], result["slot_j"]), (0, 1))
+        self.assertEqual(result["storage"]["slot"], {"i": 2, "j": 0})
+        self.assertEqual((result["x"], result["y"]), (100.0, -340.0))
+        self.assertEqual((result["slot_i"], result["slot_j"]), (2, 0))
         self.assertEqual(result["mode"], "autopack")
         self.assertEqual(client.calls[0][1]["grasp_policy"], "short_edges")
         self.assertEqual(client.calls[0][1]["pickup_context"], "table")
@@ -228,8 +228,8 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
 
         result = await host.repack_storage_slot("tag_9")
 
-        self.assertEqual(result["storage"]["slot"], {"i": 0, "j": 1})
-        self.assertEqual((result["x"], result["y"]), (-100.0, -220.0))
+        self.assertEqual(result["storage"]["slot"], {"i": 2, "j": 0})
+        self.assertEqual((result["x"], result["y"]), (100.0, -340.0))
         self.assertEqual(client.calls[0][1]["grasp_policy"], "short_edges")
         self.assertEqual(client.calls[0][1]["pickup_context"], "storage")
         self.assertNotEqual(result["storage"]["slot"], {"i": 0, "j": 0})
