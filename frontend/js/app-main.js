@@ -67,7 +67,7 @@ import {
     closePanel,
 } from './ui/context-panel.js';
 import { checkCollision, initCanvasInteraction } from './canvas/interaction.js';
-import { initRender, render } from './canvas/render.js';
+import { exportTableLayoutPng, initRender, render } from './canvas/render.js';
 import { loadPlatformRegistries } from './lab-capabilities.js';
 import { initControlPanel, refreshControlWorkingState } from './ui/control-panel.js';
 import { initInventoryAdd } from './ui/inventory-add.js';
@@ -202,6 +202,30 @@ initContextPanel({
 });
 initCanvasInteraction({ render: () => render() });
 store._teleopLivePoseRender = () => render();
+
+// Laptop keyboards commonly expose F8 through Fn+F8. Browsers report both as
+// the same `F8` key, so one handler supports full-size and compact keyboards.
+let tablePngExportInProgress = false;
+window.addEventListener('keydown', async (event) => {
+    if (event.key !== 'F8' && event.code !== 'F8') return;
+    if (event.repeat) return;
+    event.preventDefault();
+    if (tablePngExportInProgress) return;
+
+    tablePngExportInProgress = true;
+    try {
+        const results = await Promise.all([
+            exportTableLayoutPng({ scale: 4, includeText: true }),
+            exportTableLayoutPng({ scale: 4, includeText: false }),
+        ]);
+        log(`Saved high-resolution table PNGs: ${results.map((item) => item.path).join(', ')}`);
+    } catch (error) {
+        console.error('High-resolution table PNG export failed', error);
+        log(`Table PNG export failed: ${error && error.message ? error.message : error}`, 'error');
+    } finally {
+        tablePngExportInProgress = false;
+    }
+});
 
 
 /** Initialize store.ghostState[tagId] from lab state for Command Console moves. */

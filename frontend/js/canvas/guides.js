@@ -68,6 +68,29 @@ export function initGuides(deps) {
     }
 }
 
+/**
+ * Temporarily direct guide drawing to another canvas context.
+ *
+ * The table PNG exporter uses this to redraw guides into its high-resolution
+ * off-screen canvas without disturbing the interactive on-screen canvas.
+ * The callback must be synchronous so the original context can always be
+ * restored before browser event handling resumes.
+ *
+ * @template T
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {() => T} callback
+ * @returns {T}
+ */
+export function withGuideRenderContext(ctx, callback) {
+    const previous = _ctx;
+    _ctx = ctx;
+    try {
+        return callback();
+    } finally {
+        _ctx = previous;
+    }
+}
+
 function _validGuide(g) {
     return (
         g &&

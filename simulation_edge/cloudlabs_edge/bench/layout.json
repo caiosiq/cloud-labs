@@ -22,15 +22,14 @@
     },
     "storage": {
       "rule": "negative_xy",
-      "grid_nx": 4,
-      "grid_ny": 4,
+      "grid_nx": 3,
+      "grid_ny": 2,
       "bounds_mm": {
-        "x_min": -361,
-        "x_max": -1,
-        "y_min": -361,
-        "y_max": -1
+        "x_min": -150,
+        "x_max": 150,
+        "y_min": -400,
+        "y_max": -160
       },
-      "pitch_mm": 90,
       "minimum_clearance_mm": 10,
       "component_base_diameter_mm": 75
     },

@@ -228,6 +228,32 @@ class ApplyInAirCommitTests(unittest.TestCase):
         self.assertEqual(tun["storage"]["slot"]["i"], 1)
         self.assertEqual(tun["storage"]["slot"]["j"], 2)
 
+    def test_store_accepts_top_level_edge_pose_for_compatibility(self) -> None:
+        state = _seed_component()
+        ok = apply_in_air_commit(
+            state,
+            "STORE_COMPONENT",
+            {
+                "action": "STORE_COMPONENT",
+                "target_id": "tag_10",
+                "parameters": {"slot_i": 2, "slot_j": 1},
+            },
+            {
+                "tag_id": "tag_10",
+                "x": 97.35,
+                "y": -212.75,
+                "rotation": 0.0,
+                "slot_i": 2,
+                "slot_j": 1,
+                "presence": "storage",
+            },
+        )
+
+        self.assertTrue(ok)
+        tun = state["components"]["tag_10"]["statecontrol"]["tunables"]
+        self.assertEqual(tun["nominal_pose"], {"x": 97.35, "y": -212.75, "rotation": 0.0})
+        self.assertEqual(tun["reported_pose"], {"x": 97.35, "y": -212.75, "rotation": 0.0})
+
     def test_recenter_in_storage_updates_nominal_pose(self) -> None:
         """After Refresh Pose leaves a part off-center, RECENTER must commit cell center."""
         state = _seed_component(x=-115.0, y=-78.0)

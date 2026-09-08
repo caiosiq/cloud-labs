@@ -9,8 +9,8 @@
         "tunables": {
           "presence": "storage",
           "nominal_pose": {
-            "x": -316.0,
-            "y": -316.0,
+            "x": -100.0,
+            "y": -340.0,
             "rotation": 0.0
           },
           "nominal_motor_positions": {},
@@ -25,15 +25,15 @@
             "mode": "STORAGE"
           },
           "reported_pose": {
-            "x": -316.0,
-            "y": -316.0,
+            "x": -100.0,
+            "y": -340.0,
             "rotation": 0.0
           }
         },
         "measurables": {
           "pose": {
-            "x": -316.0,
-            "y": -316.0,
+            "x": -100.0,
+            "y": -340.0,
             "rotation": 0.0
           },
           "last_optimization_score": null,
@@ -77,8 +77,8 @@
         "tunables": {
           "presence": "storage",
           "nominal_pose": {
-            "x": -226.0,
-            "y": -316.0,
+            "x": 0.0,
+            "y": -340.0,
             "rotation": 0.0
           },
           "nominal_motor_positions": {},
@@ -93,15 +93,15 @@
             "mode": "STORAGE"
           },
           "reported_pose": {
-            "x": -226.0,
-            "y": -316.0,
+            "x": 0.0,
+            "y": -340.0,
             "rotation": 0.0
           }
         },
         "measurables": {
           "pose": {
-            "x": -226.0,
-            "y": -316.0,
+            "x": 0.0,
+            "y": -340.0,
             "rotation": 0.0
           },
           "last_optimization_score": null,
@@ -476,8 +476,8 @@
         "tunables": {
           "presence": "storage",
           "nominal_pose": {
-            "x": -136.0,
-            "y": -316.0,
+            "x": 100.0,
+            "y": -340.0,
             "rotation": 0.0
           },
           "nominal_motor_positions": {},
@@ -492,15 +492,15 @@
             "mode": "STORAGE"
           },
           "reported_pose": {
-            "x": -136.0,
-            "y": -316.0,
+            "x": 100.0,
+            "y": -340.0,
             "rotation": 0.0
           }
         },
         "measurables": {
           "pose": {
-            "x": -136.0,
-            "y": -316.0,
+            "x": 100.0,
+            "y": -340.0,
             "rotation": 0.0
           },
           "last_optimization_score": null,

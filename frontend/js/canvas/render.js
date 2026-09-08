@@ -35,6 +35,7 @@ import {
 } from '../config.js';
 import { mmToPx } from './coordinates.js';
 import { store } from '../state/store.js';
+import { backendHeaders, withBackendQuery } from '../state/backend-selection.js';
 import {
     catalogDeclaresTablePose,
     drawPose,
@@ -44,7 +45,11 @@ import {
 } from '../component-model.js';
 import { isTeleopReady } from '../component-state.js';
 import { clipTwoPointLineToLabBounds } from '../geometry/lines.js';
-import { drawAlignmentGuides, drawAlignmentIntersectionMarkers } from './guides.js';
+import {
+    drawAlignmentGuides,
+    drawAlignmentIntersectionMarkers,
+    withGuideRenderContext,
+} from './guides.js';
 import { getComponentSize } from './interaction.js';
 import { placementUiLabel } from '../ui/context-panel.js';
 import { occupiedStorageSlots, storageSlotCenterPose } from '../storage-region.js';
@@ -55,6 +60,11 @@ import {
 import { getParameterScanHighlightForTag } from '../state/parameter-scan-builder.js';
 
 let _ctx = null;
+let _renderText = true;
+
+function drawText(ctx, text, x, y) {
+    if (_renderText) ctx.fillText(text, x, y);
+}
 
 // Approximate outward footprint of the arm, wrist camera, and gripper during an edge pickup.
 // This is visual guidance only and does not affect motion validation.
@@ -159,7 +169,7 @@ function clearCanvas() {
 
     ctx.fillStyle = 'rgba(239, 68, 68, 0.5)';
     ctx.font = '10px Inter';
-    ctx.fillText('DANGER ZONE', LAB_CENTER_PX.x - 30, LAB_CENTER_PX.y - 10);
+    drawText(ctx, 'DANGER ZONE', LAB_CENTER_PX.x - 30, LAB_CENTER_PX.y - 10);
 
     // X axis (red, right) and Y axis (green, up). Canvas Y is inverted relative to lab Y but
     // `mmToPx` already accounts for that — +labY maps to -canvasY (up on screen).
@@ -170,7 +180,7 @@ function clearCanvas() {
     ctx.lineTo(LAB_CENTER_PX.x + 50, LAB_CENTER_PX.y);
     ctx.stroke();
     ctx.fillStyle = '#ef4444';
-    ctx.fillText('X', LAB_CENTER_PX.x + 55, LAB_CENTER_PX.y + 4);
+    drawText(ctx, 'X', LAB_CENTER_PX.x + 55, LAB_CENTER_PX.y + 4);
 
     ctx.beginPath();
     ctx.strokeStyle = '#10b981';
@@ -179,7 +189,7 @@ function clearCanvas() {
     ctx.lineTo(LAB_CENTER_PX.x, LAB_CENTER_PX.y - 50);
     ctx.stroke();
     ctx.fillStyle = '#10b981';
-    ctx.fillText('Y', LAB_CENTER_PX.x - 4, LAB_CENTER_PX.y - 55);
+    drawText(ctx, 'Y', LAB_CENTER_PX.x - 4, LAB_CENTER_PX.y - 55);
 
     ctx.beginPath();
     ctx.arc(LAB_CENTER_PX.x, LAB_CENTER_PX.y, 3, 0, Math.PI * 2);
@@ -228,7 +238,7 @@ function drawStorageZone() {
     ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(148, 163, 184, 0.95)';
     ctx.font = '11px Inter, sans-serif';
-    ctx.fillText('Storage', pSw.x + 10, pSw.y - 10);
+    drawText(ctx, 'Storage', pSw.x + 10, pSw.y - 10);
 
     const spec = store.storageGridSpec;
     if (!spec || !spec.nx || !spec.ny) return;
@@ -291,14 +301,14 @@ function drawStorageZone() {
                 ctx.font = '10px ui-monospace, monospace';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(`${i},${j}`, mid.x, mid.y);
+                drawText(ctx, `${i},${j}`, mid.x, mid.y);
             }
         }
         ctx.textAlign = 'start';
         ctx.textBaseline = 'alphabetic';
         ctx.fillStyle = 'rgba(103, 232, 249, 0.95)';
         ctx.font = '11px Inter, sans-serif';
-        ctx.fillText('Pick a free cell', pSw.x + 10, pSe.y + 14);
+        drawText(ctx, 'Pick a free cell', pSw.x + 10, pSe.y + 14);
     }
 }
 
@@ -663,7 +673,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         ctx.fillStyle = '#000';
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('?', 0, 4);
+        drawText(ctx, '?', 0, 4);
     }
 
     ctx.restore();
@@ -679,7 +689,7 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
         displayName = store.catalogMap[name].name;
     }
 
-    ctx.fillText(displayName, 0, -halfH - 10);
+    drawText(ctx, displayName, 0, -halfH - 10);
     const stLab = store.labState && store.labState.components[name] && placementUiLabel(store.labState.components[name]);
     const previewComp = store.control?.previewConfig?.components?.[name];
     const showStorageBadge =
@@ -687,35 +697,35 @@ function drawComponent(name, pose, type, mode = 'SOLID') {
     if (mode === 'SOLID' && showStorageBadge) {
         ctx.fillStyle = 'rgba(165, 180, 252, 0.95)';
         ctx.font = '600 9px Inter, sans-serif';
-        ctx.fillText('STORAGE', 0, -halfH - 24);
+        drawText(ctx, 'STORAGE', 0, -halfH - 24);
     }
 
     if (mode === 'PENDING') {
         const style = pendingOverlayStyle(name);
         ctx.fillStyle = style.color;
         ctx.font = 'bold 10px Inter, sans-serif';
-        ctx.fillText(style.label, 0, halfH + 15);
+        drawText(ctx, style.label, 0, halfH + 15);
     }
     if (mode === 'HOLDING') {
         ctx.fillStyle = HOLDING_STEADY_COLOR;
         ctx.font = 'bold 10px Inter, sans-serif';
-        ctx.fillText('HOLDING', 0, halfH + 15);
+        drawText(ctx, 'HOLDING', 0, halfH + 15);
     }
     if (store.isOptimizing && store.pendingCommands.has(name)) {
         ctx.fillStyle = '#10b981';
         ctx.font = 'bold 10px Inter, sans-serif';
-        ctx.fillText('OPTIMIZING...', 0, halfH + 15);
+        drawText(ctx, 'OPTIMIZING...', 0, halfH + 15);
     } else if (optRole && optRole !== 'scope') {
         const optColor = optimizationHighlightColor(optRole);
         ctx.fillStyle = optColor;
         ctx.font = 'bold 9px Inter, sans-serif';
         const label =
             optRole === 'both' ? 'OBJ · VAR' : optRole === 'objective' ? 'OBJECTIVE' : 'VARIABLE';
-        ctx.fillText(label, 0, halfH + 15);
+        drawText(ctx, label, 0, halfH + 15);
     } else if (scanRole) {
         ctx.fillStyle = '#a78bfa';
         ctx.font = 'bold 9px Inter, sans-serif';
-        ctx.fillText('SCAN AXIS', 0, halfH + 15);
+        drawText(ctx, 'SCAN AXIS', 0, halfH + 15);
     }
 
     ctx.restore();
@@ -739,7 +749,7 @@ function drawOptimizationGraph() {
 
     ctx.fillStyle = '#94a3b8';
     ctx.font = '11px Inter';
-    ctx.fillText('Optimization Metric (Beam Intensity)', x + 10, y + 20);
+    drawText(ctx, 'Optimization Metric (Beam Intensity)', x + 10, y + 20);
 
     ctx.beginPath();
     ctx.strokeStyle = '#10b981';
@@ -849,7 +859,7 @@ export function render() {
         const p = mmToPx(x, y);
         _ctx.fillStyle = TELEOP_LIVE_COLOR;
         _ctx.font = '9px Inter, sans-serif';
-        _ctx.fillText('LIVE', p.x + 8, p.y - 8);
+        drawText(_ctx, 'LIVE', p.x + 8, p.y - 8);
     });
 
     // 1c. TeleOp TARGET preview (client planning layer).
@@ -860,7 +870,7 @@ export function render() {
         const p = mmToPx(pose.x, pose.y);
         _ctx.fillStyle = TELEOP_TARGET_COLOR;
         _ctx.font = '9px Inter, sans-serif';
-        _ctx.fillText('TARGET', p.x + 8, p.y + 14);
+        drawText(_ctx, 'TARGET', p.x + 8, p.y + 14);
         const live = store.teleopLivePose[name];
         if (live && Number.isFinite(live.x)) {
             const from = mmToPx(live.x, live.y);
@@ -911,4 +921,71 @@ export function render() {
     });
 
     drawOptimizationGraph();
+}
+
+/**
+ * Redraw and save the table layout as a genuinely high-resolution PNG.
+ * This does not upscale the visible canvas: all geometry and text are painted
+ * again into a larger off-screen backing store, so labels remain sharp.
+ *
+ * @param {{ scale?: number, includeText?: boolean }} [options]
+ * @returns {Promise<{ filename: string, width: number, height: number }>}
+ */
+export function exportTableLayoutPng({ scale = 4, includeText = true } = {}) {
+    const exportScale = Math.max(1, Math.min(8, Math.round(Number(scale) || 4)));
+    const canvas = document.createElement('canvas');
+    const width = CANVAS_WIDTH * exportScale;
+    const height = CANVAS_HEIGHT * exportScale;
+    canvas.width = width;
+    canvas.height = height;
+
+    const exportCtx = canvas.getContext('2d');
+    if (!exportCtx) {
+        return Promise.reject(new Error('Could not create the PNG render context.'));
+    }
+
+    // Rendering code continues to use the layout's logical 1000 x 700 pixel
+    // coordinate system; the transform supplies the additional PNG pixels.
+    exportCtx.setTransform(exportScale, 0, 0, exportScale, 0, 0);
+    const previousCtx = _ctx;
+    const previousRenderText = _renderText;
+    _ctx = exportCtx;
+    _renderText = includeText;
+    try {
+        withGuideRenderContext(exportCtx, () => render());
+    } finally {
+        _ctx = previousCtx;
+        _renderText = previousRenderText;
+    }
+
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+        + `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const variant = includeText ? 'labeled' : 'no-text';
+    const filename = `cloud-labs-table-${variant}-${stamp}-${width}x${height}.png`;
+
+    return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (!blob) {
+                reject(new Error('The browser could not encode the table PNG.'));
+                return;
+            }
+            const captureUrl = withBackendQuery(
+                `/api/table-layout-captures?variant=${encodeURIComponent(variant)}`,
+            );
+            fetch(captureUrl, {
+                method: 'POST',
+                headers: backendHeaders({ 'Content-Type': 'image/png' }),
+                body: blob,
+            }).then(async (response) => {
+                if (!response.ok) {
+                    const detail = await response.text();
+                    throw new Error(detail || `Capture save failed (${response.status})`);
+                }
+                const saved = await response.json();
+                resolve({ ...saved, width, height });
+            }).catch(reject);
+        }, 'image/png');
+    });
 }

@@ -719,12 +719,12 @@ app = FastAPI(lifespan=_app_lifespan)
 
 @app.middleware("http")
 async def _backend_selection_middleware(request: Request, call_next):
-    """Bind backend_id + lab-view paths for /api/* routes (except backends listing)."""
+    """Bind backend_id + lab-view paths for backend-scoped /api/* routes."""
     from lab_model.coordinator.backends.context import bind_backend_context, reset_backend_context
 
     path = request.url.path
     skip = (
-        path in ("/api/backends",)
+        path in ("/api/backends", "/api/table-layout-captures")
         or path.startswith("/api/jobs/submit")
         or path.startswith("/api/jobs/lease/")
         or not path.startswith("/api/")
@@ -1004,6 +1004,41 @@ async def read_home():
 async def read_twin():
     """Twin UI control room (direct control + local VC)."""
     return _html_no_cache(os.path.join(frontend_path, "index.html"), bust_index=True)
+
+
+_TABLE_LAYOUT_CAPTURE_VARIANTS = {"labeled", "no-text"}
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_MAX_TABLE_LAYOUT_CAPTURE_BYTES = 64 * 1024 * 1024
+
+
+@app.post("/api/table-layout-captures")
+async def save_table_layout_capture(
+    request: Request,
+    variant: str = Query(...),
+):
+    """Save a browser-rendered table PNG into simulation_edge/captures."""
+    if variant not in _TABLE_LAYOUT_CAPTURE_VARIANTS:
+        raise HTTPException(status_code=400, detail="Unknown table capture variant")
+
+    payload = await request.body()
+    if not payload.startswith(_PNG_SIGNATURE):
+        raise HTTPException(status_code=415, detail="Capture must be a PNG image")
+    if len(payload) > _MAX_TABLE_LAYOUT_CAPTURE_BYTES:
+        raise HTTPException(status_code=413, detail="Table capture is too large")
+
+    capture_root = os.path.join(_project_root, "simulation_edge", "captures")
+    os.makedirs(capture_root, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    filename = f"cloud-labs-table-{variant}-{timestamp}-4000x2800.png"
+    capture_path = os.path.join(capture_root, filename)
+    with open(capture_path, "xb") as capture_file:
+        capture_file.write(payload)
+
+    return {
+        "filename": filename,
+        "path": capture_path,
+        "bytes": len(payload),
+    }
 
 @app.get("/api/platform/registries")
 async def get_platform_registries():

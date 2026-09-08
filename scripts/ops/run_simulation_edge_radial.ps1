@@ -19,6 +19,20 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 Set-Location -LiteralPath $RepoRoot
 
+$PythonPath = $null
+foreach ($Candidate in @(
+    (Join-Path $RepoRoot "..\.venv\Scripts\python.exe"),
+    (Join-Path $RepoRoot "..\..\.venv\Scripts\python.exe")
+)) {
+    if (Test-Path -LiteralPath $Candidate -PathType Leaf) {
+        $PythonPath = (Resolve-Path -LiteralPath $Candidate).Path
+        break
+    }
+}
+if (-not $PythonPath) {
+    throw "Python virtual environment not found beside the version folder or workspace root."
+}
+
 function Format-EnvFloat([double]$Value) {
     return $Value.ToString("0.###", [System.Globalization.CultureInfo]::InvariantCulture)
 }
@@ -64,5 +78,5 @@ Write-Host "MuJoCo playback rate: $env:CLOUDLAB_MUJOCO_PLAYBACK_RATE x"
 Write-Host "MuJoCo viewer target: $env:CLOUDLAB_MUJOCO_VIEWER_SYNC_HZ FPS"
 Write-Host "Simulation edge: http://127.0.0.1:$Port"
 
-& "..\.venv\Scripts\python.exe" -m simulation_edge --port $Port
+& $PythonPath -m simulation_edge --port $Port
 exit $LASTEXITCODE

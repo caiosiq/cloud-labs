@@ -240,7 +240,8 @@ def _pose_xyr(
     params: Mapping[str, Any],
     edge_result: Mapping[str, Any],
 ) -> tuple[float, float, float]:
-    pose = edge_result.get("pose") if isinstance(edge_result.get("pose"), Mapping) else {}
+    nested_pose = edge_result.get("pose")
+    pose = nested_pose if isinstance(nested_pose, Mapping) else edge_result
     x = _float_from(params, "target_x", "x", default=_float_from(pose, "x"))
     y = _float_from(params, "target_y", "y", default=_float_from(pose, "y"))
     rotation = _float_from(
@@ -256,8 +257,12 @@ def _actual_pose_from_edge(
     y: float,
     rotation: float,
 ) -> Optional[LabPose]:
-    pose = edge_result.get("pose") if isinstance(edge_result.get("pose"), Mapping) else {}
-    if not pose:
+    nested_pose = edge_result.get("pose")
+    if isinstance(nested_pose, Mapping):
+        pose = nested_pose
+    elif any(key in edge_result for key in ("x", "y", "rotation")):
+        pose = edge_result
+    else:
         return None
     return LabPose(
         x=_float_from(pose, "x", default=x),

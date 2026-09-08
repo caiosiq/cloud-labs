@@ -78,13 +78,17 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
         client = FakeMuJoCoClient()
         host._client = client
 
-        await host.move_component(
+        result = await host.move_component(
             "tag_11",
             x=-250.0,
             y=200.0,
             rotation=0.0,
         )
 
+        self.assertEqual(
+            result["pose"],
+            {"x": -250.0, "y": 200.0, "rotation": 0.0},
+        )
         self.assertEqual(client.calls[0][1]["grasp_policy"], "short_edges")
         self.assertEqual(client.calls[0][1]["pickup_context"], "table")
 
@@ -95,11 +99,80 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
 
         result = await host.store_component("tag_11")
 
-        self.assertEqual(result["storage"]["slot"], {"i": 3, "j": 0})
-        self.assertEqual((result["x"], result["y"]), (-46.0, -316.0))
+        self.assertEqual(result["storage"]["slot"], {"i": 0, "j": 1})
+        self.assertEqual((result["x"], result["y"]), (-100.0, -220.0))
+        self.assertEqual((result["slot_i"], result["slot_j"]), (0, 1))
+        self.assertEqual(result["mode"], "autopack")
         self.assertEqual(client.calls[0][1]["grasp_policy"], "short_edges")
         self.assertEqual(client.calls[0][1]["pickup_context"], "table")
         self.assertEqual(tunables(host, "tag_11")["presence"], "storage")
+
+    async def test_store_uses_requested_free_slot(self):
+        host = make_host()
+        client = FakeMuJoCoClient()
+        host._client = client
+
+        result = await host.store_component("tag_11", slot_i=2, slot_j=1)
+
+        self.assertEqual(result["storage"]["slot"], {"i": 2, "j": 1})
+        self.assertEqual((result["x"], result["y"]), (100.0, -220.0))
+        self.assertEqual((result["slot_i"], result["slot_j"]), (2, 1))
+        self.assertEqual(result["mode"], "explicit")
+        self.assertEqual(
+            result["pose"],
+            {"x": 100.0, "y": -220.0, "rotation": 0.0},
+        )
+        self.assertEqual(client.calls[0][1]["pickup_context"], "table")
+
+    async def test_store_rejects_occupied_requested_slot(self):
+        host = make_host()
+
+        with self.assertRaisesRegex(ValueError, "already occupied"):
+            await host.store_component("tag_11", slot_i=1, slot_j=0)
+
+        self.assertEqual(tunables(host, "tag_11")["presence"], "breadboard")
+        self.assertIsNone(tunables(host, "tag_11")["storage"]["slot"])
+
+    async def test_store_rejects_out_of_range_requested_slot(self):
+        host = make_host()
+
+        with self.assertRaisesRegex(ValueError, "outside the 3x2 grid"):
+            await host.store_component("tag_11", slot_i=3, slot_j=0)
+
+    async def test_store_rejects_component_larger_than_cell(self):
+        host = make_host()
+        host.catalog_map["tag_11"]["size"] = {"width": 101.0, "height": 80.0}
+
+        with self.assertRaisesRegex(ValueError, "does not fit"):
+            await host.store_component("tag_11", slot_i=2, slot_j=1)
+
+    async def test_explicit_store_can_move_between_storage_cells(self):
+        host = make_host()
+        client = FakeMuJoCoClient()
+        host._client = client
+
+        result = await host.store_component("tag_9", slot_i=1, slot_j=1)
+
+        self.assertEqual(result["storage"]["slot"], {"i": 1, "j": 1})
+        self.assertEqual((result["x"], result["y"]), (0.0, -220.0))
+        self.assertEqual(client.calls[0][1]["pickup_context"], "storage")
+        self.assertEqual(tunables(host, "tag_9")["storage"]["slot"], {"i": 1, "j": 1})
+
+    async def test_failed_explicit_reslot_preserves_pose_and_slot(self):
+        host = make_host()
+        before = copy.deepcopy(tunables(host, "tag_9"))
+        host._client = FakeMuJoCoClient(fail=True)
+
+        with self.assertRaisesRegex(RuntimeError, "preflight rejected"):
+            await host.store_component("tag_9", slot_i=1, slot_j=1)
+
+        self.assertEqual(tunables(host, "tag_9"), before)
+
+    async def test_store_requires_both_explicit_slot_indices(self):
+        host = make_host()
+
+        with self.assertRaisesRegex(ValueError, "must be provided together"):
+            await host.store_component("tag_11", slot_i=1)
 
     async def test_place_button_and_drag_share_place_from_storage_motion(self):
         host = make_host()
@@ -137,7 +210,7 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
 
         result = await host.recenter_stored_in_inventory("tag_9")
 
-        self.assertEqual((result["x"], result["y"]), (-316.0, -316.0))
+        self.assertEqual((result["x"], result["y"]), (-100.0, -340.0))
         self.assertEqual(result["rotation"], 0.0)
         self.assertEqual(result["storage"]["slot"], {"i": 0, "j": 0})
         self.assertEqual(client.calls[0][1]["grasp_policy"], "short_edges")
@@ -155,8 +228,8 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
 
         result = await host.repack_storage_slot("tag_9")
 
-        self.assertEqual(result["storage"]["slot"], {"i": 3, "j": 0})
-        self.assertEqual((result["x"], result["y"]), (-46.0, -316.0))
+        self.assertEqual(result["storage"]["slot"], {"i": 0, "j": 1})
+        self.assertEqual((result["x"], result["y"]), (-100.0, -220.0))
         self.assertEqual(client.calls[0][1]["grasp_policy"], "short_edges")
         self.assertEqual(client.calls[0][1]["pickup_context"], "storage")
         self.assertNotEqual(result["storage"]["slot"], {"i": 0, "j": 0})

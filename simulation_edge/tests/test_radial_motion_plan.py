@@ -1,14 +1,21 @@
 import unittest
+import tempfile
+from pathlib import Path
 from unittest import mock
 from types import SimpleNamespace
 
 import numpy as np
+import mujoco
 
 import simulation_edge.host.runtime as runtime_module
 from simulation_edge.host.runtime import (
     GRIPPER_CLOSED,
     GRIPPER_OPEN,
+    RADIAL_PHYSICAL_HOME_JOINTS_DEG,
     MuJoCoRobotRuntime,
+    MUJOCO_HIGH_RES_CAPTURE_KEY,
+    MUJOCO_PHOTO_PAUSE_KEY,
+    RadialAssistedWeldAction,
     RadialClearCollisionAction,
     RadialComponentObservation,
     RadialGripperAction,
@@ -54,6 +61,124 @@ class RadialMotionPlanTests(unittest.TestCase):
         self.assertAlmostEqual(
             runtime._radial_max_radius_at_theta_m(np.deg2rad(90.0)),
             0.4445,
+        )
+
+    def test_physical_home_matches_experimental_robot_manager(self):
+        self.assertEqual(
+            RADIAL_PHYSICAL_HOME_JOINTS_DEG,
+            (180.0, 75.0, -180.0, 20.0, 0.0, 90.0, -60.0),
+        )
+
+    def test_f8_key_requests_high_resolution_capture(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime._capture_requested = False
+
+        runtime._on_viewer_key(MUJOCO_HIGH_RES_CAPTURE_KEY)
+
+        self.assertTrue(runtime._capture_requested)
+
+    def test_f9_key_toggles_photo_pause(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime._photo_paused = False
+
+        with mock.patch("builtins.print"):
+            runtime._on_viewer_key(MUJOCO_PHOTO_PAUSE_KEY)
+            self.assertTrue(runtime._photo_paused)
+            runtime._on_viewer_key(MUJOCO_PHOTO_PAUSE_KEY)
+
+        self.assertFalse(runtime._photo_paused)
+
+    def test_photo_pause_services_capture_without_advancing_physics(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = SimpleNamespace(opt=SimpleNamespace(timestep=0.002))
+        runtime.data = object()
+        runtime.realtime = True
+        runtime.playback_rate = 1.0
+        runtime._photo_paused = True
+        runtime._capture_requested = True
+        runtime._viewer_sync_interval_s = 1.0 / 60.0
+        runtime._last_viewer_sync_perf_s = 0.0
+        runtime._viewer_entered = mock.Mock()
+        runtime._viewer_entered.is_running.return_value = True
+        runtime._capture_high_resolution_png = mock.Mock()
+
+        with (
+            mock.patch.object(runtime_module.mujoco, "mj_step") as mj_step,
+            mock.patch.object(runtime_module.time, "perf_counter", side_effect=(10.0, 10.0)),
+            mock.patch.object(runtime_module.time, "sleep") as sleep,
+        ):
+            runtime._step()
+
+        runtime._capture_high_resolution_png.assert_called_once_with()
+        runtime._viewer_entered.sync.assert_called_once_with()
+        sleep.assert_called_once_with(0.01)
+        mj_step.assert_not_called()
+
+    def test_png_writer_produces_lossless_rgb_png(self):
+        pixels = np.zeros((3, 5, 3), dtype=np.uint8)
+        pixels[:, :, 0] = 255
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "capture.png"
+            MuJoCoRobotRuntime._write_rgb_png(path, pixels)
+            payload = path.read_bytes()
+
+        self.assertEqual(payload[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(int.from_bytes(payload[16:20], "big"), 5)
+        self.assertEqual(int.from_bytes(payload[20:24], "big"), 3)
+
+    def test_capture_background_accepts_six_digit_hex(self):
+        np.testing.assert_array_equal(
+            MuJoCoRobotRuntime._parse_hex_rgb("#2B3440"),
+            np.array([43, 52, 64], dtype=np.uint8),
+        )
+
+        with self.assertRaisesRegex(ValueError, "six-digit hex color"):
+            MuJoCoRobotRuntime._parse_hex_rgb("slate")
+
+    def test_paper_render_disables_model_textures(self):
+        option = mujoco.MjvOption()
+        self.assertTrue(option.flags[mujoco.mjtVisFlag.mjVIS_TEXTURE])
+
+        MuJoCoRobotRuntime._disable_model_textures(option)
+
+        self.assertFalse(option.flags[mujoco.mjtVisFlag.mjVIS_TEXTURE])
+
+    def test_physical_home_transitions_are_explicit_and_directional(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        physical_home = np.radians(RADIAL_PHYSICAL_HOME_JOINTS_DEG)
+        observation_home = np.radians((180.0, 47.5, -180.0, 61.7, 0.0, 109.3, 0.0))
+        runtime.current_joint_target = physical_home.copy()
+        runtime._radial_observation_home_joints = mock.Mock(
+            return_value=observation_home.copy()
+        )
+        runtime._radial_physical_home_joints = mock.Mock(
+            return_value=physical_home.copy()
+        )
+        runtime._preflight_radial_physical_home_transition = mock.Mock()
+
+        entry = runtime._plan_radial_physical_home_transition(
+            to_observation_home=True
+        )
+        self.assertEqual(entry.name, "physical home to radial observation home")
+        np.testing.assert_allclose(entry.waypoints[0], physical_home)
+        np.testing.assert_allclose(entry.waypoints[-1], observation_home)
+        runtime._preflight_radial_physical_home_transition.assert_called_once_with(
+            entry
+        )
+
+        runtime.current_joint_target = observation_home.copy()
+        runtime._preflight_radial_physical_home_transition.reset_mock()
+        exit_stage = runtime._plan_radial_physical_home_transition(
+            to_observation_home=False
+        )
+        self.assertEqual(
+            exit_stage.name,
+            "radial observation home to physical home",
+        )
+        np.testing.assert_allclose(exit_stage.waypoints[0], observation_home)
+        np.testing.assert_allclose(exit_stage.waypoints[-1], physical_home)
+        runtime._preflight_radial_physical_home_transition.assert_called_once_with(
+            exit_stage
         )
 
     def test_rotation_sweep_uses_tightest_crossed_axis(self):
@@ -362,6 +487,9 @@ class RadialMotionPlanTests(unittest.TestCase):
         runtime._settle = fake_settle
         runtime._validate_physical_grasp = fake_validate_grasp
         runtime._rebase_radial_periodic_joint_branches = fake_rebase
+        runtime._set_assisted_weld = lambda spec, *, active: runtime.events.append(
+            ("weld", spec.tag_id, active)
+        )
 
         class FakeArm:
             def __init__(self, ip=None, *, runtime):
@@ -424,12 +552,15 @@ class RadialMotionPlanTests(unittest.TestCase):
                 RadialGripperAction("close while stationary", GRIPPER_CLOSED),
                 RadialSettleAction("secure physical grasp", 0.20),
                 RadialValidateGraspAction("pickup"),
+                RadialAssistedWeldAction("activate assisted weld", True),
+                RadialSettleAction("", 0.08),
                 RadialJointStageAction(
                     lift,
                     attached_tag="tag_1",
                     validate_grasp_after="pickup lift",
                 ),
                 RadialGripperAction("open and release", GRIPPER_OPEN),
+                RadialAssistedWeldAction("deactivate assisted weld", False),
                 RadialSettleAction("", 0.25),
                 RadialClearCollisionAction("post-release"),
                 RadialJointStageAction(retreat),
@@ -451,13 +582,39 @@ class RadialMotionPlanTests(unittest.TestCase):
                 "pickup camera align",
                 "close while stationary",
                 "secure physical grasp",
+                "activate assisted weld",
                 "pickup lift",
                 "open and release",
+                "deactivate assisted weld",
                 "retreat",
             ],
         )
         self.assertIn(("validate", "tag_1", "pickup"), runtime.events)
         self.assertIn(("validate", "tag_1", "pickup lift"), runtime.events)
+        pickup_validate_index = runtime.events.index(
+            ("validate", "tag_1", "pickup")
+        )
+        weld_on_index = runtime.events.index(("weld", "tag_1", True))
+        weld_settle_index = runtime.events.index(("settle", 0.08))
+        lift_index = next(
+            index
+            for index, event in enumerate(runtime.events)
+            if event[:2] == ("joint", "pickup lift")
+        )
+        release_index = max(
+            index
+            for index, event in enumerate(runtime.events)
+            if event == ("gripper", GRIPPER_OPEN, True)
+        )
+        weld_off_index = runtime.events.index(("weld", "tag_1", False))
+        self.assertLess(
+            pickup_validate_index,
+            weld_on_index,
+        )
+        self.assertLess(weld_on_index, weld_settle_index)
+        self.assertLess(weld_settle_index, lift_index)
+        self.assertLess(lift_index, release_index)
+        self.assertLess(release_index, weld_off_index)
         self.assertIn(("rebase", "radial observation home"), runtime.events)
         self.assertIn(
             (
@@ -476,6 +633,205 @@ class RadialMotionPlanTests(unittest.TestCase):
             runtime.events,
         )
         self.assertEqual(runtime.allowed_collision_tag, None)
+
+    def test_assisted_weld_updates_equality_and_forwards_model(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = SimpleNamespace(
+            equality=lambda name: SimpleNamespace(id=1, name=name)
+        )
+        runtime.data = SimpleNamespace(eq_active=np.zeros(3, dtype=np.uint8))
+        runtime._log = mock.Mock()
+        runtime._runtime_snapshot = lambda: {"ok": True}
+        runtime._align_assisted_weld_site_to_tcp = mock.Mock()
+        runtime._reset_assisted_weld_site = mock.Mock()
+        spec = SimpleNamespace(tag_id="tag_1", weld_name="assisted_grasp_tag_1")
+
+        with mock.patch.object(runtime_module.mujoco, "mj_forward") as forward:
+            runtime._set_assisted_weld(spec, active=True)
+            self.assertEqual(int(runtime.data.eq_active[1]), 1)
+            runtime._align_assisted_weld_site_to_tcp.assert_called_once_with(spec)
+            runtime._reset_assisted_weld_site.assert_not_called()
+            forward.assert_called_once_with(runtime.model, runtime.data)
+
+            forward.reset_mock()
+            runtime._set_assisted_weld(spec, active=False)
+            self.assertEqual(int(runtime.data.eq_active[1]), 0)
+            runtime._reset_assisted_weld_site.assert_called_once_with(spec)
+            forward.assert_called_once_with(runtime.model, runtime.data)
+
+    def test_assisted_weld_activation_preserves_measured_component_pose(self):
+        model = runtime_module.mujoco.MjModel.from_xml_string(
+            """
+            <mujoco model="no-snap assisted weld test">
+              <option gravity="0 0 0" timestep="0.002"/>
+              <worldbody>
+                <body name="tcp_body" pos="0.10 -0.20 0.40"
+                  quat="0.9238795 0 0 0.3826834">
+                  <site name="link_tcp" pos="0.03 0.01 0.02"
+                    quat="0.9659258 0.2588190 0 0"/>
+                </body>
+                <body name="component" pos="0.18 -0.24 0.32"
+                  quat="0.8660254 0 0 0.5">
+                  <freejoint name="component_joint"/>
+                  <geom type="box" size="0.02 0.03 0.04" mass="0.2"/>
+                  <site name="grasp_site" pos="0 0 0.04" quat="0 0 1 0"/>
+                </body>
+              </worldbody>
+              <equality>
+                <weld name="assisted_grasp" site1="link_tcp" site2="grasp_site"
+                  active="false" solref="0.002 1"
+                  solimp="0.99 0.999 0.0001"/>
+              </equality>
+            </mujoco>
+            """
+        )
+        data = runtime_module.mujoco.MjData(model)
+        runtime_module.mujoco.mj_forward(model, data)
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = model
+        runtime.data = data
+        runtime._log = mock.Mock()
+        runtime._runtime_snapshot = lambda: {"ok": True}
+        spec = SimpleNamespace(
+            tag_id="tag_1",
+            body_name="component",
+            site_name="grasp_site",
+            weld_name="assisted_grasp",
+            grasp_site_local_z_m=0.04,
+        )
+        position_before = data.body("component").xpos.copy()
+        rotation_before = data.body("component").xmat.copy()
+
+        runtime._set_assisted_weld(spec, active=True)
+        np.testing.assert_allclose(
+            data.site("grasp_site").xpos,
+            data.site("link_tcp").xpos,
+            atol=1e-10,
+        )
+        np.testing.assert_allclose(
+            data.site("grasp_site").xmat,
+            data.site("link_tcp").xmat,
+            atol=1e-7,
+        )
+        for _ in range(100):
+            runtime_module.mujoco.mj_step(model, data)
+
+        np.testing.assert_allclose(
+            data.body("component").xpos,
+            position_before,
+            atol=1e-9,
+        )
+        np.testing.assert_allclose(
+            data.body("component").xmat,
+            rotation_before,
+            atol=1e-8,
+        )
+
+        runtime._set_assisted_weld(spec, active=False)
+        site_id = model.site("grasp_site").id
+        np.testing.assert_allclose(model.site_pos[site_id], (0.0, 0.0, 0.04))
+        np.testing.assert_allclose(model.site_quat[site_id], (0.0, 0.0, 1.0, 0.0))
+
+    def test_executor_releases_assisted_weld_after_failure(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        spec = SimpleNamespace(tag_id="tag_1", weld_name="assisted_grasp_tag_1")
+        runtime.scene = SimpleNamespace(components={"tag_1": spec})
+        runtime.stage_trace = []
+        runtime.allowed_collision_tag = None
+        runtime._runtime_snapshot = lambda: {"ok": True}
+        runtime._log = mock.Mock()
+        weld_changes = []
+        runtime._set_assisted_weld = lambda item, *, active: weld_changes.append(
+            (item.tag_id, active)
+        )
+
+        plan = RadialMotionPlan(
+            tag_id="tag_1",
+            target_xy=np.array((0.10, 0.20)),
+            target_rotation_deg=0.0,
+            planned_target_xy=np.array((0.10, 0.20)),
+            source_outer=False,
+            target_outer=False,
+            portal_radius_m=0.473,
+            outer_carry_z_m=0.416,
+            actions=(
+                RadialAssistedWeldAction("activate assisted weld", True),
+                object(),
+            ),
+        )
+
+        with mock.patch.object(runtime_module, "XArmAPI"):
+            with self.assertRaisesRegex(SimulatorError, "unknown radial plan action"):
+                runtime._execute_radial_motion_plan(plan)
+
+        self.assertEqual(
+            weld_changes,
+            [("tag_1", True), ("tag_1", False)],
+        )
+        runtime._log.assert_called_once_with(
+            "assisted_weld_emergency_release",
+            tag_id="tag_1",
+            state={"ok": True},
+        )
+
+    def test_assisted_weld_environment_setting_is_strict_and_defaults_on(self):
+        variable = runtime_module.ASSISTED_WELD_ENV_VAR
+        with mock.patch.dict(runtime_module.os.environ, {}, clear=True):
+            self.assertTrue(runtime_module._env_bool(variable, True))
+
+        for value in ("1", "true", "YES", "on"):
+            with self.subTest(value=value):
+                with mock.patch.dict(
+                    runtime_module.os.environ,
+                    {variable: value},
+                    clear=True,
+                ):
+                    self.assertTrue(runtime_module._env_bool(variable, True))
+
+        for value in ("0", "false", "NO", "off"):
+            with self.subTest(value=value):
+                with mock.patch.dict(
+                    runtime_module.os.environ,
+                    {variable: value},
+                    clear=True,
+                ):
+                    self.assertFalse(runtime_module._env_bool(variable, True))
+
+        with mock.patch.dict(
+            runtime_module.os.environ,
+            {variable: "sometimes"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(SimulatorError, variable):
+                runtime_module._env_bool(variable, True)
+
+    def test_radial_assisted_weld_actions_follow_runtime_setting(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+
+        runtime.assisted_weld_enabled = True
+        enabled_pickup = runtime._radial_assisted_weld_actions(active=True)
+        enabled_release = runtime._radial_assisted_weld_actions(active=False)
+        self.assertEqual(
+            enabled_pickup,
+            (
+                RadialAssistedWeldAction("activate assisted weld", True),
+                RadialSettleAction("", 0.08),
+            ),
+        )
+        self.assertEqual(
+            enabled_release,
+            (RadialAssistedWeldAction("deactivate assisted weld", False),),
+        )
+
+        runtime.assisted_weld_enabled = False
+        self.assertEqual(
+            runtime._radial_assisted_weld_actions(active=True),
+            (),
+        )
+        self.assertEqual(
+            runtime._radial_assisted_weld_actions(active=False),
+            (),
+        )
 
 
 if __name__ == "__main__":

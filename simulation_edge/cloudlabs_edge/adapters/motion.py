@@ -137,6 +137,23 @@ async def store_component(args: dict[str, Any]) -> dict[str, Any]:
         ``tag_id``, storage slot id/indices, and presence ``"STORED"``.
     """
     tag = context.tag_from_args(args)
+    raw_i = args.get("slot_i", args.get("i"))
+    raw_j = args.get("slot_j", args.get("j"))
+    has_i = raw_i is not None and raw_i != ""
+    has_j = raw_j is not None and raw_j != ""
+    if has_i != has_j:
+        raise ValueError("slot_i and slot_j must be provided together")
+    if has_i:
+        try:
+            slot_i = int(raw_i)
+            slot_j = int(raw_j)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("slot_i and slot_j must be integers") from exc
+        return await context.get_lab().store_component(
+            tag,
+            slot_i=slot_i,
+            slot_j=slot_j,
+        )
     return await context.get_lab().store_component(tag)
 
 

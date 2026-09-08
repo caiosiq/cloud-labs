@@ -23,6 +23,8 @@ from lab_model.language.domain.component import (
 # MuJoCo world-frame Z of the tabletop surface. The physical xArm is mounted
 # on a 3/8-inch plate, so its mounting plane is one plate thickness higher.
 TABLE_SURFACE_Z_M = 0.12
+STORAGE_TABLETOP_OVERLAY_GEOM_NAME = "storage_tabletop_overlay"
+STORAGE_TABLETOP_OVERLAY_THICKNESS_M = 0.0004
 INCH_TO_M = 0.0254
 ROBOT_MOUNTING_PLATE_X_M = 7.5 * INCH_TO_M
 ROBOT_MOUNTING_PLATE_Y_M = 6.0 * INCH_TO_M
@@ -86,6 +88,7 @@ def normalize_capabilities(caps: Any) -> Dict[str, Any]:
 @dataclass(frozen=True)
 class ComponentSpec:
     tag_id: str
+    display_name: str
     body_name: str
     joint_name: str
     site_name: str
@@ -103,6 +106,7 @@ class ComponentSpec:
     mesh_offset_m: tuple[float, float, float] | None = None
     base_cylinder_diameter_m: float | None = None
     base_cylinder_height_m: float | None = None
+    mounted_visual: "MountedComponentVisualSpec | None" = None
 
     @property
     def center_z_m(self) -> float:
@@ -191,6 +195,66 @@ class VisualMeshSpec:
 
 
 @dataclass(frozen=True)
+class MountedComponentVisualSpec:
+    tag_id: str
+    name: str
+    material_name: str
+    geom_name: str
+    mesh_path: Path
+    mesh_scale: float
+    mesh_bounds_min: tuple[float, float, float]
+    mesh_bounds_max: tuple[float, float, float]
+    quat_wxyz: tuple[float, float, float, float]
+    front_axis_xyz: tuple[float, float, float]
+    support_plane_from_bottom_m: float
+    rgba: tuple[float, float, float, float]
+    specular: float
+    shininess: float
+
+    def transformed_bounds_m(
+        self,
+    ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+        """Return axis-aligned bounds after applying the configured rotation."""
+        rotation = _rotation_matrix_from_quat_wxyz(self.quat_wxyz)
+        transformed_corners = tuple(
+            _mat_vec_mul(
+                rotation,
+                (
+                    x * self.mesh_scale,
+                    y * self.mesh_scale,
+                    z * self.mesh_scale,
+                ),
+            )
+            for x in (self.mesh_bounds_min[0], self.mesh_bounds_max[0])
+            for y in (self.mesh_bounds_min[1], self.mesh_bounds_max[1])
+            for z in (self.mesh_bounds_min[2], self.mesh_bounds_max[2])
+        )
+        return (
+            tuple(
+                min(corner[axis] for corner in transformed_corners)
+                for axis in range(3)
+            ),
+            tuple(
+                max(corner[axis] for corner in transformed_corners)
+                for axis in range(3)
+            ),
+        )
+
+    def position_in_component_m(
+        self,
+        component_height_m: float,
+    ) -> tuple[float, float, float]:
+        """Center the rotated mesh in X/Y and rest its low edge on the support."""
+        low, high = self.transformed_bounds_m()
+        support_z = -component_height_m / 2.0 + self.support_plane_from_bottom_m
+        return (
+            -(low[0] + high[0]) / 2.0,
+            -(low[1] + high[1]) / 2.0,
+            support_z - low[2],
+        )
+
+
+@dataclass(frozen=True)
 class SimulationProfile:
     profile_id: str
     kind: str
@@ -199,10 +263,12 @@ class SimulationProfile:
     mesh_scale: float = 1.0
     mesh_offset_m: tuple[float, float, float] | None = None
     collision_size_m: tuple[float, float, float] | None = None
+    visual_clearance_size_m: tuple[float, float, float] | None = None
     base_cylinder_diameter_m: float | None = None
     base_cylinder_height_m: float | None = None
     grasp_height_m: float | None = None
     rgba: tuple[float, float, float, float] | None = None
+    component_visuals: tuple[MountedComponentVisualSpec, ...] = ()
     visual_meshes: tuple[VisualMeshSpec, ...] = ()
     static_collision_objects: tuple[StaticCollisionObjectSpec, ...] = ()
     table_bounds_mm: Dict[str, float] | None = None
@@ -275,6 +341,155 @@ def _mat_vec_mul(
         sum(matrix[row][col] * vector[col] for col in range(3))
         for row in range(3)
     )
+
+
+def _parse_component_visuals(
+    profile_path: Path,
+    document: Mapping[str, Any],
+    *,
+    component_height_m: float,
+    visual_clearance_size_m: tuple[float, float, float],
+) -> tuple[MountedComponentVisualSpec, ...]:
+    raw_visuals = document.get("component_visuals")
+    if raw_visuals is None:
+        return ()
+    if not isinstance(raw_visuals, Mapping):
+        raise SceneValidationError("component_visuals must be an object keyed by tag id")
+
+    visuals: list[MountedComponentVisualSpec] = []
+    assets_by_name: dict[str, MountedComponentVisualSpec] = {}
+    for raw_tag_id, raw_visual in raw_visuals.items():
+        tag_id = str(raw_tag_id).strip()
+        label = f"component_visuals.{tag_id}"
+        if not tag_id or not isinstance(raw_visual, Mapping):
+            raise SceneValidationError(
+                "component_visuals entries must be objects with non-empty tag ids"
+            )
+        mesh_value = raw_visual.get("mesh")
+        if not isinstance(mesh_value, str) or not mesh_value.strip():
+            raise SceneValidationError(f"{label}.mesh is required")
+        mesh_path = (profile_path.parent / mesh_value).resolve()
+        if not mesh_path.is_file():
+            raise SceneValidationError(f"Component visual mesh not found: {mesh_path}")
+        mesh_scale = _finite_float(
+            raw_visual.get("mesh_scale", 1.0),
+            label=f"{label}.mesh_scale",
+        )
+        if mesh_scale <= 0:
+            raise SceneValidationError(f"{label}.mesh_scale must be positive")
+        bounds = raw_visual.get("mesh_bounds_mm")
+        if not isinstance(bounds, Mapping):
+            raise SceneValidationError(f"{label}.mesh_bounds_mm is required")
+        bounds_min = _profile_vector(
+            bounds.get("min"),
+            label=f"{label}.mesh_bounds_mm.min",
+            length=3,
+        )
+        bounds_max = _profile_vector(
+            bounds.get("max"),
+            label=f"{label}.mesh_bounds_mm.max",
+            length=3,
+        )
+        if any(low >= high for low, high in zip(bounds_min, bounds_max)):
+            raise SceneValidationError(f"{label} mesh bounds must have positive size")
+        quat = _profile_vector(
+            raw_visual.get("quat_wxyz", (1.0, 0.0, 0.0, 0.0)),
+            label=f"{label}.quat_wxyz",
+            length=4,
+        )
+        rotation = _rotation_matrix_from_quat_wxyz(quat)
+        front_axis = _profile_vector(
+            raw_visual.get("front_axis_xyz", (0.0, 0.0, 1.0)),
+            label=f"{label}.front_axis_xyz",
+            length=3,
+        )
+        axis_norm = math.sqrt(sum(value * value for value in front_axis))
+        if axis_norm <= 0:
+            raise SceneValidationError(f"{label}.front_axis_xyz must be non-zero")
+        normalized_front_axis = tuple(value / axis_norm for value in front_axis)
+        mounted_front_axis = _mat_vec_mul(rotation, normalized_front_axis)
+        if any(
+            abs(actual - expected) > 1e-6
+            for actual, expected in zip(mounted_front_axis, (0.0, 1.0, 0.0))
+        ):
+            raise SceneValidationError(
+                f"{label} front axis must point toward +lab-Y after rotation"
+            )
+        support_plane_mm = _finite_float(
+            raw_visual.get("support_plane_from_bottom_mm"),
+            label=f"{label}.support_plane_from_bottom_mm",
+        )
+        if not 0 <= support_plane_mm <= component_height_m * 1000.0:
+            raise SceneValidationError(
+                f"{label} support plane must lie inside the component height"
+            )
+        rgba = _profile_vector(
+            raw_visual.get("rgba", (0.72, 0.78, 0.86, 1.0)),
+            label=f"{label}.rgba",
+            length=4,
+        )
+        specular = _finite_float(
+            raw_visual.get("specular", 0.9),
+            label=f"{label}.specular",
+        )
+        shininess = _finite_float(
+            raw_visual.get("shininess", 0.85),
+            label=f"{label}.shininess",
+        )
+        if not 0 <= specular <= 1 or not 0 <= shininess <= 1:
+            raise SceneValidationError(
+                f"{label} specular and shininess values must be between 0 and 1"
+            )
+        asset_id = str(raw_visual.get("asset_id") or tag_id).strip()
+        if not asset_id:
+            raise SceneValidationError(f"{label}.asset_id must be non-empty")
+        suffix = _safe_suffix(tag_id)
+        asset_suffix = _safe_suffix(asset_id)
+        visual = MountedComponentVisualSpec(
+            tag_id=tag_id,
+            name=f"mounted_visual_mesh_{asset_suffix}",
+            material_name=f"mounted_visual_material_{asset_suffix}",
+            geom_name=f"mounted_visual_{suffix}",
+            mesh_path=mesh_path,
+            mesh_scale=mesh_scale,
+            mesh_bounds_min=bounds_min,
+            mesh_bounds_max=bounds_max,
+            quat_wxyz=quat,
+            front_axis_xyz=normalized_front_axis,
+            support_plane_from_bottom_m=support_plane_mm / 1000.0,
+            rgba=rgba,
+            specular=specular,
+            shininess=shininess,
+        )
+        low, high = visual.transformed_bounds_m()
+        extent = tuple(high[axis] - low[axis] for axis in range(3))
+        if any(
+            extent[axis] > visual_clearance_size_m[axis] + 1e-9
+            for axis in (0, 1)
+        ):
+            raise SceneValidationError(
+                f"{label} does not fit the housing's horizontal visual clearance"
+            )
+        position = visual.position_in_component_m(component_height_m)
+        visual_top = position[2] + high[2]
+        if visual_top > component_height_m / 2.0 + 1e-9:
+            raise SceneValidationError(
+                f"{label} extends above the component housing collision height"
+            )
+        existing_asset = assets_by_name.get(visual.name)
+        if existing_asset is not None and (
+            existing_asset.mesh_path != visual.mesh_path
+            or existing_asset.mesh_scale != visual.mesh_scale
+            or existing_asset.rgba != visual.rgba
+            or existing_asset.specular != visual.specular
+            or existing_asset.shininess != visual.shininess
+        ):
+            raise SceneValidationError(
+                f"{label}.asset_id conflicts with another component visual"
+            )
+        assets_by_name[visual.name] = visual
+        visuals.append(visual)
+    return tuple(visuals)
 
 
 def _parse_lab_frame_environment(
@@ -548,6 +763,20 @@ def load_simulation_profile(profile_id: str | None = None) -> SimulationProfile:
     )
     if any(value <= 0 for value in collision_mm):
         raise SceneValidationError(f"{selected} collision dimensions must be positive")
+    visual_clearance_mm = _profile_vector(
+        geometry.get("visual_clearance_size_mm", collision_mm),
+        label=f"{selected}.geometry.visual_clearance_size_mm",
+        length=3,
+    )
+    if any(value <= 0 for value in visual_clearance_mm):
+        raise SceneValidationError(f"{selected} visual clearance must be positive")
+    if any(
+        clearance > collision + 1e-9
+        for clearance, collision in zip(visual_clearance_mm, collision_mm)
+    ):
+        raise SceneValidationError(
+            f"{selected} visual clearance cannot exceed collision dimensions"
+        )
     base_cylinder_diameter_m: float | None = None
     base_cylinder_height_m: float | None = None
     base_cylinder = geometry.get("base_collision_cylinder_mm")
@@ -583,6 +812,14 @@ def load_simulation_profile(profile_id: str | None = None) -> SimulationProfile:
         label=f"{selected}.geometry.rgba",
         length=4,
     )
+    component_visuals = _parse_component_visuals(
+        path,
+        document,
+        component_height_m=collision_mm[2] / 1000.0,
+        visual_clearance_size_m=tuple(
+            value / 1000.0 for value in visual_clearance_mm
+        ),
+    )
     return SimulationProfile(
         profile_id=selected,
         kind=kind,
@@ -591,10 +828,14 @@ def load_simulation_profile(profile_id: str | None = None) -> SimulationProfile:
         mesh_scale=mesh_scale,
         mesh_offset_m=mesh_offset_m,
         collision_size_m=tuple(value / 1000.0 for value in collision_mm),
+        visual_clearance_size_m=tuple(
+            value / 1000.0 for value in visual_clearance_mm
+        ),
         base_cylinder_diameter_m=base_cylinder_diameter_m,
         base_cylinder_height_m=base_cylinder_height_m,
         grasp_height_m=grasp_height_mm / 1000.0,
         rgba=rgba,
+        component_visuals=component_visuals,
         visual_meshes=visual_meshes,
         static_collision_objects=static_collision_objects,
         table_bounds_mm=table_bounds_mm,
@@ -846,6 +1087,12 @@ def build_scene_spec(
     profile_id: str | None = None,
 ) -> SceneSpec:
     profile = load_simulation_profile(profile_id)
+    mounted_visual_by_tag = {
+        visual.tag_id: visual for visual in profile.component_visuals
+    }
+    mounted_visual_assets = tuple(
+        {visual.name: visual for visual in profile.component_visuals}.values()
+    )
     bounds_raw = layout.get("lab_bounds_mm")
     if not isinstance(bounds_raw, Mapping):
         raise SceneValidationError("layout.json is missing lab_bounds_mm")
@@ -991,6 +1238,7 @@ def build_scene_spec(
         suffix = _safe_suffix(str(tag_id))
         specs[str(tag_id)] = ComponentSpec(
             tag_id=str(tag_id),
+            display_name=str(row.get("name") or row.get("id") or tag_id).strip(),
             body_name=f"component_{suffix}",
             joint_name=f"freejoint_{suffix}",
             site_name=f"grasp_site_{suffix}",
@@ -1011,6 +1259,7 @@ def build_scene_spec(
             mesh_offset_m=profile.mesh_offset_m,
             base_cylinder_diameter_m=profile.base_cylinder_diameter_m,
             base_cylinder_height_m=profile.base_cylinder_height_m,
+            mounted_visual=mounted_visual_by_tag.get(str(tag_id)),
         )
 
     if invalid:
@@ -1032,6 +1281,50 @@ def build_scene_spec(
     y_center_m = (table_bounds["y_min"] + table_bounds["y_max"]) / 2000.0
     half_x_m = (table_bounds["x_max"] - table_bounds["x_min"]) / 2000.0
     half_y_m = (table_bounds["y_max"] - table_bounds["y_min"]) / 2000.0
+
+    storage_tabletop_overlay = ""
+    storage_raw = layout.get("storage")
+    if isinstance(storage_raw, Mapping):
+        storage_bounds_raw = storage_raw.get("bounds_mm")
+        if not isinstance(storage_bounds_raw, Mapping):
+            raise SceneValidationError("storage is missing bounds_mm")
+        storage_bounds = {
+            key: _finite_float(
+                storage_bounds_raw.get(key),
+                label=f"storage.bounds_mm.{key}",
+            )
+            for key in ("x_min", "x_max", "y_min", "y_max")
+        }
+        if (
+            storage_bounds["x_min"] >= storage_bounds["x_max"]
+            or storage_bounds["y_min"] >= storage_bounds["y_max"]
+        ):
+            raise SceneValidationError(
+                "storage bounds must have positive width and height"
+            )
+        storage_center_x_m = (
+            storage_bounds["x_min"] + storage_bounds["x_max"]
+        ) / 2000.0
+        storage_center_y_m = (
+            storage_bounds["y_min"] + storage_bounds["y_max"]
+        ) / 2000.0
+        storage_half_x_m = (
+            storage_bounds["x_max"] - storage_bounds["x_min"]
+        ) / 2000.0
+        storage_half_y_m = (
+            storage_bounds["y_max"] - storage_bounds["y_min"]
+        ) / 2000.0
+        storage_overlay_center_z_m = (
+            TABLE_SURFACE_Z_M + STORAGE_TABLETOP_OVERLAY_THICKNESS_M / 2.0
+        )
+        storage_overlay_half_thickness_m = (
+            STORAGE_TABLETOP_OVERLAY_THICKNESS_M / 2.0
+        )
+        storage_tabletop_overlay = f'''
+    <geom name="{STORAGE_TABLETOP_OVERLAY_GEOM_NAME}" type="box"
+      pos="{storage_center_x_m:.8f} {storage_center_y_m:.8f} {storage_overlay_center_z_m:.8f}"
+      size="{storage_half_x_m:.8f} {storage_half_y_m:.8f} {storage_overlay_half_thickness_m:.8f}"
+      rgba="0.12 0.12 0.12 1" contype="0" conaffinity="0"/>'''
 
     mounting_plate = StaticCollisionObjectSpec(
         object_id=ROBOT_MOUNTING_PLATE_OBJECT_ID,
@@ -1084,6 +1377,19 @@ def build_scene_spec(
         size="{half[0]:.8f} {half[1]:.8f} {half[2]:.8f}"
         mass="{spec.mass_kg:.8f}" rgba="{rgba}" friction="1.2 0.02 0.002"
         solref="0.008 1" solimp="0.95 0.99 0.001"/>"""
+        if spec.mounted_visual is not None:
+            mounted = spec.mounted_visual
+            mounted_position = mounted.position_in_component_m(spec.height_m)
+            mounted_pos = " ".join(f"{value:.8f}" for value in mounted_position)
+            mounted_quat = " ".join(
+                f"{value:.8f}" for value in mounted.quat_wxyz
+            )
+            mounted_rgba = " ".join(f"{value:.5f}" for value in mounted.rgba)
+            geometry += f"""
+      <geom name="{html.escape(mounted.geom_name)}" type="mesh"
+        mesh="{html.escape(mounted.name)}" pos="{mounted_pos}"
+        quat="{mounted_quat}" mass="0" contype="0" conaffinity="0"
+        material="{html.escape(mounted.material_name)}" rgba="{mounted_rgba}"/>"""
         bodies.append(
             f"""
     <body name="{html.escape(spec.body_name)}"
@@ -1111,9 +1417,10 @@ def build_scene_spec(
   <statistic center="{x_center_m:.5f} {y_center_m:.5f} 0.30"
     extent="{max(half_x_m, half_y_m, 0.75):.5f}"/>
   <visual>
-    <headlight diffuse="0.72 0.72 0.72" ambient="0.32 0.32 0.32"
+    <headlight diffuse="0.5 0.5 0.5" ambient="0.2 0.2 0.2"
       specular="0.1 0.1 0.1"/>
-    <global azimuth="135" elevation="-28"/>
+    <global orthographic="false" fovy="45" azimuth="135" elevation="-10"
+      offwidth="3840" offheight="2160"/>
   </visual>
   <asset>
     {(
@@ -1131,13 +1438,22 @@ def build_scene_spec(
       scale="{mesh.mesh_scale:.8f} {mesh.mesh_scale:.8f} {mesh.mesh_scale:.8f}"/>'''
         for mesh in profile.visual_meshes
     )}
+    {''.join(
+        f'''
+    <mesh name="{html.escape(mesh.name)}"
+      file="{html.escape(mesh.mesh_path.as_posix())}"
+      scale="{mesh.mesh_scale:.8f} {mesh.mesh_scale:.8f} {mesh.mesh_scale:.8f}"/>'''
+        for mesh in mounted_visual_assets
+    )}
+    {''.join(
+        f'''
+    <material name="{html.escape(mesh.material_name)}"
+      rgba="{mesh.rgba[0]:.5f} {mesh.rgba[1]:.5f} {mesh.rgba[2]:.5f} {mesh.rgba[3]:.5f}"
+      specular="{mesh.specular:.5f}" shininess="{mesh.shininess:.5f}"/>'''
+        for mesh in mounted_visual_assets
+    )}
     <texture type="skybox" builtin="gradient" rgb1="0.28 0.42 0.62"
       rgb2="0.02 0.025 0.05" width="512" height="3072"/>
-    <texture type="2d" name="table_grid" builtin="checker" mark="edge"
-      rgb1="0.30 0.34 0.38" rgb2="0.18 0.21 0.25" markrgb="0.7 0.72 0.75"
-      width="300" height="300"/>
-    <material name="table_material" texture="table_grid" texuniform="true"
-      texrepeat="20 20" reflectance="0.12"/>
   </asset>
   <worldbody>
     <light pos="0.2 -0.3 1.6" dir="0 0 -1" directional="true"/>
@@ -1145,7 +1461,8 @@ def build_scene_spec(
     <geom name="tabletop" type="box"
       pos="{x_center_m:.8f} {y_center_m:.8f} 0.08"
       size="{half_x_m:.8f} {half_y_m:.8f} 0.04"
-      material="table_material" friction="1 0.01 0.001"/>
+      rgba="0.28 0.34 0.42 1" friction="1 0.01 0.001"/>
+    {storage_tabletop_overlay}
     {''.join(
         f'''
     <geom name="{html.escape(mesh.geom_name)}" type="mesh"

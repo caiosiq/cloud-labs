@@ -7,8 +7,10 @@ import json
 import math
 import os
 import queue
+import struct
 import time
 import traceback
+import zlib
 from collections.abc import Sequence as AbcSequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -61,6 +63,82 @@ MUJOCO_VIEWER_SYNC_HZ_ENV_VAR = "CLOUDLAB_MUJOCO_VIEWER_SYNC_HZ"
 MUJOCO_VIEWER_SYNC_HZ = 60.0
 MUJOCO_PLAYBACK_RATE_ENV_VAR = "CLOUDLAB_MUJOCO_PLAYBACK_RATE"
 MUJOCO_PLAYBACK_RATE = 1.0
+MUJOCO_CAPTURE_DIR_ENV_VAR = "CLOUDLAB_MUJOCO_CAPTURE_DIR"
+MUJOCO_CAPTURE_WIDTH_ENV_VAR = "CLOUDLAB_MUJOCO_CAPTURE_WIDTH"
+MUJOCO_CAPTURE_HEIGHT_ENV_VAR = "CLOUDLAB_MUJOCO_CAPTURE_HEIGHT"
+MUJOCO_CAPTURE_BACKGROUND_ENV_VAR = "CLOUDLAB_MUJOCO_CAPTURE_BACKGROUND"
+MUJOCO_CAPTURE_WIDTH = 3840
+MUJOCO_CAPTURE_HEIGHT = 2160
+MUJOCO_CAPTURE_BACKGROUND = "#8FA2B5"
+# GLFW_KEY_F8. Keep this separate from MuJoCo's built-in P screenshot, which
+# only captures the on-screen framebuffer at window resolution.
+MUJOCO_HIGH_RES_CAPTURE_KEY = 297
+# F9-F12 are unassigned by MuJoCo 3.9. Keep custom viewer controls away from
+# F6/F7 and letter keys, which toggle MuJoCo's built-in visualization modes.
+MUJOCO_PHOTO_PAUSE_KEY = 298
+MUJOCO_COMPONENT_LABEL_KEY = 299
+MUJOCO_MEASUREMENT_MARK_KEY = 300
+MUJOCO_MEASUREMENT_CLEAR_KEY = 301
+MUJOCO_LABEL_OFFSET_M = 0.025
+MUJOCO_RULER_WIDTH_PX = 3.0
+MUJOCO_RULER_RGBA = (1.0, 0.78, 0.12, 1.0)
+# Place ruler endpoints near the mounted optic: 121.412 mm from the housing
+# bottom to the optic support plane, plus another 28 mm for visibility.
+MUJOCO_RULER_HEIGHT_FROM_COMPONENT_BOTTOM_M = 0.149412
+# Exact glyph advances from MuJoCo's normal 150% bitmap font for the active
+# catalog names and ruler values. Unknown printable characters use the average
+# advance so future catalog labels remain approximately centered.
+MUJOCO_FONT_150_CHAR_WIDTH_PX = {
+    " ": 6,
+    "(": 7,
+    ")": 7,
+    ".": 6,
+    **{str(digit): 12 for digit in range(10)},
+    "B": 14,
+    "C": 16,
+    "D": 15,
+    "F": 13,
+    "G": 16,
+    "I": 6,
+    "L": 12,
+    "M": 18,
+    "N": 15,
+    "O": 17,
+    "P": 14,
+    "S": 15,
+    "a": 12,
+    "c": 11,
+    "d": 12,
+    "e": 12,
+    "i": 5,
+    "k": 11,
+    "l": 5,
+    "m": 17,
+    "n": 12,
+    "o": 12,
+    "p": 12,
+    "r": 7,
+    "s": 11,
+    "t": 6,
+    "u": 12,
+    "v": 11,
+}
+MUJOCO_FONT_150_FALLBACK_CHAR_WIDTH_PX = 11
+MUJOCO_RENDER_FLAGS = {
+    mujoco.mjtRndFlag.mjRND_SHADOW: False,
+    mujoco.mjtRndFlag.mjRND_WIREFRAME: False,
+    mujoco.mjtRndFlag.mjRND_REFLECTION: True,
+    mujoco.mjtRndFlag.mjRND_ADDITIVE: False,
+    mujoco.mjtRndFlag.mjRND_SKYBOX: False,
+    mujoco.mjtRndFlag.mjRND_FOG: False,
+    mujoco.mjtRndFlag.mjRND_HAZE: True,
+    mujoco.mjtRndFlag.mjRND_DEPTH: False,
+    mujoco.mjtRndFlag.mjRND_SEGMENT: False,
+    mujoco.mjtRndFlag.mjRND_IDCOLOR: False,
+    mujoco.mjtRndFlag.mjRND_CULL_FACE: True,
+}
+ASSISTED_WELD_ENV_VAR = "CLOUDLAB_MUJOCO_ASSISTED_WELD"
+ASSISTED_WELD_DEFAULT = True
 ARM_SERVO_STIFFNESS_SCALE = 2.0
 GRIPPER_FORCE_LIMIT_N = 65.0
 GRIPPER_PAD_SLIDING_FRICTION = 3.0
@@ -123,6 +201,16 @@ RADIAL_OBSERVATION_HOME_RADIUS_M = 0.193
 RADIAL_OBSERVATION_HOME_THETA_DEG = 0.0
 RADIAL_OBSERVATION_HOME_Z_M = 0.550
 RADIAL_OBSERVATION_HOME_YAW_DEG = 0.0
+# Bench-tested xArm home used throughout lab_automation/managers/robot_manager.py.
+RADIAL_PHYSICAL_HOME_JOINTS_DEG = (
+    180.0,
+    75.0,
+    -180.0,
+    20.0,
+    0.0,
+    90.0,
+    -60.0,
+)
 RADIAL_JOINT_PATH_MIN_SAMPLE_COUNT = 3
 RADIAL_JOINT_PATH_MAX_SAMPLE_COUNT = 24
 RADIAL_JOINT_PATH_MAX_STEP_RAD = math.radians(3.0)
@@ -196,6 +284,20 @@ def _env_float(
     except ValueError as exc:
         raise SimulatorError(f"{name} must be a numeric value") from exc
     return float(np.clip(value, minimum, maximum))
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return bool(default)
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise SimulatorError(
+        f"{name} must be one of 1/0, true/false, yes/no, or on/off"
+    )
 
 
 def _json_safe(value: Any) -> Any:
@@ -653,6 +755,12 @@ class RadialValidateGraspAction:
 
 
 @dataclass(frozen=True)
+class RadialAssistedWeldAction:
+    name: str
+    active: bool
+
+
+@dataclass(frozen=True)
 class RadialClearCollisionAction:
     reason: str
 
@@ -667,6 +775,7 @@ RadialMotionAction = (
     | RadialGripperAction
     | RadialSettleAction
     | RadialValidateGraspAction
+    | RadialAssistedWeldAction
     | RadialClearCollisionAction
     | RadialRebaseAction
 )
@@ -720,6 +829,10 @@ class MuJoCoRobotRuntime:
             minimum=0.1,
             maximum=32.0,
         )
+        self.assisted_weld_enabled = _env_bool(
+            ASSISTED_WELD_ENV_VAR,
+            ASSISTED_WELD_DEFAULT,
+        )
         self.active_request_id: str | None = None
         if self.planner_backend not in {
             MUJOCO_PLANNER_CUSTOM_IK,
@@ -731,6 +844,7 @@ class MuJoCoRobotRuntime:
             show_viewer=bool(show_viewer),
             realtime=bool(realtime),
             playback_rate=self.playback_rate,
+            assisted_weld_enabled=self.assisted_weld_enabled,
         )
         self.model = mujoco.MjModel.from_xml_string(scene.xml)
         self._radial_joint1_route_limits_overridden = False
@@ -810,12 +924,24 @@ class MuJoCoRobotRuntime:
         self.stage_trace: list[str] = []
         self.allowed_collision_tag: Optional[str] = None
         self._gripper_position = GRIPPER_OPEN
+        self._capture_requested = False
+        self._photo_paused = False
+        self._component_labels_visible = False
+        self._measurement_mark_requested = False
+        self._measurement_clear_requested = False
+        self._measurement_tags: list[str] = []
+        self._capture_index = 0
         self._viewer = (
-            mujoco.viewer.launch_passive(self.model, self.data)
+            mujoco.viewer.launch_passive(
+                self.model,
+                self.data,
+                key_callback=self._on_viewer_key,
+            )
             if show_viewer
             else _NullViewer()
         )
         self._viewer_entered = self._viewer.__enter__()
+        self._configure_viewer_camera_and_effects()
         viewer_sync_hz = _env_float(
             MUJOCO_VIEWER_SYNC_HZ_ENV_VAR,
             MUJOCO_VIEWER_SYNC_HZ,
@@ -846,25 +972,37 @@ class MuJoCoRobotRuntime:
             for geom_id in self._radial_frame_boundary_geom_ids
         }
         self._radial_motion_library: RadialMotionLibrary | None = None
+        observation_home_target = self.current_joint_target.copy()
+        physical_home_target: np.ndarray | None = None
         if self.planner_backend == MUJOCO_PLANNER_RADIAL:
-            initial_joint_target = self._radial_observation_home_joints(
+            observation_home_target = self._radial_observation_home_joints(
                 seed=self.current_joint_target,
             )
+            physical_home_target = self._radial_physical_home_joints(
+                reference=observation_home_target,
+            )
+            initial_joint_target = physical_home_target
             self.current_joint_target = initial_joint_target.copy()
             self.data.qpos[:ARM_DOF] = initial_joint_target
             self.data.ctrl[:ARM_DOF] = initial_joint_target
             mujoco.mj_forward(self.model, self.data)
             self._log(
-                "radial_observation_home_selected",
+                "radial_home_poses_selected",
                 keyframe_home_joints=self.home,
-                observation_home_joints=initial_joint_target,
-                observation_home_tcp_m=self.data.site("link_tcp").xpos.copy(),
+                observation_home_joints=observation_home_target,
+                physical_home_joints=physical_home_target,
+                physical_home_tcp_m=self.data.site("link_tcp").xpos.copy(),
             )
         self._settle(0.25)
         self._log(
             "runtime_ready",
             keyframe_home_joints=self.home.tolist(),
-            observation_home_joints=self.current_joint_target.tolist(),
+            observation_home_joints=observation_home_target.tolist(),
+            physical_home_joints=(
+                physical_home_target.tolist()
+                if physical_home_target is not None
+                else None
+            ),
             initial_joint_target=self.current_joint_target.tolist(),
             initial_tcp_m=self.data.site("link_tcp").xpos.copy(),
             component_ids=sorted(self.scene.components),
@@ -872,6 +1010,7 @@ class MuJoCoRobotRuntime:
             gripper_pad_sliding_friction=GRIPPER_PAD_SLIDING_FRICTION,
             gripper_force_range_n=self.model.actuator_forcerange[ARM_DOF].copy(),
             playback_rate=self.playback_rate,
+            assisted_weld_enabled=self.assisted_weld_enabled,
         )
 
     def _log(self, event: str, **payload: Any) -> None:
@@ -913,14 +1052,408 @@ class MuJoCoRobotRuntime:
         except Exception:
             return False
 
+    def _on_viewer_key(self, keycode: int) -> None:
+        keycode = int(keycode)
+        if keycode == MUJOCO_HIGH_RES_CAPTURE_KEY:
+            self._capture_requested = True
+            return
+        if keycode == MUJOCO_PHOTO_PAUSE_KEY:
+            self._photo_paused = not getattr(self, "_photo_paused", False)
+            state = "PAUSED" if self._photo_paused else "RESUMED"
+            print(
+                f"[SIM EDGE] Photo mode {state} (F9 toggles, F8 captures)",
+                flush=True,
+            )
+            return
+        if keycode == MUJOCO_COMPONENT_LABEL_KEY:
+            self._component_labels_visible = not getattr(
+                self,
+                "_component_labels_visible",
+                False,
+            )
+            state = "ON" if self._component_labels_visible else "OFF"
+            print(f"[SIM EDGE] Component labels {state} (F10 toggles)", flush=True)
+            return
+        if keycode == MUJOCO_MEASUREMENT_MARK_KEY:
+            self._measurement_mark_requested = True
+            return
+        if keycode == MUJOCO_MEASUREMENT_CLEAR_KEY:
+            self._measurement_clear_requested = True
+
+    def _selected_component_tag(self) -> str | None:
+        if isinstance(self._viewer_entered, _NullViewer):
+            return None
+        selected_body_id = int(self._viewer_entered.perturb.select)
+        return next(
+            (
+                tag_id
+                for tag_id, body_id in self._component_body_ids.items()
+                if body_id == selected_body_id
+            ),
+            None,
+        )
+
+    def _handle_viewer_measurement_requests(self) -> None:
+        if getattr(self, "_measurement_clear_requested", False):
+            self._measurement_clear_requested = False
+            self._measurement_tags.clear()
+            print("[SIM EDGE] Center measurement cleared (F12)", flush=True)
+
+        if not getattr(self, "_measurement_mark_requested", False):
+            return
+        self._measurement_mark_requested = False
+        tag_id = self._selected_component_tag()
+        if tag_id is None:
+            print(
+                "[SIM EDGE] F11 ignored: double-click a component first",
+                flush=True,
+            )
+            return
+
+        has_pending_start = len(self._measurement_tags) % 2 == 1
+        if has_pending_start and self._measurement_tags[-1] == tag_id:
+            print(
+                "[SIM EDGE] F11 ignored: select a different second component",
+                flush=True,
+            )
+            return
+
+        self._measurement_tags.append(tag_id)
+        spec = self.scene.components[tag_id]
+        if len(self._measurement_tags) % 2 == 1:
+            print(
+                f"[SIM EDGE] Measurement start: {spec.display_name}; "
+                "double-click another component and press F11",
+                flush=True,
+            )
+            return
+
+        first_tag, second_tag = self._measurement_tags[-2:]
+        first = self.data.body(self.scene.components[first_tag].body_name).xpos
+        second = self.data.body(self.scene.components[second_tag].body_name).xpos
+        distance_mm = float(np.linalg.norm(second - first) * 1000.0)
+        print(
+            f"[SIM EDGE] Center distance: "
+            f"{self.scene.components[first_tag].display_name} <-> "
+            f"{self.scene.components[second_tag].display_name} = "
+            f"{distance_mm:.1f} mm",
+            flush=True,
+        )
+
+    @staticmethod
+    def _viewer_text_width_px(text: str) -> int:
+        return sum(
+            MUJOCO_FONT_150_CHAR_WIDTH_PX.get(
+                character,
+                MUJOCO_FONT_150_FALLBACK_CHAR_WIDTH_PX,
+            )
+            for character in str(text)
+        )
+
+    def _centered_viewer_label_position(
+        self,
+        position: np.ndarray,
+        text: str,
+    ) -> np.ndarray:
+        anchor = np.asarray(position, dtype=float).copy()
+        viewport = getattr(self._viewer_entered, "viewport", None)
+        camera = getattr(self._viewer_entered, "cam", None)
+        viewport_height = int(getattr(viewport, "height", 0) or 0)
+        if camera is None or viewport_height <= 0:
+            return anchor
+
+        head_position = np.zeros(3)
+        forward = np.zeros(3)
+        up = np.zeros(3)
+        right = np.zeros(3)
+        mujoco.mjv_cameraFrame(
+            head_position,
+            forward,
+            up,
+            right,
+            self.data,
+            camera,
+        )
+        depth_m = float(np.dot(anchor - head_position, forward))
+        if depth_m <= 0.0:
+            return anchor
+
+        fovy_deg = float(self.model.vis.global_.fovy)
+        if (
+            camera.type == mujoco.mjtCamera.mjCAMERA_FIXED
+            and 0 <= int(camera.fixedcamid) < self.model.ncam
+        ):
+            fovy_deg = float(self.model.cam_fovy[int(camera.fixedcamid)])
+        world_height_m = 2.0 * depth_m * math.tan(math.radians(fovy_deg) / 2.0)
+        world_per_pixel_m = world_height_m / viewport_height
+        half_text_width_m = (
+            self._viewer_text_width_px(text) * world_per_pixel_m / 2.0
+        )
+        return anchor - right * half_text_width_m
+
+    @staticmethod
+    def _init_viewer_label(
+        geom: mujoco.MjvGeom,
+        *,
+        position: np.ndarray,
+        text: str,
+    ) -> None:
+        mujoco.mjv_initGeom(
+            geom,
+            mujoco.mjtGeom.mjGEOM_LABEL,
+            np.zeros(3),
+            np.asarray(position, dtype=float),
+            np.eye(3).reshape(-1),
+            np.array((1.0, 1.0, 1.0, 1.0), dtype=np.float32),
+        )
+        geom.category = mujoco.mjtCatBit.mjCAT_DECOR
+        geom.label = str(text)[:99]
+
+    def _refresh_viewer_overlays(self) -> None:
+        if isinstance(self._viewer_entered, _NullViewer):
+            return
+        user_scene = getattr(self._viewer_entered, "user_scn", None)
+        if not isinstance(user_scene, mujoco.MjvScene):
+            return
+        with self._viewer_entered.lock():
+            user_scene.ngeom = 0
+
+            if getattr(self, "_component_labels_visible", False):
+                for spec in self.scene.components.values():
+                    if user_scene.ngeom >= user_scene.maxgeom:
+                        break
+                    position = self.data.body(spec.body_name).xpos.copy()
+                    position[2] += spec.height_m / 2.0 + MUJOCO_LABEL_OFFSET_M
+                    position = self._centered_viewer_label_position(
+                        position,
+                        spec.display_name,
+                    )
+                    self._init_viewer_label(
+                        user_scene.geoms[user_scene.ngeom],
+                        position=position,
+                        text=spec.display_name,
+                    )
+                    user_scene.ngeom += 1
+
+            complete_endpoint_count = len(self._measurement_tags) // 2 * 2
+            for index in range(0, complete_endpoint_count, 2):
+                first_tag, second_tag = self._measurement_tags[index : index + 2]
+                first = self._ruler_endpoint(first_tag)
+                second = self._ruler_endpoint(second_tag)
+                distance_mm = float(np.linalg.norm(second - first) * 1000.0)
+
+                if user_scene.ngeom < user_scene.maxgeom:
+                    line = user_scene.geoms[user_scene.ngeom]
+                    mujoco.mjv_initGeom(
+                        line,
+                        mujoco.mjtGeom.mjGEOM_LINE,
+                        np.zeros(3),
+                        np.zeros(3),
+                        np.eye(3).reshape(-1),
+                        np.array(MUJOCO_RULER_RGBA, dtype=np.float32),
+                    )
+                    mujoco.mjv_connector(
+                        line,
+                        mujoco.mjtGeom.mjGEOM_LINE,
+                        MUJOCO_RULER_WIDTH_PX,
+                        first,
+                        second,
+                    )
+                    line.category = mujoco.mjtCatBit.mjCAT_DECOR
+                    user_scene.ngeom += 1
+
+                if user_scene.ngeom < user_scene.maxgeom:
+                    midpoint = (first + second) / 2.0
+                    midpoint[2] += MUJOCO_LABEL_OFFSET_M
+                    distance_text = f"{distance_mm:.1f} mm"
+                    midpoint = self._centered_viewer_label_position(
+                        midpoint,
+                        distance_text,
+                    )
+                    self._init_viewer_label(
+                        user_scene.geoms[user_scene.ngeom],
+                        position=midpoint,
+                        text=distance_text,
+                    )
+                    # MuJoCo's classic renderer hard-codes mjGEOM_LABEL glyphs
+                    # to white; the geom RGBA cannot change the text color.
+                    user_scene.ngeom += 1
+
+    def _ruler_endpoint(self, tag_id: str) -> np.ndarray:
+        spec = self.scene.components[tag_id]
+        endpoint = self.data.body(spec.body_name).xpos.copy()
+        endpoint[2] += (
+            MUJOCO_RULER_HEIGHT_FROM_COMPONENT_BOTTOM_M - spec.height_m / 2.0
+        )
+        return endpoint
+
+    def _sync_viewer(self) -> None:
+        self._refresh_viewer_overlays()
+        self._viewer_entered.sync()
+        self._handle_viewer_measurement_requests()
+        # Prepare newly selected endpoints for the following viewer frame.
+        self._refresh_viewer_overlays()
+
+    @staticmethod
+    def _set_render_flags(scene: mujoco.MjvScene) -> None:
+        for flag, enabled in MUJOCO_RENDER_FLAGS.items():
+            scene.flags[flag] = bool(enabled)
+
+    @staticmethod
+    def _disable_model_textures(option: mujoco.MjvOption) -> None:
+        option.flags[mujoco.mjtVisFlag.mjVIS_TEXTURE] = False
+
+    def _configure_viewer_camera_and_effects(self) -> None:
+        if isinstance(self._viewer_entered, _NullViewer):
+            return
+        with self._viewer_entered.lock():
+            camera = self._viewer_entered.cam
+            camera.lookat[:] = (0.0, 0.0, 0.0)
+            camera.azimuth = 135.0
+            camera.elevation = -10.0
+            camera.orthographic = 0
+            self._disable_model_textures(self._viewer_entered.opt)
+            user_scene = self._viewer_entered.user_scn
+            if user_scene is not None:
+                self._set_render_flags(user_scene)
+
+    @staticmethod
+    def _write_rgb_png(path: Path, pixels: np.ndarray) -> None:
+        image = np.asarray(pixels, dtype=np.uint8)
+        if image.ndim != 3 or image.shape[2] != 3:
+            raise ValueError("PNG capture requires an HxWx3 RGB image")
+        height, width, _ = image.shape
+
+        def chunk(kind: bytes, payload: bytes) -> bytes:
+            return (
+                struct.pack(">I", len(payload))
+                + kind
+                + payload
+                + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+            )
+
+        scanlines = b"".join(
+            b"\x00" + np.ascontiguousarray(row).tobytes()
+            for row in image
+        )
+        png = b"\x89PNG\r\n\x1a\n"
+        png += chunk(
+            b"IHDR",
+            struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0),
+        )
+        png += chunk(b"IDAT", zlib.compress(scanlines, level=6))
+        png += chunk(b"IEND", b"")
+        path.write_bytes(png)
+
+    def _copy_viewer_camera(self) -> mujoco.MjvCamera:
+        camera = mujoco.MjvCamera()
+        with self._viewer_entered.lock():
+            source = self._viewer_entered.cam
+            camera.type = source.type
+            camera.fixedcamid = source.fixedcamid
+            camera.trackbodyid = source.trackbodyid
+            camera.lookat[:] = source.lookat
+            camera.distance = source.distance
+            camera.azimuth = source.azimuth
+            camera.elevation = source.elevation
+            camera.orthographic = source.orthographic
+        return camera
+
+    @staticmethod
+    def _parse_hex_rgb(value: str) -> np.ndarray:
+        raw = str(value or "").strip().removeprefix("#")
+        if len(raw) != 6:
+            raise ValueError("capture background must be a six-digit hex color")
+        try:
+            return np.array(
+                [int(raw[index : index + 2], 16) for index in (0, 2, 4)],
+                dtype=np.uint8,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "capture background must be a six-digit hex color"
+            ) from exc
+
+    def _capture_high_resolution_png(self) -> Path:
+        width = int(
+            _env_float(
+                MUJOCO_CAPTURE_WIDTH_ENV_VAR,
+                MUJOCO_CAPTURE_WIDTH,
+                minimum=640,
+                maximum=float(self.model.vis.global_.offwidth),
+            )
+        )
+        height = int(
+            _env_float(
+                MUJOCO_CAPTURE_HEIGHT_ENV_VAR,
+                MUJOCO_CAPTURE_HEIGHT,
+                minimum=480,
+                maximum=float(self.model.vis.global_.offheight),
+            )
+        )
+        capture_root = Path(
+            os.getenv(MUJOCO_CAPTURE_DIR_ENV_VAR)
+            or (Path.cwd() / "simulation_edge" / "captures")
+        ).expanduser().resolve()
+        capture_root.mkdir(parents=True, exist_ok=True)
+        background_hex = os.getenv(
+            MUJOCO_CAPTURE_BACKGROUND_ENV_VAR,
+            MUJOCO_CAPTURE_BACKGROUND,
+        )
+        background_rgb = self._parse_hex_rgb(background_hex)
+        self._capture_index += 1
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        image_path = capture_root / f"cloudlabs_{timestamp}_{self._capture_index:03d}.png"
+        camera = self._copy_viewer_camera()
+        scene_option = mujoco.MjvOption()
+        self._disable_model_textures(scene_option)
+        with mujoco.Renderer(self.model, height=height, width=width) as renderer:
+            renderer.update_scene(
+                self.data,
+                camera=camera,
+                scene_option=scene_option,
+            )
+            self._set_render_flags(renderer.scene)
+            pixels = renderer.render().copy()
+            renderer.enable_segmentation_rendering()
+            renderer.update_scene(
+                self.data,
+                camera=camera,
+                scene_option=scene_option,
+            )
+            segmentation = renderer.render()
+            pixels[np.all(segmentation == -1, axis=2)] = background_rgb
+        self._write_rgb_png(image_path, pixels)
+        print(
+            f"[SIM EDGE] Saved {width}x{height} MuJoCo render: {image_path}",
+            flush=True,
+        )
+        return image_path
+
     def _step(self) -> None:
         if not self.viewer_running():
             raise ViewerClosedError("MuJoCo viewer was closed")
+        if getattr(self, "_capture_requested", False):
+            self._capture_requested = False
+            try:
+                self._capture_high_resolution_png()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[SIM EDGE] PNG capture failed: {exc}", flush=True)
+        if getattr(self, "_photo_paused", False):
+            # Do not advance MuJoCo time or consume a trajectory sample. The
+            # surrounding motion loops are simulation-time based, so the exact
+            # command resumes from this state when F9 is pressed again.
+            now = time.perf_counter()
+            if now - self._last_viewer_sync_perf_s >= self._viewer_sync_interval_s:
+                self._sync_viewer()
+                self._last_viewer_sync_perf_s = time.perf_counter()
+            time.sleep(min(0.01, self._viewer_sync_interval_s))
+            return
         started = time.perf_counter()
         mujoco.mj_step(self.model, self.data)
         now = time.perf_counter()
         if now - self._last_viewer_sync_perf_s >= self._viewer_sync_interval_s:
-            self._viewer_entered.sync()
+            self._sync_viewer()
             # Measure the next frame interval from the end of rendering. Some
             # viewer/driver combinations block in sync(); recording `now`
             # before that block made every following 2-ms physics step render
@@ -2956,6 +3489,19 @@ class MuJoCoRobotRuntime:
             )
         return np.asarray(self.home, dtype=float).copy()
 
+    def _radial_physical_home_joints(
+        self,
+        *,
+        reference: np.ndarray,
+    ) -> np.ndarray:
+        target = np.radians(
+            np.asarray(RADIAL_PHYSICAL_HOME_JOINTS_DEG, dtype=float)
+        )
+        return self._nearest_equivalent_joints(
+            target,
+            np.asarray(reference, dtype=float),
+        )
+
     def _radial_observation_home_joints(
         self,
         *,
@@ -4874,6 +5420,37 @@ class MuJoCoRobotRuntime:
         )
         return tuple(stages)
 
+    def _preflight_radial_physical_home_transition(
+        self,
+        stage: RadialJointStagePlan,
+    ) -> None:
+        """Check a bench-home transition without radial workspace assumptions."""
+        self._validate_radial_wrist_travel(stage.name, stage.waypoints)
+        for start, end in zip(stage.waypoints, stage.waypoints[1:]):
+            self._preflight_joint_path(
+                start,
+                end,
+                allowed_tag=None,
+                sample_count=_radial_joint_path_sample_count(start, end),
+            )
+        self._preview_joint_target(stage.waypoints[-1])
+
+    def _plan_radial_physical_home_transition(
+        self,
+        *,
+        to_observation_home: bool,
+    ) -> RadialJointStagePlan:
+        start = self.current_joint_target.copy()
+        if to_observation_home:
+            name = "physical home to radial observation home"
+            target = self._radial_observation_home_joints(seed=start)
+        else:
+            name = "radial observation home to physical home"
+            target = self._radial_physical_home_joints(reference=start)
+        stage = RadialJointStagePlan(name, (start, target), None)
+        self._preflight_radial_physical_home_transition(stage)
+        return stage
+
     def _plan_radial_observation_home(
         self,
         *,
@@ -5230,6 +5807,21 @@ class MuJoCoRobotRuntime:
             ),
         )
 
+    def _radial_assisted_weld_actions(
+        self,
+        *,
+        active: bool,
+    ) -> tuple[RadialMotionAction, ...]:
+        if not self.assisted_weld_enabled:
+            return ()
+        name = "activate assisted weld" if active else "deactivate assisted weld"
+        actions: list[RadialMotionAction] = [
+            RadialAssistedWeldAction(name, bool(active))
+        ]
+        if active:
+            actions.append(RadialSettleAction("", 0.08))
+        return tuple(actions)
+
     def _build_radial_motion_plan(
         self,
         tag_id: str,
@@ -5291,6 +5883,9 @@ class MuJoCoRobotRuntime:
 
         preflight_snapshot = self._motion_snapshot()
         try:
+            radial_home_entry_stage = self._plan_radial_physical_home_transition(
+                to_observation_home=True,
+            )
             radial_pickup_stages, radial_lift_stage = self._plan_radial_manual_pickup(
                 tag_id,
                 pickup_adapter,
@@ -5358,6 +5953,9 @@ class MuJoCoRobotRuntime:
                 start_xy=target_transfer_xy,
                 start_rotation=target_rotation,
             )
+            radial_physical_home_stage = self._plan_radial_physical_home_transition(
+                to_observation_home=False,
+            )
             self._log(
                 "radial_transaction_preflight_success",
                 tag_id=tag_id,
@@ -5379,6 +5977,7 @@ class MuJoCoRobotRuntime:
 
         actions: list[RadialMotionAction] = [
             RadialGripperAction("open gripper", GRIPPER_OPEN),
+            self._radial_joint_stage_action(radial_home_entry_stage),
         ]
         actions.extend(
             self._radial_joint_stage_action(stage)
@@ -5389,6 +5988,7 @@ class MuJoCoRobotRuntime:
                 RadialGripperAction("close while stationary", GRIPPER_CLOSED),
                 RadialSettleAction("secure physical grasp", 0.20),
                 RadialValidateGraspAction("pickup"),
+                *self._radial_assisted_weld_actions(active=True),
                 self._radial_joint_stage_action(
                     radial_lift_stage,
                     attached_tag=tag_id,
@@ -5427,6 +6027,7 @@ class MuJoCoRobotRuntime:
                     attached_tag=tag_id,
                 ),
                 RadialGripperAction("open and release", GRIPPER_OPEN),
+                *self._radial_assisted_weld_actions(active=False),
                 RadialSettleAction("", 0.25),
                 RadialClearCollisionAction("post-release"),
                 self._radial_joint_stage_action(radial_retreat_stage),
@@ -5440,7 +6041,8 @@ class MuJoCoRobotRuntime:
             self._radial_joint_stage_action(stage)
             for stage in radial_home_stages
         )
-        actions.append(RadialRebaseAction("radial observation home"))
+        actions.append(self._radial_joint_stage_action(radial_physical_home_stage))
+        actions.append(RadialRebaseAction("physical home"))
 
         return RadialMotionPlan(
             tag_id=tag_id,
@@ -5466,43 +6068,57 @@ class MuJoCoRobotRuntime:
 
         spec = self.scene.components[plan.tag_id]
         self.allowed_collision_tag = None
-        for action in plan.actions:
-            if isinstance(action, RadialGripperAction):
-                self.stage_trace.append(action.name)
-                arm.set_gripper_position(action.position, wait=True)
-            elif isinstance(action, RadialSettleAction):
-                if action.name:
+        assisted_weld_active = False
+        try:
+            for action in plan.actions:
+                if isinstance(action, RadialGripperAction):
                     self.stage_trace.append(action.name)
-                self._settle(action.duration_s)
-            elif isinstance(action, RadialValidateGraspAction):
-                self._validate_physical_grasp(spec, stage=action.stage)
-            elif isinstance(action, RadialClearCollisionAction):
-                self.allowed_collision_tag = None
-            elif isinstance(action, RadialJointStageAction):
-                attached_pose = (
-                    self._component_relative_pose(action.attached_tag)
-                    if action.attached_tag is not None
-                    else None
-                )
-                stage = action.stage
-                self._execute_radial_joint_waypoints(
-                    stage.name,
-                    stage.waypoints,
-                    allowed_tag=stage.allowed_tag,
-                    attached_pose=attached_pose,
-                    prevalidated=True,
-                )
-                if action.validate_grasp_after:
-                    self._validate_physical_grasp(
-                        spec,
-                        stage=action.validate_grasp_after,
+                    arm.set_gripper_position(action.position, wait=True)
+                elif isinstance(action, RadialSettleAction):
+                    if action.name:
+                        self.stage_trace.append(action.name)
+                    self._settle(action.duration_s)
+                elif isinstance(action, RadialValidateGraspAction):
+                    self._validate_physical_grasp(spec, stage=action.stage)
+                elif isinstance(action, RadialAssistedWeldAction):
+                    self._set_assisted_weld(spec, active=action.active)
+                    assisted_weld_active = bool(action.active)
+                    self.stage_trace.append(action.name)
+                elif isinstance(action, RadialClearCollisionAction):
+                    self.allowed_collision_tag = None
+                elif isinstance(action, RadialJointStageAction):
+                    attached_pose = (
+                        self._component_relative_pose(action.attached_tag)
+                        if action.attached_tag is not None
+                        else None
                     )
-            elif isinstance(action, RadialRebaseAction):
-                self._rebase_radial_periodic_joint_branches(
-                    reason=action.reason,
+                    stage = action.stage
+                    self._execute_radial_joint_waypoints(
+                        stage.name,
+                        stage.waypoints,
+                        allowed_tag=stage.allowed_tag,
+                        attached_pose=attached_pose,
+                        prevalidated=True,
+                    )
+                    if action.validate_grasp_after:
+                        self._validate_physical_grasp(
+                            spec,
+                            stage=action.validate_grasp_after,
+                        )
+                elif isinstance(action, RadialRebaseAction):
+                    self._rebase_radial_periodic_joint_branches(
+                        reason=action.reason,
+                    )
+                else:
+                    raise SimulatorError(f"unknown radial plan action {action!r}")
+        finally:
+            if assisted_weld_active:
+                self._set_assisted_weld(spec, active=False)
+                self._log(
+                    "assisted_weld_emergency_release",
+                    tag_id=spec.tag_id,
+                    state=self._runtime_snapshot(),
                 )
-            else:
-                raise SimulatorError(f"unknown radial plan action {action!r}")
 
     def _pick_and_place_radial(
         self,
@@ -5666,6 +6282,46 @@ class MuJoCoRobotRuntime:
                 f"lateral={lateral * 1000.0:.1f} mm, "
                 f"vertical={vertical * 1000.0:.1f} mm"
             )
+
+    def _align_assisted_weld_site_to_tcp(self, spec: ComponentSpec) -> None:
+        """Make weld activation preserve the component's current grasp pose."""
+        mujoco.mj_forward(self.model, self.data)
+        tcp = self.data.site("link_tcp")
+        component = self.data.body(spec.body_name)
+        component_rotation = component.xmat.reshape(3, 3)
+        tcp_rotation = tcp.xmat.reshape(3, 3)
+        site_id = self.model.site(spec.site_name).id
+        self.model.site_pos[site_id] = component_rotation.T @ (
+            tcp.xpos - component.xpos
+        )
+        self.model.site_quat[site_id] = _matrix_to_quat_wxyz(
+            component_rotation.T @ tcp_rotation
+        )
+
+    def _reset_assisted_weld_site(self, spec: ComponentSpec) -> None:
+        site_id = self.model.site(spec.site_name).id
+        self.model.site_pos[site_id] = (0.0, 0.0, spec.grasp_site_local_z_m)
+        self.model.site_quat[site_id] = (0.0, 0.0, 1.0, 0.0)
+
+    def _set_assisted_weld(self, spec: ComponentSpec, *, active: bool) -> None:
+        weld_id = self.model.equality(spec.weld_name).id
+        if active:
+            # A site-based MuJoCo weld aligns both site frames. Reposition its
+            # component-side site to the measured TCP frame before enabling it
+            # so the constraint starts with zero position/orientation error.
+            self._align_assisted_weld_site_to_tcp(spec)
+            self.data.eq_active[weld_id] = 1
+        else:
+            self.data.eq_active[weld_id] = 0
+            self._reset_assisted_weld_site(spec)
+        mujoco.mj_forward(self.model, self.data)
+        self._log(
+            "assisted_weld_changed",
+            tag_id=spec.tag_id,
+            weld_name=spec.weld_name,
+            active=bool(active),
+            state=self._runtime_snapshot(),
+        )
 
     def _physical_grasp_contact_bodies(self, spec: ComponentSpec) -> set[str]:
         mujoco.mj_forward(self.model, self.data)

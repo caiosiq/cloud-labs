@@ -1,6 +1,6 @@
 {
-  "system_status": "HOLDING",
-  "last_updated": "2026-07-31T12:00:52.575140",
+  "system_status": "IDLE",
+  "last_updated": "2026-09-07T16:31:29.809171",
   "components": {
     "tag_18": {
       "id": "tag_18",
@@ -64,7 +64,8 @@
             "live": false,
             "backend": null,
             "resource_id": null,
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -139,7 +140,8 @@
             "live": false,
             "backend": null,
             "resource_id": null,
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -205,7 +207,8 @@
             "live": false,
             "backend": "table_cam",
             "resource_id": "cam_gripper_2",
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -273,7 +276,8 @@
             "live": false,
             "backend": null,
             "resource_id": null,
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -339,7 +343,8 @@
             "live": false,
             "backend": "overhead",
             "resource_id": "cam_table_top",
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -404,7 +409,8 @@
             "live": false,
             "backend": null,
             "resource_id": null,
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -475,7 +481,8 @@
             "live": false,
             "backend": null,
             "resource_id": null,
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -543,7 +550,8 @@
             "live": false,
             "backend": null,
             "resource_id": null,
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -609,7 +617,8 @@
             "live": false,
             "backend": null,
             "resource_id": null,
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -677,7 +686,8 @@
             "live": false,
             "backend": null,
             "resource_id": null,
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -743,7 +753,8 @@
             "live": false,
             "backend": "table_cam",
             "resource_id": "cam_gripper_1",
-            "last_error": null
+            "last_error": null,
+            "live_exposure_time_ms": null
           }
         }
       },
@@ -751,13 +762,8 @@
     }
   },
   "holding": {
-    "tag_id": "tag_11",
-    "nominal_pose": {
-      "x": -393.1010137028703,
-      "y": 200.11223163966798,
-      "rotation": 0.0,
-      "z": 245.0
-    },
+    "tag_id": null,
+    "nominal_pose": null,
     "requires_operator_confirm": false
   },
   "optimization_step": 0,
