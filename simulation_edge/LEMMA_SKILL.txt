@@ -1,0 +1,500 @@
+CLOUD LABS OPERATING SKILL FOR AI AGENTS
+=========================================
+
+Purpose
+-------
+
+Use this skill when an AI agent needs to inspect or operate a Cloud Labs bench,
+especially the local MuJoCo-backed simulation. The agent must treat the Cloud
+Labs coordinator as the authority for lab state and commands. Do not manipulate
+MuJoCo directly when a Cloud Labs primitive or simulation-preset operation is
+available.
+
+This document is simulation-first, but it calls out the boundary between the
+simulation and a physical experiment. Never assume that a simulation-only
+operation is safe or available on physical hardware.
+
+
+Local endpoints and identity
+----------------------------
+
+- Cloud Labs coordinator and UI: http://127.0.0.1:8000
+- Twin UI: http://127.0.0.1:8000/twin
+- Simulation edge: http://127.0.0.1:8120
+- MuJoCo simulation backend_id: sim.default
+- Coordinates are lab-frame millimetres. Rotations are degrees.
+
+Check GET /api/backends before acting. Select a backend that is reported ready.
+For this local simulation, explicitly select sim.default; do not rely on whichever
+backend happens to be first or currently visible in a browser tab.
+
+
+Preferred control path
+----------------------
+
+For autonomous or multi-step work, use the Python cloudlabs client. It acquires
+and maintains the exclusive command lease, sends the same primitives as the
+Twin UI, and releases the lease on exit.
+
+Install once from the cloud-labs repository root if needed:
+
+    pip install -e ./packages/cloudlabs
+
+Minimal pattern:
+
+    from cloudlabs import connect
+
+    with connect(
+        "sim.default",
+        base_url="http://127.0.0.1:8000",
+        holder="lemma",
+    ) as lab:
+        before = lab.get_lab_state()
+        if before.get("system_status") != "IDLE":
+            raise RuntimeError(
+                f"Lab is not idle: {before.get('system_status')}"
+            )
+
+        tag_id = "tag_13"
+        if tag_id not in (before.get("components") or {}):
+            raise KeyError(f"Component is not active: {tag_id}")
+
+        lab.move_pose(tag_id, x=-300, y=0, rotation=-90)
+        after = lab.wait_for_primitive_settled(timeout_s=180)
+
+        pose = (
+            after["components"][tag_id]["statecontrol"]
+            ["tunables"]["nominal_pose"]
+        )
+        assert pose == {"x": -300.0, "y": 0.0, "rotation": -90.0}
+
+The fluent equivalent is:
+
+    lab.components["tag_13"].move(x=-300, y=0, rotation=-90)
+    lab.wait_for_primitive_settled(timeout_s=180)
+
+Use one full-pose move rather than three separate x/y/rotation commands.
+
+
+Mandatory observe-act-verify loop
+---------------------------------
+
+For every action:
+
+1. Read the current lab state.
+2. Confirm the intended backend and system_status.
+3. Resolve the target to a real tag_id from components or the component catalog.
+   Never invent a tag ID and never choose a component only from its screen label.
+4. Inspect the target's presence, storage state, nominal pose, and held state.
+5. Check that the requested pose or operation is plausible and unambiguous.
+6. Send one primitive.
+7. Wait for the primitive to settle. Do not issue concurrent motion commands.
+8. Read state again and verify the requested effect.
+9. Report the backend, primitive, target, requested values, final values, and any
+   refusal or uncertainty.
+
+For a request containing multiple actions, repeat the complete observe -> act ->
+wait -> verify cycle for every action. "Send one primitive" means one at a time,
+not only one total. Continue through the requested sequence after each verified
+success, and do not report completion until every requested action has
+succeeded or a specific failure has been reported.
+
+Normally issue motion only while system_status is IDLE. HOLDING is a deliberate
+in-air state and only holding-compatible primitives are valid there. BUSY,
+OPTIMIZING, and TELEOP mean the agent must wait or stop rather than competing
+with the current operation.
+
+
+Component orientation
+---------------------
+
+Reason about each component's semantic input direction; knowledge of the
+physical tracking marker is not required.
+
+- At rotation = 0 degrees, the component input direction points along lab +x.
+- Positive rotation is counterclockwise when viewed from above.
+- Orient the input direction along the incoming beam's propagation direction.
+- Components in storage normally use 0 degrees.
+
+For a beam traveling from source (x1, y1) to destination (x2, y2), compute:
+
+    dx = x2 - x1
+    dy = y2 - y1
+    rotation_deg = atan2(dy, dx) * 180 / pi
+
+Therefore +x is 0 degrees, +y is 90 degrees, -x is 180 degrees, and -y is
+-90 degrees. A beam traveling from +y toward -y requires -90 degrees. Apply
+this convention when translating an Optiland or paper-derived layout into
+Cloud Labs component poses.
+
+
+Physical housing and layout clearance
+-------------------------------------
+
+Plan mounted assemblies, not bare optics. Lens diameter, clear aperture, and an
+ideal optical-axis point do not describe the space occupied by the housing,
+base, or gripper clearance.
+
+When local coordinator routes are available, read /api/catalog and
+/api/lab-layout before proposing or executing a layout. Cloud Labs uses a
+conservative center-spacing rule based on catalog footprints:
+
+    radius = sqrt(width^2 + height^2) / 2
+    center_distance >= radius_1 + radius_2 + 5 mm
+
+The current optical-housing catalog entries are 62 x 62 mm, which requires at
+least 92.7 mm between two housing centers. The MuJoCo optical_housings profile
+models an approximately 72 x 64.3 mm body and a 75 mm-diameter base. Therefore:
+
+- never substitute the optic diameter for the component footprint;
+- use live catalog sizes when available and fail closed on an unknown size;
+- let Twin/backend collision validation remain authoritative;
+- also check frame clearance, the robot-base danger zone, storage bounds, and
+  motion reachability.
+
+For Optiland or another optical-design agent, pass this as an explicit design
+constraint: its component coordinates must satisfy the Cloud Labs housing
+center-spacing rule. Treat an optical solution that violates it as mechanically
+infeasible and redesign it before attempting Cloud Labs commands. Do not rely on
+the execution layer to repair an over-packed optical layout.
+
+
+How to read the lab
+-------------------
+
+The complete coordinator state is available through:
+
+    GET http://127.0.0.1:8000/api/lab-state?backend_id=sim.default
+
+In Python:
+
+    state = lab.get_lab_state()
+
+This is the Tier-C overview: component membership, layout, commanded state,
+saved measurements, holding state, jobs, and leases. It is appropriate for
+planning and verification, but it is not a high-rate scientific telemetry feed.
+
+Important component paths:
+
+- components.<tag>.statecontrol.tunables
+  Commanded intent, including nominal_pose, nominal_motor_positions, presence,
+  and storage.
+- components.<tag>.statecontrol.measurables
+  Last recorded lab-reported measurements. These can be stale until explicitly
+  recorded.
+- components.<tag>.parameters
+  Static identity and constants.
+- components.<tag>.telemetry
+  Live-feed and TeleOp session metadata, not the high-rate payload itself.
+- holding
+  The currently held tag, its airborne pose, and whether operator confirmation
+  is required.
+
+Read endpoints for one component:
+
+    GET /api/components/<tag>/tunables?backend_id=sim.default
+    GET /api/components/<tag>/measurables?backend_id=sim.default
+    GET /api/components/<tag>/parameters?backend_id=sim.default
+
+GET_MEASURABLES returns saved values. To request a fresh measurement, use
+RECORD_MEASURABLES, for example:
+
+    image = lab.capture_measurable("tag_22", "camera_image")
+
+
+Twin Command Console
+--------------------
+
+The Command Console is a browser client of the same coordinator; it is not a
+separate source of truth. Use it when a human wants to watch an exact command
+being entered in the already-open Twin tab. Use the Python client for reliable
+agent automation.
+
+Useful read commands:
+
+    help
+    labstate
+    labstate --json
+    tunables <tag_id-or-name>
+    measurables <tag_id-or-name>
+    record <tag_id-or-name>
+    lasers
+
+labstate is a concise but complete report: it emits one full COMPONENT JSON
+record per component plus LAB_META for every non-component top-level field.
+labstate --json returns the untouched full state JSON. The alias state works too.
+
+Useful action commands:
+
+    move <tag-or-name> <x_mm> <y_mm> <rotation_deg>
+    movelaser <tag-or-name> <y_mm> <rotation_deg> [laser-line]
+    store <tag-or-name>
+    store <tag-or-name> <slot_i> <slot_j>
+    place <tag-or-name> <x_mm> <y_mm> <rotation_deg>
+    placelaser <tag-or-name> <y_mm> <rotation_deg> [laser-line]
+    motor <tag-or-name> <motor_id> <distance>
+    motorhome <tag-or-name> <motor_id>
+    motorset0 <tag-or-name> <motor_id>
+    pick <tag-or-name>
+    hover <tag-or-name> <x_mm> <y_mm> <rotation_deg> <z_mm>
+    placehover <tag-or-name> <x_mm> <y_mm> <rotation_deg>
+    confirmhold <tag-or-name>
+
+The console also accepts an expert-only raw primitive:
+
+    json {"action":"MOVE_COMPONENT","target_id":"tag_13","parameters":{"target_x":-300,"target_y":0,"rotation":-90}}
+
+Prefer the named command or Python client. Raw JSON bypasses some convenient
+client-side resolution and preview checks, although the backend still validates
+the primitive.
+
+The console command refresh re-records component poses; it is not the same as
+restarting MuJoCo. Do not confuse refresh with simreset current.
+
+
+Simulation component definitions and active inventory
+-----------------------------------------------------
+
+A paper may require a lens focal length, filter, optic, or other component that
+is not active at startup. Do not create one catalog row for every possible lens
+variant. Cloud Labs uses reusable generic MuJoCo housings plus parameterized
+component definitions.
+
+Definitions, active instances, and arrangements are distinct:
+
+- Built-in definitions are immutable source data.
+- A built-in `configure` is stored as a separate simulation-only override;
+  `reset` restores the built-in definition.
+- Tags are always canonical positive integers: tag_1, tag_2, and so on. Call
+  `simcomponent nexttag` immediately before each definition and use exactly the
+  returned tag. Never invent a descriptive tag or reuse an existing number.
+- `define` creates a persistent custom definition identified by that stable
+  numeric tag. Its MuJoCo representation is the standard generic housing/black
+  box.
+- `insert` and `remove` change the current live simulation only.
+- `simsave` preserves the resulting arrangement as a named preset.
+- For several components, do not repeatedly insert and restart. Define or
+  configure the required tags, author all desired poses in one `simwrite`, then
+  load that preset once. `simwrite` can introduce a known library tag even when
+  the chosen base currently has no active components.
+
+Commands:
+
+    simcomponent list
+    simcomponent nexttag
+    simcomponent show <tag>
+    simcomponent define <tag> <json_object>
+    simcomponent configure <tag> <json_patch>
+    simcomponent reset <tag>
+    simcomponent insert <tag> <x_mm> <y_mm> <rotation_deg>
+    simcomponent insert <tag> storage <slot_i> <slot_j>
+    simcomponent remove <tag>
+    simcomponent delete <tag>
+    simclear [table|all]
+
+`simcomponent list` and `show` expose tag_id, name, type, parameters, housing,
+active, and placement. Housing is read-only and contains footprint_mm,
+height_mm, and clearance_radius_mm. The response also supplies
+pair_clearance_margin_mm. For every proposed pair require:
+
+    center_distance >= radius_1 + radius_2 + pair_clearance_margin_mm
+
+List returns all records, show returns one, and nexttag returns only the next
+unused tag. Allowed editable fields are name, type, and parameters; Cloud Labs
+owns housing geometry. Put focal_length_mm, coating, filter band, material,
+wavelength, and other experimental meaning in parameters. Parameter changes
+are metadata for Optiland and planning; MuJoCo does not simulate optical
+behavior. Use type GENERIC_COMPONENT when a paper component has no better
+model yet.
+
+Example (each command is one line):
+
+    simcomponent nexttag
+    simcomponent define tag_100 {"name":"Paper lens","type":"OPTICAL_LENS","parameters":{"focal_length_mm":175,"filter":"longpass"}}
+    simcomponent insert tag_100 -200 120 0
+    simsave paper_layout_1
+
+Rules:
+
+- Read `simcomponent list`, then call `simcomponent nexttag` immediately before
+  defining a tag. Use exactly the returned numeric tag.
+- Definitions never contain poses. A tag is a stable component instance label;
+  to change it, remove/delete it and define a new tag explicitly.
+- `configure` merges parameter keys; a parameter value of null removes that key.
+- `remove` preserves the definition. `delete` works only for an inactive custom
+  definition. Built-ins cannot be deleted.
+- `simclear table` removes breadboard components but keeps storage. `simclear all`
+  removes every active component. Neither command deletes definitions.
+- After every live change, wait for the MuJoCo restart and verify both lab state
+  and the active catalog before continuing.
+- All commands in this section are simulation-only and require IDLE. They do not
+  imply that equivalent physical hardware exists.
+
+For a paper-derived experiment: extract component requirements, reuse and
+configure compatible definitions when possible, define generic black boxes for
+missing simulation-only parts, author the complete collision-safe arrangement
+with `simwrite`, and load it once with `simreset`. Use individual `insert` only
+for incremental work. Report separately which parts are exact models,
+parameterized surrogates, black boxes, or unavailable on the physical bench.
+
+
+Direct HTTP primitives
+----------------------
+
+Direct HTTP is appropriate only when the agent correctly manages a Cloud Labs
+lease. POST /api/command can require an exclusive lease. The backend selector
+must be supplied as X-CloudLabs-Backend: sim.default or as backend_id in the
+query. The command lease must be supplied as X-CloudLabs-Lease (the SDK also
+includes lease_id in the command body).
+
+Primitive body example:
+
+    {
+      "action": "MOVE_COMPONENT",
+      "target_id": "tag_13",
+      "parameters": {
+        "target_x": -300,
+        "target_y": 0,
+        "rotation": -90
+      }
+    }
+
+Do not work around a lease conflict. A conflict means another client controls
+the bench; stop, report it, or wait as directed. Prefer cloudlabs.connect()
+instead of hand-writing lease acquisition, heartbeat, and release logic.
+
+
+Simulation presets
+------------------
+
+Simulation presets are initialization/workspace states, not version-control
+commits. They are available only for the simulation backend and only while the
+lab is IDLE.
+
+Command Console operations:
+
+    simreset list
+    simreset current
+    simreset default
+    simreset <preset_name>
+    simsave <preset_name>
+    simsave <preset_name> --overwrite
+    simshow current|default|<preset_name>
+    simwrite <preset_name> [--overwrite] <json_object>
+
+Meanings:
+
+- simreset current: close and reopen only MuJoCo from the current working state.
+- simreset default: restore simulation_edge/lab_view/lab_state.json.
+- simreset <name>: load simulation_edge/lab_view/states/<name>.json.
+- simsave <name>: normalize and save the current simulation state as a named
+  preset. It strips transient leases, jobs, telemetry, held state, and noise.
+- simshow <name>: return compact editable JSON without loading or changing the
+  live simulation. The returned object is accepted directly by simwrite.
+- simwrite <name> <json>: validate and atomically save an authored preset without
+  moving components or restarting MuJoCo. The JSON must name an explicit base
+  (current, default, or a named preset); omitted components retain base values,
+  and known library tags absent from the base are materialized from their
+  definitions.
+
+A successful reset keeps the simulation-edge and coordinator servers running,
+restarts only the MuJoCo viewer/process, replaces the coordinator working state,
+and publishes a reset revision so every open Twin tab discards stale ghost poses.
+
+Equivalent coordinator endpoints:
+
+    GET  /api/runtime-mode/simulation-presets?backend_id=sim.default
+    POST /api/runtime-mode/refresh-mujoco?backend_id=sim.default
+    POST /api/runtime-mode/simulation-presets/<name>/load?backend_id=sim.default
+    POST /api/runtime-mode/simulation-presets/<name>?backend_id=sim.default
+         JSON body: {"overwrite": false}
+    GET  /api/runtime-mode/simulation-presets/<name>?backend_id=sim.default
+    PUT  /api/runtime-mode/simulation-presets/<name>?backend_id=sim.default
+         JSON body: {"document": {...}, "overwrite": false}
+
+Preset names may contain letters, digits, underscores, and hyphens, up to 64
+characters. default, current, and list are reserved selectors.
+
+Prefer simwrite over direct file edits: it rejects malformed JSON, unknown tags,
+invalid poses or storage slots, out-of-bounds/danger-zone placements, and target
+overlap. Direct file edits should happen only while the relevant processes are
+stopped.
+
+
+Simulation versus physical experiment
+--------------------------------------
+
+simreset, simsave, simshow, and simwrite are simulation-only. Never attempt them on a physical
+backend. A physical bench cannot be teleported into a JSON state: it must be
+reconciled through supported primitives, physical sensing, and any required
+operator confirmation.
+
+The ordinary primitive vocabulary is intentionally shared between simulation
+and experiment, but support and safety gates are backend capabilities. Before
+using a primitive on any backend, inspect its catalog/capabilities and accept a
+refusal as authoritative.
+
+Control/version-control configurations are durable experimental history that
+may be reconciled to simulation or hardware. Simulation presets are quick local
+starting arrangements. Loading a preset creates an uncommitted live setup; save
+it into Control separately only when it should become durable experiment history.
+
+
+Safety and refusal rules
+------------------------
+
+- Never bypass collision, workspace, danger-zone, storage, holding, or runtime
+  validation.
+- Never move an unknown component or guess a component from a similar name.
+- Never silently change backend.
+- Never issue a second motion merely because the UI has not updated yet. Poll
+  state and wait for settlement first.
+- Never treat nominal_pose as fresh measured truth. Record measurables or
+  tunables when the task requires observation rather than commanded intent.
+- Never repeatedly retry HTTP 409, lease conflicts, or safety refusals.
+- Treat 400/422 as a malformed or invalid request; correct it only after reading
+  the response detail.
+- Treat 404 as a wrong endpoint, preset, tag, or expired/missing lease.
+- Treat 409 as busy, unsupported mode, safety conflict, or lease conflict.
+- Treat 410 as an expired lease; reacquire through the normal client lifecycle.
+- Treat 502/503 as coordinator/edge unavailability; report the service that is
+  unavailable instead of pretending the action succeeded.
+
+
+Operator startup (local simulation)
+-----------------------------------
+
+From the cloud-labs repository root, the operator normally runs:
+
+Terminal 1:
+
+    .\scripts\ops\run_simulation_edge_radial.ps1 -Viewer -JointSpeedDegPerSec 30 -PlaybackRate 4 -ViewerFps 15
+
+Terminal 2:
+
+    .\scripts\ops\run_cloud_labs_backend.ps1
+
+Then open:
+
+    http://127.0.0.1:8000/twin
+
+The agent should diagnose service availability before asking the operator to
+restart anything. Documentation-only or frontend-only changes do not require a
+MuJoCo restart; backend or simulation-edge Python changes generally do.
+
+
+Completion report
+-----------------
+
+After operating the lab, report:
+
+- backend_id used;
+- starting system_status;
+- command or primitive issued;
+- target tag and requested values;
+- final system_status and verified state values;
+- whether the result was commanded state, freshly measured state, or both;
+- any warning, refusal, timeout, or operator action still required.
+
+Never claim success solely because a request returned HTTP 200. Success means
+the post-action state was read and matched the intended result.

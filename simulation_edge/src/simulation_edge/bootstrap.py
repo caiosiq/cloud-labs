@@ -31,6 +31,16 @@ def _resolve_catalog_rows(root: Path) -> List[Mapping[str, Any]]:
     """Build catalog rows from ``active_catalog.json`` + ``component_library.json``."""
     active = _load_json(root / "active_catalog.json", {})
     library = _load_json(root / "component_library.json", {})
+    edge_root = root.resolve().parent / "cloudlabs_edge"
+    if (edge_root / "data" / "library.json").is_file():
+        try:
+            from simulation_edge.component_registry import merged_library
+
+            library = merged_library(edge_root)
+        except Exception:
+            # Startup validation below still produces explicit UNKNOWN rows for
+            # active tags when the authored simulation registry is invalid.
+            pass
 
     tag_ids: list[str] = []
     if isinstance(active, dict):

@@ -13,6 +13,14 @@ DESIRED_COMPONENTS = {
     "tag_22": ("Gripper Camera 1", "cam_gripper_1"),
     "tag_15": ("60mm Lens", "lens_60mm"),
 }
+INITIAL_TABLE_POSES = {
+    "tag_20": {"x": 320.0, "y": 190.0, "rotation": -90.0},
+    "tag_9": {"x": 320.0, "y": 95.0, "rotation": -90.0},
+    "tag_11": {"x": 320.0, "y": 0.0, "rotation": -90.0},
+    "tag_14": {"x": 320.0, "y": -95.0, "rotation": -90.0},
+    "tag_13": {"x": 320.0, "y": -190.0, "rotation": -90.0},
+    "tag_22": {"x": 320.0, "y": -285.0, "rotation": -90.0},
+}
 
 
 def load(relative_path: str):
@@ -34,6 +42,29 @@ class InitialComponentInventoryTests(unittest.TestCase):
             for tag_id, (name, catalog_id) in DESIRED_COMPONENTS.items():
                 self.assertEqual(library["components"][tag_id]["name"], name)
                 self.assertEqual(library["components"][tag_id]["id"], catalog_id)
+
+    def test_simulation_and_mock_initialize_with_requested_poses(self):
+        for prefix in ("simulation_edge", "mock_backend"):
+            state = load(f"{prefix}/lab_view/lab_state.json")
+
+            for tag_id, expected_pose in INITIAL_TABLE_POSES.items():
+                component = state["components"][tag_id]
+                tunables = component["statecontrol"]["tunables"]
+                self.assertEqual(tunables["presence"], "breadboard")
+                self.assertEqual(tunables["nominal_pose"], expected_pose)
+                self.assertEqual(tunables["reported_pose"], expected_pose)
+                self.assertEqual(
+                    component["statecontrol"]["measurables"]["pose"],
+                    expected_pose,
+                )
+                self.assertEqual(
+                    tunables["storage"],
+                    {"in_storage": False, "slot": None},
+                )
+
+            stored = state["components"]["tag_15"]["statecontrol"]
+            self.assertEqual(stored["tunables"]["presence"], "storage")
+            self.assertTrue(stored["tunables"]["storage"]["in_storage"])
 
     def test_existing_canvas_renderer_dispatches_requested_icons(self):
         renderer = (ROOT / "frontend/js/canvas/render.js").read_text(

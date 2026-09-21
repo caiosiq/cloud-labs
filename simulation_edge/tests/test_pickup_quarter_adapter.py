@@ -5,6 +5,7 @@ import numpy as np
 
 from simulation_edge.host.runtime import (
     CollisionPlanError,
+    RADIAL_PHYSICAL_HOME_JOINTS_DEG,
     REAL_PICKUP_CAMERA_TO_GRIPPER_OFFSET_M,
     REAL_PICKUP_CANONICAL_RIGHT_CAMERA_YAW_DEG,
     RETURN_HOME_JOINT_TOLERANCE_RAD,
@@ -80,6 +81,30 @@ class PickupQuarterAdapterTests(unittest.TestCase):
         self.assertAlmostEqual(adapter.camera_yaw_deg, -160.6)
         self.assertTrue(adapter.base_first)
         self.assertEqual(abs(adapter.grasp_yaw_offset_deg), 90.0)
+
+    def test_storage_pickup_base_align_uses_shortest_joint1_branch(self):
+        class FakeModel:
+            jnt_limited = np.ones(7, dtype=bool)
+            jnt_range = np.tile(np.array((-2.0 * np.pi, 2.0 * np.pi)), (7, 1))
+
+            @staticmethod
+            def joint(name):
+                return SimpleNamespace(id=int(name.removeprefix("joint")) - 1)
+
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = FakeModel()
+        runtime._log = lambda *args, **kwargs: None
+
+        current = np.zeros(7)
+        current[0] = np.deg2rad(-180.0)
+        aligned = runtime._storage_pickup_base_aligned_joints(
+            current,
+            np.deg2rad(90.0),
+        )
+
+        self.assertAlmostEqual(np.rad2deg(aligned[0]), -270.0)
+        self.assertAlmostEqual(np.rad2deg(aligned[0] - current[0]), -90.0)
+        np.testing.assert_allclose(aligned[1:], current[1:])
 
     def test_inner_table_pickup_flips_camera_approach_outside_radial_minimum(self):
         runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
@@ -253,6 +278,51 @@ class PickupQuarterAdapterTests(unittest.TestCase):
         )
         self.assertLess(wrist_travel_deg, 60.0)
         self.assertAlmostEqual(wrist_travel_deg, 52.1609, places=3)
+
+    def test_half_turn_home_route_preserves_short_physical_home_wrist_move(self):
+        class FakeModel:
+            jnt_limited = np.ones(7, dtype=bool)
+            jnt_range = np.tile(np.array((-2.0 * np.pi, 2.0 * np.pi)), (7, 1))
+
+            @staticmethod
+            def joint(name):
+                return SimpleNamespace(id=int(name.removeprefix("joint")) - 1)
+
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime.model = FakeModel()
+        runtime.home_tcp_rotation = np.eye(3)
+        runtime._validate_radial_pose_target = lambda *args, **kwargs: None
+        runtime._load_radial_motion_library = lambda: SimpleNamespace(carry_z_m=0.550)
+        runtime._log = lambda *args, **kwargs: None
+
+        current = np.zeros(7)
+        current[0] = -np.pi
+        current[6] = -np.pi
+        physical_home = np.radians(
+            np.asarray(RADIAL_PHYSICAL_HOME_JOINTS_DEG, dtype=float)
+        )
+        plan = runtime._plan_radial_coordinated_rotation(
+            name="home coordinated rotate",
+            tag_id=None,
+            radius_m=0.193,
+            source_theta=np.pi,
+            target_theta=0.0,
+            source_rotation=runtime._target_rotation(0.0),
+            target_rotation=runtime._target_rotation(0.0),
+            current=current,
+            successor_target=physical_home,
+        )
+
+        self.assertIsNotNone(plan)
+        endpoint = plan.waypoints[-1]
+        self.assertAlmostEqual(np.rad2deg(endpoint[0]), 0.0, places=6)
+        self.assertAlmostEqual(np.rad2deg(endpoint[6]), 0.0, places=6)
+        nearest_home = runtime._nearest_equivalent_joints(physical_home, endpoint)
+        self.assertAlmostEqual(
+            abs(np.rad2deg(nearest_home[6] - endpoint[6])),
+            60.0,
+            places=6,
+        )
 
     def test_cord_limited_joint1_uses_equivalent_long_way_route(self):
         class FakeModel:

@@ -14,6 +14,7 @@ from simulation_edge.host.runtime import (
     RADIAL_PHYSICAL_HOME_JOINTS_DEG,
     MuJoCoRobotRuntime,
     MUJOCO_HIGH_RES_CAPTURE_KEY,
+    MUJOCO_PAUSE_KEY_REPEAT_GUARD_S,
     MUJOCO_PHOTO_PAUSE_KEY,
     RadialAssistedWeldAction,
     RadialClearCollisionAction,
@@ -81,9 +82,38 @@ class RadialMotionPlanTests(unittest.TestCase):
         runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
         runtime._photo_paused = False
 
-        with mock.patch("builtins.print"):
+        with (
+            mock.patch("builtins.print"),
+            mock.patch.object(
+                runtime_module.time,
+                "perf_counter",
+                side_effect=(10.0, 11.0),
+            ),
+        ):
             runtime._on_viewer_key(MUJOCO_PHOTO_PAUSE_KEY)
             self.assertTrue(runtime._photo_paused)
+            runtime._on_viewer_key(MUJOCO_PHOTO_PAUSE_KEY)
+
+        self.assertFalse(runtime._photo_paused)
+
+    def test_f9_keyboard_repeat_does_not_resume_motion(self):
+        runtime = MuJoCoRobotRuntime.__new__(MuJoCoRobotRuntime)
+        runtime._photo_paused = False
+        quiet_time = MUJOCO_PAUSE_KEY_REPEAT_GUARD_S + 0.1
+
+        with (
+            mock.patch("builtins.print"),
+            mock.patch.object(
+                runtime_module.time,
+                "perf_counter",
+                side_effect=(10.0, 10.4, 10.45, 10.5, 10.5 + quiet_time),
+            ),
+        ):
+            runtime._on_viewer_key(MUJOCO_PHOTO_PAUSE_KEY)
+            self.assertTrue(runtime._photo_paused)
+            for _ in range(3):
+                runtime._on_viewer_key(MUJOCO_PHOTO_PAUSE_KEY)
+                self.assertTrue(runtime._photo_paused)
             runtime._on_viewer_key(MUJOCO_PHOTO_PAUSE_KEY)
 
         self.assertFalse(runtime._photo_paused)

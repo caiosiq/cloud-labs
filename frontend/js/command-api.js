@@ -12,6 +12,7 @@ import { resolveLaserStitchPose } from './laser-stitch.js';
 import { store } from './state/store.js';
 import { isHeldTag, isStoredComponent } from './component-model.js';
 import { occupiedStorageSlots } from './storage-region.js';
+import { formatCompleteLabStateReport } from './lab-state-report.js';
 
 /**
  * @param {string} ref
@@ -33,6 +34,256 @@ function resolveTagOrNull(ref, deps, appendLine) {
 
 function labComponent(tagId) {
     return store.labState?.components?.[tagId] || null;
+}
+
+function responseDetail(body, fallback) {
+    const detail = body && body.detail !== undefined ? body.detail : null;
+    if (typeof detail === 'string') return detail;
+    if (detail && typeof detail === 'object') {
+        return detail.message || detail.error || JSON.stringify(detail);
+    }
+    return fallback;
+}
+
+async function fetchSimulationPresets() {
+    const response = await fetch(withBackendQuery('/api/runtime-mode/simulation-presets'), {
+        headers: backendHeaders(),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(responseDetail(body, `HTTP ${response.status}`));
+    }
+    const rows = Array.isArray(body.presets) ? body.presets : [];
+    store.simulationPresetNames = rows
+        .filter((row) => row && row.valid !== false && row.name)
+        .map((row) => String(row.name));
+    return rows;
+}
+
+async function dispatchSimulationPreset(result, deps, appendLine) {
+    if (result.type === 'simshow') {
+        try {
+            const response = await fetch(
+                withBackendQuery(
+                    `/api/runtime-mode/simulation-presets/${encodeURIComponent(result.selector)}`,
+                ),
+                { headers: backendHeaders() },
+            );
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(responseDetail(body, `HTTP ${response.status}`));
+            }
+            appendLine(JSON.stringify(body.document, null, 2), 'info');
+        } catch (error) {
+            appendLine(`Preset read failed: ${error.message || error}`, 'error');
+        }
+        return;
+    }
+
+    if (result.type === 'simwrite') {
+        appendLine(`Validating simulation preset "${result.name}"…`, 'info');
+        try {
+            const response = await fetch(
+                withBackendQuery(
+                    `/api/runtime-mode/simulation-presets/${encodeURIComponent(result.name)}`,
+                ),
+                {
+                    method: 'PUT',
+                    headers: backendHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({
+                        document: result.document,
+                        overwrite: Boolean(result.overwrite),
+                    }),
+                },
+            );
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(responseDetail(body, `HTTP ${response.status}`));
+            }
+            if (!store.simulationPresetNames.includes(result.name)) {
+                store.simulationPresetNames.push(result.name);
+                store.simulationPresetNames.sort();
+            }
+            appendLine(`Saved authored simulation preset "${result.name}".`, 'info');
+        } catch (error) {
+            appendLine(`Preset write failed: ${error.message || error}`, 'error');
+        }
+        return;
+    }
+
+    if (result.type === 'simreset' && result.selector.toLowerCase() === 'list') {
+        try {
+            const rows = await fetchSimulationPresets();
+            appendLine('Simulation presets:', 'info');
+            appendLine('  current — restart from the current working state', 'info');
+            appendLine('  default — restart from lab_view/lab_state.json', 'info');
+            if (!rows.length) {
+                appendLine('  (no named presets saved)', 'info');
+            }
+            rows.forEach((row) => {
+                const count = Number(row.component_count || 0);
+                const suffix = row.valid === false ? ` [invalid: ${row.error || 'bad state'}]` : '';
+                appendLine(`  ${row.name} — ${count} component${count === 1 ? '' : 's'}${suffix}`, row.valid === false ? 'warn' : 'info');
+            });
+        } catch (error) {
+            appendLine(error.message || String(error), 'error');
+        }
+        return;
+    }
+
+    if (result.type === 'simsave') {
+        appendLine(`Saving simulation preset "${result.name}"…`, 'info');
+        try {
+            const response = await fetch(
+                withBackendQuery(
+                    `/api/runtime-mode/simulation-presets/${encodeURIComponent(result.name)}`,
+                ),
+                {
+                    method: 'POST',
+                    headers: backendHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ overwrite: Boolean(result.overwrite) }),
+                },
+            );
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(responseDetail(body, `HTTP ${response.status}`));
+            }
+            if (!store.simulationPresetNames.includes(result.name)) {
+                store.simulationPresetNames.push(result.name);
+                store.simulationPresetNames.sort();
+            }
+            appendLine(`Saved simulation preset "${result.name}".`, 'info');
+        } catch (error) {
+            appendLine(error.message || String(error), 'error');
+        }
+        return;
+    }
+
+    const selector = result.selector;
+    appendLine(`Resetting MuJoCo from "${selector}"…`, 'info');
+    try {
+        const path = selector.toLowerCase() === 'current'
+            ? '/api/runtime-mode/refresh-mujoco'
+            : `/api/runtime-mode/simulation-presets/${encodeURIComponent(selector)}/load`;
+        const response = await fetch(withBackendQuery(path), {
+            method: 'POST',
+            headers: backendHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({}),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(responseDetail(body, `HTTP ${response.status}`));
+        }
+        store.forceGhostSync = true;
+        if (typeof deps.fetchLabState === 'function') {
+            await deps.fetchLabState();
+        }
+        const pid = body?.simulator?.pid;
+        appendLine(
+            `MuJoCo reset from "${selector}"${pid ? ` (PID ${pid})` : ''}.`,
+            'info',
+        );
+    } catch (error) {
+        appendLine(error.message || String(error), 'error');
+    }
+}
+
+async function dispatchSimulationComponent(result, deps, appendLine) {
+    const base = '/api/runtime-mode/simulation-components';
+    let method = 'GET';
+    let path = base;
+    let payload = null;
+    let mutatesRuntime = false;
+
+    if (result.type === 'simcomponent-show') {
+        path = `${base}/${encodeURIComponent(result.tagId)}`;
+    } else if (result.type === 'simcomponent-nexttag') {
+        path = `${base}/next-tag`;
+    } else if (result.type === 'simcomponent-define') {
+        method = 'PUT';
+        path = `${base}/${encodeURIComponent(result.tagId)}`;
+        payload = result.definition;
+    } else if (result.type === 'simcomponent-configure') {
+        method = 'PATCH';
+        path = `${base}/${encodeURIComponent(result.tagId)}`;
+        payload = result.definition;
+        mutatesRuntime = true;
+    } else if (result.type === 'simcomponent-reset') {
+        method = 'POST';
+        path = `${base}/${encodeURIComponent(result.tagId)}/reset`;
+        payload = {};
+        mutatesRuntime = true;
+    } else if (result.type === 'simcomponent-insert') {
+        method = 'POST';
+        path = `${base}/${encodeURIComponent(result.tagId)}/insert`;
+        payload = result.payload;
+        mutatesRuntime = true;
+    } else if (result.type === 'simcomponent-remove') {
+        method = 'POST';
+        path = `${base}/${encodeURIComponent(result.tagId)}/remove`;
+        payload = {};
+        mutatesRuntime = true;
+    } else if (result.type === 'simcomponent-delete') {
+        method = 'DELETE';
+        path = `${base}/${encodeURIComponent(result.tagId)}`;
+    } else if (result.type === 'simclear') {
+        method = 'POST';
+        path = '/api/runtime-mode/simulation-table/clear';
+        payload = { scope: result.scope };
+        mutatesRuntime = true;
+    }
+
+    try {
+        const options = { method, headers: backendHeaders() };
+        if (payload !== null) {
+            options.headers = backendHeaders({ 'Content-Type': 'application/json' });
+            options.body = JSON.stringify(payload);
+        }
+        const response = await fetch(withBackendQuery(path), options);
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(responseDetail(body, `HTTP ${response.status}`));
+        }
+        if (result.type === 'simcomponent-list') {
+            const rows = Array.isArray(body.components) ? body.components : [];
+            store.simulationComponentTags = rows
+                .map((row) => row && row.tag_id)
+                .filter(Boolean)
+                .map(String);
+            appendLine(`Simulation library (${rows.length} definitions):`, 'info');
+            appendLine(
+                `  spacing rule: radius₁ + radius₂ + ${body.pair_clearance_margin_mm ?? 5} mm`,
+                'info',
+            );
+            rows.forEach((row) => {
+                const active = row.active ? `active:${row.placement || 'yes'}` : 'inactive';
+                const parameters = row.parameters && Object.keys(row.parameters).length
+                    ? ` parameters=${JSON.stringify(row.parameters)}`
+                    : '';
+                const footprint = row.housing?.footprint_mm || {};
+                const housing = row.housing
+                    ? ` housing=${footprint.width}x${footprint.depth}x${row.housing.height_mm}mm` +
+                      ` radius=${row.housing.clearance_radius_mm}mm`
+                    : '';
+                appendLine(
+                    `  ${row.tag_id} — ${row.name || 'Unnamed'} (${row.type || 'UNKNOWN'}) ` +
+                    `[${active}]${housing}${parameters}`,
+                    'info',
+                );
+            });
+        } else if (result.type === 'simcomponent-nexttag') {
+            appendLine(`Next available tag: ${body.tag_id}`, 'info');
+        } else {
+            appendLine(JSON.stringify(body, null, 2), 'info');
+        }
+        if (mutatesRuntime || result.type === 'simcomponent-define' || result.type === 'simcomponent-delete') {
+            if (mutatesRuntime) store.forceGhostSync = true;
+            if (typeof deps.fetchCatalogMap === 'function') await deps.fetchCatalogMap();
+            if (typeof deps.fetchLabState === 'function') await deps.fetchLabState();
+        }
+    } catch (error) {
+        appendLine(`Simulation component command failed: ${error.message || error}`, 'error');
+    }
 }
 
 /**
@@ -183,6 +434,43 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
             const msg = e && e.message ? e.message : String(e);
             appendLine(`Refresh failed: ${msg}`, 'error');
         }
+        return;
+    }
+
+    if (result.type === 'labstate') {
+        try {
+            const response = await fetch(withBackendQuery('/api/lab-state'), {
+                headers: backendHeaders(),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(responseDetail(body, `HTTP ${response.status}`));
+            }
+            if (result.rawJson) {
+                appendLine(JSON.stringify(body, null, 2), 'info');
+            } else {
+                formatCompleteLabStateReport(body, store.catalogMap).forEach((line) => {
+                    appendLine(line, 'info');
+                });
+            }
+        } catch (error) {
+            appendLine(`Lab-state read failed: ${error.message || error}`, 'error');
+        }
+        return;
+    }
+
+    if (
+        result.type === 'simreset' ||
+        result.type === 'simsave' ||
+        result.type === 'simshow' ||
+        result.type === 'simwrite'
+    ) {
+        await dispatchSimulationPreset(result, deps, appendLine);
+        return;
+    }
+
+    if (result.type.startsWith('simcomponent-') || result.type === 'simclear') {
+        await dispatchSimulationComponent(result, deps, appendLine);
         return;
     }
 

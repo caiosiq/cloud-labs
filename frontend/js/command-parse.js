@@ -14,9 +14,25 @@ export function formatHelp() {
         '  help | ?          — this text',
         '  lasers            — list laser line ids / names (for movelaser)',
         '  refresh           — refresh poses from camera (same as Refresh Pose button)',
+        '  labstate [--json] — report the complete current lab state (alias: state)',
         '  tunables <tag|name>    — print tunables JSON (alias: get_tunables)',
         '  measurables <tag|name> — print measurables JSON (alias: get_measurables; saved state only)',
         '  record <tag|name>      — RECORD_MEASURABLES (poll lab; e.g. camera → measurables.camera_image)',
+        '  simreset list|current|default|<preset> — restart MuJoCo from a simulation state',
+        '  simsave <preset> [--overwrite]         — save the current simulation state',
+        '  simshow current|default|<preset>        — print editable preset JSON',
+        '  simwrite <preset> [--overwrite] <json>  — validate and save preset JSON without loading it',
+        '  simcomponent list                        — list simple experiment-facing component records',
+        '  simcomponent nexttag                     — return the next unused numeric tag',
+        '  simcomponent show <tag>                  — show one simple component record',
+        '  simcomponent define <tag> <json>          — define a reusable generic/black-box component',
+        '  simcomponent configure <tag> <json>       — change name/type/parameters',
+        '  simcomponent reset <tag>                  — remove overrides from a built-in definition',
+        '  simcomponent insert <tag> <x> <y> <rot>   — add a library component to the table',
+        '  simcomponent insert <tag> storage <i> <j> — add a library component to storage',
+        '  simcomponent remove <tag>                 — remove an active component, keep its definition',
+        '  simcomponent delete <tag>                 — delete an inactive custom definition',
+        '  simclear [table|all]                      — clear table parts or every active component',
         '  move <tag|name> <x> <y> <rot>     — MOVE_COMPONENT (lab mm, degrees)',
         '  movelaser <tag|name> <y> <rot> [line_id|name] — MOVE on laser (X from line at Y; omit line → snap)',
         '  store <tag|name>              — STORE_COMPONENT (autopack into a free cell)',
@@ -101,6 +117,75 @@ export function parseCommandLine(line) {
         return { ok: true, result: { type: 'refresh' } };
     }
 
+    if (/^(?:simwrite|sim_write)\b/i.test(raw)) {
+        const match = raw.match(
+            /^(?:simwrite|sim_write)\s+([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\s+(--overwrite))?\s+([\s\S]+)$/i,
+        );
+        if (!match) {
+            return {
+                ok: false,
+                error: 'Usage: simwrite <preset_name> [--overwrite] <json_object>',
+            };
+        }
+        try {
+            const document = JSON.parse(match[3]);
+            if (!document || typeof document !== 'object' || Array.isArray(document)) {
+                return { ok: false, error: 'simwrite: JSON body must be an object.' };
+            }
+            return {
+                ok: true,
+                result: {
+                    type: 'simwrite',
+                    name: match[1],
+                    overwrite: match[2] === '--overwrite',
+                    document,
+                },
+            };
+        } catch (e) {
+            return { ok: false, error: `simwrite JSON: ${e.message}` };
+        }
+    }
+
+    if (/^simcomponent\s+(?:define|configure)\b/i.test(raw)) {
+        const match = raw.match(
+            /^simcomponent\s+(define|configure)\s+(tag_[1-9][0-9]*)\s+([\s\S]+)$/i,
+        );
+        if (!match) {
+            return {
+                ok: false,
+                error: 'Usage: simcomponent define|configure <tag_id> <json_object>',
+            };
+        }
+        try {
+            const definition = JSON.parse(match[3]);
+            if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+                return { ok: false, error: 'simcomponent JSON body must be an object.' };
+            }
+            return {
+                ok: true,
+                result: {
+                    type: match[1].toLowerCase() === 'define'
+                        ? 'simcomponent-define'
+                        : 'simcomponent-configure',
+                    tagId: match[2],
+                    definition,
+                },
+            };
+        } catch (e) {
+            return { ok: false, error: `simcomponent JSON: ${e.message}` };
+        }
+    }
+
+    if (verb === 'labstate' || verb === 'state') {
+        if (tokens.length > 2 || (tokens.length === 2 && tokens[1] !== '--json')) {
+            return { ok: false, error: 'Usage: labstate [--json]' };
+        }
+        return {
+            ok: true,
+            result: { type: 'labstate', rawJson: tokens[1] === '--json' },
+        };
+    }
+
     if (verb === 'tunables' || verb === 'get_tunables') {
         if (tokens.length !== 2) {
             return { ok: false, error: 'Usage: tunables <tag_id|name>  (alias: get_tunables …)' };
@@ -120,6 +205,133 @@ export function parseCommandLine(line) {
             return { ok: false, error: 'Usage: record <tag_id|name>  (alias: record_measurables …)' };
         }
         return { ok: true, result: { type: 'record', tagRef: tokens[1] } };
+    }
+
+    if (verb === 'simreset') {
+        if (tokens.length !== 2) {
+            return {
+                ok: false,
+                error: 'Usage: simreset list|current|default|<preset_name>',
+            };
+        }
+        return {
+            ok: true,
+            result: { type: 'simreset', selector: tokens[1] },
+        };
+    }
+
+    if (verb === 'simshow' || verb === 'sim_show') {
+        if (tokens.length !== 2) {
+            return {
+                ok: false,
+                error: 'Usage: simshow current|default|<preset_name>',
+            };
+        }
+        return {
+            ok: true,
+            result: { type: 'simshow', selector: tokens[1] },
+        };
+    }
+
+    if (verb === 'simsave') {
+        if (tokens.length !== 2 && tokens.length !== 3) {
+            return {
+                ok: false,
+                error: 'Usage: simsave <preset_name> [--overwrite]',
+            };
+        }
+        if (tokens.length === 3 && tokens[2] !== '--overwrite') {
+            return {
+                ok: false,
+                error: 'simsave: the only supported option is --overwrite',
+            };
+        }
+        return {
+            ok: true,
+            result: {
+                type: 'simsave',
+                name: tokens[1],
+                overwrite: tokens[2] === '--overwrite',
+            },
+        };
+    }
+
+    if (verb === 'simcomponent' || verb === 'simcomp') {
+        const action = (tokens[1] || '').toLowerCase();
+        const taggedActions = ['show', 'reset', 'insert', 'remove', 'delete'];
+        if (
+            taggedActions.includes(action) &&
+            tokens.length >= 3 &&
+            !/^tag_[1-9][0-9]*$/.test(tokens[2])
+        ) {
+            return {
+                ok: false,
+                error: 'Component tags must be tag_<positive integer>, for example tag_23.',
+            };
+        }
+        if (action === 'list' && tokens.length === 2) {
+            return { ok: true, result: { type: 'simcomponent-list' } };
+        }
+        if (action === 'nexttag' && tokens.length === 2) {
+            return { ok: true, result: { type: 'simcomponent-nexttag' } };
+        }
+        if (action === 'show' && tokens.length === 3) {
+            return { ok: true, result: { type: 'simcomponent-show', tagId: tokens[2] } };
+        }
+        if (action === 'reset' && tokens.length === 3) {
+            return { ok: true, result: { type: 'simcomponent-reset', tagId: tokens[2] } };
+        }
+        if (action === 'remove' && tokens.length === 3) {
+            return { ok: true, result: { type: 'simcomponent-remove', tagId: tokens[2] } };
+        }
+        if (action === 'delete' && tokens.length === 3) {
+            return { ok: true, result: { type: 'simcomponent-delete', tagId: tokens[2] } };
+        }
+        if (action === 'insert' && tokens.length === 6 && tokens[3].toLowerCase() !== 'storage') {
+            const x = Number(tokens[3]);
+            const y = Number(tokens[4]);
+            const rotation = Number(tokens[5]);
+            if (![x, y, rotation].every(Number.isFinite)) {
+                return { ok: false, error: 'simcomponent insert: x, y and rotation must be finite.' };
+            }
+            return {
+                ok: true,
+                result: {
+                    type: 'simcomponent-insert',
+                    tagId: tokens[2],
+                    payload: { x, y, rotation },
+                },
+            };
+        }
+        if (action === 'insert' && tokens.length === 6 && tokens[3].toLowerCase() === 'storage') {
+            const i = Number(tokens[4]);
+            const j = Number(tokens[5]);
+            if (!Number.isInteger(i) || !Number.isInteger(j)) {
+                return { ok: false, error: 'storage i and j must be integers.' };
+            }
+            return {
+                ok: true,
+                result: {
+                    type: 'simcomponent-insert',
+                    tagId: tokens[2],
+                    payload: { storage_slot: { i, j } },
+                },
+            };
+        }
+        return {
+            ok: false,
+            error: 'Usage: simcomponent list|nexttag|show|define|configure|reset|insert|remove|delete ...',
+        };
+    }
+
+    if (verb === 'simclear') {
+        if (tokens.length > 2 || (tokens[1] && !['table', 'all'].includes(tokens[1].toLowerCase()))) {
+            return { ok: false, error: 'Usage: simclear [table|all]' };
+        }
+        return {
+            ok: true,
+            result: { type: 'simclear', scope: (tokens[1] || 'table').toLowerCase() },
+        };
     }
 
     if (verb === 'move') {

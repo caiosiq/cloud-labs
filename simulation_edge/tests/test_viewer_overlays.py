@@ -102,6 +102,65 @@ class ViewerOverlayTests(unittest.TestCase):
             places=6,
         )
 
+    def test_high_resolution_capture_uses_larger_font(self):
+        runtime = make_runtime()
+
+        self.assertEqual(
+            runtime._capture_font_scale(2160),
+            mujoco.mjtFontScale.mjFONTSCALE_300,
+        )
+        self.assertEqual(
+            runtime._capture_font_scale(720),
+            mujoco.mjtFontScale.mjFONTSCALE_150,
+        )
+
+    def test_nearest_resize_enlarges_overlay_pixels_without_blending(self):
+        source = np.array(
+            [
+                [[1, 2, 3], [4, 5, 6]],
+                [[7, 8, 9], [10, 11, 12]],
+            ],
+            dtype=np.uint8,
+        )
+
+        enlarged = MuJoCoRobotRuntime._resize_nearest(
+            source,
+            height=4,
+            width=4,
+        )
+
+        expected = np.repeat(np.repeat(source, 2, axis=0), 2, axis=1)
+        np.testing.assert_array_equal(enlarged, expected)
+
+    def test_capture_label_remains_centered_with_larger_font(self):
+        runtime = make_runtime()
+        runtime._measurement_tags = ["tag_9", "tag_20"]
+        capture_scene = mujoco.MjvScene(runtime.model, maxgeom=100)
+
+        runtime._append_viewer_overlays_to_scene(
+            capture_scene,
+            capture_height=2160,
+            capture_font_scale_percent=300,
+        )
+
+        label = next(
+            capture_scene.geoms[index]
+            for index in range(capture_scene.ngeom)
+            if capture_scene.geoms[index].type == mujoco.mjtGeom.mjGEOM_LABEL
+        )
+        first = runtime._ruler_endpoint("tag_9")
+        second = runtime._ruler_endpoint("tag_20")
+        expected_center = (first + second) / 2.0
+        expected_center[2] += 0.025
+        expected = expected_center - runtime._label_half_width_world(
+            expected_center,
+            label.label,
+            camera=runtime._viewer_entered.cam,
+            viewport_height=2160,
+            font_scale_percent=300,
+        )
+        np.testing.assert_allclose(label.pos, expected, atol=1e-9)
+
     def test_scene_preserves_catalog_component_names(self):
         runtime = make_runtime()
         self.assertEqual(runtime.scene.components["tag_9"].display_name, "150mm Lens")
@@ -165,6 +224,40 @@ class ViewerOverlayTests(unittest.TestCase):
         runtime._refresh_viewer_overlays()
         self.assertEqual(runtime._measurement_tags, [])
         self.assertEqual(scene.ngeom, 0)
+
+    def test_active_overlays_are_copied_into_capture_scene(self):
+        runtime = make_runtime()
+        runtime._component_labels_visible = True
+        runtime._measurement_tags = ["tag_9", "tag_20"]
+        capture_scene = mujoco.MjvScene(runtime.model, maxgeom=100)
+        mujoco.mjv_initGeom(
+            capture_scene.geoms[0],
+            mujoco.mjtGeom.mjGEOM_SPHERE,
+            np.ones(3),
+            np.zeros(3),
+            np.eye(3).reshape(-1),
+            np.ones(4, dtype=np.float32),
+        )
+        capture_scene.ngeom = 1
+
+        copied = runtime._append_viewer_overlays_to_scene(capture_scene)
+
+        self.assertEqual(copied, len(runtime.scene.components) + 2)
+        self.assertEqual(capture_scene.geoms[0].type, mujoco.mjtGeom.mjGEOM_SPHERE)
+        copied_geoms = [
+            capture_scene.geoms[index]
+            for index in range(1, capture_scene.ngeom)
+        ]
+        labels = {geom.label for geom in copied_geoms if geom.label}
+        expected_labels = {
+            spec.display_name for spec in runtime.scene.components.values()
+        }
+        self.assertTrue(expected_labels.issubset(labels))
+        self.assertTrue(any(label.endswith(" mm") for label in labels))
+        self.assertEqual(
+            sum(geom.type == mujoco.mjtGeom.mjGEOM_LINE for geom in copied_geoms),
+            1,
+        )
 
     def test_ruler_tracks_optic_height_and_reports_millimetres(self):
         runtime = make_runtime()

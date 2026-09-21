@@ -1285,9 +1285,6 @@ def build_scene_spec(
 
     if invalid:
         raise SceneValidationError("Invalid MuJoCo component poses:\n- " + "\n- ".join(invalid))
-    if not specs:
-        raise SceneValidationError("No movable table components are available for MuJoCo")
-
     model_path = xarm_model_path()
     asset_dir = model_path.parent / "assets"
     table_bounds = dict(bounds)

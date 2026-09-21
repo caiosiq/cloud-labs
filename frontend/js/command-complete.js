@@ -12,12 +12,20 @@ const VERBS = [
     'help',
     'lasers',
     'refresh',
+    'labstate',
+    'state',
     'tunables',
     'get_tunables',
     'measurables',
     'get_measurables',
     'record',
     'record_measurables',
+    'simreset',
+    'simsave',
+    'simshow',
+    'simwrite',
+    'simcomponent',
+    'simclear',
     'move',
     'movelaser',
     'move-laser',
@@ -162,6 +170,24 @@ function allComponentCompletions(deps) {
     return out;
 }
 
+function simulationPresetCompletions() {
+    return [
+        'list',
+        'current',
+        'default',
+        ...(Array.isArray(store.simulationPresetNames) ? store.simulationPresetNames : []),
+    ].filter((value, index, values) => values.indexOf(value) === index);
+}
+
+function simulationComponentCompletions() {
+    return [
+        ...allComponentCompletions({
+            getLabState: () => store.labState,
+        }),
+        ...(Array.isArray(store.simulationComponentTags) ? store.simulationComponentTags : []),
+    ].filter((value, index, values) => values.indexOf(value) === index).sort();
+}
+
 /**
  * Parse the line fragment before the caret into tokens and the word being completed.
  * @param {string} before
@@ -242,6 +268,7 @@ export function getTabCompletions(line, caret, deps) {
 
     if (tokens.length === 1 && endsWithSpace) {
         const v = verb;
+        if (v === 'labstate' || v === 'state') return ['--json'];
         if (v === 'json' || v === 'help' || v === '?' || v === 'refresh' || v === 'lasers') {
             return [];
         }
@@ -257,6 +284,14 @@ export function getTabCompletions(line, caret, deps) {
         }
         if (isStoreVerb(v)) return storable;
         if (isPlaceVerb(v) || isPlaceLaserVerb(v)) return stored;
+        if (v === 'simreset') return simulationPresetCompletions();
+        if (v === 'simsave') return store.simulationPresetNames || [];
+        if (v === 'simshow') return simulationPresetCompletions().filter((name) => name !== 'list');
+        if (v === 'simwrite') return store.simulationPresetNames || [];
+        if (v === 'simcomponent') {
+            return ['list', 'nexttag', 'show', 'define', 'configure', 'reset', 'insert', 'remove', 'delete'];
+        }
+        if (v === 'simclear') return ['table', 'all'];
         if (
             v === 'move' ||
             isMoveLaserVerb(v) ||
@@ -274,6 +309,79 @@ export function getTabCompletions(line, caret, deps) {
     }
 
     if (verb === 'json' || verb === 'help' || verb === '?' || verb === 'refresh' || verb === 'lasers') {
+        return [];
+    }
+
+    if (verb === 'labstate' || verb === 'state') {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(['--json'], current);
+        }
+        return [];
+    }
+
+    if (verb === 'simreset') {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(simulationPresetCompletions(), current);
+        }
+        return [];
+    }
+
+    if (verb === 'simsave') {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(store.simulationPresetNames || [], current);
+        }
+        if (tokens.length === 2 && endsWithSpace) return ['--overwrite'];
+        if (tokens.length === 3 && !endsWithSpace) {
+            return filterPrefix(['--overwrite'], current);
+        }
+        return [];
+    }
+
+    if (verb === 'simshow') {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(
+                simulationPresetCompletions().filter((name) => name !== 'list'),
+                current,
+            );
+        }
+        return [];
+    }
+
+    if (verb === 'simwrite') {
+        if (tokens.length === 2 && !endsWithSpace) {
+            return filterPrefix(store.simulationPresetNames || [], current);
+        }
+        if (tokens.length === 2 && endsWithSpace) return ['--overwrite'];
+        if (tokens.length === 3 && !endsWithSpace) {
+            return filterPrefix(['--overwrite'], current);
+        }
+        return [];
+    }
+
+    if (verb === 'simcomponent') {
+        const actions = ['list', 'nexttag', 'show', 'define', 'configure', 'reset', 'insert', 'remove', 'delete'];
+        if (tokens.length === 2 && !endsWithSpace) return filterPrefix(actions, current);
+        const action = String(tokens[1] || '').toLowerCase();
+        if (tokens.length === 2 && endsWithSpace) {
+            if (['show', 'configure', 'reset', 'insert', 'remove', 'delete'].includes(action)) {
+                return simulationComponentCompletions();
+            }
+            return [];
+        }
+        if (
+            ['show', 'configure', 'reset', 'insert', 'remove', 'delete'].includes(action) &&
+            tokens.length === 3 && !endsWithSpace
+        ) {
+            return filterPrefix(simulationComponentCompletions(), current);
+        }
+        if (action === 'insert' && tokens.length === 3 && endsWithSpace) {
+            return ['storage'];
+        }
+        return [];
+    }
+
+    if (verb === 'simclear') {
+        if (tokens.length === 2 && !endsWithSpace) return filterPrefix(['table', 'all'], current);
         return [];
     }
 

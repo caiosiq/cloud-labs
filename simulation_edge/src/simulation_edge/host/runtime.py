@@ -70,18 +70,43 @@ MUJOCO_CAPTURE_BACKGROUND_ENV_VAR = "CLOUDLAB_MUJOCO_CAPTURE_BACKGROUND"
 MUJOCO_CAPTURE_WIDTH = 3840
 MUJOCO_CAPTURE_HEIGHT = 2160
 MUJOCO_CAPTURE_BACKGROUND = "#8FA2B5"
+MUJOCO_VIEWER_FONT_SCALE_PERCENT = 150
+# MuJoCo's largest native label font is 300% (2x the viewer's 150% font).
+# Render the capture overlays at half resolution and enlarge that layer 2x to
+# produce labels that are 4x the viewer bitmap size without softening the 4K
+# scene itself.
+MUJOCO_CAPTURE_OVERLAY_UPSCALE = 2
 # GLFW_KEY_F8. Keep this separate from MuJoCo's built-in P screenshot, which
 # only captures the on-screen framebuffer at window resolution.
 MUJOCO_HIGH_RES_CAPTURE_KEY = 297
 # F9-F12 are unassigned by MuJoCo 3.9. Keep custom viewer controls away from
 # F6/F7 and letter keys, which toggle MuJoCo's built-in visualization modes.
 MUJOCO_PHOTO_PAUSE_KEY = 298
+MUJOCO_PAUSE_KEY_REPEAT_GUARD_S = 0.75
 MUJOCO_COMPONENT_LABEL_KEY = 299
 MUJOCO_MEASUREMENT_MARK_KEY = 300
 MUJOCO_MEASUREMENT_CLEAR_KEY = 301
 MUJOCO_LABEL_OFFSET_M = 0.025
 MUJOCO_RULER_WIDTH_PX = 3.0
 MUJOCO_RULER_RGBA = (1.0, 0.78, 0.12, 1.0)
+MUJOCO_GEOM_SCALAR_COPY_FIELDS = (
+    "type",
+    "dataid",
+    "objtype",
+    "objid",
+    "category",
+    "texcoord",
+    "segid",
+    "emission",
+    "specular",
+    "shininess",
+    "reflectance",
+    "transparent",
+    "camdist",
+    "modelrbound",
+    "matid",
+)
+MUJOCO_GEOM_ARRAY_COPY_FIELDS = ("pos", "mat", "size", "rgba")
 # Place ruler endpoints near the mounted optic: 121.412 mm from the housing
 # bottom to the optic support plane, plus another 28 mm for visibility.
 MUJOCO_RULER_HEIGHT_FROM_COMPONENT_BOTTOM_M = 0.149412
@@ -926,6 +951,7 @@ class MuJoCoRobotRuntime:
         self._gripper_position = GRIPPER_OPEN
         self._capture_requested = False
         self._photo_paused = False
+        self._last_pause_key_event_s = float("-inf")
         self._component_labels_visible = False
         self._measurement_mark_requested = False
         self._measurement_clear_requested = False
@@ -1058,6 +1084,11 @@ class MuJoCoRobotRuntime:
             self._capture_requested = True
             return
         if keycode == MUJOCO_PHOTO_PAUSE_KEY:
+            now = time.perf_counter()
+            last_event = getattr(self, "_last_pause_key_event_s", float("-inf"))
+            self._last_pause_key_event_s = now
+            if now - last_event < MUJOCO_PAUSE_KEY_REPEAT_GUARD_S:
+                return
             self._photo_paused = not getattr(self, "_photo_paused", False)
             state = "PAUSED" if self._photo_paused else "RESUMED"
             print(
@@ -1162,6 +1193,27 @@ class MuJoCoRobotRuntime:
         if camera is None or viewport_height <= 0:
             return anchor
 
+        return anchor - self._label_half_width_world(
+            anchor,
+            text,
+            camera=camera,
+            viewport_height=viewport_height,
+            font_scale_percent=MUJOCO_VIEWER_FONT_SCALE_PERCENT,
+        )
+
+    def _label_half_width_world(
+        self,
+        position: np.ndarray,
+        text: str,
+        *,
+        camera: mujoco.MjvCamera,
+        viewport_height: int,
+        font_scale_percent: int,
+    ) -> np.ndarray:
+        """Return the camera-right vector spanning half a rendered label."""
+        if viewport_height <= 0:
+            return np.zeros(3)
+
         head_position = np.zeros(3)
         forward = np.zeros(3)
         up = np.zeros(3)
@@ -1174,9 +1226,9 @@ class MuJoCoRobotRuntime:
             self.data,
             camera,
         )
-        depth_m = float(np.dot(anchor - head_position, forward))
+        depth_m = float(np.dot(np.asarray(position) - head_position, forward))
         if depth_m <= 0.0:
-            return anchor
+            return np.zeros(3)
 
         fovy_deg = float(self.model.vis.global_.fovy)
         if (
@@ -1187,9 +1239,13 @@ class MuJoCoRobotRuntime:
         world_height_m = 2.0 * depth_m * math.tan(math.radians(fovy_deg) / 2.0)
         world_per_pixel_m = world_height_m / viewport_height
         half_text_width_m = (
-            self._viewer_text_width_px(text) * world_per_pixel_m / 2.0
+            self._viewer_text_width_px(text)
+            * float(font_scale_percent)
+            / MUJOCO_VIEWER_FONT_SCALE_PERCENT
+            * world_per_pixel_m
+            / 2.0
         )
-        return anchor - right * half_text_width_m
+        return right * half_text_width_m
 
     @staticmethod
     def _init_viewer_label(
@@ -1287,6 +1343,76 @@ class MuJoCoRobotRuntime:
         )
         return endpoint
 
+    @staticmethod
+    def _copy_viewer_geom(source: mujoco.MjvGeom, target: mujoco.MjvGeom) -> None:
+        for field in MUJOCO_GEOM_SCALAR_COPY_FIELDS:
+            setattr(target, field, getattr(source, field))
+        for field in MUJOCO_GEOM_ARRAY_COPY_FIELDS:
+            getattr(target, field)[:] = getattr(source, field)
+        target.label = source.label
+
+    def _append_viewer_overlays_to_scene(
+        self,
+        target_scene: mujoco.MjvScene,
+        *,
+        capture_height: int | None = None,
+        capture_font_scale_percent: int = MUJOCO_VIEWER_FONT_SCALE_PERCENT,
+    ) -> int:
+        """Copy active viewer decorations into an off-screen render scene."""
+        self._refresh_viewer_overlays()
+        if isinstance(self._viewer_entered, _NullViewer):
+            return 0
+        source_scene = getattr(self._viewer_entered, "user_scn", None)
+        if not isinstance(source_scene, mujoco.MjvScene):
+            return 0
+
+        copied = 0
+        with self._viewer_entered.lock():
+            available = max(0, int(target_scene.maxgeom) - int(target_scene.ngeom))
+            copy_count = min(int(source_scene.ngeom), available)
+            for index in range(copy_count):
+                self._copy_viewer_geom(
+                    source_scene.geoms[index],
+                    target_scene.geoms[target_scene.ngeom],
+                )
+                copied_geom = target_scene.geoms[target_scene.ngeom]
+                if (
+                    copied_geom.type == mujoco.mjtGeom.mjGEOM_LABEL
+                    and capture_height is not None
+                ):
+                    viewport = getattr(self._viewer_entered, "viewport", None)
+                    viewer_height = int(getattr(viewport, "height", 0) or 0)
+                    camera = getattr(self._viewer_entered, "cam", None)
+                    if viewer_height > 0 and camera is not None:
+                        source_shift = self._label_half_width_world(
+                            copied_geom.pos,
+                            copied_geom.label,
+                            camera=camera,
+                            viewport_height=viewer_height,
+                            font_scale_percent=MUJOCO_VIEWER_FONT_SCALE_PERCENT,
+                        )
+                        capture_shift = self._label_half_width_world(
+                            copied_geom.pos,
+                            copied_geom.label,
+                            camera=camera,
+                            viewport_height=capture_height,
+                            font_scale_percent=capture_font_scale_percent,
+                        )
+                        copied_geom.pos[:] += source_shift - capture_shift
+                target_scene.ngeom += 1
+                copied += 1
+        return copied
+
+    def _capture_font_scale(self, capture_height: int) -> mujoco.mjtFontScale:
+        viewport = getattr(self._viewer_entered, "viewport", None)
+        viewer_height = int(getattr(viewport, "height", 0) or 0)
+        if viewer_height <= 0:
+            return mujoco.mjtFontScale.mjFONTSCALE_300
+        desired = MUJOCO_VIEWER_FONT_SCALE_PERCENT * capture_height / viewer_height
+        available = (50, 100, 150, 200, 250, 300)
+        selected = min(available, key=lambda scale: abs(scale - desired))
+        return mujoco.mjtFontScale(selected)
+
     def _sync_viewer(self) -> None:
         self._refresh_viewer_overlays()
         self._viewer_entered.sync()
@@ -1344,6 +1470,26 @@ class MuJoCoRobotRuntime:
         png += chunk(b"IDAT", zlib.compress(scanlines, level=6))
         png += chunk(b"IEND", b"")
         path.write_bytes(png)
+
+    @staticmethod
+    def _resize_nearest(
+        pixels: np.ndarray,
+        *,
+        height: int,
+        width: int,
+    ) -> np.ndarray:
+        """Resize an RGB image or boolean mask without adding blended edges."""
+        source = np.asarray(pixels)
+        source_height, source_width = source.shape[:2]
+        row_indices = np.minimum(
+            np.arange(height) * source_height // height,
+            source_height - 1,
+        )
+        column_indices = np.minimum(
+            np.arange(width) * source_width // width,
+            source_width - 1,
+        )
+        return source[row_indices[:, None], column_indices[None, :]]
 
     def _copy_viewer_camera(self) -> mujoco.MjvCamera:
         camera = mujoco.MjvCamera()
@@ -1407,14 +1553,18 @@ class MuJoCoRobotRuntime:
         camera = self._copy_viewer_camera()
         scene_option = mujoco.MjvOption()
         self._disable_model_textures(scene_option)
-        with mujoco.Renderer(self.model, height=height, width=width) as renderer:
+        with mujoco.Renderer(
+            self.model,
+            height=height,
+            width=width,
+        ) as renderer:
             renderer.update_scene(
                 self.data,
                 camera=camera,
                 scene_option=scene_option,
             )
             self._set_render_flags(renderer.scene)
-            pixels = renderer.render().copy()
+            base_pixels = renderer.render().copy()
             renderer.enable_segmentation_rendering()
             renderer.update_scene(
                 self.data,
@@ -1422,7 +1572,50 @@ class MuJoCoRobotRuntime:
                 scene_option=scene_option,
             )
             segmentation = renderer.render()
-            pixels[np.all(segmentation == -1, axis=2)] = background_rgb
+            renderer.disable_segmentation_rendering()
+        overlay_width = max(1, width // MUJOCO_CAPTURE_OVERLAY_UPSCALE)
+        overlay_height = max(1, height // MUJOCO_CAPTURE_OVERLAY_UPSCALE)
+        capture_font_scale = mujoco.mjtFontScale.mjFONTSCALE_300
+        with mujoco.Renderer(
+            self.model,
+            height=overlay_height,
+            width=overlay_width,
+            font_scale=capture_font_scale,
+        ) as overlay_renderer:
+            overlay_renderer.update_scene(
+                self.data,
+                camera=camera,
+                scene_option=scene_option,
+            )
+            self._set_render_flags(overlay_renderer.scene)
+            overlay_base = overlay_renderer.render().copy()
+            overlay_renderer.update_scene(
+                self.data,
+                camera=camera,
+                scene_option=scene_option,
+            )
+            self._set_render_flags(overlay_renderer.scene)
+            self._append_viewer_overlays_to_scene(
+                overlay_renderer.scene,
+                capture_height=overlay_height,
+                capture_font_scale_percent=int(capture_font_scale),
+            )
+            overlay_pixels_low = overlay_renderer.render().copy()
+        overlay_mask_low = np.any(overlay_pixels_low != overlay_base, axis=2)
+        overlay_pixels = self._resize_nearest(
+            overlay_pixels_low,
+            height=height,
+            width=width,
+        )
+        overlay_mask = self._resize_nearest(
+            overlay_mask_low,
+            height=height,
+            width=width,
+        )
+        pixels = base_pixels
+        pixels[overlay_mask] = overlay_pixels[overlay_mask]
+        background_pixels = np.all(segmentation == -1, axis=2)
+        pixels[background_pixels & ~overlay_mask] = background_rgb
         self._write_rgb_png(image_path, pixels)
         print(
             f"[SIM EDGE] Saved {width}x{height} MuJoCo render: {image_path}",
@@ -3771,6 +3964,30 @@ class MuJoCoRobotRuntime:
             )
         )
 
+    def _storage_pickup_base_aligned_joints(
+        self,
+        current: np.ndarray,
+        canonical_base_joint_rad: float,
+    ) -> np.ndarray:
+        """Select the closest limit-valid joint-1 representation for storage."""
+
+        current = np.asarray(current, dtype=float)
+        canonical = current.copy()
+        canonical[0] = float(canonical_base_joint_rad)
+        aligned = self._nearest_equivalent_joints(canonical, current)
+        self._log(
+            "storage_pickup_base_branch_selected",
+            current_joint1_deg=math.degrees(float(current[0])),
+            canonical_target_joint1_deg=math.degrees(
+                float(canonical_base_joint_rad)
+            ),
+            selected_target_joint1_deg=math.degrees(float(aligned[0])),
+            joint1_delta_deg=math.degrees(
+                float(aligned[0]) - float(current[0])
+            ),
+        )
+        return aligned
+
     def _real_pickup_adapter_targets(
         self,
         source_xy: np.ndarray,
@@ -4374,8 +4591,10 @@ class MuJoCoRobotRuntime:
         pregrasp: list[RadialJointStagePlan] = []
 
         if adapter.base_first:
-            base_aligned = current.copy()
-            base_aligned[0] = adapter.base_joint_rad
+            base_aligned = self._storage_pickup_base_aligned_joints(
+                current,
+                adapter.base_joint_rad,
+            )
             base_stage = RadialJointStagePlan(
                 "storage pickup base align",
                 (current.copy(), base_aligned.copy()),
@@ -4860,8 +5079,10 @@ class MuJoCoRobotRuntime:
         pregrasp: list[RadialJointStagePlan] = []
 
         if adapter.base_first:
-            base_aligned = current.copy()
-            base_aligned[0] = adapter.base_joint_rad
+            base_aligned = self._storage_pickup_base_aligned_joints(
+                current,
+                adapter.base_joint_rad,
+            )
             base_stage = RadialJointStagePlan(
                 "storage pickup base align",
                 (current.copy(), base_aligned.copy()),
@@ -5121,6 +5342,7 @@ class MuJoCoRobotRuntime:
         source_rotation: np.ndarray,
         target_rotation: np.ndarray,
         current: np.ndarray,
+        successor_target: np.ndarray | None = None,
     ) -> RadialJointStagePlan | None:
         shortest_theta_delta = self._shortest_angle_delta_rad(
             source_theta,
@@ -5165,10 +5387,36 @@ class MuJoCoRobotRuntime:
                         break
                 if valid:
                     wrist_delta = theta_delta - yaw_delta
+                    if abs(wrist_delta) > RADIAL_MAX_WRIST_STAGE_TRAVEL_RAD:
+                        continue
+                    successor_wrist_travel = 0.0
+                    successor_base_travel = 0.0
+                    if successor_target is not None:
+                        # A half-turn has two equally short representations. Use
+                        # the one that also leaves the next known stage on a
+                        # short wrist branch instead of stranding joint 7 near
+                        # a +/-2*pi limit.
+                        nearest_successor = self._nearest_equivalent_joints(
+                            np.asarray(successor_target, dtype=float),
+                            endpoint,
+                        )
+                        successor_wrist_travel = abs(
+                            float(nearest_successor[6] - endpoint[6])
+                        )
+                        if (
+                            successor_wrist_travel
+                            > RADIAL_MAX_WRIST_STAGE_TRAVEL_RAD
+                        ):
+                            continue
+                        successor_base_travel = abs(
+                            float(nearest_successor[0] - endpoint[0])
+                        )
                     score = (
                         abs(theta_delta),
                         abs(wrist_delta),
                         abs(yaw_delta),
+                        successor_wrist_travel,
+                        successor_base_travel,
                         abs(theta_turns) + abs(yaw_turns),
                     )
                     route_candidates.append((score, theta_delta, yaw_delta))
@@ -5518,6 +5766,9 @@ class MuJoCoRobotRuntime:
             source_rotation=start_rotation,
             target_rotation=home_rotation,
             current=current,
+            successor_target=np.radians(
+                np.asarray(RADIAL_PHYSICAL_HOME_JOINTS_DEG, dtype=float)
+            ),
         )
         if coordinated_rotation is not None:
             stages.append(coordinated_rotation)

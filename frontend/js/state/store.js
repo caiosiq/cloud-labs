@@ -11,6 +11,9 @@ export const store = {
      */
     coordinatorPolicy: null,
     runtimeMode: null,
+    /** Names returned by the simulation-preset API (Command Console completion). */
+    simulationPresetNames: [],
+    simulationComponentTags: [],
     /**
      * Ghost (canvas-truth) pose per tag: ``{x, y, rotation}``.
      * TeleOp v2 planning uses ``teleopTarget``; hardware truth uses ``teleopLivePose``.
@@ -80,6 +83,8 @@ export const store = {
     laserLineCoeffs: null,
     previousSystemStatus: 'IDLE',
     previousRuntimeErrorKey: null,
+    /** Last shared MuJoCo-reset revision observed from coordinator lab state. */
+    previousSimulationResetRevision: '',
     /** Tags that were teleop-ready on the previous lab-state poll (ghost sync on exit). */
     previousTeleopReadyTags: new Set(),
     forceGhostSync: false,

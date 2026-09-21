@@ -92,15 +92,122 @@ def create_app(*, lab: Any = None, backend_id: str = "sim.default") -> FastAPI:
 
     @app.get("/library")
     async def get_library() -> Dict[str, Any]:
-        from cloudlabs_edge_dev.edge_data import load_library, stamp_backend
+        from cloudlabs_edge_dev.edge_data import stamp_backend
 
-        return stamp_backend(load_library(_edge_root()), backend_id)
+        return stamp_backend(context.get_lab().get_component_library(), backend_id)
 
     @app.get("/inventory")
     async def get_inventory() -> Dict[str, Any]:
-        from cloudlabs_edge_dev.edge_data import load_inventory, stamp_backend
+        from cloudlabs_edge_dev.edge_data import stamp_backend
 
-        return stamp_backend(load_inventory(_edge_root()), backend_id)
+        return stamp_backend(context.get_lab().get_inventory(), backend_id)
+
+    component_admin_lock = asyncio.Lock()
+
+    async def _component_admin_response(
+        operation: Any, *args: Any, **kwargs: Any
+    ) -> JSONResponse:
+        try:
+            # Registry updates and MuJoCo scene rebuilds are one transaction;
+            # serialize them so concurrent console clients cannot lose edits.
+            async with component_admin_lock:
+                result = await asyncio.to_thread(operation, *args, **kwargs)
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=422,
+                content=contract.refused("INVALID_COMPONENT", str(exc)),
+            )
+        except RuntimeError as exc:
+            return JSONResponse(
+                status_code=409,
+                content=contract.refused("COMPONENT_ADMIN_REFUSED", str(exc)),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                status_code=500,
+                content=contract.failed("COMPONENT_ADMIN_FAILED", str(exc)),
+            )
+        return JSONResponse({"status": "ok", **(result or {})})
+
+    @app.get("/simulation/components")
+    async def list_simulation_components() -> Dict[str, Any]:
+        return await asyncio.to_thread(context.get_lab().list_simulation_components)
+
+    @app.get("/simulation/components/next-tag")
+    async def next_simulation_component_tag() -> Dict[str, Any]:
+        return await asyncio.to_thread(context.get_lab().next_simulation_component_tag)
+
+    @app.get("/simulation/components/{tag_id}")
+    async def get_simulation_component(tag_id: str) -> JSONResponse:
+        return await _component_admin_response(
+            context.get_lab().get_simulation_component,
+            tag_id,
+        )
+
+    @app.put("/simulation/components/{tag_id}")
+    async def define_simulation_component(
+        tag_id: str,
+        body: Dict[str, Any],
+    ) -> JSONResponse:
+        return await _component_admin_response(
+            context.get_lab().define_simulation_component,
+            tag_id,
+            body,
+        )
+
+    @app.patch("/simulation/components/{tag_id}")
+    async def configure_simulation_component(
+        tag_id: str,
+        body: Dict[str, Any],
+    ) -> JSONResponse:
+        return await _component_admin_response(
+            context.get_lab().configure_simulation_component,
+            tag_id,
+            body,
+        )
+
+    @app.post("/simulation/components/{tag_id}/reset")
+    async def reset_simulation_component(tag_id: str) -> JSONResponse:
+        return await _component_admin_response(
+            context.get_lab().reset_simulation_component,
+            tag_id,
+        )
+
+    @app.delete("/simulation/components/{tag_id}")
+    async def delete_simulation_component(tag_id: str) -> JSONResponse:
+        return await _component_admin_response(
+            context.get_lab().delete_simulation_component,
+            tag_id,
+        )
+
+    @app.post("/simulation/components/{tag_id}/insert")
+    async def insert_simulation_component(
+        tag_id: str,
+        body: Dict[str, Any],
+    ) -> JSONResponse:
+        storage = body.get("storage_slot")
+        return await _component_admin_response(
+            context.get_lab().insert_simulation_component,
+            tag_id,
+            x=body.get("x"),
+            y=body.get("y"),
+            rotation=body.get("rotation", 0.0),
+            storage_slot=storage if isinstance(storage, dict) else None,
+        )
+
+    @app.post("/simulation/components/{tag_id}/remove")
+    async def remove_simulation_component(tag_id: str) -> JSONResponse:
+        return await _component_admin_response(
+            context.get_lab().remove_simulation_component,
+            tag_id,
+        )
+
+    @app.post("/simulation/table/clear")
+    async def clear_simulation_table(body: Dict[str, Any] | None = None) -> JSONResponse:
+        return await _component_admin_response(
+            context.get_lab().clear_simulation_components,
+            scope=str((body or {}).get("scope") or "table"),
+        )
 
     @app.get("/lab-state")
     async def get_lab_state() -> Dict[str, Any]:
@@ -122,6 +229,9 @@ def create_app(*, lab: Any = None, backend_id: str = "sim.default") -> FastAPI:
             requested_state = (
                 body.get("lab_state") if isinstance(body, dict) else None
             )
+            requested_catalog = (
+                body.get("catalog_rows") if isinstance(body, dict) else None
+            )
             if requested_state is not None and not isinstance(requested_state, dict):
                 return JSONResponse(
                     status_code=400,
@@ -129,9 +239,17 @@ def create_app(*, lab: Any = None, backend_id: str = "sim.default") -> FastAPI:
                         "BAD_REQUEST", "lab_state must be an object"
                     ),
                 )
+            if requested_catalog is not None and not isinstance(requested_catalog, list):
+                return JSONResponse(
+                    status_code=400,
+                    content=contract.failed(
+                        "BAD_REQUEST", "catalog_rows must be an array"
+                    ),
+                )
             status = await asyncio.to_thread(
                 restart,
                 lab_state=requested_state,
+                catalog_rows=requested_catalog,
             )
         except Exception as exc:  # noqa: BLE001
             return JSONResponse(

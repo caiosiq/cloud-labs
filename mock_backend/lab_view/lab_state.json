@@ -9,9 +9,9 @@
         "tunables": {
           "presence": "breadboard",
           "nominal_pose": {
-            "x": -242.52285924916845,
-            "y": 199.93411764705883,
-            "rotation": -0.15235294117647058
+            "x": 320.0,
+            "y": 190.0,
+            "rotation": -90.0
           },
           "nominal_motor_positions": {
             "1": 2.6,
@@ -25,16 +25,16 @@
             "mode": "MANUAL"
           },
           "reported_pose": {
-            "x": -242.52285924916845,
-            "y": 199.93411764705883,
-            "rotation": -0.15235294117647058
+            "x": 320.0,
+            "y": 190.0,
+            "rotation": -90.0
           }
         },
         "measurables": {
           "pose": {
-            "x": -242.52285924916845,
-            "y": 199.93411764705883,
-            "rotation": -0.15235294117647058
+            "x": 320.0,
+            "y": 190.0,
+            "rotation": -90.0
           },
           "last_optimization_score": null,
           "last_optimized_pose": null,
@@ -83,33 +83,30 @@
       "type": "OPTICAL_LENS",
       "statecontrol": {
         "tunables": {
-          "presence": "storage",
+          "presence": "breadboard",
           "nominal_pose": {
-            "x": -262.5,
-            "y": -332.5,
-            "rotation": 0.0
+            "x": 320.0,
+            "y": 95.0,
+            "rotation": -90.0
           },
           "storage": {
-            "in_storage": true,
-            "slot": {
-              "i": 0,
-              "j": 0
-            }
+            "in_storage": false,
+            "slot": null
           },
           "placement": {
-            "mode": "STORAGE"
+            "mode": "MANUAL"
           },
           "reported_pose": {
-            "x": -262.5,
-            "y": -332.5,
-            "rotation": 0.0
+            "x": 320.0,
+            "y": 95.0,
+            "rotation": -90.0
           }
         },
         "measurables": {
           "pose": {
-            "x": -262.5,
-            "y": -332.5,
-            "rotation": 0.0
+            "x": 320.0,
+            "y": 95.0,
+            "rotation": -90.0
           },
           "last_optimization_score": null,
           "last_optimized_pose": null,
@@ -153,31 +150,28 @@
         "tunables": {
           "presence": "breadboard",
           "nominal_pose": {
-            "x": -393.1010137028703,
-            "y": 200.11223163966798,
-            "rotation": 0.0,
-            "z": 245.0
+            "x": 320.0,
+            "y": 0.0,
+            "rotation": -90.0
           },
           "storage": {
             "in_storage": false,
             "slot": null
           },
           "placement": {
-            "mode": "PICK"
+            "mode": "MANUAL"
           },
           "reported_pose": {
-            "x": -393.1010137028703,
-            "y": 200.11223163966798,
-            "rotation": 0.0,
-            "z": 245.0
+            "x": 320.0,
+            "y": 0.0,
+            "rotation": -90.0
           }
         },
         "measurables": {
           "pose": {
-            "x": -393.1010137028703,
-            "y": 200.11223163966798,
-            "rotation": 0.0,
-            "z": 245.0
+            "x": 320.0,
+            "y": 0.0,
+            "rotation": -90.0
           },
           "last_optimization_score": null,
           "last_optimized_pose": null,
@@ -221,9 +215,9 @@
         "tunables": {
           "presence": "breadboard",
           "nominal_pose": {
-            "x": 196.3559682816611,
-            "y": 164.2857142857143,
-            "rotation": 180.0
+            "x": 320.0,
+            "y": -95.0,
+            "rotation": -90.0
           },
           "storage": {
             "in_storage": false,
@@ -233,16 +227,16 @@
             "mode": "MANUAL"
           },
           "reported_pose": {
-            "x": 196.3559682816611,
-            "y": 164.2857142857143,
-            "rotation": 180.0
+            "x": 320.0,
+            "y": -95.0,
+            "rotation": -90.0
           }
         },
         "measurables": {
           "pose": {
-            "x": 196.3559682816611,
-            "y": 164.2857142857143,
-            "rotation": 180.0
+            "x": 320.0,
+            "y": -95.0,
+            "rotation": -90.0
           },
           "last_optimization_score": null,
           "last_optimized_pose": null,
@@ -286,8 +280,8 @@
         "tunables": {
           "presence": "breadboard",
           "nominal_pose": {
-            "x": 390.0,
-            "y": 200.0,
+            "x": 320.0,
+            "y": -190.0,
             "rotation": -90.0
           },
           "nominal_motor_positions": {
@@ -302,15 +296,15 @@
             "mode": "MANUAL"
           },
           "reported_pose": {
-            "x": 390.0,
-            "y": 200.0,
+            "x": 320.0,
+            "y": -190.0,
             "rotation": -90.0
           }
         },
         "measurables": {
           "pose": {
-            "x": 390.0,
-            "y": 200.0,
+            "x": 320.0,
+            "y": -190.0,
             "rotation": -90.0
           },
           "last_optimization_score": null,
@@ -362,9 +356,9 @@
         "tunables": {
           "presence": "breadboard",
           "nominal_pose": {
-            "x": -242.3032514060312,
-            "y": 54.7840336134454,
-            "rotation": -0.09196078431372547
+            "x": 320.0,
+            "y": -285.0,
+            "rotation": -90.0
           },
           "storage": {
             "in_storage": false,
@@ -375,16 +369,16 @@
           },
           "exposure_time_ms": 200.0,
           "reported_pose": {
-            "x": -242.3032514060312,
-            "y": 54.7840336134454,
-            "rotation": -0.09196078431372547
+            "x": 320.0,
+            "y": -285.0,
+            "rotation": -90.0
           }
         },
         "measurables": {
           "pose": {
-            "x": -242.3032514060312,
-            "y": 54.7840336134454,
-            "rotation": -0.09196078431372547
+            "x": 320.0,
+            "y": -285.0,
+            "rotation": -90.0
           },
           "last_optimization_score": null,
           "last_optimized_pose": null,

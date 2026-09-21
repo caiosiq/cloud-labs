@@ -99,9 +99,9 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
 
         result = await host.store_component("tag_11")
 
-        self.assertEqual(result["storage"]["slot"], {"i": 2, "j": 0})
-        self.assertEqual((result["x"], result["y"]), (100.0, -340.0))
-        self.assertEqual((result["slot_i"], result["slot_j"]), (2, 0))
+        self.assertEqual(result["storage"]["slot"], {"i": 0, "j": 0})
+        self.assertEqual((result["x"], result["y"]), (-100.0, -340.0))
+        self.assertEqual((result["slot_i"], result["slot_j"]), (0, 0))
         self.assertEqual(result["mode"], "autopack")
         self.assertEqual(client.calls[0][1]["grasp_policy"], "short_edges")
         self.assertEqual(client.calls[0][1]["pickup_context"], "table")
@@ -151,22 +151,22 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
         client = FakeMuJoCoClient()
         host._client = client
 
-        result = await host.store_component("tag_9", slot_i=1, slot_j=1)
+        result = await host.store_component("tag_15", slot_i=1, slot_j=1)
 
         self.assertEqual(result["storage"]["slot"], {"i": 1, "j": 1})
         self.assertEqual((result["x"], result["y"]), (0.0, -220.0))
         self.assertEqual(client.calls[0][1]["pickup_context"], "storage")
-        self.assertEqual(tunables(host, "tag_9")["storage"]["slot"], {"i": 1, "j": 1})
+        self.assertEqual(tunables(host, "tag_15")["storage"]["slot"], {"i": 1, "j": 1})
 
     async def test_failed_explicit_reslot_preserves_pose_and_slot(self):
         host = make_host()
-        before = copy.deepcopy(tunables(host, "tag_9"))
+        before = copy.deepcopy(tunables(host, "tag_15"))
         host._client = FakeMuJoCoClient(fail=True)
 
         with self.assertRaisesRegex(RuntimeError, "preflight rejected"):
-            await host.store_component("tag_9", slot_i=1, slot_j=1)
+            await host.store_component("tag_15", slot_i=1, slot_j=1)
 
-        self.assertEqual(tunables(host, "tag_9"), before)
+        self.assertEqual(tunables(host, "tag_15"), before)
 
     async def test_store_requires_both_explicit_slot_indices(self):
         host = make_host()
@@ -180,7 +180,7 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
         host._client = client
 
         result = await host.place_from_storage(
-            "tag_9",
+            "tag_15",
             x=250.0,
             y=200.0,
             rotation=45.0,
@@ -189,8 +189,8 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0][1]["grasp_policy"], "short_edges")
         self.assertEqual(client.calls[0][1]["pickup_context"], "storage")
         self.assertEqual(result["presence"], "breadboard")
-        self.assertEqual(tunables(host, "tag_9")["storage"]["slot"], None)
-        self.assertEqual(tunables(host, "tag_9")["nominal_pose"]["rotation"], 45.0)
+        self.assertEqual(tunables(host, "tag_15")["storage"]["slot"], None)
+        self.assertEqual(tunables(host, "tag_15")["nominal_pose"]["rotation"], 45.0)
 
     async def test_failed_motion_does_not_commit_storage_transition(self):
         host = make_host()
@@ -206,19 +206,19 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
         host = make_host()
         client = FakeMuJoCoClient()
         host._client = client
-        host._set_pose("tag_9", -307.0, -310.0, 12.0)
+        host._set_pose("tag_15", -307.0, -310.0, 12.0)
 
-        result = await host.recenter_stored_in_inventory("tag_9")
+        result = await host.recenter_stored_in_inventory("tag_15")
 
-        self.assertEqual((result["x"], result["y"]), (-100.0, -340.0))
+        self.assertEqual((result["x"], result["y"]), (0.0, -340.0))
         self.assertEqual(result["rotation"], 0.0)
-        self.assertEqual(result["storage"]["slot"], {"i": 0, "j": 0})
+        self.assertEqual(result["storage"]["slot"], {"i": 1, "j": 0})
         self.assertEqual(client.calls[0][1]["grasp_policy"], "short_edges")
         self.assertEqual(client.calls[0][1]["pickup_context"], "storage")
-        self.assertEqual(tunables(host, "tag_9")["presence"], "storage")
+        self.assertEqual(tunables(host, "tag_15")["presence"], "storage")
         self.assertEqual(
-            tunables(host, "tag_9")["storage"]["slot"],
-            {"i": 0, "j": 0},
+            tunables(host, "tag_15")["storage"]["slot"],
+            {"i": 1, "j": 0},
         )
 
     async def test_repack_moves_to_a_different_free_slot(self):
@@ -226,41 +226,41 @@ class StoragePrimitiveTests(unittest.IsolatedAsyncioTestCase):
         client = FakeMuJoCoClient()
         host._client = client
 
-        result = await host.repack_storage_slot("tag_9")
+        result = await host.repack_storage_slot("tag_15")
 
-        self.assertEqual(result["storage"]["slot"], {"i": 2, "j": 0})
-        self.assertEqual((result["x"], result["y"]), (100.0, -340.0))
+        self.assertEqual(result["storage"]["slot"], {"i": 0, "j": 0})
+        self.assertEqual((result["x"], result["y"]), (-100.0, -340.0))
         self.assertEqual(client.calls[0][1]["grasp_policy"], "short_edges")
         self.assertEqual(client.calls[0][1]["pickup_context"], "storage")
-        self.assertNotEqual(result["storage"]["slot"], {"i": 0, "j": 0})
+        self.assertNotEqual(result["storage"]["slot"], {"i": 1, "j": 0})
 
     async def test_failed_recenter_preserves_pose_and_slot(self):
         host = make_host()
-        host._set_pose("tag_9", -307.0, -310.0, 12.0)
-        before = copy.deepcopy(tunables(host, "tag_9"))
+        host._set_pose("tag_15", -307.0, -310.0, 12.0)
+        before = copy.deepcopy(tunables(host, "tag_15"))
         host._client = FakeMuJoCoClient(fail=True)
 
         with self.assertRaisesRegex(RuntimeError, "preflight rejected"):
-            await host.recenter_stored_in_inventory("tag_9")
+            await host.recenter_stored_in_inventory("tag_15")
 
-        self.assertEqual(tunables(host, "tag_9"), before)
+        self.assertEqual(tunables(host, "tag_15"), before)
 
     async def test_failed_repack_preserves_pose_and_slot(self):
         host = make_host()
-        before = copy.deepcopy(tunables(host, "tag_9"))
+        before = copy.deepcopy(tunables(host, "tag_15"))
         host._client = FakeMuJoCoClient(fail=True)
 
         with self.assertRaisesRegex(RuntimeError, "preflight rejected"):
-            await host.repack_storage_slot("tag_9")
+            await host.repack_storage_slot("tag_15")
 
-        self.assertEqual(tunables(host, "tag_9"), before)
+        self.assertEqual(tunables(host, "tag_15"), before)
 
     async def test_recenter_requires_an_assigned_slot(self):
         host = make_host()
-        tunables(host, "tag_9")["storage"]["slot"] = None
+        tunables(host, "tag_15")["storage"]["slot"] = None
 
         with self.assertRaisesRegex(ValueError, "no assigned storage slot"):
-            await host.recenter_stored_in_inventory("tag_9")
+            await host.recenter_stored_in_inventory("tag_15")
 
     def test_simulation_edge_advertises_storage_recovery_primitives(self):
         capabilities = json.loads(

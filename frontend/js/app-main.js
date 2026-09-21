@@ -361,6 +361,7 @@ window.__commandConsoleDeps = {
     log,
     runLabPoseRefresh,
     fetchLabState,
+    fetchCatalogMap,
     ensureGhostForConsole,
     getTableCamExposureSeconds,
     get ghostState() {

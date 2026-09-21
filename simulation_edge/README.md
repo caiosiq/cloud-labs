@@ -11,6 +11,16 @@ simulation_edge/
   third_party/mujoco_menagerie/ufactory_xarm7/
 ```
 
+Component identity is intentionally layered. Built-in definitions live in
+`cloudlabs_edge/data/library.json`; startup membership is seeded by
+`cloudlabs_edge/data/inventory.json`; Lemma-authored definitions and built-in
+parameter overrides live separately in
+`cloudlabs_edge/data/simulation_components.json` (created on first use). The
+live simulation state determines current membership after startup, and named
+states under `lab_view/states/` preserve reusable arrangements. Do not copy a
+custom definition into the built-in library or encode table poses in a catalog
+definition.
+
 ## Modes
 
 | Mode | How | Notes |
@@ -127,3 +137,61 @@ cloudlabs-edge certify http://127.0.0.1:8120 --path simulation_edge/cloudlabs_ed
 `backend_id`: **`sim.default`**. Set `edge.base_url` in `schemas/backends.json` when serving HTTP.
 
 v1 physically implements **`MOVE_COMPONENT`** (soft or MuJoCo). Live / teleop / observe are soft contract stubs so certify and coordinator wiring work without a full optical stack.
+
+## Simulation state presets
+
+The root `lab_view/lab_state.json` remains the normal default startup state.
+Named, simulation-only presets live in `lab_view/states/<name>.json`; they are
+separate from Control configuration history and may be edited directly when
+the backend and simulation are stopped.
+
+Use the Twin UI Command Console while the selected backend is `sim.default`
+and the lab is idle:
+
+```text
+simreset list
+simreset current
+simreset default
+simreset polarizer_test
+simsave polarizer_test
+simsave polarizer_test --overwrite
+simshow polarizer_test
+simwrite new_setup {"schema_version":1,"kind":"cloud_labs_simulation_preset","base":"default","components":{"tag_13":{"presence":"breadboard","pose":{"x":-300,"y":0,"rotation":-90}}}}
+simwrite new_setup --overwrite {"schema_version":1,"kind":"cloud_labs_simulation_preset","base":"default","components":{"tag_13":{"presence":"breadboard","pose":{"x":-300,"y":0,"rotation":-90}}}}
+```
+
+`simsave` captures the current workspace after removing live telemetry,
+leases, jobs, held-component state, and measurement noise. `simreset` validates
+the selected file, closes and reopens only the MuJoCo process, replaces the
+coordinator's uncommitted working state, and refreshes the Twin UI. The backend
+and simulation-edge servers remain running. Each successful reset publishes a
+shared reset revision, so every open Twin tab discards stale local ghost poses
+on its next lab-state poll, including resets initiated through the API.
+
+`simshow <name>` prints compact editable JSON without loading the preset.
+`simwrite <name> [--overwrite] <json>` applies that JSON to its explicit `base`,
+validates names, tags, poses, storage slots, table bounds, the danger zone, and
+component overlap, then atomically saves a normal workspace preset. It does not
+move components, alter live state, or restart MuJoCo. A document returned by
+`simshow` can be edited and passed directly to `simwrite`; components omitted
+from the document retain their base-state values.
+
+Preset names may contain letters, numbers, underscores, and hyphens (up to 64
+characters). `default`, `current`, and `list` are reserved command selectors.
+Files written by `simsave` use this wrapper:
+
+```json
+{
+  "schema_version": 2,
+  "kind": "cloud_labs_workspace_state",
+  "saved_at": "2026-09-19T12:00:00+00:00",
+  "lab_state": {
+    "system_status": "IDLE",
+    "components": {}
+  }
+}
+```
+
+For convenience, `simreset` also accepts a hand-authored file whose top-level
+object is the lab state itself. Each component still needs a valid
+`statecontrol.tunables.nominal_pose`; live `telemetry` may be omitted.

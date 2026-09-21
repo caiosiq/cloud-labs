@@ -1,0 +1,132 @@
+{
+  "schema_version": 2,
+  "kind": "cloud_labs_workspace_state",
+  "saved_at": "2026-09-19T00:00:00+00:00",
+  "lab_state": {
+    "system_status": "IDLE",
+    "components": {
+      "tag_20": {
+        "id": "tag_20",
+        "type": "OPTICAL_POLARIZER",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": { "x": -350.0, "y": 300.0, "rotation": 30.0 },
+            "nominal_motor_positions": { "1": 2.5248346065087364, "3": 1.6932646823569844 },
+            "storage": { "in_storage": false, "slot": null },
+            "placement": { "mode": "MANUAL" }
+          },
+          "measurables": {}
+        }
+      },
+      "tag_9": {
+        "id": "tag_9",
+        "type": "OPTICAL_LENS",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": { "x": -100.0, "y": 350.0, "rotation": -20.0 },
+            "storage": { "in_storage": false, "slot": null },
+            "placement": { "mode": "MANUAL" }
+          },
+          "measurables": {}
+        }
+      },
+      "tag_11": {
+        "id": "tag_11",
+        "type": "OPTICAL_FILTER",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": { "x": 180.0, "y": 320.0, "rotation": 75.0 },
+            "storage": { "in_storage": false, "slot": null },
+            "placement": { "mode": "MANUAL" }
+          },
+          "measurables": {}
+        }
+      },
+      "tag_14": {
+        "id": "tag_14",
+        "type": "OPTICAL_LENS",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": { "x": -400.0, "y": 0.0, "rotation": 0.0 },
+            "storage": { "in_storage": false, "slot": null },
+            "placement": { "mode": "MANUAL" }
+          },
+          "measurables": {}
+        }
+      },
+      "tag_13": {
+        "id": "tag_13",
+        "type": "OPTICAL_POLARIZER",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": { "x": -220.0, "y": 100.0, "rotation": 135.0 },
+            "nominal_motor_positions": { "1": 2.5248346065087364, "3": 1.6932646823569844 },
+            "storage": { "in_storage": false, "slot": null },
+            "placement": { "mode": "MANUAL" }
+          },
+          "measurables": {}
+        }
+      },
+      "tag_22": {
+        "id": "tag_22",
+        "type": "OPTICAL_CAMERA",
+        "statecontrol": {
+          "tunables": {
+            "presence": "breadboard",
+            "nominal_pose": { "x": 250.0, "y": 100.0, "rotation": -45.0 },
+            "storage": { "in_storage": false, "slot": null },
+            "placement": { "mode": "MANUAL" },
+            "exposure_time_ms": 200.0
+          },
+          "measurables": {}
+        }
+      },
+      "tag_15": {
+        "id": "tag_15",
+        "type": "OPTICAL_LENS",
+        "statecontrol": {
+          "tunables": {
+            "presence": "storage",
+            "nominal_pose": { "x": 0.0, "y": -340.0, "rotation": 0.0 },
+            "storage": { "in_storage": true, "slot": { "i": 1, "j": 0 } },
+            "placement": { "mode": "STORAGE" }
+          },
+          "measurables": {}
+        }
+      }
+    },
+    "alignment_guides": [
+      {
+        "id": "g_83fa666c00f3",
+        "p1": { "x": -241.90482003348217, "y": 432.63889857700894 },
+        "p2": { "x": -241.90482003348217, "y": -60.21824428013393 }
+      }
+    ],
+    "laser_lines": {
+      "snap_line_id": "demo_beam",
+      "lines": [
+        {
+          "id": "demo_beam",
+          "name": "Mock table beam",
+          "color": "#ff3b3b",
+          "enabled": true,
+          "p1": { "x": 0.0, "y": -450.0 },
+          "p2": { "x": 0.0, "y": 450.0 }
+        },
+        {
+          "id": "demo_secondary",
+          "name": "Mock secondary (angled)",
+          "color": "#ff8c42",
+          "enabled": true,
+          "p1": { "x": -200.0, "y": 200.0 },
+          "p2": { "x": 200.0, "y": 200.0 }
+        }
+      ]
+    }
+  }
+}

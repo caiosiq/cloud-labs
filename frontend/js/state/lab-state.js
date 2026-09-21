@@ -318,6 +318,12 @@ async function _fetchLabStateBody() {
                 : null;
         const newRuntimeFailure =
             !!runtimeErrorKey && runtimeErrorKey !== store.previousRuntimeErrorKey;
+        const simulationResetRevision = String(
+            store.labState?.simulation_reset?.revision || '',
+        );
+        const simulationResetChanged =
+            Boolean(simulationResetRevision) &&
+            simulationResetRevision !== store.previousSimulationResetRevision;
         if (newRuntimeFailure) {
             const target = runtimeError.target_id ? ` for ${runtimeError.target_id}` : '';
             log(`Simulator move failed${target}: ${runtimeError.message || 'unknown error'}`, 'error');
@@ -365,13 +371,18 @@ async function _fetchLabStateBody() {
         // Ghost state reconciliation. The ghost is what the canvas draws; we sync it from the
         // backend's nominal/measured pose when:
         //   1. Force Sync was requested (Refresh button).
-        //   2. The system status transitioned BUSY/OPTIMIZING → IDLE (command finished).
-        //   3. Initial load (handled by `!store.ghostState[name]` check).
+        //   2. Any client published a new shared MuJoCo-reset revision.
+        //   3. The system status transitioned BUSY/OPTIMIZING → IDLE (command finished).
+        //   4. Initial load (handled by `!store.ghostState[name]` check).
         pruneOrphanRuntimeUiState();
 
         if (store.labState.components) {
             const justFinishedCommand = (store.previousSystemStatus !== 'IDLE' && store.labState.system_status === 'IDLE');
-            const shouldSync = store.forceGhostSync || justFinishedCommand || newRuntimeFailure;
+            const shouldSync =
+                store.forceGhostSync ||
+                simulationResetChanged ||
+                justFinishedCommand ||
+                newRuntimeFailure;
 
             if (shouldSync) {
                 log('Syncing ghost state with lab state...', 'info');
@@ -518,6 +529,7 @@ async function _fetchLabStateBody() {
 
         store.previousSystemStatus = store.labState.system_status;
         store.previousRuntimeErrorKey = runtimeErrorKey;
+        store.previousSimulationResetRevision = simulationResetRevision;
         store.previousTeleopReadyTags = teleopReadyNow;
         if (store.labState.system_status === 'IDLE') {
             if (store.isOptimizing) {

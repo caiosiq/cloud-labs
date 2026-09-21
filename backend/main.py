@@ -793,6 +793,15 @@ class RefreshPoseBody(BaseModel):
     tag_ids: List[str] = Field(default_factory=list)
 
 
+class SimulationPresetSaveBody(BaseModel):
+    overwrite: bool = False
+
+
+class SimulationPresetWriteBody(BaseModel):
+    document: Dict[str, Any]
+    overwrite: bool = False
+
+
 class ControlCreateRepoBody(BaseModel):
     repo_id: str
     display_name: Optional[str] = None
@@ -1208,38 +1217,593 @@ async def set_runtime_mode(payload: RuntimeModeBody):
 
 @app.post("/api/runtime-mode/refresh-mujoco")
 async def refresh_mujoco_runtime():
-    rt = _runtime_for_active(init=False)
-    client = _edge_client_for(rt.backend_id)
-    base_url = getattr(client, "base_url", None)
-    if not base_url:
-        raise HTTPException(
-            status_code=409,
-            detail="Refresh MuJoCo requires a configured HTTP simulation edge",
-        )
+    rt, base_url = _require_simulation_edge()
+    store, working_state, _, _ = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(rt, working_state)
+    reset_event = _simulation_reset_event("current")
+    restart_state = copy.deepcopy(working_state)
+    restart_state["simulation_reset"] = copy.deepcopy(reset_event)
     try:
-        from lab_model.coordinator.state.lab_state_store import (
-            ensure_lab_state_store,
+        body = await _restart_mujoco_edge(
+            base_url,
+            restart_state,
+            catalog_rows=list(_simulation_catalog_components(rt).values()),
         )
-
-        store = ensure_lab_state_store(rt)
-        working_state = store.snapshot()
-        async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as edge:
-            resp = await edge.post(
-                "/simulator/restart",
-                json={"lab_state": working_state},
-            )
-            body = resp.json()
-        if resp.status_code >= 400:
-            detail = body.get("error") or body.get("detail") or body
-            raise HTTPException(status_code=resp.status_code, detail=detail)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
         logger.exception("Refresh MuJoCo failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    _publish_simulation_reset_event(store, event=reset_event)
     mode_info = await _edge_runtime_mode_info(rt)
     mode_info["restart"] = body if isinstance(body, dict) else {"status": "ok"}
+    mode_info["simulation_reset"] = reset_event
     return mode_info
+
+
+def _require_simulation_edge() -> Tuple[BackendRuntime, str]:
+    rt = _runtime_for_active(init=False)
+    if str(rt.lab_mode or "").strip().upper() != "SIMULATION":
+        raise HTTPException(
+            status_code=409,
+            detail="Simulation presets are available only on a SIMULATION backend",
+        )
+    client = _edge_client_for(rt.backend_id)
+    base_url = str(getattr(client, "base_url", None) or "").strip()
+    if not base_url:
+        raise HTTPException(
+            status_code=409,
+            detail="Simulation presets require a configured HTTP simulation edge",
+        )
+    return rt, base_url
+
+
+def _read_json_object(path: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            value = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=500, detail=f"Expected a JSON object in {path}")
+    return value
+
+
+def _simulation_preset_context(
+    rt: BackendRuntime,
+) -> Tuple[Any, Dict[str, Any], Dict[str, Any], List[str]]:
+    from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+
+    store = ensure_lab_state_store(rt)
+    working_state = store.snapshot()
+    layout = _read_json_object(rt.paths.layout_json)
+    catalog_ids: List[str] = []
+    try:
+        from lab_model.coordinator.catalog.resolve_edge_catalog import resolve_edge_catalog
+
+        # Presets may contain any component defined in the simulation library,
+        # including a currently inactive custom component.
+        catalog_ids = resolve_edge_catalog(rt).library_tag_id_list()
+    except Exception:
+        catalog_ids = []
+    if not catalog_ids:
+        try:
+            active = _read_json_object(rt.paths.active_catalog_json)
+            raw_ids = active.get("tag_ids")
+            if isinstance(raw_ids, list):
+                catalog_ids = [str(tag) for tag in raw_ids if str(tag).strip()]
+            elif isinstance(active.get("components"), list):
+                catalog_ids = [
+                    str(row.get("tag_id"))
+                    for row in active["components"]
+                    if isinstance(row, dict) and row.get("tag_id")
+                ]
+        except HTTPException:
+            catalog_ids = []
+    if not catalog_ids:
+        components = working_state.get("components")
+        catalog_ids = list(components.keys()) if isinstance(components, dict) else []
+    return store, working_state, layout, catalog_ids
+
+
+def _simulation_catalog_components(rt: BackendRuntime) -> Dict[str, Any]:
+    try:
+        from lab_model.coordinator.catalog.resolve_edge_catalog import resolve_edge_catalog
+
+        return {
+            str(row["tag_id"]): row
+            for row in resolve_edge_catalog(rt).all_library_rows()
+            if isinstance(row, dict) and row.get("tag_id")
+        }
+    except Exception:
+        pass
+    path = str(getattr(rt.paths, "component_library_json", "") or "").strip()
+    if not path:
+        return {}
+    try:
+        document = _read_json_object(path)
+    except HTTPException:
+        return {}
+    raw = document.get("components")
+    if isinstance(raw, dict):
+        return {str(tag): row for tag, row in raw.items() if isinstance(row, dict)}
+    if isinstance(raw, list):
+        return {
+            str(row["tag_id"]): row
+            for row in raw
+            if isinstance(row, dict) and row.get("tag_id")
+        }
+    return {}
+
+
+def _assert_simulation_reset_idle(
+    rt: BackendRuntime,
+    state: Dict[str, Any],
+    *,
+    operation: str = "Simulation reset",
+) -> None:
+    status = str(state.get("system_status") or "").strip().upper()
+    if status != "IDLE":
+        raise HTTPException(
+            status_code=409,
+            detail=f"{operation} requires IDLE; system is {status or 'UNKNOWN'}",
+        )
+    if command_matrix_enabled(rt.backend_id):
+        matrix = get_or_create_matrix(rt).snapshot()
+        if not bool(matrix.get("idle")):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{operation} requires an idle command queue",
+            )
+
+
+async def _restart_mujoco_edge(
+    base_url: str,
+    lab_state: Dict[str, Any],
+    *,
+    catalog_rows: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    request_body: Dict[str, Any] = {"lab_state": lab_state}
+    if catalog_rows is not None:
+        request_body["catalog_rows"] = catalog_rows
+    async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as edge:
+        resp = await edge.post("/simulator/restart", json=request_body)
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {"detail": resp.text or f"HTTP {resp.status_code}"}
+    if resp.status_code >= 400:
+        detail = body.get("error") or body.get("detail") or body
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+    return body if isinstance(body, dict) else {"status": "ok"}
+
+
+def _simulation_reset_event(selector: str) -> Dict[str, str]:
+    """Build the shared event that tells every Twin tab to discard stale ghosts."""
+    return {
+        "revision": uuid.uuid4().hex,
+        "selector": str(selector or "current"),
+        "at": datetime.now().astimezone().isoformat(),
+    }
+
+
+def _publish_simulation_reset_event(
+    store: Any,
+    *,
+    event: Dict[str, str],
+) -> None:
+    from lab_model.coordinator.state.runtime_manager import MutationKind
+
+    def _mark(state: Dict[str, Any]) -> None:
+        state["simulation_reset"] = copy.deepcopy(event)
+
+    store.mutate(
+        _mark,
+        kind=MutationKind.ADMINISTRATIVE_LOAD,
+        source=f"simulation_reset:{event.get('selector') or 'current'}",
+        persist=True,
+    )
+
+
+@app.get("/api/runtime-mode/simulation-presets")
+async def list_runtime_simulation_presets():
+    from lab_model.coordinator.state.simulation_presets import list_simulation_presets
+
+    rt, _ = _require_simulation_edge()
+    return {
+        "backend_id": rt.backend_id,
+        "presets": list_simulation_presets(rt.paths.states_dir),
+        "reserved": ["current", "default", "list"],
+    }
+
+
+@app.get("/api/runtime-mode/simulation-presets/{preset_name}")
+async def show_runtime_simulation_preset(preset_name: str):
+    from lab_model.coordinator.state.simulation_presets import (
+        SimulationPresetError,
+        load_simulation_preset,
+        normalize_simulation_state,
+        simulation_preset_authoring_document,
+    )
+
+    rt, _ = _require_simulation_edge()
+    _, working_state, layout, catalog_ids = _simulation_preset_context(rt)
+    selector = str(preset_name or "").strip()
+    try:
+        if selector.lower() == "current":
+            state = normalize_simulation_state(
+                working_state,
+                catalog_tag_ids=catalog_ids,
+                layout=layout,
+            )
+        else:
+            state = load_simulation_preset(
+                rt.paths.states_dir,
+                selector,
+                default_state_path=os.path.join(rt.paths.root_dir, "lab_state.json"),
+                catalog_tag_ids=catalog_ids,
+                layout=layout,
+            )
+        document = simulation_preset_authoring_document(state, base=selector)
+    except SimulationPresetError as exc:
+        message = str(exc)
+        status_code = 404 if "not found" in message.lower() else 400
+        raise HTTPException(status_code=status_code, detail=message) from exc
+    return {
+        "status": "ok",
+        "backend_id": rt.backend_id,
+        "preset": selector,
+        "document": document,
+    }
+
+
+@app.put("/api/runtime-mode/simulation-presets/{preset_name}")
+async def write_runtime_simulation_preset(
+    preset_name: str,
+    payload: SimulationPresetWriteBody,
+):
+    from lab_model.coordinator.state.simulation_presets import (
+        SimulationPresetError,
+        build_simulation_state_from_authoring,
+        load_simulation_preset,
+        save_simulation_preset,
+        simulation_preset_authoring_document,
+        validate_preset_name,
+    )
+
+    rt, _ = _require_simulation_edge()
+    _, working_state, layout, catalog_ids = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(
+        rt,
+        working_state,
+        operation="Simulation preset write",
+    )
+    try:
+        validate_preset_name(preset_name, for_save=True)
+        base = str(payload.document.get("base") or "").strip()
+        if base.lower() == "current":
+            base_state = working_state
+        else:
+            validate_preset_name(base)
+            if base.lower() == "list":
+                raise SimulationPresetError(
+                    "simwrite base must be current, default, or a preset name"
+                )
+            base_state = load_simulation_preset(
+                rt.paths.states_dir,
+                base,
+                default_state_path=os.path.join(rt.paths.root_dir, "lab_state.json"),
+                catalog_tag_ids=catalog_ids,
+                layout=layout,
+            )
+        authored_state = build_simulation_state_from_authoring(
+            payload.document,
+            base_state=base_state,
+            catalog_tag_ids=catalog_ids,
+            catalog_components=_simulation_catalog_components(rt),
+            layout=layout,
+        )
+        path = save_simulation_preset(
+            rt.paths.states_dir,
+            preset_name,
+            authored_state,
+            overwrite=payload.overwrite,
+            catalog_tag_ids=catalog_ids,
+            layout=layout,
+        )
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SimulationPresetError as exc:
+        message = str(exc)
+        status_code = 404 if "not found" in message.lower() else 400
+        raise HTTPException(status_code=status_code, detail=message) from exc
+    return {
+        "status": "ok",
+        "backend_id": rt.backend_id,
+        "preset": {"name": path.stem},
+        "document": simulation_preset_authoring_document(
+            authored_state,
+            base=path.stem,
+        ),
+    }
+
+
+@app.post("/api/runtime-mode/simulation-presets/{preset_name}")
+async def save_runtime_simulation_preset(
+    preset_name: str,
+    payload: SimulationPresetSaveBody,
+):
+    from lab_model.coordinator.state.simulation_presets import (
+        SimulationPresetError,
+        save_simulation_preset,
+    )
+
+    rt, _ = _require_simulation_edge()
+    _, working_state, layout, catalog_ids = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(
+        rt,
+        working_state,
+        operation="Simulation preset save",
+    )
+    try:
+        path = save_simulation_preset(
+            rt.paths.states_dir,
+            preset_name,
+            working_state,
+            overwrite=payload.overwrite,
+            catalog_tag_ids=catalog_ids,
+            layout=layout,
+        )
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SimulationPresetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ok",
+        "backend_id": rt.backend_id,
+        "preset": {"name": path.stem, "path": str(path)},
+    }
+
+
+@app.post("/api/runtime-mode/simulation-presets/{preset_name}/load")
+async def load_runtime_simulation_preset(preset_name: str):
+    from lab_model.coordinator.state.runtime_manager import MutationKind
+    from lab_model.coordinator.state.simulation_presets import (
+        SimulationPresetError,
+        load_simulation_preset,
+    )
+
+    rt, base_url = _require_simulation_edge()
+    store, working_state, layout, catalog_ids = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(rt, working_state)
+    try:
+        loaded_state = load_simulation_preset(
+            rt.paths.states_dir,
+            preset_name,
+            default_state_path=os.path.join(rt.paths.root_dir, "lab_state.json"),
+            catalog_tag_ids=catalog_ids,
+            layout=layout,
+        )
+    except SimulationPresetError as exc:
+        message = str(exc)
+        status_code = 404 if "not found" in message.lower() else 400
+        raise HTTPException(status_code=status_code, detail=message) from exc
+
+    reset_event = _simulation_reset_event(preset_name)
+    loaded_state["simulation_reset"] = copy.deepcopy(reset_event)
+    body = await _restart_mujoco_edge(
+        base_url,
+        loaded_state,
+        catalog_rows=list(_simulation_catalog_components(rt).values()),
+    )
+    store.replace_state(
+        loaded_state,
+        kind=MutationKind.ADMINISTRATIVE_LOAD,
+        source=f"simulation_preset:{preset_name}",
+        persist=True,
+    )
+    mode_info = await _edge_runtime_mode_info(rt)
+    mode_info["preset"] = preset_name
+    mode_info["restart"] = body
+    mode_info["simulation_reset"] = reset_event
+    return mode_info
+
+
+async def _simulation_component_edge_request(
+    base_url: str,
+    method: str,
+    path: str,
+    *,
+    payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    async with httpx.AsyncClient(base_url=base_url, timeout=60.0) as edge:
+        response = await edge.request(method, path, json=payload)
+        try:
+            body = response.json()
+        except ValueError:
+            body = {"detail": response.text or f"HTTP {response.status_code}"}
+    if response.status_code >= 400:
+        detail = body.get("error") or body.get("detail") or body
+        if isinstance(detail, dict):
+            detail = detail.get("message") or detail.get("error") or detail
+        raise HTTPException(status_code=response.status_code, detail=detail)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=502, detail="simulation edge returned invalid JSON")
+    return body
+
+
+async def _publish_simulation_component_runtime_change(
+    rt: BackendRuntime,
+    base_url: str,
+    result: Dict[str, Any],
+    *,
+    selector: str,
+) -> Dict[str, Any]:
+    if not bool(result.get("runtime_restarted")):
+        return result
+    state = result.get("lab_state")
+    if not isinstance(state, dict):
+        state = await _simulation_component_edge_request(base_url, "GET", "/lab-state")
+    from lab_model.coordinator.state.lab_state_store import ensure_lab_state_store
+    from lab_model.coordinator.state.runtime_manager import MutationKind
+
+    event = _simulation_reset_event(selector)
+    state = copy.deepcopy(state)
+    state["simulation_reset"] = copy.deepcopy(event)
+    ensure_lab_state_store(rt).replace_state(
+        state,
+        kind=MutationKind.ADMINISTRATIVE_LOAD,
+        source=f"simulation_component:{selector}",
+        persist=True,
+    )
+    result = copy.deepcopy(result)
+    result["lab_state"] = state
+    result["simulation_reset"] = event
+    return result
+
+
+def _simulation_component_tag_path(tag_id: str) -> str:
+    tag = str(tag_id or "").strip()
+    if not re.fullmatch(r"tag_[1-9][0-9]*", tag):
+        raise HTTPException(
+            status_code=422,
+            detail="tag_id must be tag_<positive integer>, for example tag_23",
+        )
+    return tag
+
+
+@app.get("/api/runtime-mode/simulation-components")
+async def list_runtime_simulation_components():
+    _, base_url = _require_simulation_edge()
+    return await _simulation_component_edge_request(
+        base_url, "GET", "/simulation/components"
+    )
+
+
+@app.get("/api/runtime-mode/simulation-components/next-tag")
+async def next_runtime_simulation_component_tag():
+    _, base_url = _require_simulation_edge()
+    return await _simulation_component_edge_request(
+        base_url, "GET", "/simulation/components/next-tag"
+    )
+
+
+@app.get("/api/runtime-mode/simulation-components/{tag_id}")
+async def get_runtime_simulation_component(tag_id: str):
+    _, base_url = _require_simulation_edge()
+    tag = _simulation_component_tag_path(tag_id)
+    return await _simulation_component_edge_request(
+        base_url, "GET", f"/simulation/components/{tag}"
+    )
+
+
+@app.put("/api/runtime-mode/simulation-components/{tag_id}")
+async def define_runtime_simulation_component(tag_id: str, payload: Dict[str, Any]):
+    rt, base_url = _require_simulation_edge()
+    _, working_state, _, _ = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(
+        rt, working_state, operation="Simulation component definition"
+    )
+    tag = _simulation_component_tag_path(tag_id)
+    return await _simulation_component_edge_request(
+        base_url, "PUT", f"/simulation/components/{tag}", payload=payload
+    )
+
+
+@app.patch("/api/runtime-mode/simulation-components/{tag_id}")
+async def configure_runtime_simulation_component(tag_id: str, payload: Dict[str, Any]):
+    rt, base_url = _require_simulation_edge()
+    _, working_state, _, _ = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(
+        rt, working_state, operation="Simulation component configure"
+    )
+    tag = _simulation_component_tag_path(tag_id)
+    result = await _simulation_component_edge_request(
+        base_url, "PATCH", f"/simulation/components/{tag}", payload=payload
+    )
+    return await _publish_simulation_component_runtime_change(
+        rt, base_url, result, selector=f"configure:{tag}"
+    )
+
+
+@app.post("/api/runtime-mode/simulation-components/{tag_id}/reset")
+async def reset_runtime_simulation_component(tag_id: str):
+    rt, base_url = _require_simulation_edge()
+    _, working_state, _, _ = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(
+        rt, working_state, operation="Simulation component reset"
+    )
+    tag = _simulation_component_tag_path(tag_id)
+    result = await _simulation_component_edge_request(
+        base_url, "POST", f"/simulation/components/{tag}/reset", payload={}
+    )
+    return await _publish_simulation_component_runtime_change(
+        rt, base_url, result, selector=f"reset:{tag}"
+    )
+
+
+@app.delete("/api/runtime-mode/simulation-components/{tag_id}")
+async def delete_runtime_simulation_component(tag_id: str):
+    rt, base_url = _require_simulation_edge()
+    _, working_state, _, _ = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(
+        rt, working_state, operation="Simulation component delete"
+    )
+    tag = _simulation_component_tag_path(tag_id)
+    return await _simulation_component_edge_request(
+        base_url, "DELETE", f"/simulation/components/{tag}"
+    )
+
+
+@app.post("/api/runtime-mode/simulation-components/{tag_id}/insert")
+async def insert_runtime_simulation_component(tag_id: str, payload: Dict[str, Any]):
+    rt, base_url = _require_simulation_edge()
+    _, working_state, _, _ = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(
+        rt, working_state, operation="Simulation component insert"
+    )
+    tag = _simulation_component_tag_path(tag_id)
+    result = await _simulation_component_edge_request(
+        base_url,
+        "POST",
+        f"/simulation/components/{tag}/insert",
+        payload=payload,
+    )
+    return await _publish_simulation_component_runtime_change(
+        rt, base_url, result, selector=f"insert:{tag}"
+    )
+
+
+@app.post("/api/runtime-mode/simulation-components/{tag_id}/remove")
+async def remove_runtime_simulation_component(tag_id: str):
+    rt, base_url = _require_simulation_edge()
+    _, working_state, _, _ = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(
+        rt, working_state, operation="Simulation component remove"
+    )
+    tag = _simulation_component_tag_path(tag_id)
+    result = await _simulation_component_edge_request(
+        base_url, "POST", f"/simulation/components/{tag}/remove", payload={}
+    )
+    return await _publish_simulation_component_runtime_change(
+        rt, base_url, result, selector=f"remove:{tag}"
+    )
+
+
+@app.post("/api/runtime-mode/simulation-table/clear")
+async def clear_runtime_simulation_table(payload: Dict[str, Any] = Body(default={})):
+    rt, base_url = _require_simulation_edge()
+    _, working_state, _, _ = _simulation_preset_context(rt)
+    _assert_simulation_reset_idle(rt, working_state, operation="Simulation table clear")
+    result = await _simulation_component_edge_request(
+        base_url,
+        "POST",
+        "/simulation/table/clear",
+        payload={"scope": str(payload.get("scope") or "table")},
+    )
+    return await _publish_simulation_component_runtime_change(
+        rt, base_url, result, selector=f"clear:{payload.get('scope') or 'table'}"
+    )
 
 
 @app.post("/api/components")

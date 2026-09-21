@@ -127,20 +127,441 @@ class SimulationHost:
         return None
 
     def get_component_library(self) -> Dict[str, Any]:
-        from cloudlabs_edge_dev.edge_data import load_library
+        from simulation_edge.component_registry import merged_library
 
         root = self._edge_data_root()
         if root is None:
             return {"schema_version": 1, "components": {}}
-        return load_library(root, strict_recordable=False, validate=True)
+        return merged_library(root)
 
     def get_inventory(self) -> Dict[str, Any]:
-        from cloudlabs_edge_dev.edge_data import load_inventory
+        """Return runtime inventory derived from the current simulation state.
+
+        The on-disk inventory seeds startup.  Runtime additions/removals are
+        intentionally session state (save a preset to make an arrangement
+        reusable) while custom component definitions persist separately.
+        """
+
+        entries: Dict[str, Any] = {}
+        with self._lock:
+            components = self.current_state.get("components") or {}
+            for tag_id, component in components.items():
+                if not isinstance(component, Mapping):
+                    continue
+                statecontrol = component.get("statecontrol")
+                tunables = (
+                    statecontrol.get("tunables")
+                    if isinstance(statecontrol, Mapping)
+                    else {}
+                )
+                if not isinstance(tunables, Mapping):
+                    tunables = {}
+                presence = str(tunables.get("presence") or "breadboard").lower()
+                placement = {
+                    "breadboard": "table",
+                    "storage": "storage",
+                    "off_table": "off",
+                }.get(presence, presence)
+                storage = tunables.get("storage")
+                slot = storage.get("slot") if isinstance(storage, Mapping) else None
+                entries[str(tag_id)] = {
+                    "placement": placement,
+                    "storage_slot": copy.deepcopy(slot),
+                    "localize": placement != "off",
+                }
+        return {"schema_version": 1, "entries": entries}
+
+    def _replace_catalog(self, rows: Iterable[Mapping[str, Any]]) -> None:
+        catalog = [copy.deepcopy(dict(row)) for row in rows if isinstance(row, Mapping)]
+        catalog_map = {
+            str(row["tag_id"]): row for row in catalog if row.get("tag_id")
+        }
+        with self._lock:
+            self.catalog = catalog
+            self.catalog_map = catalog_map
+
+    def _all_simulation_catalog_rows(
+        self,
+        *,
+        registry: Optional[Mapping[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        from simulation_edge.component_registry import merged_library
 
         root = self._edge_data_root()
         if root is None:
-            return {"schema_version": 1, "entries": {}}
-        return load_inventory(root)
+            raise RuntimeError("simulation edge data directory is unavailable")
+        library = merged_library(root, registry=registry)
+        components = library.get("components") or {}
+        return [
+            copy.deepcopy(dict(row))
+            for row in components.values()
+            if isinstance(row, Mapping)
+        ]
+
+    def _assert_component_admin_idle(self) -> None:
+        with self._lock:
+            status = str(self.current_state.get("system_status") or "").upper()
+        if status != "IDLE":
+            raise RuntimeError(
+                f"simulation component administration requires IDLE; system is {status or 'UNKNOWN'}"
+            )
+
+    def _pair_clearance_margin_mm(self) -> float:
+        danger = self.layout.get("danger_zone")
+        if isinstance(danger, Mapping):
+            try:
+                margin = float(danger.get("padding_mm", 5.0))
+                if math.isfinite(margin) and margin >= 0:
+                    return margin
+            except (TypeError, ValueError):
+                pass
+        return 5.0
+
+    def _component_agent_record(
+        self,
+        tag_id: str,
+        row: Mapping[str, Any],
+        *,
+        active: bool,
+        placement: Optional[str],
+    ) -> Dict[str, Any]:
+        size = row.get("size")
+        if isinstance(size, Mapping):
+            try:
+                width = float(size.get("width") or 62.0)
+                depth = float(size.get("height") or 62.0)
+            except (TypeError, ValueError):
+                width = depth = 62.0
+        elif isinstance(size, (int, float)):
+            width = depth = float(size)
+        else:
+            width = depth = 62.0
+        try:
+            height = float(row.get("height_mm") or 60.0)
+        except (TypeError, ValueError):
+            height = 60.0
+        radius = math.hypot(width, depth) / 2.0
+        return {
+            "tag_id": tag_id,
+            "name": row.get("name"),
+            "type": row.get("type"),
+            "parameters": copy.deepcopy(row.get("parameters") or {}),
+            "housing": {
+                "footprint_mm": {"width": width, "depth": depth},
+                "height_mm": height,
+                "clearance_radius_mm": round(radius, 3),
+            },
+            "active": active,
+            "placement": placement if active else None,
+        }
+
+    def list_simulation_components(self) -> Dict[str, Any]:
+        from simulation_edge.component_registry import merged_library, tag_number
+
+        root = self._edge_data_root()
+        if root is None:
+            raise RuntimeError("simulation edge data directory is unavailable")
+        library = merged_library(root)
+        inventory = self.get_inventory().get("entries") or {}
+        rows: List[Dict[str, Any]] = []
+        for tag_id in sorted(library["components"], key=tag_number):
+            row = library["components"][tag_id]
+            active = tag_id in inventory
+            rows.append(
+                self._component_agent_record(
+                    tag_id,
+                    row,
+                    active=active,
+                    placement=(
+                        inventory.get(tag_id, {}).get("placement") if active else None
+                    ),
+                )
+            )
+        return {
+            "schema_version": 1,
+            "pair_clearance_margin_mm": self._pair_clearance_margin_mm(),
+            "components": rows,
+        }
+
+    def next_simulation_component_tag(self) -> Dict[str, Any]:
+        from simulation_edge.component_registry import merged_library, next_tag_id
+
+        root = self._edge_data_root()
+        if root is None:
+            raise RuntimeError("simulation edge data directory is unavailable")
+        known = set(merged_library(root)["components"])
+        with self._lock:
+            known.update(str(tag) for tag in (self.current_state.get("components") or {}))
+        return {"tag_id": next_tag_id(known)}
+
+    def get_simulation_component(self, tag_id: str) -> Dict[str, Any]:
+        from simulation_edge.component_registry import merged_library, validate_tag_id
+
+        root = self._edge_data_root()
+        if root is None:
+            raise RuntimeError("simulation edge data directory is unavailable")
+        tag = validate_tag_id(tag_id)
+        components = merged_library(root)["components"]
+        row = components.get(tag)
+        if not isinstance(row, Mapping):
+            raise ValueError(f"unknown component tag: {tag}")
+        inventory = self.get_inventory().get("entries") or {}
+        result = self._component_agent_record(
+            tag,
+            row,
+            active=tag in inventory,
+            placement=(
+                inventory.get(tag, {}).get("placement") if tag in inventory else None
+            ),
+        )
+        result["pair_clearance_margin_mm"] = self._pair_clearance_margin_mm()
+        return result
+
+    def _commit_registry_change(
+        self,
+        registry: Mapping[str, Any],
+        *,
+        restart_if_active: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from simulation_edge.component_registry import save_registry
+
+        root = self._edge_data_root()
+        if root is None:
+            raise RuntimeError("simulation edge data directory is unavailable")
+        rows = self._all_simulation_catalog_rows(registry=registry)
+        with self._lock:
+            active = restart_if_active in (self.current_state.get("components") or {})
+            state = copy.deepcopy(self.current_state)
+        previous_rows = self.get_catalog()
+        if active:
+            self.restart_mujoco(lab_state=state, catalog_rows=rows)
+        else:
+            self._replace_catalog(rows)
+        try:
+            save_registry(root, registry)
+        except Exception:
+            if active:
+                self.restart_mujoco(lab_state=state, catalog_rows=previous_rows)
+            else:
+                self._replace_catalog(previous_rows)
+            raise
+        result: Dict[str, Any] = {"runtime_restarted": bool(active)}
+        if active:
+            result["lab_state"] = self.get_lab_state()
+        return result
+
+    def define_simulation_component(
+        self,
+        tag_id: str,
+        definition: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        from simulation_edge.component_registry import define_component
+
+        self._assert_component_admin_idle()
+        root = self._edge_data_root()
+        if root is None:
+            raise RuntimeError("simulation edge data directory is unavailable")
+        registry, _ = define_component(root, tag_id, definition)
+        result = self._commit_registry_change(registry)
+        return {**result, "component": self.get_simulation_component(tag_id)}
+
+    def configure_simulation_component(
+        self,
+        tag_id: str,
+        patch: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        from simulation_edge.component_registry import configure_component
+
+        self._assert_component_admin_idle()
+        root = self._edge_data_root()
+        if root is None:
+            raise RuntimeError("simulation edge data directory is unavailable")
+        registry, _ = configure_component(root, tag_id, patch)
+        result = self._commit_registry_change(registry, restart_if_active=tag_id)
+        return {**result, "component": self.get_simulation_component(tag_id)}
+
+    def reset_simulation_component(self, tag_id: str) -> Dict[str, Any]:
+        from simulation_edge.component_registry import reset_component_override
+
+        self._assert_component_admin_idle()
+        root = self._edge_data_root()
+        if root is None:
+            raise RuntimeError("simulation edge data directory is unavailable")
+        registry, _ = reset_component_override(root, tag_id)
+        result = self._commit_registry_change(registry, restart_if_active=tag_id)
+        return {**result, "component": self.get_simulation_component(tag_id)}
+
+    def delete_simulation_component(self, tag_id: str) -> Dict[str, Any]:
+        from simulation_edge.component_registry import delete_custom_component, validate_tag_id
+
+        self._assert_component_admin_idle()
+        tag = validate_tag_id(tag_id)
+        with self._lock:
+            if tag in (self.current_state.get("components") or {}):
+                raise RuntimeError(
+                    f"{tag} is active; remove it from the simulation before deleting its definition"
+                )
+        root = self._edge_data_root()
+        if root is None:
+            raise RuntimeError("simulation edge data directory is unavailable")
+        registry = delete_custom_component(root, tag)
+        self._commit_registry_change(registry)
+        return {"deleted": tag, "runtime_restarted": False}
+
+    def _storage_pose(self, slot_i: int, slot_j: int) -> Dict[str, float]:
+        storage = self.layout.get("storage")
+        bounds = storage.get("bounds_mm") if isinstance(storage, Mapping) else None
+        if not isinstance(storage, Mapping) or not isinstance(bounds, Mapping):
+            raise ValueError("simulation layout does not define storage")
+        nx = int(storage.get("grid_nx") or 0)
+        ny = int(storage.get("grid_ny") or 0)
+        if nx <= 0 or ny <= 0 or not (0 <= slot_i < nx and 0 <= slot_j < ny):
+            raise ValueError(f"storage slot ({slot_i}, {slot_j}) is outside the grid")
+        width = (float(bounds["x_max"]) - float(bounds["x_min"])) / nx
+        height = (float(bounds["y_max"]) - float(bounds["y_min"])) / ny
+        return {
+            "x": float(bounds["x_min"]) + (slot_i + 0.5) * width,
+            "y": float(bounds["y_min"]) + (slot_j + 0.5) * height,
+            "rotation": 0.0,
+        }
+
+    @staticmethod
+    def _component_state_entry(
+        tag_id: str,
+        row: Mapping[str, Any],
+        *,
+        pose: Mapping[str, Any],
+        presence: str,
+        slot: Optional[Mapping[str, int]] = None,
+    ) -> Dict[str, Any]:
+        nominal = {
+            "x": float(pose["x"]),
+            "y": float(pose["y"]),
+            "rotation": float(pose.get("rotation") or 0.0),
+        }
+        in_storage = presence == "storage"
+        return {
+            "id": tag_id,
+            "type": str(row.get("type") or "GENERIC_COMPONENT"),
+            "statecontrol": {
+                "tunables": {
+                    "presence": presence,
+                    "nominal_pose": copy.deepcopy(nominal),
+                    "reported_pose": copy.deepcopy(nominal),
+                    "storage": {
+                        "in_storage": in_storage,
+                        "slot": copy.deepcopy(dict(slot)) if slot else None,
+                    },
+                    "placement": {
+                        "mode": "STORAGE" if in_storage else "MANUAL"
+                    },
+                },
+                "measurables": {"pose": copy.deepcopy(nominal)},
+            },
+            "telemetry": {"teleop": {}, "live_feed": {}},
+        }
+
+    def insert_simulation_component(
+        self,
+        tag_id: str,
+        *,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        rotation: float = 0.0,
+        storage_slot: Optional[Mapping[str, int]] = None,
+    ) -> Dict[str, Any]:
+        from simulation_edge.component_registry import merged_library, validate_tag_id
+
+        self._assert_component_admin_idle()
+        tag = validate_tag_id(tag_id)
+        root = self._edge_data_root()
+        if root is None:
+            raise RuntimeError("simulation edge data directory is unavailable")
+        library = merged_library(root)
+        row = library["components"].get(tag)
+        if not isinstance(row, Mapping):
+            raise ValueError(f"unknown component tag: {tag}")
+        with self._lock:
+            state = copy.deepcopy(self.current_state)
+        components = state.setdefault("components", {})
+        if tag in components:
+            raise ValueError(f"{tag} is already active in the simulation")
+        if storage_slot is not None:
+            slot = {"i": int(storage_slot["i"]), "j": int(storage_slot["j"])}
+            pose = self._storage_pose(slot["i"], slot["j"])
+            presence = "storage"
+        else:
+            if x is None or y is None:
+                raise ValueError("table insertion requires x and y")
+            pose = {"x": float(x), "y": float(y), "rotation": float(rotation)}
+            slot = None
+            presence = "breadboard"
+        components[tag] = self._component_state_entry(
+            tag, row, pose=pose, presence=presence, slot=slot
+        )
+        state["system_status"] = "IDLE"
+        rows = [copy.deepcopy(dict(value)) for value in library["components"].values()]
+        self.restart_mujoco(lab_state=state, catalog_rows=rows)
+        return {
+            "runtime_restarted": True,
+            "tag_id": tag,
+            "presence": presence,
+            "pose": pose,
+            "lab_state": self.get_lab_state(),
+        }
+
+    def remove_simulation_component(self, tag_id: str) -> Dict[str, Any]:
+        from simulation_edge.component_registry import validate_tag_id
+
+        self._assert_component_admin_idle()
+        tag = validate_tag_id(tag_id)
+        with self._lock:
+            state = copy.deepcopy(self.current_state)
+        components = state.get("components") or {}
+        if tag not in components:
+            raise ValueError(f"{tag} is not active in the simulation")
+        components.pop(tag)
+        state["components"] = components
+        self.restart_mujoco(
+            lab_state=state,
+            catalog_rows=self._all_simulation_catalog_rows(),
+        )
+        return {
+            "runtime_restarted": True,
+            "removed": tag,
+            "lab_state": self.get_lab_state(),
+        }
+
+    def clear_simulation_components(self, *, scope: str = "table") -> Dict[str, Any]:
+        self._assert_component_admin_idle()
+        selected = str(scope or "table").strip().lower()
+        if selected not in {"table", "all"}:
+            raise ValueError("clear scope must be 'table' or 'all'")
+        with self._lock:
+            state = copy.deepcopy(self.current_state)
+        components = state.get("components") or {}
+        removed: List[str] = []
+        for tag_id, component in list(components.items()):
+            statecontrol = component.get("statecontrol") if isinstance(component, Mapping) else None
+            tunables = statecontrol.get("tunables") if isinstance(statecontrol, Mapping) else None
+            presence = str(
+                (tunables.get("presence") if isinstance(tunables, Mapping) else None)
+                or "breadboard"
+            )
+            if selected == "all" or presence == "breadboard":
+                components.pop(tag_id, None)
+                removed.append(str(tag_id))
+        state["components"] = components
+        self.restart_mujoco(
+            lab_state=state,
+            catalog_rows=self._all_simulation_catalog_rows(),
+        )
+        return {
+            "runtime_restarted": True,
+            "scope": selected,
+            "removed": sorted(removed),
+            "lab_state": self.get_lab_state(),
+        }
 
     def set_runtime_sync_status(
         self,
@@ -268,14 +689,18 @@ class SimulationHost:
         show_viewer: Optional[bool] = None,
         realtime: Optional[bool] = None,
         lab_state: Optional[Mapping[str, Any]] = None,
+        catalog_rows: Optional[Iterable[Mapping[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        client = self._client
-        if client is not None:
-            client.stop()
-        self._client = None
-        self.scene = None
         with self._lock:
-            self._last_runtime_error = None
+            previous_state = copy.deepcopy(self.current_state)
+            previous_poses = copy.deepcopy(self._poses)
+            previous_catalog = copy.deepcopy(self.catalog)
+            candidate_state = copy.deepcopy(self.current_state)
+            candidate_catalog = (
+                [copy.deepcopy(dict(row)) for row in catalog_rows]
+                if catalog_rows is not None
+                else copy.deepcopy(self.catalog)
+            )
             if lab_state is not None:
                 components = lab_state.get("components")
                 if not isinstance(components, Mapping):
@@ -299,13 +724,66 @@ class SimulationHost:
                     "simulator",
                 ):
                     synced.pop(key, None)
-                self.current_state = synced
-                self._poses = {
-                    str(tag): _pose_from_component(component)
-                    for tag, component in components.items()
-                    if isinstance(component, Mapping)
+                candidate_state = synced
+            candidate_components = candidate_state.get("components") or {}
+            candidate_poses = {
+                str(tag): _pose_from_component(component)
+                for tag, component in candidate_components.items()
+                if isinstance(component, Mapping)
+            }
+
+        # Validate the complete scene before closing the working viewer.  Scene
+        # construction catches unknown/invalid geometry and out-of-bounds poses.
+        from simulation_edge.host.scene import build_scene_spec
+
+        candidate_scene = build_scene_spec(self.layout, candidate_catalog, candidate_state)
+        if candidate_scene.spawn_adjustments_mm:
+            adjusted = ", ".join(sorted(candidate_scene.spawn_adjustments_mm))
+            raise ValueError(
+                "simulation state contains overlapping startup components "
+                f"({adjusted}); edit their nominal poses before loading it"
+            )
+
+        client = self._client
+        if client is not None:
+            client.stop()
+        self._client = None
+        self.scene = None
+        with self._lock:
+            self._last_runtime_error = None
+            self.current_state = candidate_state
+            self._poses = candidate_poses
+            self.catalog = candidate_catalog
+            self.catalog_map = {
+                str(row["tag_id"]): row
+                for row in self.catalog
+                if row.get("tag_id")
+            }
+        try:
+            self._start_mujoco(show_viewer=show_viewer, realtime=realtime)
+        except Exception as restart_exc:
+            # Best-effort rollback keeps a bad preset from permanently replacing
+            # the last working simulation state.
+            if self._client is not None:
+                self._client.stop()
+            self._client = None
+            self.scene = None
+            with self._lock:
+                self.current_state = previous_state
+                self._poses = previous_poses
+                self.catalog = previous_catalog
+                self.catalog_map = {
+                    str(row["tag_id"]): row
+                    for row in self.catalog
+                    if row.get("tag_id")
                 }
-        self._start_mujoco(show_viewer=show_viewer, realtime=realtime)
+            try:
+                self._start_mujoco(show_viewer=show_viewer, realtime=realtime)
+            except Exception as rollback_exc:
+                raise RuntimeError(
+                    f"MuJoCo restart failed ({restart_exc}); rollback also failed ({rollback_exc})"
+                ) from restart_exc
+            raise
         return self.simulator_status()
 
     @property
