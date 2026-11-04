@@ -26,6 +26,7 @@ import {
     LAB_Y_MAX,
     LAB_Y_MIN,
     MANUAL_MOTION_CORNER_CUTOFF_MM,
+    tcpDestinationError,
 } from '../config.js';
 import { mmToPx, pxToMm } from './coordinates.js';
 import { isConfigViewMode } from '../ui/config-view-mode.js';
@@ -194,6 +195,8 @@ export function getComponentRadius(name) {
 }
 
 export function checkCollision(targetId, x, y, opts = {}) {
+    const tcpError = tcpDestinationError(x, y);
+    if (tcpError) return { detected: true, other: tcpError };
     const { forPlaceFromStorageDrag = false } = opts;
     const comp = store.labState && store.labState.components && store.labState.components[targetId];
     const breadboardIntent = comp ? isBreadboardIntent(comp) : true;

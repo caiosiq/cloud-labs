@@ -21,9 +21,10 @@ BACKEND_ID = "sim.default"
 class GatewayError(RuntimeError):
     """Base error returned to a gateway caller."""
 
-    def __init__(self, message: str, *, status_code: int = 500) -> None:
+    def __init__(self, message: str, *, status_code: int = 500, result: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.result = result
 
 
 class UpstreamError(GatewayError):
@@ -33,8 +34,8 @@ class UpstreamError(GatewayError):
 class JobCancelled(GatewayError):
     """The gateway stopped waiting for a submitted operation."""
 
-    def __init__(self, message: str = "job cancellation requested") -> None:
-        super().__init__(message, status_code=409)
+    def __init__(self, message: str = "job cancellation requested", *, result: dict[str, Any] | None = None) -> None:
+        super().__init__(message, status_code=409, result=result)
 
 
 def _response_detail(response: httpx.Response, body: Any) -> str:
@@ -121,8 +122,12 @@ class CoordinatorClient:
                 timeout=timeout_s or self.timeout_s,
             )
         except httpx.RequestError as exc:
+            uncertainty = (
+                " The command may have been accepted; check its outcome before retrying."
+                if method == "POST" and path == "/api/command" else ""
+            )
             raise UpstreamError(
-                f"Cloud Labs is unreachable at {self.base_url}: {exc}",
+                f"Cloud Labs request to {self.base_url}{path} failed: {exc}.{uncertainty}",
                 status_code=503,
             ) from exc
         try:
@@ -132,6 +137,8 @@ class CoordinatorClient:
         if not response.is_success:
             status = response.status_code if response.status_code < 500 else 502
             raise UpstreamError(_response_detail(response, payload), status_code=status)
+        if payload is None and response.status_code != 204:
+            raise UpstreamError("Cloud Labs returned an invalid JSON response", status_code=502)
         return payload
 
     def acquire_lease(self) -> Lease:
@@ -310,6 +317,7 @@ class CoordinatorClient:
             "system_status": state.get("system_status"),
             "component_count": len(components),
             "components": components,
+            "last_runtime_error": copy.deepcopy(state.get("last_runtime_error")),
         }
 
     def list_presets(self) -> list[dict[str, Any]]:
@@ -350,6 +358,8 @@ class CoordinatorClient:
         presets = self.list_presets()
         result: dict[str, Any] = {
             "language": "cloudlabs-console-v1",
+            "diagnostics": "/v1/jobs/{job_id}/diagnostics",
+            "automatic_failure_diagnostics": True,
             "backend_id": BACKEND_ID,
             "status": state["system_status"],
             "commands": help_payload()["commands"],
@@ -463,8 +473,24 @@ class CoordinatorClient:
                 body=command,
                 include_lease=True,
             )
-            settled = self._wait_until_idle(cancel_event)
-            return {"accepted": accepted, "settled_state": settled}
+            if not isinstance(accepted, dict):
+                raise UpstreamError("Cloud Labs returned an invalid command receipt", status_code=502)
+            command_id = accepted.get("command_id")
+            if isinstance(command_id, str) and command_id.strip():
+                try:
+                    outcome = self._wait_for_command(command_id, cancel_event)
+                except GatewayError as exc:
+                    exc.result = {"accepted": accepted, **(exc.result or {})}
+                    raise
+                return {"accepted": accepted, "command_id": command_id, "command_status": outcome}
+            # With the matrix disabled the HTTP edge completes synchronously.
+            # An acceptance-only response without an ID cannot prove completion.
+            if accepted.get("status") in {"ok", "done", "completed", "succeeded"}:
+                return {"accepted": accepted, "completion": "synchronous"}
+            raise UpstreamError(
+                "Cloud Labs did not provide a command ID or a completed result; outcome cannot be confirmed",
+                status_code=502, result={"accepted": accepted},
+            )
 
         if parsed.kind == "record":
             tag_id = self.resolve_component(parsed.arguments["component_ref"])
@@ -579,6 +605,60 @@ class CoordinatorClient:
             return result
 
         raise GatewayError(f"{parsed.kind} is not a mutation command", status_code=400)
+
+    def _wait_for_command(self, command_id: str, cancel_event: threading.Event) -> dict[str, Any]:
+        """Require this command's terminal outcome; IDLE is not a success signal."""
+        deadline = time.monotonic() + self.operation_timeout_s
+        last: dict[str, Any] = {"status": "unknown"}
+        context = {"command_id": command_id, "command_status": last}
+        while time.monotonic() < deadline:
+            if cancel_event.is_set():
+                raise JobCancelled(
+                    f"Stopped waiting for {command_id}; an already accepted action may still finish",
+                    result=context,
+                )
+            try:
+                payload = self._request(
+                    "POST", "/api/command-queue/status", body={"command_ids": [command_id]},
+                    timeout_s=min(self.timeout_s, max(.001, deadline - time.monotonic())),
+                )
+            except GatewayError as exc:
+                raise UpstreamError(
+                    f"Cannot confirm outcome of {command_id}: {exc}; the action may still finish",
+                    status_code=exc.status_code, result=context,
+                ) from exc
+            statuses = payload.get("statuses") if isinstance(payload, dict) else None
+            info = statuses.get(command_id) if isinstance(statuses, dict) else None
+            if not isinstance(payload, dict) or payload.get("enabled") is not True or not isinstance(info, dict):
+                raise UpstreamError(
+                    f"Cannot confirm outcome of {command_id}: command tracking is unavailable or invalid",
+                    status_code=502, result=context,
+                )
+            last = copy.deepcopy(info)
+            context = {"command_id": command_id, "command_status": last}
+            status = last.get("status")
+            if status == "done":
+                return last
+            if status == "failed":
+                raise GatewayError(
+                    f"{command_id} failed: {last.get('error') or 'No error detail was provided'}",
+                    status_code=502, result=context,
+                )
+            if status == "cancelled":
+                raise JobCancelled(
+                    f"{command_id} was cancelled: {last.get('error') or 'cancelled by Cloud Labs'}",
+                    result=context,
+                )
+            if status not in {"queued", "running"}:
+                raise UpstreamError(
+                    f"Cannot confirm outcome of {command_id}: unrecognized status {status!r}",
+                    status_code=502, result=context,
+                )
+            cancel_event.wait(min(self.poll_interval_s, max(0., deadline - time.monotonic())))
+        raise GatewayError(
+            f"Timed out waiting for {command_id} (last status: {last.get('status')}); the action may still finish",
+            status_code=504, result=context,
+        )
 
     def _wait_until_idle(
         self,

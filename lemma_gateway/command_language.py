@@ -32,6 +32,7 @@ COMPACT_COMMANDS: tuple[str, ...] = (
     "help",
     "capabilities",
     "state [--json]",
+    "diagnostics <job_id>",
     "tunables <tag|name>",
     "measurables <tag|name>",
     "record <tag|name>",
@@ -193,6 +194,9 @@ def parse_console_line(line: str) -> ParsedLine:
     if verb in {"capabilities", "commands"}:
         _require_count(tokens, {1}, "capabilities")
         return ParsedLine("capabilities")
+    if verb == "diagnostics":
+        _require_count(tokens, {2}, "diagnostics <job_id>")
+        return ParsedLine("job_diagnostics", arguments={"job_id": tokens[1]})
     if verb in {"state", "labstate"}:
         _require_count(tokens, {1, 2}, "state [--json]")
         if len(tokens) == 2 and tokens[1] != "--json":

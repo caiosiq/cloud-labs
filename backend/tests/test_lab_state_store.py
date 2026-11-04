@@ -15,6 +15,16 @@ from lab_model.language.domain.holding import SYSTEM_STATUS_HOLDING, SYSTEM_STAT
 
 
 class MergeLabStateTests(unittest.TestCase):
+    def test_latest_edge_error_replaces_and_clears_old_error(self) -> None:
+        working = {"system_status": "HOLDING", "last_runtime_error": {"message": "old error"}}
+        latest = {"message": "new error", "target_id": "tag_22"}
+        merged = merge_lab_state_for_twin(working, {"last_runtime_error": latest})
+        self.assertEqual(merged["last_runtime_error"], latest)
+        self.assertEqual(merged["system_status"], "HOLDING")
+        cleared = merge_lab_state_for_twin(working, {"last_runtime_error": None})
+        self.assertIsNone(cleared["last_runtime_error"])
+        self.assertEqual(working["last_runtime_error"]["message"], "old error")
+
     def test_coordinator_wins_fsm_edge_wins_runtime_sync(self) -> None:
         working = {
             "system_status": SYSTEM_STATUS_HOLDING,

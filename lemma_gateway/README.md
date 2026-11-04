@@ -54,6 +54,60 @@ $JobId = $Accepted.job.job_id
 Invoke-RestMethod "http://127.0.0.1:8787/v1/jobs/$JobId"
 ```
 
+For queued primitives, the gateway polls that specific coordinator command ID.
+`succeeded` means the command reported `done`; an idle lab alone is insufficient.
+Failures and cancellations retain the coordinator command ID and final status
+in `job.result`, with the reason in `job.error`. Timeouts or lost connections
+mean the outcome could not be confirmed; an accepted action may still finish.
+Do not automatically resubmit a move after either condition. With command
+queuing disabled, the coordinator's synchronous completed response is used.
+
+After completion, read `state` to verify the requested effect. Both compact
+`state` and full `state --json` include `last_runtime_error` (or null); this is
+the latest simulator diagnostic, not a command history or a success signal.
+Gateway jobs and request-id deduplication are held in memory and are lost when
+the gateway restarts. An unknown job after a restart does not establish whether
+its action executed; inspect the lab before submitting it again.
+
+## Inspect a failed job
+
+Failed jobs automatically include a `diagnostics` object in the normal job
+response. It is captured before the terminal status is published and retained
+in memory with that job, so subsequent reads remain stable if the simulator
+restarts or its log is deleted. Immediate console rejections also include
+`diagnostics` alongside `detail`, without creating a job. If collecting logs
+fails, the original command error is preserved and the diagnostic response
+explains the limitation. Successful jobs have `diagnostics: null`.
+
+Lemma should read the attached `error` and `diagnostics` before deciding on
+another action; do not automatically retry safety refusals or uncertain moves.
+Missing or shortened logs do not imply success. No follow-up request is needed.
+
+Each job also includes a `diagnostics_url` for optional retrieval with the same
+authentication used to submit commands:
+
+```text
+GET /v1/jobs/<job_id>/diagnostics
+```
+
+The gateway console equivalent is `diagnostics <job_id>`. It returns the
+command's status and error, plus matching simulator log entries when available:
+the submitted pose, failure, completed stages, and Python traceback. It filters
+by the simulator request ID so unrelated moves are excluded. No new move is
+submitted by either diagnostic read. For a failed job, both return the captured
+snapshot already attached to its status response. Snapshots expire with the
+gateway's in-memory job history when the gateway restarts.
+
+The gateway reads local MuJoCo session logs on the laptop. If the simulator
+uses a custom `CLOUDLAB_MUJOCO_LOG_DIR`, set the same directory for the gateway.
+Only referenced `mujoco_*.jsonl` files in that directory are readable; callers
+cannot provide arbitrary file paths. Reads scan at most the last 4 MiB and
+return at most 40 events / approximately 96 KiB of event data, with truncation
+reported. Full physics snapshots are omitted. If the file is missing, the
+failure predates the excerpt, or the error occurred before the simulator was
+called, the response explains why no simulator entries are available and keeps
+the original error. This does not expose the entire server terminal history.
+
 `request_id` is an optional idempotency key. Repeating the same request id and
 command returns the original job instead of executing the command twice.
 

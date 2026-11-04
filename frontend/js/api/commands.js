@@ -18,6 +18,7 @@
  * `initCommands` so this module stays independent of the canvas/UI module graph.
  */
 import { store } from '../state/store.js';
+import { tcpDestinationError } from '../config.js';
 import { runtimeEditableOrMessage } from '../control/control-state.js';
 import { log } from '../ui/log.js';
 import { leaseHeaders } from './session-lease.js';
@@ -36,6 +37,11 @@ let _render = () => {};
 let _updateContextPanel = () => {};
 /** @type {() => Promise<void>} */
 let _refreshControlWorkingState = async () => {};
+
+function destinationError(command) {
+    if (!['MOVE_COMPONENT', 'PLACE_FROM_STORAGE'].includes(command?.action)) return null;
+    return tcpDestinationError(command.parameters?.target_x, command.parameters?.target_y);
+}
 
 /**
  * Inject the renderer and selection-panel refresher so we can roll back ghost state on cancel.
@@ -58,7 +64,7 @@ export function initCommands(deps) {
  * @param {{ skipConfirm?: boolean }} [opts]
  */
 export async function sendCommand(command, opts = {}) {
-    const blocked = runtimeEditableOrMessage();
+    const blocked = runtimeEditableOrMessage() || destinationError(command);
     if (blocked) {
         log(blocked, 'warn');
         return { ok: false, error: blocked };
@@ -101,7 +107,7 @@ export async function sendCommand(command, opts = {}) {
 }
 
 export async function executeSendCommand(command) {
-    const blocked = runtimeEditableOrMessage();
+    const blocked = runtimeEditableOrMessage() || destinationError(command);
     if (blocked) {
         log(blocked, 'warn');
         return { ok: false, error: blocked };

@@ -69,6 +69,13 @@ score = lab.probe_kernel("tag_22", "camera_image", kernel_id="demo.image_mean_sc
 
 **Runtime sync helpers** (same language plane as Twin):
 
+For queued primitives, `wait_until_idle()` and `wait_for_primitive_settled()`
+check the client's submitted command IDs and raise if a command failed or was
+cancelled. An idle lab alone does not prove command success. Missing command
+tracking also raises an error; after a timeout, inspect the outcome before
+resubmitting an action. Legacy commands without queue tracking still use
+lab-status polling and require post-action state verification.
+
 | Helper | Primitive |
 |--------|-----------|
 | `lab.sync_runtime()` | `SYNC_RUNTIME` (SET + RECORD boot gate) |
