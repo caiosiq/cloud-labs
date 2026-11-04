@@ -1,9 +1,9 @@
 # Script23 real-edge integration
 
-Implemented only in josh_robotic_twin_simulation_radial, on
-josh/radial-cloudlabs-integration in both repositories. The original workspace,
-its branches and legacy motion implementation are preserved. No commit or push
-was made for this integration. No server, camera or physical robot was started.
+Maintained on josh/radial-cloudlabs-integration in both the cloud-labs and
+robot-deathray repositories. The working copy used for integration is
+josh_robotic_twin_simulation_radial. The original workspace and its legacy
+motion implementation are preserved.
 
 ## Motion boundary
 
@@ -124,34 +124,56 @@ workspace root:
 The importer is idempotent, preserves other state/lines and never changes
 existing VC history. Without --install it only prints the proposed overlay.
 
-## Verification
+## Branch synchronization and verification (2026-11-04)
 
-All checks were offline; physical placement accuracy remains to be tested.
+Cloud Labs includes commit 03e211da77e2e2d7ec2e3bdb01cc2fc6d4039f61
+from josh/radial-motion-library-updated_8-30-2026. Both overlapping backend
+files merged automatically. The simulation_edge, lemma_gateway and
+packages/cloudlabs trees match that source branch exactly. Native real motion
+continues to use Lab Automation's separately owned, validated planner.
 
-- 72 focused Lab Automation tests passed: production adapter, repeated session
-  success/failure cleanup, storage success/refusal bookkeeping, legacy routing,
-  optimization, frames and held-placement regression cases.
-- The production service built actual headless Script23 plans for tag_22 and
-  a lens, including moves into and out of the configured storage region.
-- Existing Script23 model/grasp/height/FK/joint-limit/home tests passed.
-- 20 backend tests passed: calibration export, frame transform, preserved
-  legacy coefficients, idempotent import, interior-point VC diffs and existing
-  line-versioning/geometry cases.
-- 3 Node tests passed: exact six-segment geometry and 61 fractional stations,
-  camera/orientation/range checks, unchanged legacy selection and drag snapping.
-- Changed JavaScript syntax and Git patch whitespace checks passed.
-- Scripts23/24/25, legacy experiment/vision/live-control/xArm-driver modules,
-  and the old Script18 production adapter match the original files byte-for-byte.
+Matching Lab Automation revision:
+360fccda429af2e450f5935f577154b83a29d1e2, on the same integration branch name.
+It includes the native runtime, frozen models, required robot assets and
+calibration measurement records. Git attributes preserve byte-hashed assets
+across checkout platforms. The portable reference tests compare measurement
+identities and hashes without requiring the calibration computer's absolute
+directory, and supply an explicit historical laser fixture.
 
-A separate broader run found one pre-existing failure:
-test_cloudlabs_script18_move_service.py::
-CloudLabsScript18MoveServiceTests::
-test_production_runtime_uses_script21_fixed_normal_placement.
-It expects Script21's fixed-normal function, while the current Script21 file
-uses its preserved placement function. The exact test also fails in the
-untouched original workspace. It was not changed to hide that mismatch and
-does not exercise the new Script23 adapter.
+Offline checks for this synchronization:
 
-Restart the backend and real edge from this new workspace to use these
-changes. No hardware validation or alignment guarantee is claimed by the
-offline checks.
+- 171 focused backend/gateway checks passed (plus 22 subtests): command
+  outcomes, atomic persistence, state, overlays, queueing and edge clients.
+- 40 MuJoCo safety/motion checks passed (plus 29 subtests).
+- 60 native motion, calibration, differential parity and storage/optimization
+  routing checks passed, including from committed source snapshots.
+- 308 standalone calibration/reference checks passed (plus 6 subtests).
+- 7 calibrated laser UI checks passed.
+- All 59 frozen native assets matched their recorded SHA256 after export.
+
+The broad backend/gateway comparison used clean snapshots of 03e211d and the
+combined branch. It found the same 39 failing test identities in both, with
+no additional failures in the combined branch. The baseline had 606 passed
+and 2 skipped; the combined branch had 612 passed and 1 skipped. Existing
+failures include old fixture paths, catalog assumptions, missing test kernels
+and Windows snapshot-path limits; the full broad suite is not green.
+
+The user reported testing the native integration before this synchronization.
+This merge validation used offline tests; it did not start a server, camera
+or physical robot. Restart existing backend/edge processes to load the new
+source.
+
+## Switching an existing Cloud Labs clone
+
+Save any local edits first. Once the branch is available on GitHub, run from
+the existing Cloud Labs checkout:
+
+```powershell
+git fetch origin
+git switch --track origin/josh/radial-cloudlabs-integration
+```
+
+For later updates while on the integration branch, use `git pull --ff-only`.
+An existing clone reuses its Git objects; a full re-download is unnecessary.
+Cloud Labs simulation remains in this repository. Physical real-edge motion
+requires the matching Lab Automation integration revision above.
