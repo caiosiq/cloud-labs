@@ -401,9 +401,23 @@ async def _southbound_execute(
             (snap.get("system_status") if isinstance(snap, dict) else None)
             or SYSTEM_STATUS_IDLE
         )
-        _coordinator_set_system_status(
-            store, SYSTEM_STATUS_BUSY, source="southbound:busy"
-        )
+        try:
+            _coordinator_set_system_status(
+                store, SYSTEM_STATUS_BUSY, source="southbound:busy"
+            )
+        except Exception as exc:
+            # mutate() changes memory before persistence. Restore even when the
+            # first disk write failed, and never send the action to the edge.
+            try:
+                _coordinator_set_system_status(
+                    store, prior_status, source="southbound:busy_failed"
+                )
+            except Exception:
+                logger.exception("coordinator status restore failed backend=%s", bid)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Command was not sent to the edge: coordinator could not save BUSY status: {exc}",
+            ) from exc
         # Pending teleop session before the edge arms hardware (may take seconds).
         if action == "START_TELEOP" and store is not None:
             try:
@@ -472,6 +486,7 @@ async def _southbound_execute(
         raise HTTPException(status_code=status, detail=result.error or "edge execute failed")
 
     if remote and store is not None:
+        commit_error = None
         try:
             edge_payload = result.result if isinstance(result.result, dict) else {}
             if action == "START_TELEOP":
@@ -488,7 +503,8 @@ async def _southbound_execute(
                     edge_result=edge_payload,
                     backend_id=bid,
                 )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            commit_error = exc
             logger.exception(
                 "coordinator commit after southbound failed backend=%s", bid
             )
@@ -510,10 +526,20 @@ async def _southbound_execute(
                     kind=MutationKind.PROCESS_TRANSITION,
                     source="southbound:busy_rederive",
                 )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            if commit_error is None:
+                commit_error = exc
             logger.exception(
                 "coordinator BUSY clear after southbound failed backend=%s", bid
             )
+        if commit_error is not None:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "The edge action completed, but the coordinator could not save its result: "
+                    f"{commit_error}. Read the lab state before retrying the action."
+                ),
+            ) from commit_error
     return result
 
 

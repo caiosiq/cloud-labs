@@ -11,6 +11,7 @@ from typing import Any, Dict, Mapping, Optional, Set
 #: Top-level keys the edge owns when present.
 EDGE_TOP_LEVEL_KEYS: Set[str] = {
     "runtime_sync",
+    "last_runtime_error",
 }
 
 #: Top-level keys the coordinator always wins (after edge overlays).
@@ -60,7 +61,7 @@ def merge_lab_state_for_twin(
     - **Coordinator wins:** ``system_status``, ``holding``, presence / placement /
       commanded tunables (``statecontrol``), guides, optimization fields,
       ``telemetry.teleop`` and ``telemetry.live_feed`` session flags.
-    - **Edge wins:** ``runtime_sync``, and tags that exist only on the edge
+    - **Edge wins:** ``runtime_sync``, ``last_runtime_error``, and tags that exist only on the edge
       (read-time inventory).
     """
     out: Dict[str, Any] = copy.deepcopy(dict(working))

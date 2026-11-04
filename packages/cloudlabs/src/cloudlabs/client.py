@@ -242,6 +242,7 @@ class CloudLabsClient:
         # Survives lease release/reacquire between closed-loop jobs in one script.
         self._session_kernel_cache: Dict[str, Dict[str, Any]] = {}
         self._components_ns: Optional[Any] = None
+        self._pending_primitive_command_ids: List[str] = []
 
     @property
     def components(self) -> "ComponentsNamespace":
@@ -400,6 +401,11 @@ class CloudLabsClient:
 
         deadline = time.monotonic() + timeout_s
         last: Dict[str, Any] = {}
+        if self._pending_primitive_command_ids:
+            self.wait_for_commands(
+                list(self._pending_primitive_command_ids), timeout_s=timeout_s,
+                poll_interval_s=poll_interval_s,
+            )
         while time.monotonic() < deadline:
             last = self.get_lab_state()
             status = str(last.get("system_status", "")).upper()
@@ -423,9 +429,15 @@ class CloudLabsClient:
     ) -> Dict[str, Any]:
         """Wait until a dispatched primitive finishes (reconcile-friendly).
 
-        Mirrors the UI reconcile runner: tolerates fast no-op steps that never
-        enter ``BUSY``, but requires ``BUSY`` → ``IDLE`` when motion occurs.
+        Queued primitives require their own command statuses to succeed.
+        Legacy untracked primitives fall back to observing the lab status.
         """
+        if self._pending_primitive_command_ids:
+            self.wait_for_commands(
+                list(self._pending_primitive_command_ids), timeout_s=timeout_s,
+                poll_interval_s=poll_interval_s,
+            )
+            return self.get_lab_state()
         deadline = time.monotonic() + timeout_s
         start = time.monotonic()
         saw_busy = False
@@ -928,10 +940,17 @@ class CloudLabsClient:
             terminal = True
             for cid in ids:
                 st = str((last.get(cid) or {}).get("status") or "unknown").lower()
-                if st in ("queued", "running", "unknown"):
+                if st not in ("queued", "running", "done", "failed", "cancelled"):
+                    raise CloudLabsCommandError(
+                        f"Cannot confirm outcome of {cid}: unrecognized status {st!r}",
+                        detail={"statuses": last},
+                    )
+                if st in ("queued", "running"):
                     terminal = False
-                    break
             if terminal:
+                self._pending_primitive_command_ids = [
+                    cid for cid in self._pending_primitive_command_ids if cid not in ids
+                ]
                 failed = [
                     cid
                     for cid in ids
@@ -2350,7 +2369,18 @@ class CloudLabsClient:
     def _post_command(self, body: Dict[str, Any]) -> Dict[str, Any]:
         payload = {**body, "lease_id": self._require_lease().lease_id}
         try:
-            return self._post_json("/api/command", payload)
+            result = self._post_json("/api/command", payload)
+            command_id = result.get("command_id")
+            if result.get("status") == "queued" and not (
+                isinstance(command_id, str) and command_id.strip()
+            ):
+                raise CloudLabsCommandError(
+                    "Queued command has no tracking ID; outcome cannot be confirmed",
+                    detail=result, action=str(body.get("action")), target_id=str(body.get("target_id")),
+                )
+            if isinstance(command_id, str) and command_id.strip():
+                self._pending_primitive_command_ids.append(command_id)
+            return result
         except CloudLabsLeaseError as exc:
             raise CloudLabsCommandError(
                 str(exc),

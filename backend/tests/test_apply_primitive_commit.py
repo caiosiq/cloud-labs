@@ -727,6 +727,53 @@ class StoreAndMergeAfterPickTests(unittest.TestCase):
 
 
 class SouthboundHookTests(unittest.IsolatedAsyncioTestCase):
+    async def check_persistence_failure(self, *, before_send=False, clear_busy=False):
+        from fastapi import HTTPException
+        from lab_model.execution.edge.client import EdgeExecuteResult, EdgeTransport
+        import main as main_mod
+
+        store = LabStateStore("sim.default", "")
+        store.replace_state(_seed_component(), persist=False)
+        rt = MagicMock(lab_state_store=store)
+        client = MagicMock(transport=EdgeTransport.HTTP)
+        client.execute_command = AsyncMock(return_value=EdgeExecuteResult(
+            ok=True, transport=EdgeTransport.HTTP, result={"tag_id": "tag_10", "holding": True},
+        ))
+        with patch("main._edge_client_for", return_value=client), patch("main.require_backend", return_value=rt):
+            if before_send:
+                failure = patch.object(store, "persist", side_effect=[PermissionError("file locked"), None])
+            elif clear_busy:
+                failure = patch.object(store, "persist", side_effect=[None, PermissionError("file locked")])
+            else:
+                failure = patch(
+                    "lab_model.coordinator.state.apply_primitive_commit.apply_edge_primitive_commit",
+                    side_effect=PermissionError("file locked"),
+                )
+            with failure, self.assertRaises(HTTPException) as caught:
+                await main_mod._southbound_execute(
+                    {"action": "PICK_COMPONENT", "target_id": "tag_10", "parameters": {}},
+                    backend_id="sim.default",
+                )
+            self.assertEqual(caught.exception.status_code, 502)
+            self.assertIn("file locked", caught.exception.detail)
+            if before_send:
+                client.execute_command.assert_not_called()
+                self.assertIn("not sent", caught.exception.detail)
+                self.assertEqual(store.snapshot()["system_status"], SYSTEM_STATUS_IDLE)
+            else:
+                client.execute_command.assert_awaited_once()
+                self.assertIn("edge action completed", caught.exception.detail)
+                self.assertNotEqual(store.snapshot()["system_status"], SYSTEM_STATUS_BUSY)
+
+    async def test_busy_save_failure_restores_status_without_sending_action(self):
+        await self.check_persistence_failure(before_send=True)
+
+    async def test_commit_save_failure_is_not_reported_as_success(self):
+        await self.check_persistence_failure()
+
+    async def test_final_status_save_failure_is_not_reported_as_success(self):
+        await self.check_persistence_failure(clear_busy=True)
+
     async def test_southbound_skips_in_process_commit(self) -> None:
         from lab_model.execution.edge.client import EdgeExecuteResult, EdgeTransport
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import threading
 import uuid
@@ -14,9 +15,12 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from pydantic import BaseModel, Field
 
 from .command_language import CommandSyntaxError, ParsedLine, parse_console_line
+from .diagnostics import capture_job_diagnostics
 from .service import (
     CoordinatorClient,
     GatewayError,
@@ -42,6 +46,7 @@ class JobRecord:
     finished_at: str | None = None
     result: dict[str, Any] | None = None
     error: str | None = None
+    diagnostics: dict[str, Any] | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def public(self) -> dict[str, Any]:
@@ -55,6 +60,8 @@ class JobRecord:
             "finished_at": self.finished_at,
             "result": self.result,
             "error": self.error,
+            "diagnostics": self.diagnostics,
+            "diagnostics_url": f"/v1/jobs/{self.job_id}/diagnostics",
         }
 
 
@@ -110,25 +117,31 @@ class JobManager:
         try:
             result = self.controller.execute_mutation(record.parsed, record.cancel_event)
         except JobCancelled as exc:
-            with self._lock:
-                record.status = "cancelled"
-                record.error = str(exc)
-                record.finished_at = _utc_now()
+            self._finish_error(record, "cancelled", str(exc), exc.result)
         except GatewayError as exc:
-            with self._lock:
-                record.status = "failed"
-                record.error = str(exc)
-                record.finished_at = _utc_now()
+            self._finish_error(record, "failed", str(exc), exc.result)
         except Exception as exc:  # noqa: BLE001 - job boundary must retain failure
-            with self._lock:
-                record.status = "failed"
-                record.error = f"unexpected gateway failure: {exc}"
-                record.finished_at = _utc_now()
+            self._finish_error(record, "failed", f"unexpected gateway failure: {exc}")
         else:
             with self._lock:
                 record.status = "succeeded"
                 record.result = result
                 record.finished_at = _utc_now()
+
+    def _finish_error(self, record: JobRecord, status: str, error: str,
+                      result: dict[str, Any] | None = None) -> None:
+        diagnostics = capture_job_diagnostics({
+            "job_id": record.job_id, "command": record.command,
+            "status": status, "error": error, "result": result,
+        })
+        # Publish the terminal status and its diagnostic snapshot together.
+        # Later reads need not depend on a session log still being available.
+        with self._lock:
+            record.status = status
+            record.error = error
+            record.result = result
+            record.diagnostics = diagnostics
+            record.finished_at = _utc_now()
 
     def get(self, job_id: str) -> dict[str, Any]:
         with self._lock:
@@ -152,6 +165,10 @@ class JobManager:
             elif record.status == "running":
                 record.status = "cancel_requested"
             return record.public()
+
+    def diagnostics(self, job_id: str) -> dict[str, Any]:
+        job = self.get(job_id)
+        return job["diagnostics"] if job["diagnostics"] is not None else capture_job_diagnostics(job)
 
     def cancel_all(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -232,7 +249,25 @@ def create_app(controller: CoordinatorClient | None = None) -> FastAPI:
 
     @application.exception_handler(GatewayError)
     async def gateway_error_handler(_request: Request, exc: GatewayError):
-        return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
+        content = {"detail": str(exc)}
+        if _request.url.path == "/v1/console":
+            content["diagnostics"] = capture_job_diagnostics({
+                "command": getattr(_request.state, "console_command", None), "status": "failed",
+                "error": str(exc), "result": exc.result,
+            })
+        return JSONResponse(status_code=exc.status_code, content=content)
+
+    @application.exception_handler(RequestValidationError)
+    async def console_validation_error(request: Request, exc: RequestValidationError):
+        response = await request_validation_exception_handler(request, exc)
+        if request.url.path != "/v1/console":
+            return response
+        content = json.loads(response.body)
+        content["diagnostics"] = capture_job_diagnostics({
+            "command": exc.body.get("command") if isinstance(exc.body, dict) else None,
+            "status": "failed", "error": "; ".join(e["msg"] for e in exc.errors()),
+        })
+        return JSONResponse(status_code=response.status_code, content=content)
 
     @application.get("/v1/health", dependencies=[Depends(authorize)])
     async def health(rt: GatewayRuntime = Depends(runtime)):
@@ -278,12 +313,19 @@ def create_app(controller: CoordinatorClient | None = None) -> FastAPI:
     @application.post("/v1/console", dependencies=[Depends(authorize)])
     async def console(
         body: ConsoleRequest,
+        request: Request,
         rt: GatewayRuntime = Depends(runtime),
     ):
+        request.state.console_command = body.command
         try:
             parsed = parse_console_line(body.command)
         except CommandSyntaxError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise GatewayError(str(exc), status_code=400) from exc
+        if parsed.kind == "job_diagnostics":
+            return {
+                "mode": "immediate", "command": body.command,
+                "result": rt.jobs.diagnostics(parsed.arguments["job_id"]),
+            }
         if parsed.kind in READ_KINDS:
             return {
                 "mode": "immediate",
@@ -291,9 +333,9 @@ def create_app(controller: CoordinatorClient | None = None) -> FastAPI:
                 "result": rt.controller.execute_read(parsed),
             }
         if parsed.kind not in MUTATION_KINDS:
-            raise HTTPException(
+            raise GatewayError(
+                f"unsupported parsed command kind: {parsed.kind}",
                 status_code=400,
-                detail=f"unsupported parsed command kind: {parsed.kind}",
             )
         job, created = rt.jobs.submit(
             command=body.command,
@@ -308,6 +350,10 @@ def create_app(controller: CoordinatorClient | None = None) -> FastAPI:
     @application.get("/v1/jobs/{job_id}", dependencies=[Depends(authorize)])
     async def job_status(job_id: str, rt: GatewayRuntime = Depends(runtime)):
         return rt.jobs.get(job_id)
+
+    @application.get("/v1/jobs/{job_id}/diagnostics", dependencies=[Depends(authorize)])
+    def job_diagnostics_view(job_id: str, rt: GatewayRuntime = Depends(runtime)):
+        return rt.jobs.diagnostics(job_id)
 
     @application.post("/v1/jobs/{job_id}/cancel", dependencies=[Depends(authorize)])
     async def cancel_job(job_id: str, rt: GatewayRuntime = Depends(runtime)):

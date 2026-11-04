@@ -169,6 +169,9 @@ GRIPPER_FORCE_LIMIT_N = 65.0
 GRIPPER_PAD_SLIDING_FRICTION = 3.0
 PLACEMENT_POSITION_TOLERANCE_MM = 5.0
 RADIAL_PLACEMENT_POSITION_TOLERANCE_MM = 8.0
+# Admission only: leave room for small IK/interpolation deviations at the frame.
+# Keep in sync with TCP_DESTINATION_MARGIN_MM in frontend/js/config.js.
+TCP_DESTINATION_MARGIN_MM = 0.1
 PLACEMENT_YAW_TOLERANCE_DEG = 2.0
 ARM_JOINT_LIMIT_MARGIN_RAD = 0.010
 ARM_JOINT_LIMITS_RAD = (
@@ -281,6 +284,10 @@ class ViewerClosedError(SimulatorError):
 
 class CollisionPlanError(SimulatorError):
     pass
+
+
+class RadialRotationRouteError(CollisionPlanError):
+    """No base/yaw combination satisfies the rotation's joint/travel limits."""
 
 
 def _cloud_labs_root() -> Path:
@@ -723,6 +730,7 @@ class RadialJointStagePlan:
     name: str
     waypoints: tuple[np.ndarray, ...]
     allowed_tag: str | None
+    allow_long_wrist_return: bool = False
 
 
 @dataclass(frozen=True)
@@ -2887,9 +2895,11 @@ class MuJoCoRobotRuntime:
         self,
         name: str,
         waypoints: Sequence[np.ndarray],
+        *,
+        allow_long_wrist_return: bool = False,
     ) -> None:
         travel_rad = _radial_joint_path_travel_rad(waypoints, 6)
-        if travel_rad <= RADIAL_MAX_WRIST_STAGE_TRAVEL_RAD:
+        if allow_long_wrist_return or travel_rad <= RADIAL_MAX_WRIST_STAGE_TRAVEL_RAD:
             return
         raise CollisionPlanError(
             f"{name} would rotate joint7 through "
@@ -2963,7 +2973,13 @@ class MuJoCoRobotRuntime:
         allowed_tag: Optional[str],
         attached_pose: tuple[int, np.ndarray, np.ndarray] | None = None,
         prevalidated: bool = False,
+        allow_long_wrist_return: bool = False,
     ) -> None:
+        if allow_long_wrist_return and (
+            name != "home coordinated rotate" or allowed_tag is not None
+            or attached_pose is not None or self._gripper_position != GRIPPER_OPEN
+        ):
+            raise SimulatorError("long wrist return requires an open, empty gripper on a home stage")
         if len(waypoints) < 2:
             self.stage_trace.append(name)
             self._emit_progress(
@@ -2982,7 +2998,9 @@ class MuJoCoRobotRuntime:
             np.asarray(waypoint, dtype=float).copy()
             for waypoint in waypoints
         ]
-        self._validate_radial_wrist_travel(name, checked_waypoints)
+        self._validate_radial_wrist_travel(
+            name, checked_waypoints, allow_long_wrist_return=allow_long_wrist_return,
+        )
         worst_report: RadialHeightZoneReport | None = None
         if not prevalidated:
             for start, end in zip(checked_waypoints, checked_waypoints[1:]):
@@ -3531,7 +3549,15 @@ class MuJoCoRobotRuntime:
         *,
         attached_pose: tuple[int, np.ndarray, np.ndarray] | None = None,
     ) -> None:
-        self._validate_radial_wrist_travel(stage.name, stage.waypoints)
+        if stage.allow_long_wrist_return and (
+            stage.name != "home coordinated rotate" or stage.allowed_tag is not None
+            or attached_pose is not None or self._gripper_position != GRIPPER_OPEN
+        ):
+            raise SimulatorError("long wrist return requires an open, empty gripper on a home stage")
+        self._validate_radial_wrist_travel(
+            stage.name, stage.waypoints,
+            allow_long_wrist_return=stage.allow_long_wrist_return,
+        )
         for start, end in zip(stage.waypoints, stage.waypoints[1:]):
             self._preflight_radial_joint_path(
                 start,
@@ -4226,6 +4252,20 @@ class MuJoCoRobotRuntime:
     ) -> None:
         bounds = self.scene.lab_bounds_mm
         x_mm, y_mm = target_xy * 1000.0
+        if self.planner_backend == MUJOCO_PLANNER_RADIAL:
+            limits = self._radial_tcp_axis_limits_m()
+            margin_m = TCP_DESTINATION_MARGIN_MM / 1000.0
+            for axis, value in (("x", float(target_xy[0])), ("y", float(target_xy[1]))):
+                lower = limits[f"{axis}_min"] + margin_m
+                upper = limits[f"{axis}_max"] - margin_m
+                if value < lower or value > upper:
+                    relation = "is below" if value < lower else "exceeds"
+                    boundary = lower if value < lower else upper
+                    raise CollisionPlanError(
+                        f"Requested {axis.upper()} = {value * 1000.0:.1f} mm {relation} "
+                        f"the robot TCP {axis.upper()} limit of {boundary * 1000.0:.1f} mm "
+                        "(tool envelope plus frame clearance and destination margin)"
+                    )
         half_width_m, half_depth_m = spec.footprint_half_extents_m(
             target_rotation_deg
         )
@@ -5422,13 +5462,42 @@ class MuJoCoRobotRuntime:
                     route_candidates.append((score, theta_delta, yaw_delta))
 
         if not route_candidates:
-            raise CollisionPlanError(
+            raise RadialRotationRouteError(
                 f"{name} has no equivalent base/wrist rotation inside joint limits"
             )
         _, theta_delta, yaw_delta = min(
             route_candidates,
             key=lambda candidate: candidate[0],
         )
+        return self._build_radial_rotation_stage(
+            name=name,
+            tag_id=tag_id,
+            radius_m=radius_m,
+            source_theta=source_theta,
+            target_theta=target_theta,
+            source_yaw=source_yaw,
+            target_yaw=target_yaw,
+            theta_delta=theta_delta,
+            yaw_delta=yaw_delta,
+            current=current,
+        )
+
+    def _build_radial_rotation_stage(
+        self,
+        *,
+        name: str,
+        tag_id: str | None,
+        radius_m: float,
+        source_theta: float,
+        target_theta: float,
+        source_yaw: float,
+        target_yaw: float,
+        theta_delta: float,
+        yaw_delta: float,
+        current: np.ndarray,
+        allow_long_wrist_return: bool = False,
+    ) -> RadialJointStagePlan | None:
+        """Sample an explicit, continuous base/wrist branch without re-solving it."""
         step_rad = math.radians(RADIAL_BASE_ROTATION_STEP_DEG)
         count = max(
             int(math.ceil(abs(theta_delta) / step_rad)),
@@ -5479,11 +5548,15 @@ class MuJoCoRobotRuntime:
             source_theta_deg=math.degrees(source_theta),
             target_theta_deg=math.degrees(target_theta),
             base_delta_deg=math.degrees(theta_delta),
-            shortest_base_delta_deg=math.degrees(shortest_theta_delta),
+            shortest_base_delta_deg=math.degrees(
+                self._shortest_angle_delta_rad(source_theta, target_theta)
+            ),
             source_world_yaw_deg=math.degrees(source_yaw),
             target_world_yaw_deg=math.degrees(target_yaw),
             world_yaw_delta_deg=math.degrees(yaw_delta),
-            shortest_world_yaw_delta_deg=math.degrees(shortest_yaw_delta),
+            shortest_world_yaw_delta_deg=math.degrees(
+                self._shortest_angle_delta_rad(source_yaw, target_yaw)
+            ),
             max_middle_joint_delta_rad=max_middle_delta,
             final_duration_scale=RADIAL_ROTATION_FINAL_DURATION_SCALE,
         )
@@ -5491,6 +5564,7 @@ class MuJoCoRobotRuntime:
             name,
             tuple(waypoints),
             tag_id,
+            allow_long_wrist_return=allow_long_wrist_return,
         )
 
     def _plan_radial_transfer(
@@ -5699,6 +5773,128 @@ class MuJoCoRobotRuntime:
         self._preflight_radial_physical_home_transition(stage)
         return stage
 
+    def _plan_radial_home_rotations(
+        self,
+        *,
+        radius_m: float,
+        source_theta: float,
+        target_theta: float,
+        source_rotation: np.ndarray,
+        target_rotation: np.ndarray,
+        current: np.ndarray,
+    ) -> tuple[RadialJointStagePlan, ...]:
+        """Search complete home endpoints and validate an empty-gripper return.
+
+        Empty-gripper home motion need not take the shortest world-yaw turn.
+        Choose actual joint representations together with their physical-home
+        successor instead of greedily committing to an intermediate yaw. Linear
+        interpolation stays inside the joint ranges; geometry is still checked
+        on every sampled path. No periodic joint is rebased during this return.
+        """
+        physical_home = np.radians(
+            np.asarray(RADIAL_PHYSICAL_HOME_JOINTS_DEG, dtype=float)
+        )
+        current = np.asarray(current, dtype=float).copy()
+        # Enumerate the unwrapped library target, before nearest-branch selection
+        # or IK limit-margin clipping. Clipping a -2*pi representation first can
+        # shift every equivalent endpoint away from the requested home pose.
+        target_yaw = math.radians(self._target_yaw_from_rotation(target_rotation))
+        target = self._interpolate_radial_vertical_joints(
+            radius_m, self._load_radial_motion_library().carry_z_m,
+        ).copy()
+        target[0] += target_theta
+        target[6] += target_theta - target_yaw
+
+        def equivalent_values(index: int) -> list[float]:
+            value = float(target[index])
+            joint_id = self.model.joint(f"joint{index + 1}").id
+            full_turn = 2.0 * math.pi
+            if self.model.jnt_limited[joint_id]:
+                lower, upper = self.model.jnt_range[joint_id]
+                first = math.ceil((float(lower) - value) / full_turn)
+                last = math.floor((float(upper) - value) / full_turn)
+            else:
+                nearest = round((float(current[index]) - value) / full_turn)
+                first, last = nearest - 1, nearest + 1
+            return [value + turns * full_turn for turns in range(first, last + 1)]
+
+        candidates: list[tuple[tuple[float, ...], np.ndarray]] = []
+        for base in equivalent_values(0):
+            for wrist in equivalent_values(6):
+                endpoint = target.copy()
+                endpoint[0], endpoint[6] = base, wrist
+                successor = self._nearest_equivalent_joints(physical_home, endpoint)
+                successor_travel = abs(float(successor[6] - wrist))
+                if successor_travel > RADIAL_MAX_WRIST_STAGE_TRAVEL_RAD:
+                    continue
+                base_travel = abs(float(base - current[0]))
+                wrist_travel = abs(float(wrist - current[6]))
+                score = (
+                    max(base_travel, wrist_travel),
+                    base_travel + wrist_travel,
+                    successor_travel,
+                    abs(float(successor[0] - base)),
+                )
+                candidates.append((score, endpoint))
+        if not candidates:
+            raise RadialRotationRouteError(
+                "home return has no equivalent endpoint inside joint limits "
+                "with a short physical-home wrist move"
+            )
+
+        source_yaw = math.radians(self._target_yaw_from_rotation(source_rotation))
+        snapshot = self._motion_snapshot()
+        rejected: list[str] = []
+        try:
+            for _, endpoint in sorted(candidates, key=lambda item: item[0]):
+                self._restore_motion_snapshot(snapshot)
+                theta_delta = float(endpoint[0] - current[0])
+                wrist_delta = float(endpoint[6] - current[6])
+                yaw_delta = theta_delta - wrist_delta
+                stages: list[RadialJointStagePlan] = []
+                try:
+                    self._preview_joint_target(current)
+                    stage = self._build_radial_rotation_stage(
+                        name="home coordinated rotate",
+                        tag_id=None,
+                        radius_m=radius_m,
+                        source_theta=source_theta,
+                        target_theta=source_theta + theta_delta,
+                        source_yaw=source_yaw,
+                        target_yaw=source_yaw + yaw_delta,
+                        theta_delta=theta_delta,
+                        yaw_delta=yaw_delta,
+                        current=current,
+                        allow_long_wrist_return=True,
+                    )
+                    planned_endpoint = current
+                    if stage is not None:
+                        self._preflight_radial_stage(stage)
+                        stages.append(stage)
+                        planned_endpoint = stage.waypoints[-1]
+                    if not np.allclose(
+                        planned_endpoint, endpoint,
+                        atol=RADIAL_FIXED_JOINT_TOLERANCE_RAD, rtol=0.0,
+                    ):
+                        raise SimulatorError("home unwind did not reach its selected joint branch")
+                except CollisionPlanError as exc:
+                    rejected.append(str(exc))
+                    continue
+                self._log(
+                    "radial_home_rotation_route_selected",
+                    start_joints=current,
+                    endpoint_joints=endpoint,
+                    wrist_travel_deg=math.degrees(abs(wrist_delta)),
+                    rejected_candidates=rejected,
+                    stages=[stage.name for stage in stages],
+                )
+                return tuple(stages)
+        finally:
+            self._restore_motion_snapshot(snapshot)
+        raise CollisionPlanError(
+            "home return has no validated unwind path: " + "; ".join(rejected[:3])
+        )
+
     def _plan_radial_observation_home(
         self,
         *,
@@ -5757,22 +5953,17 @@ class MuJoCoRobotRuntime:
                 )
             )
 
-        coordinated_rotation = self._plan_radial_coordinated_rotation(
-            name="home coordinated rotate",
-            tag_id=None,
+        home_rotations = self._plan_radial_home_rotations(
             radius_m=home_radius,
             source_theta=start_theta,
             target_theta=home_theta,
             source_rotation=start_rotation,
             target_rotation=home_rotation,
             current=current,
-            successor_target=np.radians(
-                np.asarray(RADIAL_PHYSICAL_HOME_JOINTS_DEG, dtype=float)
-            ),
         )
-        if coordinated_rotation is not None:
-            stages.append(coordinated_rotation)
-            current = coordinated_rotation.waypoints[-1].copy()
+        stages.extend(home_rotations)
+        if home_rotations:
+            current = home_rotations[-1].waypoints[-1].copy()
 
         home_z = float(
             np.clip(
@@ -6350,6 +6541,7 @@ class MuJoCoRobotRuntime:
                         allowed_tag=stage.allowed_tag,
                         attached_pose=attached_pose,
                         prevalidated=True,
+                        allow_long_wrist_return=stage.allow_long_wrist_return,
                     )
                     if action.validate_grasp_after:
                         self._validate_physical_grasp(

@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Mapping, Optional, Tuple
@@ -671,10 +673,31 @@ def load_layout_document() -> Dict[str, Any]:
 
 
 def atomic_write_json(path: str, data: Any) -> None:
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp, path)
+    # Separate writers must not share a temporary file. Windows readers and
+    # file watchers can briefly block replacement even after the writer closes.
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=os.path.dirname(path) or ".",
+        prefix=f".{os.path.basename(path)}.", suffix=".tmp", delete=False,
+    ) as f:
+        tmp = f.name
+        try:
+            json.dump(data, f, indent=2)
+        except BaseException:
+            f.close()
+            os.unlink(tmp)
+            raise
+    try:
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(.02 * (2 ** attempt))
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def read_laser_lines_doc() -> Dict[str, Any]:

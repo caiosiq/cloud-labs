@@ -32,6 +32,19 @@ backend happens to be first or currently visible in a browser tab.
 Preferred control path
 ----------------------
 
+For remote Lemma control, use the simulation-only gateway described in SKILL.md.
+Mutations return a job ID: poll the job until succeeded, failed, or cancelled.
+A failed job automatically includes error and diagnostics in that same response.
+Read both before taking another action. Diagnostics contain the matching
+simulator log excerpt, stage trace, and traceback when available; immediate
+console rejections also include diagnostics without creating a job.
+Missing, truncated, or unreadable logs are reported explicitly. Keep the original
+error in your explanation and do not treat missing diagnostics as success.
+Do not automatically retry safety refusals or commands with uncertain outcomes.
+No follow-up diagnostics request is required: diagnostics <job_id> and the job's
+diagnostics_url are optional ways to reread the captured report. Gateway job
+history and diagnostic snapshots do not survive a gateway process restart.
+
 For autonomous or multi-step work, use the Python cloudlabs client. It acquires
 and maintains the exclusive command lease, sends the same primitives as the
 Twin UI, and releases the lease on exit.

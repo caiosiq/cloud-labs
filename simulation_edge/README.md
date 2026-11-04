@@ -41,6 +41,14 @@ The radial runtime rests at the experimental xArm home joint target
 from physical home to radial observation home before planning the pickup, and
 returns through radial observation home to physical home after placement.
 
+The post-release return searches equivalent home joint positions together with
+their physical-home successors. The open, empty gripper may rotate its wrist
+more than 180 degrees to return home; component-carrying stages retain the
+180-degree wrist travel limit. Every candidate return undergoes the normal
+pose, collision, height, frame, and mechanical joint-limit checks; blocked
+candidates are rejected. Joint angles are never rebased during the return,
+and the complete transaction is validated before pickup.
+
 For the radial MuJoCo simulation used by Cloud Labs, run:
 
 ```powershell
@@ -121,6 +129,9 @@ before rotating; when a theta sweep crosses a tighter frame direction, it
 automatically retracts to the tightest legal sweep radius first. Diagnostic
 outer-library poses remain non-executable unless the realized pose and every
 interpolated path sample pass these runtime checks.
+Destination admission in the simulator and Twin reserves a further 0.1 mm
+inside that TCP boundary for small IK/interpolation deviations. This margin
+does not relax the physical frame or collision checks.
 
 ## Run
 

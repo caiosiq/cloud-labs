@@ -487,6 +487,7 @@ class RadialMotionPlanTests(unittest.TestCase):
             allowed_tag,
             attached_pose=None,
             prevalidated=False,
+            allow_long_wrist_return=False,
         ):
             runtime.events.append(
                 (

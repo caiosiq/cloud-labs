@@ -46,21 +46,35 @@ GET  <gateway>/v1/capabilities
 POST <gateway>/v1/console   {"command":"state"}
 POST <gateway>/v1/console   {"command":"move tag_13 -220 100 45"}
 GET  <gateway>/v1/jobs/<job_id>
+GET  <gateway>/v1/jobs/<job_id>/diagnostics
 ```
 
-Mutations return `202` plus a job ID. Poll the job, then read `state` and verify
-the requested values. Do not trust job `succeeded` alone: the current gateway
-can miss a later Command Matrix failure. The gateway is locked to `sim.default`
+Mutations return `202` plus a job ID. Poll until `succeeded`, `failed`, or
+`cancelled`, then read `state` and verify the requested values. For queued
+primitives the gateway requires that specific coordinator command to report
+`done`; failures retain its ID/status in `result` and the reason in `error`.
+Timeouts or lost tracking leave the action's outcome uncertain; inspect state
+before retrying. Compact `state` also includes the latest simulator error.
+Failed jobs automatically include `diagnostics`: the original error and a
+matching simulator log excerpt, including stage trace and traceback when
+available. Read `error` and `diagnostics` before deciding on another action.
+Immediate console rejections also include `diagnostics` without a job ID.
+If logs are unavailable, truncated, or could not be collected, explain that
+limitation and retain the original failure; do not infer success. Do not
+automatically retry refused moves or commands whose outcome is uncertain.
+No extra diagnostic request is needed for a failed job. Its diagnostic snapshot
+is retained with the job, so later log deletion or simulator restart does not
+change the report. The optional `diagnostics_url` / `diagnostics <job_id>` read
+returns the same snapshot, using the same bearer token and issuing no move.
+The gateway is locked to `sim.default`
 and manages its internal Cloud Labs lease; do not send backend or lease headers.
 `401` means the bearer token is missing/wrong. A connection failure usually
 means the gateway or tunnel is down.
 
-Observed in practice: a single `move` job's wall-clock time has ranged from
-~3 s to ~30 s call to call, so do not assume a fixed settle time. Poll `state`
-in parallel with the job, not only after it reports `succeeded` — the pose and
-`system_status` can reach their final values a moment before the job object
-itself flips to `succeeded`, and polling only the job afterward can miss the
-`BUSY` window entirely.
+Do not infer completion from a fixed delay or from observing BUSY then IDLE.
+A successful pick intentionally leaves the lab HOLDING. Cancellation can stop
+the gateway waiting without interrupting an action already accepted by MuJoCo.
+Gateway job history and request-id deduplication do not survive its restart.
 
 For automation running on the laptop, prefer the Python SDK because it manages
 the exclusive lease:

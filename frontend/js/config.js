@@ -12,6 +12,9 @@ export let DANGER_RADIUS_MM = 90;
 
 /** Clearance reserved inside each visible lab-frame boundary. */
 export let FRAME_SAFETY_CLEARANCE_MM = 0;
+export let TCP_TOOL_ENVELOPE_RADIUS_MM = 0;
+/** Admission only; matches simulation_edge/host/runtime.py. Physical guards stay unchanged. */
+export const TCP_DESTINATION_MARGIN_MM = 0.1;
 export let FRAME_SAFETY_MIN_WIDTH_MM = 0;
 export let FRAME_SAFETY_MIN_HEIGHT_MM = 0;
 export let MANUAL_MOTION_CORNER_CUTOFF_MM = 0;
@@ -91,11 +94,15 @@ export function applyLabLayoutFromApiDoc(payload) {
         DANGER_RADIUS_MM = Number(dz.radius_mm);
     }
     FRAME_SAFETY_CLEARANCE_MM = 0;
+    TCP_TOOL_ENVELOPE_RADIUS_MM = 0;
     FRAME_SAFETY_MIN_WIDTH_MM = 0;
     FRAME_SAFETY_MIN_HEIGHT_MM = 0;
     MANUAL_MOTION_CORNER_CUTOFF_MM = 0;
     const frameSafety = payload.frame_safety;
     if (frameSafety && typeof frameSafety === 'object') {
+        if (Number.isFinite(Number(frameSafety.tcp_tool_envelope_radius_mm))) {
+            TCP_TOOL_ENVELOPE_RADIUS_MM = Math.max(0, Number(frameSafety.tcp_tool_envelope_radius_mm));
+        }
         if (Number.isFinite(Number(frameSafety.clearance_mm))) {
             FRAME_SAFETY_CLEARANCE_MM = Math.max(0, Number(frameSafety.clearance_mm));
         }
@@ -184,4 +191,22 @@ export function applyLabLayoutFromApiDoc(payload) {
     STORAGE_RECT_Y_MIN = sry;
     STORAGE_RECT_Y_MAX = sryy;
     recomputeDerived();
+}
+
+/** Same TCP-axis inset as the simulator; no restriction on layouts without a tool envelope. */
+export function tcpDestinationError(x, y) {
+    if (TCP_TOOL_ENVELOPE_RADIUS_MM <= 0) return null;
+    const inset = FRAME_SAFETY_CLEARANCE_MM + TCP_TOOL_ENVELOPE_RADIUS_MM + TCP_DESTINATION_MARGIN_MM;
+    for (const [axis, value, lower, upper] of [
+        ['X', Number(x), LAB_X_MIN + inset, LAB_X_MAX - inset],
+        ['Y', Number(y), LAB_Y_MIN + inset, LAB_Y_MAX - inset],
+    ]) {
+        if (!Number.isFinite(value)) continue; // Command schemas validate missing/invalid values.
+        if (value < lower || value > upper) {
+            const relation = value < lower ? 'is below' : 'exceeds';
+            const boundary = value < lower ? lower : upper;
+            return `Requested ${axis} = ${value.toFixed(1)} mm ${relation} the robot TCP ${axis} limit of ${boundary.toFixed(1)} mm (tool envelope plus frame clearance and destination margin)`;
+        }
+    }
+    return null;
 }
