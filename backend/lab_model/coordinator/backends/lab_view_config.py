@@ -749,13 +749,13 @@ def laser_line_coeffs_from_doc(doc: Dict[str, Any], lab_mode: str) -> Dict[str, 
     chosen = None
     if snap_id and snap_id in by_id:
         cand = by_id[snap_id]
-        if cand.get("enabled", True):
+        if cand.get("enabled", True) and not cand.get("points"):
             chosen = cand
     if chosen is None:
         for ln in lines:
             if not isinstance(ln, dict):
                 continue
-            if ln.get("enabled", True) and ln.get("p1") and ln.get("p2"):
+            if ln.get("enabled", True) and ln.get("p1") and ln.get("p2") and not ln.get("points"):
                 chosen = ln
                 break
     if chosen is None:

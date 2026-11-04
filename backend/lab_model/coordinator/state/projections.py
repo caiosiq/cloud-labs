@@ -528,14 +528,34 @@ def normalize_laser_lines_doc(doc: Any) -> Dict[str, Any]:
                         entry[key] = {"x": float(pt["x"]), "y": float(pt["y"])}
                     except (KeyError, TypeError, ValueError):
                         entry[key] = pt
+            if isinstance(ln.get("points"), list):
+                points = [{"x": float(p["x"]), "y": float(p["y"])} for p in ln["points"]]
+                if len(points) < 2 or any(not math.isfinite(v) for p in points for v in p.values()):
+                    raise ValueError("Laser calibration path requires finite XY points")
+                if any(b["y"] <= a["y"] for a,b in zip(points,points[1:])):
+                    raise ValueError("Laser calibration path requires increasing table Y")
+                entry["points"] = points
+            if isinstance(ln.get("calibration"), dict):
+                entry["calibration"] = copy.deepcopy(ln["calibration"])
             lines_out.append(entry)
     # Dedupe if both ne_he and he_ne were present (keep he_ne).
     by_id: Dict[str, Dict[str, Any]] = {}
     for entry in lines_out:
         by_id[str(entry["id"])] = entry
+    # The measured radial path replaces the old orange He-Ne, rather than
+    # appearing as a third (blue) laser. Also upgrades restored old sessions.
+    radial = by_id.pop("he_ne_radial_tag22", None)
+    migrated_radial = radial is not None and isinstance(radial.get("points"), list)
+    if migrated_radial:
+        by_id["he_ne"] = {
+            **radial, "id": "he_ne", "name": "He\u2013Ne", "color": "#ff5c33",
+            "calibration": {**radial.get("calibration", {}), "usage": "table_alignment"},
+        }
+    elif radial is not None:
+        by_id[radial["id"]] = radial
     lines_out = list(by_id.values())
     lines_out.sort(key=lambda item: item["id"])
-    snap = src.get("snap_line_id")
+    snap = "he_ne" if migrated_radial else src.get("snap_line_id")
     if isinstance(snap, str) and snap in id_aliases:
         snap = id_aliases[snap]
     return {"snap_line_id": snap, "lines": lines_out}

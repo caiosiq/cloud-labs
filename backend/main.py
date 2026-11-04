@@ -4631,10 +4631,11 @@ def _runtime_laser_doc() -> Dict[str, Any]:
             doc = None
     if not isinstance(doc, dict):
         doc = {"snap_line_id": None, "lines": []}
+    from lab_model.coordinator.state.projections import normalize_laser_lines_doc
+    normalized = normalize_laser_lines_doc(doc)
     return {
         "version": int(doc.get("version") or 1),
-        "snap_line_id": doc.get("snap_line_id"),
-        "lines": doc.get("lines") or [],
+        **normalized,
     }
 
 
@@ -4678,6 +4679,8 @@ async def patch_laser_line(line_id: str, payload: Dict[str, Any] = Body(...)):
     updates: Dict[str, Any] = {}
     wants_geo = any(k in payload for k in ("p1", "p2"))
     if wants_geo:
+        if lines[idx].get("calibration", {}).get("geometry_read_only"):
+            raise HTTPException(status_code=409, detail="Re-import the radial calibration to change this path.")
         if payload.get("confirm") is not True:
             raise HTTPException(
                 status_code=400,

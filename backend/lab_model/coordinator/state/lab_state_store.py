@@ -85,6 +85,16 @@ class LabStateStore:
             return False
         if not isinstance(doc, dict):
             return False
+        # Older real sessions stored the radial calibration as a blue third
+        # line. Upgrade on restart even if the preceding process saved its
+        # stale in-memory overlay after the calibration import.
+        laser_doc = doc.get("laser_lines")
+        if self.backend_id == "real.default" and isinstance(laser_doc, dict):
+            from lab_model.coordinator.state.projections import normalize_laser_lines_doc
+            if any(isinstance(row, dict) and row.get("id") == "he_ne_radial_tag22"
+                   and isinstance(row.get("points"), list)
+                   for row in laser_doc.get("lines", [])):
+                doc["laser_lines"] = normalize_laser_lines_doc(laser_doc)
         self._runtime.replace_state(
             doc,
             kind=MutationKind.BOOT_HYDRATE,

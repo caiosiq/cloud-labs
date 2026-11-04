@@ -7,11 +7,11 @@ import { store } from './state/store.js';
 import {
     pointInLabBoundsMm,
     twoPointsToLineModel,
-    xAtYOnLineModel,
+    xAtYOnLaserLine,
 } from './geometry/lines.js';
 
-/** Legacy command / VC id → canonical Helium–Neon line id. */
-const LASER_LINE_ID_ALIASES = Object.freeze({ ne_he: 'he_ne' });
+/** Legacy command / VC id â†’ canonical Heliumâ€“Neon line id. */
+const LASER_LINE_ID_ALIASES = Object.freeze({ ne_he: 'he_ne', he_ne_radial_tag22: 'he_ne' });
 
 /**
  * @param {string | null | undefined} lineId
@@ -30,9 +30,21 @@ export function canonicalizeLaserLineId(lineId) {
  */
 export function migrateLaserLinesDoc(doc) {
     if (!doc || typeof doc !== 'object' || !Array.isArray(doc.lines)) return doc;
+    const radial = doc.lines.find((line) =>
+        line?.id === 'he_ne_radial_tag22' && Array.isArray(line.points));
+    const sourceLines = radial
+        ? [
+            ...doc.lines.filter((line) => line &&
+                !['he_ne', 'ne_he', 'he_ne_radial_tag22'].includes(line.id)),
+            {
+                ...radial, id: 'he_ne', name: 'He\u2013Ne', color: '#ff5c33',
+                calibration: { ...radial.calibration, usage: 'table_alignment' },
+            },
+        ]
+        : doc.lines;
     const lines = [];
     const seen = new Set();
-    for (const ln of doc.lines) {
+    for (const ln of sourceLines) {
         if (!ln || !ln.id) continue;
         const id = canonicalizeLaserLineId(ln.id);
         if (seen.has(id)) continue;
@@ -49,7 +61,7 @@ export function migrateLaserLinesDoc(doc) {
         }
         lines.push(next);
     }
-    const snap = canonicalizeLaserLineId(doc.snap_line_id) || doc.snap_line_id;
+    const snap = radial ? 'he_ne' : canonicalizeLaserLineId(doc.snap_line_id) || doc.snap_line_id;
     return { ...doc, snap_line_id: snap, lines };
 }
 
@@ -60,7 +72,7 @@ export function migrateLaserLinesDoc(doc) {
  * @returns {{ ok: true, x: number, y: number, rotation: number, lineId: string, lineName: string }
  *   | { ok: false, error: string }}
  */
-export function resolveLaserStitchPose(yMm, rotationDeg, lineId) {
+export function resolveLaserStitchPose(yMm, rotationDeg, lineId, tagId = null) {
     const y = Number(yMm);
     const rotation = Number(rotationDeg);
     if (!Number.isFinite(y) || !Number.isFinite(rotation)) {
@@ -97,7 +109,7 @@ export function resolveLaserStitchPose(yMm, rotationDeg, lineId) {
                 const list = nameHits.map((h) => h.id).join(', ');
                 return {
                     ok: false,
-                    error: `Ambiguous laser name "${requested}" → ${list}. Use the line id.`,
+                    error: `Ambiguous laser name "${requested}" â†’ ${list}. Use the line id.`,
                 };
             }
         }
@@ -139,7 +151,17 @@ export function resolveLaserStitchPose(yMm, rotationDeg, lineId) {
                 `Laser line "${chosen.id}" is horizontal (y fixed); X cannot be determined from Y alone.`,
         };
     }
-    const x = xAtYOnLineModel(model, y);
+    const reference = chosen.calibration;
+    if (reference?.kind === 'placed_camera_reference' && reference.usage !== 'table_alignment') {
+        const error = ((rotation - reference.tag_rotation_deg + 180) % 360 + 360) % 360 - 180;
+        if (tagId !== reference.tag_id || Math.abs(error) > 1e-6) {
+            return { ok:false, error: 'This radial reference requires tag_22 at âˆ’90Â°.' };
+        }
+    }
+    const x = xAtYOnLaserLine(chosen, y);
+    if (x === null && Array.isArray(chosen.points)) {
+        return { ok:false, error:'Y is outside the measured radial calibration range; extrapolation is disabled.' };
+    }
     if (!Number.isFinite(x)) {
         return { ok: false, error: `Could not compute X on laser line "${chosen.id}" at Y=${y}.` };
     }

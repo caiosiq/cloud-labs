@@ -130,6 +130,10 @@ def _laser_line_map(doc: Any) -> Dict[str, Dict[str, Any]]:
                     "p1": _norm_point(ln.get("p1")),
                     "p2": _norm_point(ln.get("p2")),
                 }
+                if "points" in ln:
+                    out[str(ln["id"])]["points"] = ln["points"]
+                if "calibration" in ln:
+                    out[str(ln["id"])]["calibration"] = ln["calibration"]
     return out
 
 

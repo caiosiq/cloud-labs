@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "snap_line_id": "diode",
+  "snap_line_id": "he_ne",
   "lines": [
     {
       "id": "diode",
@@ -18,16 +18,64 @@
     },
     {
       "id": "he_ne",
-      "name": "He\u2013Ne",
+      "name": "He–Ne",
       "color": "#ff5c33",
       "enabled": true,
       "p1": {
-        "x": 360,
-        "y": -193.3
+        "x": 367.0400990348867,
+        "y": -290.3428485982677
       },
       "p2": {
-        "x": 360.4,
-        "y": 206.7
+        "x": 358.5208579976457,
+        "y": 159.58971243903522
+      },
+      "points": [
+        {
+          "x": 367.0400990348867,
+          "y": -290.3428485982677
+        },
+        {
+          "x": 367.39779187667216,
+          "y": -215.3068051605273
+        },
+        {
+          "x": 366.0933447566986,
+          "y": -140.31497464576967
+        },
+        {
+          "x": 364.13411522754717,
+          "y": -65.34056134309617
+        },
+        {
+          "x": 362.3008053924685,
+          "y": 9.637201423439658
+        },
+        {
+          "x": 360.5304554044261,
+          "y": 84.61663892190666
+        },
+        {
+          "x": 358.5208579976457,
+          "y": 159.58971243903522
+        }
+      ],
+      "calibration": {
+        "kind": "placed_camera_reference",
+        "usage": "table_alignment",
+        "coordinate_frame": "cloudlabs_table",
+        "position_units": "mm",
+        "tag_id": "tag_22",
+        "tag_rotation_deg": -90.0,
+        "gripper_closed_position": 510,
+        "camera_serial": "054032723075",
+        "wavelength_nm": 633,
+        "baseline_name": "radial_motion_hene_tag22_calibration",
+        "baseline_sha256": "bd5c02824dd56c53b8d1a9b1f16e853d41b2d91e76ca1b494c42580cb6ee0ad0",
+        "placed_name": "radial_motion_hene_tag22_placed_calibration",
+        "placed_sha256": "ec599afc641c77cb10f7d3c02141264c736b4c4cbfcbff8fe62f3821bbb82493",
+        "extrapolation": "disabled",
+        "geometry_read_only": true,
+        "note": "Camera-specific placement targets; no absolute optical-axis or Z calibration."
       }
     }
   ]

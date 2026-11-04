@@ -20,7 +20,7 @@ import {
  */
 
 /**
- * Two-point line in lab mm → analytic model.
+ * Two-point line in lab mm â†’ analytic model.
  * Vertical (x = x0), horizontal (y = y0), or ``x = a*y + b`` (matches laser-line convention).
  * @param {Pt} p1
  * @param {Pt} p2
@@ -117,7 +117,7 @@ export function xAtYOnLineModel(m, y) {
 }
 
 /**
- * Closest point on finite segment A–B to P, with chord distance.
+ * Closest point on finite segment Aâ€“B to P, with chord distance.
  * Returns `{ x, y, dist }` in lab mm.
  */
 export function closestPointOnSegment(px, py, x1, y1, x2, y2) {
@@ -207,4 +207,38 @@ export function infiniteLineIntersection(p1a, p2a, p1b, p2b) {
     const qpy = ay1 - by1;
     const t = (qpx * sy - qpy * sx) / denom;
     return { x: ax1 + t * rx, y: ay1 + t * ry };
+}
+
+
+/** Finite calibrated path or legacy line clipped to table bounds. */
+export function laserLineSegments(line) {
+    if (!line) return [];
+    if (Array.isArray(line.points)) {
+        if (line.points.length < 2 || !line.points.every((p) =>
+            p && Number.isFinite(p.x) && Number.isFinite(p.y))) return [];
+        return line.points.slice(1).map((point, i) => [line.points[i], point]);
+    }
+    if (!line.p1 || !line.p2) return [];
+    const segment = clipTwoPointLineToLabBounds(line.p1, line.p2);
+    return segment ? [segment] : [];
+}
+
+/** Exact interpolation in table Y; finite paths never extrapolate. */
+export function xAtYOnLaserLine(line, y) {
+    if (!Number.isFinite(y)) return null;
+    if (!Array.isArray(line?.points)) {
+        return line?.p1 && line?.p2 ? xAtYOnLineModel(twoPointsToLineModel(line.p1, line.p2), y) : null;
+    }
+    const points = line.points;
+    if (points.length < 2 || !points.every((p,i) => p &&
+        Number.isFinite(p.x) && Number.isFinite(p.y) && (!i || p.y > points[i-1].y))) return null;
+    if (y < points[0].y - 1e-8 || y > points[points.length-1].y + 1e-8) return null;
+    for (let i=1; i<points.length; i++) {
+        if (y <= points[i].y + 1e-8) {
+            const a=points[i-1], b=points[i];
+            const fraction=Math.max(0,Math.min(1,(y-a.y)/(b.y-a.y)));
+            return a.x + fraction*(b.x-a.x);
+        }
+    }
+    return null;
 }

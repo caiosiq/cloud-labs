@@ -552,7 +552,7 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
             );
             return;
         }
-        const stitch = resolveLaserStitchPose(result.y, result.rotation, result.lineId);
+        const stitch = resolveLaserStitchPose(result.y, result.rotation, result.lineId, tagId);
         if (!stitch.ok) {
             appendLine(stitch.error, 'error');
             return;
@@ -577,7 +577,7 @@ export async function dispatchConsoleLine(line, deps, appendLine) {
         const tagId = resolveTagOrNull(result.tagRef, deps, appendLine);
         if (!tagId) return;
         if (!validatePlaceFromStorage(tagId, appendLine)) return;
-        const stitch = resolveLaserStitchPose(result.y, result.rotation, result.lineId);
+        const stitch = resolveLaserStitchPose(result.y, result.rotation, result.lineId, tagId);
         if (!stitch.ok) {
             appendLine(stitch.error, 'error');
             return;

@@ -15,7 +15,7 @@
 import { store } from '../state/store.js';
 import {
     twoPointsToLineModel,
-    clipTwoPointLineToLabBounds,
+    laserLineSegments,
     closestPointOnSegment,
     pointInLabBoundsMm,
     lineModelIntersection,
@@ -155,6 +155,8 @@ export function constrainGuideEndWithShift(sx, sy, cx, cy, shiftKey, refDirectio
  *   source: 'laser'|'guide',
  *   model: ReturnType<typeof twoPointsToLineModel>,
  *   label: string,
+ *   pathKey?: string,
+ *   finitePath?: boolean,
  * }} AlignmentSegment
  */
 
@@ -163,17 +165,19 @@ export function collectAlignmentSegments() {
     const segments = [];
     const doc = store.laserLinesDoc;
     if (doc && Array.isArray(doc.lines)) {
-        doc.lines.forEach((line) => {
-            if (!line || line.enabled === false || !line.p1 || !line.p2) return;
-            const model = twoPointsToLineModel(line.p1, line.p2);
-            const seg = clipTwoPointLineToLabBounds(line.p1, line.p2);
-            if (!seg || !model) return;
-            segments.push({
-                p1: seg[0],
-                p2: seg[1],
-                source: 'laser',
-                model,
-                label: line.name || line.id || 'laser',
+        doc.lines.forEach((line, lineIndex) => {
+            if (!line || line.enabled === false) return;
+            laserLineSegments(line).forEach(([p1, p2]) => {
+                const model = twoPointsToLineModel(p1, p2);
+                if (!model) return;
+                segments.push({
+                    p1, p2,
+                    source: 'laser',
+                    model,
+                    label: line.name || line.id || 'laser',
+                    pathKey: 'laser-' + lineIndex,
+                    finitePath: Array.isArray(line.points),
+                });
             });
         });
     }
@@ -194,9 +198,17 @@ export function collectAlignmentSegments() {
 }
 
 function intersectionForSegmentPair(Sa, Sb) {
+    // Calibration knots are part of one continuous path, not glue junctions.
+    if (Sa.finitePath && Sa.pathKey === Sb.pathKey) return null;
     let IX = lineModelIntersection(Sa.model, Sb.model);
     if (!IX) {
         IX = infiniteLineIntersection(Sa.p1, Sa.p2, Sb.p1, Sb.p2);
+    }
+    if (!IX) return null;
+    for (const segment of [Sa, Sb]) {
+        if (segment.finitePath && closestPointOnSegment(
+            IX.x, IX.y, segment.p1.x, segment.p1.y, segment.p2.x, segment.p2.y,
+        ).dist > 1e-6) return null;
     }
     return IX;
 }
@@ -249,7 +261,7 @@ export function refreshAlignmentIntersectionCache() {
                 pairNotes.push({
                     a: Sa.label,
                     b: Sb.label,
-                    reason: 'parallel or degenerate',
+                    reason: 'no valid crossing',
                 });
                 continue;
             }
@@ -365,13 +377,14 @@ function bestIntersectionForCapture(px, py, intersections, da, segmentSnapMm, en
 }
 
 function pickSegmentIndexForSnap(
-    n,
+    segments,
     da,
     qix,
     qiy,
     segmentSnapMm,
     { prevGhost, stickySegIdx, useSegmentSticky },
 ) {
+    const n = segments.length;
     const argMinBare = da.reduce((b, _, i, arr) => (arr[i] < arr[b] ? i : b), 0);
 
     let bestIdx = argMinBare;
@@ -380,7 +393,10 @@ function pickSegmentIndexForSnap(
         for (let i = 1; i < n; i++) {
             if (da[i] + 1e-9 < da[best] - 1e-9) {
                 best = i;
-            } else if (Math.abs(da[i] - da[best]) <= ALIGNMENT_SEGMENT_CHOICE_TIE_MM) {
+            } else if (
+                !(segments[i].finitePath || segments[best].finitePath) &&
+                Math.abs(da[i] - da[best]) <= ALIGNMENT_SEGMENT_CHOICE_TIE_MM
+            ) {
                 const di = Math.hypot(qix[i] - prevGhost.x, qiy[i] - prevGhost.y);
                 const db = Math.hypot(qix[best] - prevGhost.x, qiy[best] - prevGhost.y);
                 if (di + 1e-9 < db) best = i;
@@ -395,7 +411,10 @@ function pickSegmentIndexForSnap(
         stickySegIdx != null &&
         Number.isFinite(stickySegIdx) &&
         stickySegIdx >= 0 &&
-        stickySegIdx < n
+        stickySegIdx < n &&
+        // Move smoothly between neighbouring measured segments at each knot.
+        !(segments[bestIdx].finitePath &&
+          segments[bestIdx].pathKey === segments[stickySegIdx].pathKey)
     ) {
         const ds = da[stickySegIdx];
         if (Number.isFinite(ds) && ds < segmentSnapMm * 1.55) {
@@ -501,7 +520,7 @@ export function snapLabPointUnified(x, y, options = {}) {
     }
 
     const useSegmentSticky = !hadIxLatch;
-    const chosenIdx = pickSegmentIndexForSnap(n, da, qix, qiy, segmentSnapMm, {
+    const chosenIdx = pickSegmentIndexForSnap(segments, da, qix, qiy, segmentSnapMm, {
         prevGhost,
         stickySegIdx,
         useSegmentSticky,

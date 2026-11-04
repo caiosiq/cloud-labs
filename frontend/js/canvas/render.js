@@ -44,7 +44,7 @@ import {
     shouldRenderOnCanvas,
 } from '../component-model.js';
 import { isTeleopReady } from '../component-state.js';
-import { clipTwoPointLineToLabBounds } from '../geometry/lines.js';
+import { laserLineSegments } from '../geometry/lines.js';
 import {
     drawAlignmentGuides,
     drawAlignmentIntersectionMarkers,
@@ -319,18 +319,19 @@ function drawLaserPath(docOverride) {
     doc.lines.forEach((line) => {
         if (!line || line.enabled === false || !line.p1 || !line.p2) return;
         const col = line.color || '#ff3b3b';
-        const seg = clipTwoPointLineToLabBounds(line.p1, line.p2);
-        if (!seg) return;
-        const p1 = mmToPx(seg[0].x, seg[0].y);
-        const p2 = mmToPx(seg[1].x, seg[1].y);
+        const segments = laserLineSegments(line);
+        if (!segments.length) return;
         ctx.shadowBlur = 10;
         ctx.shadowColor = col;
         ctx.strokeStyle = col;
         ctx.lineWidth = 2;
         ctx.setLineDash([10, 10]);
         ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
+        segments.forEach(([a, b]) => {
+            const p1=mmToPx(a.x,a.y), p2=mmToPx(b.x,b.y);
+            ctx.moveTo(p1.x,p1.y);
+            ctx.lineTo(p2.x,p2.y);
+        });
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.shadowBlur = 0;

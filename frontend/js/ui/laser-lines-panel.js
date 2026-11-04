@@ -118,7 +118,7 @@ function rebuildLaserLinesPanel() {
             const idA = _laserLineAttrEscape(id);
             const isSnap = id === snap;
             const tip =
-                `${name}${isSnap ? ' (snap)' : ''} — click to ${en ? 'hide' : 'show'}, double-click to edit`;
+                `${name}${isSnap ? ' (snap)' : ''} — click to ${en ? 'hide' : 'show'}, ${line.calibration?.geometry_read_only ? 'calibrated reference; geometry fixed' : 'double-click to edit'}`;
             return (
                 `<button type="button" class="laser-line-icon${en ? ' is-enabled' : ''}${isSnap ? ' is-snap' : ''}" ` +
                 `data-line-id="${idA}" ` +
@@ -189,11 +189,11 @@ export function coeffsFromLaserLinesDoc(doc) {
         if (ln && ln.id) byId[ln.id] = ln;
     });
     let chosen = null;
-    if (snapId && byId[snapId] && byId[snapId].enabled !== false) {
+    if (snapId && byId[snapId] && byId[snapId].enabled !== false && !byId[snapId].points) {
         chosen = byId[snapId];
     }
     if (!chosen) {
-        chosen = doc.lines.find((l) => l && l.enabled !== false && l.p1 && l.p2) || null;
+        chosen = doc.lines.find((l) => l && l.enabled !== false && l.p1 && l.p2 && !l.points) || null;
     }
     if (!chosen || !chosen.p1 || !chosen.p2) {
         return { a: 0, b: 0, source: 'schema', loaded: false, lab_mode: doc.lab_mode };
@@ -264,6 +264,10 @@ function openLaserLineEditModal(lineId) {
     if (!doc || !Array.isArray(doc.lines)) return;
     const line = doc.lines.find((l) => l && l.id === lineId);
     if (!line || !line.p1 || !line.p2) return;
+    if (line.calibration?.geometry_read_only) {
+        log('This path comes from the tag_22 placed calibration. Re-import a calibration to change it.', 'info');
+        return;
+    }
     const modal = document.getElementById('laser-line-edit-modal');
     if (!modal) return;
     modal.style.display = 'flex';
